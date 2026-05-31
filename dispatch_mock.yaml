@@ -19,6 +19,18 @@ tasks:
     timeout: 9
     conclude_timeout: 5
 
+observability:
+  enabled: true
+  record_prompts: true
+  record_stdout: true
+  record_stderr: true
+  max_event_bytes: 16384
+  max_bytes_per_execution: 10485760
+  flush_interval_ms: 250
+  flush_max_bytes: 8192
+  retention_days: 14
+  redaction_patterns: []
+
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
   network_mode: "host"

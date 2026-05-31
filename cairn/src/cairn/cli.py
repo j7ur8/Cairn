@@ -6,6 +6,7 @@ import uvicorn
 from cairn.dispatcher.logging import configure_logging
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
+from cairn.server.observability import db as observability_db
 
 
 @click.group()
@@ -23,11 +24,19 @@ def main():
     show_default=True,
     help="SQLite database path",
 )
+@click.option(
+    "--observability-db-path",
+    type=click.Path(),
+    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
+    show_default=True,
+    help="LLM execution observability SQLite database path",
+)
 @click.option("--log-level", default="info", show_default=True, help="Uvicorn log level")
 @click.option("--access-log/--no-access-log", default=True, show_default=True, help="Enable Uvicorn access log")
-def serve(host: str, port: int, db_path: str, log_level: str, access_log: bool):
+def serve(host: str, port: int, db_path: str, observability_db_path: str, log_level: str, access_log: bool):
     """Start the Cairn API server."""
     db.configure(Path(db_path))
+    observability_db.configure(Path(observability_db_path))
     from cairn.server.app import app
 
     uvicorn.run(

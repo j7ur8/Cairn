@@ -226,7 +226,7 @@
   }
 </script>
 </head>
-<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden" :class="{ 'select-none cursor-col-resize': isResizingPanel }" x-data="cairnApp()">
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden" :class="{ 'select-none cursor-col-resize': isResizingPanel || isResizingLlmPanel }" x-data="cairnApp()">
 
 <!-- ═══════════ PROJECT LIST VIEW ═══════════ -->
 <div x-show="view === 'list'" x-cloak class="flex-1 flex flex-col overflow-hidden">
@@ -483,6 +483,85 @@
   </header>
 
   <div class="flex-1 flex overflow-hidden" id="graphLayout">
+    <!-- LLM Execution panel -->
+    <div x-show="!llmPanelCollapsed"
+      class="border-r border-slate-200/70 bg-white flex flex-col overflow-hidden shrink-0 relative z-20"
+      :style="{ width: llmPanelWidth + 'px', minWidth: llmPanelWidth + 'px', flexBasis: llmPanelWidth + 'px' }">
+      <div class="h-11 border-b border-slate-100 px-3 flex items-center gap-2 shrink-0">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-700">Execution Log</div>
+          <div class="text-[10px] text-slate-400" x-text="llmPanelSummary()"></div>
+        </div>
+        <button @click="toggleLlmPolling()" class="h-7 w-7 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600 inline-flex items-center justify-center" :title="llmPollingPaused ? 'Resume log polling' : 'Pause log polling'">
+          <svg x-show="!llmPollingPaused" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6h3v12H8zM13 6h3v12h-3z"/></svg>
+          <svg x-show="llmPollingPaused" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+        </button>
+        <button @click="collapseLlmPanel()" class="h-7 w-7 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600 inline-flex items-center justify-center" title="Collapse Execution Log">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0 space-y-2">
+        <select x-model="llmSelectedExecutionId" class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
+          <option value="">All executions</option>
+          <template x-for="execution in llmExecutions" :key="execution.id">
+            <option :value="execution.id" x-text="llmExecutionOptionLabel(execution)"></option>
+          </template>
+        </select>
+        <div class="grid grid-cols-3 gap-1.5 text-[10px]">
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Running</div>
+            <div class="font-semibold text-sky-600 tabular-nums" x-text="llmExecutionCount('running')"></div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Errors</div>
+            <div class="font-semibold text-rose-600 tabular-nums" x-text="llmErrorCount()"></div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Events</div>
+            <div class="font-semibold text-slate-600 tabular-nums" x-text="filteredLlmEvents().length"></div>
+          </div>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/25">
+        <template x-if="filteredLlmEvents().length === 0">
+          <p class="text-sm text-slate-300 text-center mt-12">No execution log yet</p>
+        </template>
+        <template x-for="event in filteredLlmEvents()" :key="event.sequence">
+          <article class="rounded-lg border bg-white shadow-sm overflow-hidden" :class="llmEventBorderClass(event)">
+            <button type="button" @click="toggleLlmEvent(event.sequence)" class="w-full px-3 py-2 text-left hover:bg-slate-50 transition">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide shrink-0" :class="llmEventBadgeClass(event)" x-text="llmEventLabel(event)"></span>
+                <span class="text-[10px] text-slate-400 font-mono shrink-0" x-text="`#${event.sequence}`"></span>
+                <span class="text-[10px] text-slate-400 truncate" x-text="`${event.task_type} · ${event.worker}`"></span>
+                <span class="flex-1"></span>
+                <span class="text-[10px] text-slate-300 shrink-0" x-text="formatTime(event.created_at)"></span>
+              </div>
+              <div class="mt-1 text-[11px] text-slate-400 truncate" x-text="event.phase"></div>
+            </button>
+            <div x-show="llmEventExpanded(event)" class="border-t border-slate-100 bg-slate-950 text-slate-100">
+              <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="event.content"></pre>
+              <div x-show="event.truncated || event.redacted" class="px-3 pb-2 flex gap-1.5 text-[10px]">
+                <span x-show="event.truncated" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">truncated</span>
+                <span x-show="event.redacted" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">redacted</span>
+              </div>
+            </div>
+          </article>
+        </template>
+      </div>
+    </div>
+
+    <div x-show="llmPanelCollapsed" class="w-14 border-r border-slate-200/70 bg-white flex flex-col items-center gap-2 py-3 shrink-0">
+      <button @click="expandLlmPanel()" class="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center" title="Expand Execution Log">
+        <span class="text-[11px] font-semibold">LLM</span>
+      </button>
+      <span class="px-1.5 py-0.5 rounded bg-sky-50 text-[10px] font-semibold text-sky-700 tabular-nums" x-text="llmExecutionCount('running')"></span>
+      <span class="px-1.5 py-0.5 rounded bg-rose-50 text-[10px] font-semibold text-rose-700 tabular-nums" x-text="llmErrorCount()"></span>
+    </div>
+
+    <div @pointerdown.prevent="startLlmPanelResize($event)" x-show="!llmPanelCollapsed" class="w-2 shrink-0 cursor-col-resize group flex items-stretch justify-center touch-none relative z-20">
+      <div class="w-px bg-slate-200/70 transition group-hover:bg-brand-300" :class="{ 'bg-brand-400': isResizingLlmPanel }"></div>
+    </div>
+
     <!-- Graph -->
     <div class="flex-1 relative min-w-0">
       <div class="absolute top-3 left-3 z-10 flex items-center gap-1.5">
@@ -1082,6 +1161,17 @@ function cairnApp() {
     layoutMode: 'dagre_tb',
     sidePanelWidth: 320,
     isResizingPanel: false,
+    llmPanelWidth: 320,
+    llmPanelCollapsed: false,
+    isResizingLlmPanel: false,
+    llmExecutions: [],
+    llmEvents: [],
+    llmLastSequence: 0,
+    llmSelectedExecutionId: '',
+    llmExpandedEvents: {},
+    llmPollTimer: null,
+    llmPollingPaused: false,
+    llmLastSlowPollAt: 0,
 
     showNewProject: false,
     showIntentModal: false,
@@ -1132,12 +1222,17 @@ function cairnApp() {
     async init() {
       this._panelResizeMove = (e) => this.onPanelResize(e);
       this._panelResizeStop = () => this.stopPanelResize();
+      this._llmPanelResizeMove = (e) => this.onLlmPanelResize(e);
+      this._llmPanelResizeStop = () => this.stopLlmPanelResize();
       window.addEventListener('pointermove', this._panelResizeMove);
       window.addEventListener('pointerup', this._panelResizeStop);
+      window.addEventListener('pointermove', this._llmPanelResizeMove);
+      window.addEventListener('pointerup', this._llmPanelResizeStop);
       this.loadLocalPrefs();
       await this.loadProjects();
       await this.loadSettings();
       this.startPolling();
+      this.startLlmPolling();
       window.addEventListener('hashchange', () => this.handleRoute());
       this.handleRoute();
     },
@@ -1230,6 +1325,12 @@ function cairnApp() {
           const savedPanelWidth = Number(rawPanelWidth);
           if (Number.isFinite(savedPanelWidth)) this.sidePanelWidth = savedPanelWidth;
         }
+        const rawLlmPanelWidth = localStorage.getItem('cairn.llmPanelWidth');
+        if (rawLlmPanelWidth !== null) {
+          const savedLlmPanelWidth = Number(rawLlmPanelWidth);
+          if (Number.isFinite(savedLlmPanelWidth)) this.llmPanelWidth = savedLlmPanelWidth;
+        }
+        this.llmPanelCollapsed = localStorage.getItem('cairn.llmPanelCollapsed') === 'true';
       } catch (e) {
         console.error(e);
       }
@@ -1249,6 +1350,15 @@ function cairnApp() {
     saveSidePanelWidth() {
       try {
         localStorage.setItem('cairn.sidePanelWidth', String(this.sidePanelWidth));
+      } catch (e) {
+        console.error(e);
+      }
+    },
+
+    saveLlmPanelPrefs() {
+      try {
+        localStorage.setItem('cairn.llmPanelWidth', String(this.llmPanelWidth));
+        localStorage.setItem('cairn.llmPanelCollapsed', String(this.llmPanelCollapsed));
       } catch (e) {
         console.error(e);
       }
@@ -1559,6 +1669,7 @@ function cairnApp() {
         await this.api('DELETE', `/projects/${projectId}`);
         this.closeDeleteModal(true);
         if (this.selectedProjectId === projectId && this.view === 'graph') {
+          this.resetLlmState();
           this.backToList();
         } else {
           await this.loadProjects();
@@ -1582,6 +1693,143 @@ function cairnApp() {
 
     async loadProject(id) {
       try { this.project = await this.api('GET', `/projects/${id}`); } catch(e) { this.showToast(e.message, 'error'); }
+    },
+
+    resetLlmState() {
+      this.llmExecutions = [];
+      this.llmEvents = [];
+      this.llmLastSequence = 0;
+      this.llmSelectedExecutionId = '';
+      this.llmExpandedEvents = {};
+      this.llmPollingPaused = false;
+      this.llmLastSlowPollAt = 0;
+    },
+
+    async loadLlmExecutions() {
+      if (!this.selectedProjectId || this.view !== 'graph') return;
+      try {
+        const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-executions?limit=200`);
+        this.llmExecutions = data.executions || [];
+      } catch (e) {
+        console.error(e);
+      }
+    },
+
+    async pollLlmEvents(force = false) {
+      if (!this.selectedProjectId || this.view !== 'graph' || this.replay.active) return;
+      if (!force && (this.llmPanelCollapsed || this.llmPollingPaused)) return;
+      try {
+        const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-events?after=${this.llmLastSequence}&limit=200`);
+        const events = data.events || [];
+        if (events.length > 0) {
+          this.llmEvents.push(...events);
+          if (this.llmEvents.length > 1200) this.llmEvents = this.llmEvents.slice(-1200);
+          this.llmLastSequence = Math.max(this.llmLastSequence, ...events.map(event => event.sequence || 0));
+          await this.loadLlmExecutions();
+        } else if (force || this.llmExecutions.some(execution => execution.process_state === 'running')) {
+          await this.loadLlmExecutions();
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    },
+
+    startLlmPolling() {
+      this.llmPollTimer = setInterval(async () => {
+        if (!this.selectedProjectId || this.view !== 'graph') return;
+        if (this.llmPanelCollapsed || this.llmPollingPaused || this.replay.active) return;
+        const hasRunning = this.llmExecutions.some(execution => execution.process_state === 'running');
+        const now = Date.now();
+        if (hasRunning || this.llmEvents.length === 0 || now - this.llmLastSlowPollAt >= 5000) {
+          if (!hasRunning) this.llmLastSlowPollAt = now;
+          await this.pollLlmEvents();
+        }
+      }, 1000);
+    },
+
+    filteredLlmEvents() {
+      const events = this.llmSelectedExecutionId
+        ? this.llmEvents.filter(event => event.execution_id === this.llmSelectedExecutionId)
+        : this.llmEvents;
+      return events.slice(-500);
+    },
+
+    llmExecutionCount(state) {
+      return this.llmExecutions.filter(execution => execution.process_state === state).length;
+    },
+
+    llmErrorCount() {
+      return this.llmExecutions.filter(execution => ['failed', 'timeout', 'cancelled', 'stale'].includes(execution.process_state)).length;
+    },
+
+    llmPanelSummary() {
+      if (this.llmExecutions.length === 0) return 'No executions';
+      return `${this.llmExecutions.length} executions · ${this.llmExecutionCount('running')} running`;
+    },
+
+    llmExecutionOptionLabel(execution) {
+      const intent = execution.intent_id ? ` · ${execution.intent_id}` : '';
+      return `${execution.task_type}${intent} · ${execution.worker} · ${execution.process_state}`;
+    },
+
+    llmEventLabel(event) {
+      const labels = {
+        prompt: 'Prompt',
+        stdout: 'Stdout',
+        stderr: 'Stderr',
+        model_response: 'Result',
+        parse_error: 'Parse Error',
+        timeout: 'Timeout',
+        cancelled: 'Cancelled',
+        process_end: 'Process End',
+        error: 'Error',
+        result: 'Result',
+      };
+      return labels[event.event_kind] || event.event_kind || 'Event';
+    },
+
+    llmEventBadgeClass(event) {
+      const kind = event.event_kind;
+      if (kind === 'prompt') return 'bg-violet-50 text-violet-700';
+      if (kind === 'stdout') return 'bg-slate-100 text-slate-700';
+      if (kind === 'stderr') return 'bg-amber-50 text-amber-700';
+      if (kind === 'model_response' || kind === 'result') return 'bg-teal-50 text-teal-700';
+      if (['parse_error', 'timeout', 'cancelled', 'error'].includes(kind)) return 'bg-rose-50 text-rose-700';
+      return 'bg-sky-50 text-sky-700';
+    },
+
+    llmEventBorderClass(event) {
+      if (['parse_error', 'timeout', 'cancelled', 'error'].includes(event.event_kind)) return 'border-rose-200';
+      if (event.event_kind === 'stderr') return 'border-amber-200';
+      return 'border-slate-200';
+    },
+
+    llmEventExpanded(event) {
+      if (event.event_kind === 'prompt') return !!this.llmExpandedEvents[event.sequence];
+      return this.llmExpandedEvents[event.sequence] !== false;
+    },
+
+    toggleLlmEvent(sequence) {
+      const event = this.llmEvents.find(item => item.sequence === sequence) || { sequence, event_kind: 'manual' };
+      this.llmExpandedEvents[sequence] = !this.llmEventExpanded(event);
+    },
+
+    toggleLlmPolling() {
+      this.llmPollingPaused = !this.llmPollingPaused;
+      if (!this.llmPollingPaused) this.pollLlmEvents(true);
+    },
+
+    collapseLlmPanel() {
+      this.llmPanelCollapsed = true;
+      this.saveLlmPanelPrefs();
+      this.$nextTick(() => this.cy?.resize());
+    },
+
+    expandLlmPanel() {
+      this.llmPanelCollapsed = false;
+      this.saveLlmPanelPrefs();
+      this.pollLlmEvents(true);
+      this.$nextTick(() => this.cy?.resize());
     },
 
     async toggleProjectStop() {
@@ -2076,18 +2324,26 @@ function cairnApp() {
         this.polling = true;
       }
       this.rememberProjectListScroll();
+      this.resetLlmState();
       this.selectedProjectId = id;
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;
       await this.loadProject(id);
       this.view = 'graph';
+      await this.loadLlmExecutions();
+      await this.pollLlmEvents(true);
       if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
       this.$nextTick(() => {
         const clampedWidth = this.clampPanelWidth(this.sidePanelWidth);
         if (clampedWidth !== this.sidePanelWidth) {
           this.sidePanelWidth = clampedWidth;
           this.saveSidePanelWidth();
+        }
+        const clampedLlmWidth = this.clampLlmPanelWidth(this.llmPanelWidth);
+        if (clampedLlmWidth !== this.llmPanelWidth) {
+          this.llmPanelWidth = clampedLlmWidth;
+          this.saveLlmPanelPrefs();
         }
         this.teardownAutoFit();
         if (this.cy) { this.cy.destroy(); this.cy = null; }
@@ -2112,6 +2368,7 @@ function cairnApp() {
       this.shouldRestoreProjectListScroll = true;
       this.project = null;
       this.selectedProjectId = '';
+      this.resetLlmState();
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;
@@ -2543,6 +2800,11 @@ function cairnApp() {
               this.sidePanelWidth = clampedWidth;
               this.saveSidePanelWidth();
             }
+            const clampedLlmWidth = this.clampLlmPanelWidth(this.llmPanelWidth);
+            if (clampedLlmWidth !== this.llmPanelWidth) {
+              this.llmPanelWidth = clampedLlmWidth;
+              this.saveLlmPanelPrefs();
+            }
             this.cy.resize();
             this.cy.fit(undefined, 50);
           }
@@ -2571,6 +2833,13 @@ function cairnApp() {
       return Math.min(max, Math.max(min, width));
     },
 
+    clampLlmPanelWidth(width) {
+      const containerWidth = document.getElementById('graphLayout')?.getBoundingClientRect().width || window.innerWidth;
+      const min = 280;
+      const max = Math.min(520, Math.max(min, containerWidth - 520));
+      return Math.min(max, Math.max(min, width));
+    },
+
     startPanelResize(e) {
       e.currentTarget?.setPointerCapture?.(e.pointerId);
       this.isResizingPanel = true;
@@ -2588,6 +2857,26 @@ function cairnApp() {
       if (!this.isResizingPanel) return;
       this.isResizingPanel = false;
       this.saveSidePanelWidth();
+    },
+
+    startLlmPanelResize(e) {
+      e.currentTarget?.setPointerCapture?.(e.pointerId);
+      this.isResizingLlmPanel = true;
+      this.onLlmPanelResize(e);
+    },
+
+    onLlmPanelResize(e) {
+      if (!this.isResizingLlmPanel) return;
+      const rect = document.getElementById('graphLayout')?.getBoundingClientRect();
+      if (!rect) return;
+      this.llmPanelWidth = this.clampLlmPanelWidth(e.clientX - rect.left);
+    },
+
+    stopLlmPanelResize() {
+      if (!this.isResizingLlmPanel) return;
+      this.isResizingLlmPanel = false;
+      this.saveLlmPanelPrefs();
+      this.$nextTick(() => this.cy?.resize());
     },
 
     clearGraphSelection(preserveTimeline = false) {

@@ -5,6 +5,7 @@ import time
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
+from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.prompting import load_prompt, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -16,9 +17,10 @@ from cairn.dispatcher.tasks.common import (
     did_timeout,
     project_allows_conclude_fallback,
     preview,
+    process_state_for_task_outcome,
     run_healthcheck,
     run_worker_process,
-    write_conclude_result,
+    write_conclude_result_with_fact_id,
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.workers.registry import get_driver
@@ -38,6 +40,16 @@ def run_explore_task(
     cancellation: TaskCancellation,
 ) -> str:
     driver = get_driver(worker.type)
+    reporter = ExecutionReporter(
+        client,
+        config.observability,
+        project_id=project.project.id,
+        intent_id=intent.id,
+        task_type="explore",
+        worker=worker.name,
+    ) if config.observability.enabled else ExecutionReporter.disabled()
+    reporter.start()
+    outcome = "failed"
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
     lease = HeartbeatLease.for_intent(client, project.project.id, intent.id, worker.name, config.runtime.interval)
@@ -71,7 +83,9 @@ def run_explore_task(
                 cancelled,
             )
             best_effort_release(client, project.project.id, intent.id, worker.name)
-            return "cancelled"
+            outcome = "cancelled"
+            reporter.emit_error("explore_healthcheck", "cancelled", cancelled)
+            return outcome
         if lease.failure is not None:
             LOG.warning(
                 "heartbeat lost during explore healthcheck project=%s intent=%s worker=%s status=%s",
@@ -81,7 +95,9 @@ def run_explore_task(
                 lease.failure.status_code,
             )
             best_effort_release(client, project.project.id, intent.id, worker.name)
-            return "failed"
+            outcome = "failed"
+            reporter.emit_error("explore_healthcheck", "error", f"heartbeat lost status={lease.failure.status_code}")
+            return outcome
         if healthcheck.result.returncode != 0:
             LOG.warning(
                 "worker unhealthy project=%s intent=%s worker=%s healthcheck_ms=%s stderr=%s",
@@ -92,7 +108,9 @@ def run_explore_task(
                 preview(healthcheck.result.stderr),
             )
             best_effort_release(client, project.project.id, intent.id, worker.name)
-            return "unhealthy"
+            outcome = "unhealthy"
+            reporter.emit_error("explore_healthcheck", "error", healthcheck.result.stderr)
+            return outcome
 
         prompt = render_prompt(
             load_prompt(config.runtime.prompt_group, "explore.md"),
@@ -107,6 +125,7 @@ def run_explore_task(
                 "intent_description": intent.description,
             },
         )
+        reporter.emit_prompt("explore_execute", prompt)
 
         session = driver.prepare_session()
         execute = driver.build_execute(worker, prompt, session)
@@ -121,6 +140,7 @@ def run_explore_task(
             timeout=config.tasks.explore.timeout,
             lease=lease,
             cancellation=cancellation,
+            reporter=reporter,
         )
         execute_ms = int((time.perf_counter() - execute_started) * 1000)
         session = driver.extract_session(session, first.stdout, first.stderr)
@@ -135,7 +155,9 @@ def run_explore_task(
                 execute_ms,
             )
             best_effort_release(client, project.project.id, intent.id, worker.name)
-            return "cancelled"
+            outcome = "cancelled"
+            reporter.emit_error("explore_execute", "cancelled", cancelled)
+            return outcome
         if lease.failure is not None:
             LOG.warning(
                 "heartbeat lost during explore project=%s intent=%s worker=%s status=%s execute_ms=%s",
@@ -146,10 +168,13 @@ def run_explore_task(
                 execute_ms,
             )
             best_effort_release(client, project.project.id, intent.id, worker.name)
-            return "failed"
+            outcome = "failed"
+            reporter.emit_error("explore_execute", "error", f"heartbeat lost status={lease.failure.status_code}")
+            return outcome
         if not did_timeout(first) and first.returncode == 0:
             try:
                 model_output = driver.extract_response_text(first.stdout, first.stderr)
+                reporter.emit_result("explore_execute", model_output)
                 payload = parse_json_output(model_output)
                 kind, description = validate_explore_payload(payload)
             except Exception as exc:
@@ -164,7 +189,7 @@ def run_explore_task(
                     preview(first.stdout),
                     preview(first.stderr),
                 )
-                return _try_conclude_fallback(
+                outcome = _try_conclude_fallback(
                     config,
                     client,
                     container_manager,
@@ -177,7 +202,9 @@ def run_explore_task(
                     session,
                     lease,
                     cancellation,
+                    reporter,
                 )
+                return outcome
             if kind == "rejected":
                 LOG.warning(
                     "explore rejected project=%s intent=%s worker=%s execute_ms=%s total_ms=%s stdout_preview=%s",
@@ -189,8 +216,10 @@ def run_explore_task(
                     preview(first.stdout),
                 )
                 best_effort_release(client, project.project.id, intent.id, worker.name)
-                return "rejected"
-            return write_conclude_result(
+                outcome = "rejected"
+                reporter.emit_error("explore_execute", "error", "model rejected task")
+                return outcome
+            conclude = write_conclude_result_with_fact_id(
                 client,
                 project.project.id,
                 intent.id,
@@ -200,6 +229,10 @@ def run_explore_task(
                 phase_ms=execute_ms,
                 total_ms=int((time.perf_counter() - task_started) * 1000),
             )
+            outcome = conclude.status
+            if conclude.fact_id:
+                reporter.emit_result("explore_write", description, produced_fact_id=conclude.fact_id)
+            return outcome
         if did_timeout(first):
             LOG.warning(
                 "explore timed out project=%s intent=%s worker=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -211,7 +244,7 @@ def run_explore_task(
                 preview(first.stdout),
                 preview(first.stderr),
             )
-            return _try_conclude_fallback(
+            outcome = _try_conclude_fallback(
                 config,
                 client,
                 container_manager,
@@ -224,7 +257,9 @@ def run_explore_task(
                 session,
                 lease,
                 cancellation,
+                reporter,
             )
+            return outcome
         LOG.warning(
             "explore command failed project=%s intent=%s worker=%s code=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
             project.project.id,
@@ -237,12 +272,17 @@ def run_explore_task(
             preview(first.stderr),
         )
         best_effort_release(client, project.project.id, intent.id, worker.name)
-        return "failed"
+        outcome = "failed"
+        reporter.emit_error("explore_execute", "error", f"command failed returncode={first.returncode}\n{first.stderr}")
+        return outcome
     except Exception:
         LOG.exception("explore task crashed project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
         best_effort_release(client, project.project.id, intent.id, worker.name)
-        return "failed"
+        outcome = "failed"
+        reporter.emit_error("explore_execute", "error", "task crashed")
+        return outcome
     finally:
+        reporter.finish(process_state_for_task_outcome(outcome), error_kind=None if outcome == "success" else outcome)
         lease.stop()
 
 
@@ -259,6 +299,7 @@ def _try_conclude_fallback(
     session: str | None,
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
+    reporter: ExecutionReporter,
 ) -> str:
     if not driver.supports_conclude() or not session:
         LOG.info(
@@ -310,6 +351,7 @@ def _try_conclude_fallback(
             "intent_description": intent.description,
         },
     )
+    reporter.emit_prompt("explore_conclude", prompt)
     conclude_argv = driver.build_conclude(worker, prompt, session)
     LOG.info("starting conclude fallback project=%s intent=%s worker=%s", project_id, intent.id, worker.name)
     conclude_started = time.perf_counter()
@@ -322,6 +364,7 @@ def _try_conclude_fallback(
         timeout=config.tasks.explore.conclude_timeout,
         lease=lease,
         cancellation=cancellation,
+        reporter=reporter,
     )
     conclude_ms = int((time.perf_counter() - conclude_started) * 1000)
     cancelled = cancel_reason(result, cancellation)
@@ -335,9 +378,11 @@ def _try_conclude_fallback(
             conclude_ms,
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "cancelled", cancelled)
         return "cancelled"
     if lease.failure is not None:
         best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "error", f"heartbeat lost status={lease.failure.status_code}")
         return "failed"
     if result.timed_out or result.returncode != 0:
         LOG.warning(
@@ -352,9 +397,11 @@ def _try_conclude_fallback(
             preview(result.stderr),
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "timeout" if result.timed_out else "error", result.stderr or result.stdout)
         return "failed"
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
+        reporter.emit_result("explore_conclude", model_output)
         payload = parse_json_output(model_output)
         kind, description = validate_explore_payload(payload)
     except Exception as exc:
@@ -369,6 +416,7 @@ def _try_conclude_fallback(
             preview(result.stderr),
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "parse_error", str(exc))
         return "failed"
     if kind == "rejected":
         LOG.warning(
@@ -380,8 +428,9 @@ def _try_conclude_fallback(
             preview(result.stdout),
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "error", "model rejected task")
         return "rejected"
-    return write_conclude_result(
+    conclude = write_conclude_result_with_fact_id(
         client,
         project_id,
         intent.id,
@@ -390,6 +439,9 @@ def _try_conclude_fallback(
         source="explore_conclude",
         phase_ms=conclude_ms,
     )
+    if conclude.fact_id:
+        reporter.emit_result("explore_write", description, produced_fact_id=conclude.fact_id)
+    return conclude.status
 
 
 def _run_process(
@@ -402,6 +454,7 @@ def _run_process(
     timeout: int,
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
+    reporter: ExecutionReporter,
 ):
     return run_worker_process(
         container_manager,
@@ -412,4 +465,5 @@ def _run_process(
         timeout_seconds=timeout,
         lease=lease,
         cancellation=cancellation,
+        reporter=reporter,
     )

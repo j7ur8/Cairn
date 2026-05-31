@@ -7,6 +7,8 @@ from fastapi.staticfiles import StaticFiles
 
 from cairn import __version__
 from cairn.server import db
+from cairn.server.observability import db as observability_db
+from cairn.server.observability import routers as observability_routers
 from cairn.server.routers import export, hints, intents, projects, settings
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -15,6 +17,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.configure(db.DEFAULT_DB)
+    observability_db.configure(observability_db.DEFAULT_OBSERVABILITY_DB)
     yield
 
 
@@ -30,6 +33,7 @@ app.include_router(projects.router)
 app.include_router(hints.router)
 app.include_router(intents.router)
 app.include_router(export.router)
+app.include_router(observability_routers.router)
 
 
 @app.get("/", include_in_schema=False)

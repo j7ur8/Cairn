@@ -147,6 +147,19 @@ class TasksConfig(BaseModel):
     explore: ExploreTaskConfig
 
 
+class ObservabilityConfig(BaseModel):
+    enabled: bool = True
+    record_prompts: bool = True
+    record_stdout: bool = True
+    record_stderr: bool = True
+    max_event_bytes: int = Field(default=16384, gt=0)
+    max_bytes_per_execution: int = Field(default=10485760, gt=0)
+    flush_interval_ms: int = Field(default=250, ge=0)
+    flush_max_bytes: int = Field(default=8192, gt=0)
+    retention_days: int = Field(default=14, ge=0)
+    redaction_patterns: list[str] = Field(default_factory=list)
+
+
 class BindMountConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -253,6 +266,7 @@ class DispatchConfig(BaseModel):
     server: str
     runtime: RuntimeConfig
     tasks: TasksConfig
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     container: ContainerConfig
     common_env: dict[str, str] = Field(default_factory=dict)
     workers: list[WorkerConfig]

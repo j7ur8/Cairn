@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import logging
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from docker.errors import APIError, DockerException
 from docker.models.containers import Container
@@ -25,9 +25,16 @@ class ProcessResult:
 
 
 class ManagedProcess:
-    def __init__(self, container: Container, command: list[str], env: dict[str, str]):
+    def __init__(
+        self,
+        container: Container,
+        command: list[str],
+        env: dict[str, str],
+        on_output: Callable[[str, str], None] | None = None,
+    ):
         self.command = command
         self.env = env
+        self.on_output = on_output
         self._container = container
         self._api = container.client.api
         self._exec_id: str | None = None
@@ -113,8 +120,10 @@ class ManagedProcess:
                 stdout, stderr = self._split_chunk(chunk)
                 if stdout:
                     self._stdout.append(stdout)
+                    self._notify_output("stdout", stdout)
                 if stderr:
                     self._stderr.append(stderr)
+                    self._notify_output("stderr", stderr)
         except DockerException as exc:
             self._read_error = str(exc)
         finally:
@@ -170,6 +179,14 @@ class ManagedProcess:
                 return
         if last_error is not None:
             LOG.warning("failed to kill container exec pid=%s container=%s error=%s", pid, self._container.name, last_error)
+
+    def _notify_output(self, stream: str, chunk: str) -> None:
+        if self.on_output is None:
+            return
+        try:
+            self.on_output(stream, chunk)
+        except Exception as exc:
+            LOG.debug("process output callback failed stream=%s error=%s", stream, exc)
 
     @staticmethod
     def _split_chunk(chunk: Any) -> tuple[str, str]:

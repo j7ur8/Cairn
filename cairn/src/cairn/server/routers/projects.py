@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from cairn.server.db import get_conn
+from cairn.server.observability import db as observability_db
+from cairn.server.observability.repository import delete_project_observability
 from cairn.server.models import (
     CompleteRequest,
     CreateProjectRequest,
@@ -39,6 +43,7 @@ from cairn.server.services import (
 )
 
 router = APIRouter(tags=["projects"])
+LOG = logging.getLogger(__name__)
 
 
 @router.get("/projects", response_model=list[ProjectSummary])
@@ -141,6 +146,11 @@ def delete_project(project_id: str):
     with get_conn() as conn:
         get_project_or_404(conn, project_id)
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    try:
+        with observability_db.get_conn() as obs_conn:
+            delete_project_observability(obs_conn, project_id)
+    except Exception as exc:
+        LOG.warning("observability cleanup failed project=%s error=%s", project_id, exc)
 
 
 @router.put("/projects/{project_id}/title", response_model=ProjectMeta)
