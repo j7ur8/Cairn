@@ -880,16 +880,28 @@ codex exec resume "{session}" --dangerously-bypass-approvals-and-sandbox --model
 | `container.image` | 是 | 项目容器镜像 |
 | `container.network_mode` | 是 | 项目容器网络模式 |
 | `container.completed_action` | 是 | 项目 completed 后对容器的处理方式 |
+| `container.stopped_action` | 否 | 项目 stopped 后对容器的处理方式，默认 `stop` |
+| `container.bind_mounts` | 否 | 项目容器的 host 文件夹映射列表，用于 CTF 附件、源码、工具文件或大输出共享 |
 
 `container.completed_action` 可选值：
 
 - `remove`：项目 completed 后删除容器
 - `stop`：项目 completed 后只停止容器，保留现场
 
+`container.stopped_action` 可选值：
+
+- `remove`：项目 stopped 后删除容器
+- `stop`：项目 stopped 后只停止容器，保留现场
+
 实现约定：
 
 - completed project 的容器 cleanup 可以异步并行进行，不要求阻塞主调度循环
 - 如果项目已从 Server 删除，Dispatcher 会把找不到对应项目的 `cairn-dispatch-*` 容器视为 orphan，并执行 stop 清理
+- `container.bind_mounts[].host_path` 支持相对路径，相对 `dispatch.yaml` 所在目录解析；支持 `{project_id}` 占位符，用于为每个项目生成独立 host 子目录
+- `container.bind_mounts[].container_path` 必须是容器内绝对路径；`read_only` 默认 `false`
+- Dispatcher 会在容器创建前自动创建 host 目录，并在 startup healthcheck 中验证挂载可用性
+- Docker 不能给已创建容器动态追加 bind mount；因此已存在项目容器如果与当前挂载配置不匹配，Dispatcher 只记录自检诊断，不自动重建，避免丢失容器内执行现场
+- bind mount 只用于附件、源码、工具文件和执行产物共享；Fact / Intent / Hint 黑板真相仍由 Cairn Server 和 SQLite 维护
 
 ### `tasks.*`
 
@@ -949,6 +961,18 @@ container:
   image: "tmp:latest"
   network_mode: "host"
   completed_action: "stop"  # options: "remove" | "stop"
+  stopped_action: "remove"  # options: "remove" | "stop"
+  bind_mounts:
+    # Global read-only attachment/source library shared by all projects.
+    - name: "ctf-attachments"
+      host_path: "./attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    # Per-project writable workspace on the host.
+    - name: "project-files"
+      host_path: "./datas/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
 
 common_env:
   TSEC_BASE_URL: "http://<SERVER_HOST>/api"

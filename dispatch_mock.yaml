@@ -23,6 +23,13 @@ container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
   network_mode: "host"
   completed_action: "stop"
+  stopped_action: "remove"
+  # Optional host folder sharing. Paths containing {project_id} are rendered per project.
+  # bind_mounts:
+  #   - name: "mock-project-files"
+  #     host_path: "./datas/mock-project-files/{project_id}"
+  #     container_path: "/mnt/project"
+  #     read_only: false
   cap_add:
     - "NET_RAW"
     - "NET_ADMIN"

@@ -20,7 +20,9 @@ class StartupHealthcheckResult:
     returncode: int
     duration_ms: int
     http_status: str | None
+    response_text: str
     response_preview: str
+    stderr_text: str
     stderr_preview: str
     command: str
 
@@ -40,35 +42,42 @@ def run_startup_healthchecks(
         parallelism,
     )
     try:
-        with ThreadPoolExecutor(max_workers=parallelism) as executor:
-            future_map = {
-                executor.submit(
-                    _run_worker_healthcheck,
-                    container_manager,
-                    container_name,
-                    worker,
-                    config.runtime.healthcheck_timeout,
-                ): worker.name
-                for worker in workers
-            }
-            results: list[StartupHealthcheckResult] = []
-            for future in as_completed(future_map):
-                worker_name = future_map[future]
-                try:
-                    result = future.result()
-                except Exception:
-                    LOG.exception("startup healthcheck crashed worker=%s", worker_name)
-                    result = StartupHealthcheckResult(
-                        worker_name=worker_name,
-                        ok=False,
-                        returncode=1,
-                        duration_ms=0,
-                        http_status=None,
-                        response_preview="",
-                        stderr_preview="startup healthcheck crashed",
-                        command="-",
-                    )
-                results.append(result)
+        mount_errors = container_manager.validate_bind_mounts(container_name, "startup-healthcheck")
+        if mount_errors:
+            results = [_bind_mount_failure_result(mount_errors)]
+        else:
+            container_manager.log_managed_container_mount_mismatches()
+            with ThreadPoolExecutor(max_workers=parallelism) as executor:
+                future_map = {
+                    executor.submit(
+                        _run_worker_healthcheck,
+                        container_manager,
+                        container_name,
+                        worker,
+                        config.runtime.healthcheck_timeout,
+                    ): worker.name
+                    for worker in workers
+                }
+                results = []
+                for future in as_completed(future_map):
+                    worker_name = future_map[future]
+                    try:
+                        result = future.result()
+                    except Exception:
+                        LOG.exception("startup healthcheck crashed worker=%s", worker_name)
+                        result = StartupHealthcheckResult(
+                            worker_name=worker_name,
+                            ok=False,
+                            returncode=1,
+                            duration_ms=0,
+                            http_status=None,
+                            response_text="",
+                            response_preview="",
+                            stderr_text="startup healthcheck crashed",
+                            stderr_preview="startup healthcheck crashed",
+                            command="-",
+                        )
+                    results.append(result)
     finally:
         LOG.debug("removing startup healthcheck container container=%s", container_name)
         container_manager.remove_container(container_name, force=True)
@@ -78,13 +87,29 @@ def run_startup_healthchecks(
     return results
 
 
+def _bind_mount_failure_result(errors: list[str]) -> StartupHealthcheckResult:
+    text = "startup bind mount healthcheck failed: " + "; ".join(errors)
+    return StartupHealthcheckResult(
+        worker_name="bind-mounts",
+        ok=False,
+        returncode=1,
+        duration_ms=0,
+        http_status=None,
+        response_text="",
+        response_preview="",
+        stderr_text=text,
+        stderr_preview=_preview(text),
+        command="-",
+    )
+
+
 def format_failure_summary(results: list[StartupHealthcheckResult]) -> str:
     failed = [result for result in results if not result.ok]
     if not failed:
         return "startup healthchecks failed for all workers"
     details = []
     for result in failed:
-        preview = result.response_preview or result.stderr_preview or "-"
+        preview = _compact(result.response_text) or _compact(result.stderr_text) or "-"
         details.append(
             f"{result.worker_name}(http={result.http_status or '-'}, code={result.returncode}, preview={preview})"
         )
@@ -106,14 +131,16 @@ def _run_worker_healthcheck(
         timeout_seconds=timeout_seconds,
     )
     result = healthcheck.result
-    http_status, response_preview = _parse_stdout(result.stdout)
+    http_status, response_text = _parse_stdout(result.stdout)
     return StartupHealthcheckResult(
         worker_name=worker.name,
         ok=result.returncode == 0,
         returncode=result.returncode,
         duration_ms=healthcheck.duration_ms,
         http_status=http_status,
-        response_preview=response_preview,
+        response_text=response_text,
+        response_preview=_preview(response_text),
+        stderr_text=result.stderr,
         stderr_preview=_preview(result.stderr),
         command=driver.describe_startup_healthcheck(worker),
     )
@@ -146,6 +173,20 @@ def _log_report(results: list[StartupHealthcheckResult], *, show_commands: bool)
     lines.append(
         f"[=] Summary: total={len(results)} healthy={healthy_count} unhealthy={len(results) - healthy_count}"
     )
+    failed_results = [result for result in results if not result.ok]
+    if failed_results:
+        lines.append("")
+        lines.append("[=] Startup healthcheck failure details")
+        for result in failed_results:
+            lines.append(
+                f"- {result.worker_name} (http={result.http_status or '-'}, code={result.returncode}, time_s={result.duration_ms / 1000:.2f})"
+            )
+            if result.response_text.strip():
+                lines.append("  stdout:")
+                lines.extend(_indent_block(result.response_text, prefix="    "))
+            if result.stderr_text.strip():
+                lines.append("  stderr:")
+                lines.extend(_indent_block(result.stderr_text, prefix="    "))
     if show_commands:
         lines.append("")
         lines.append("[=] Startup healthcheck commands")
@@ -166,11 +207,22 @@ def _parse_stdout(stdout: str) -> tuple[str | None, str]:
             http_status = stripped.partition("=")[2] or None
             continue
         body_lines.append(line)
-    return http_status, _preview("\n".join(body_lines))
+    return http_status, "\n".join(body_lines).strip()
+
+
+def _compact(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _preview(text: str) -> str:
-    compact = " ".join(text.split())
+    compact = _compact(text)
     if len(compact) <= STARTUP_HEALTHCHECK_PREVIEW_LIMIT:
         return compact
     return compact[:STARTUP_HEALTHCHECK_PREVIEW_LIMIT] + "..."
+
+
+def _indent_block(text: str, *, prefix: str) -> list[str]:
+    stripped = text.strip()
+    if not stripped:
+        return []
+    return [f"{prefix}{line}" for line in stripped.splitlines()]

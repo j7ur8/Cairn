@@ -727,9 +727,23 @@ class DispatcherLoop:
             self.cleanup_futures[future] = (container_name, summary.id, summary.status)
             self._cleanup_pending.add(container_name)
 
+    def _cleanup_orphan_containers(self, summaries: list[ProjectSummary]) -> None:
+        expected_container_names = {self.container_manager.container_name(summary.id) for summary in summaries}
+        for container_name in self.container_manager.managed_container_names():
+            if container_name in expected_container_names:
+                continue
+            if container_name in self._cleanup_pending:
+                continue
+            if not self.container_manager.needs_orphan_cleanup(container_name):
+                continue
+            future = self.cleanup_executor.submit(self.container_manager.cleanup_orphan, container_name)
+            self.cleanup_futures[future] = (container_name, None, None)
+            self._cleanup_pending.add(container_name)
+
     def _queue_container_cleanups(self, summaries: list[ProjectSummary]) -> None:
         self._cleanup_completed_containers(summaries)
         self._cleanup_stopped_containers(summaries)
+        self._cleanup_orphan_containers(summaries)
 
     def _reap_cleanup_futures(self) -> None:
         done = [future for future in self.cleanup_futures if future.done()]

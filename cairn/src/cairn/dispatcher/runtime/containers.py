@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+from pathlib import Path
 from pathlib import PurePosixPath
 import tarfile
 import threading
@@ -20,12 +22,14 @@ LOG = logging.getLogger(__name__)
 class ContainerManager:
     _PREFIX = "cairn-dispatch-"
     _STARTUP_PREFIX = "cairn-startup-healthcheck-"
+    _STARTUP_PROJECT_ID = "startup-healthcheck"
 
     def __init__(self, config: ContainerConfig):
         self._config = config
         self._client = docker.from_env()
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
+        self._logged_mount_mismatches: set[tuple[str, str]] = set()
 
     def close(self) -> None:
         self._client.close()
@@ -42,14 +46,17 @@ class ContainerManager:
     def _ensure_running_locked(self, project_id: str, name: str) -> str:
         state = self.inspect_state(name)
         if state == "running":
+            self.log_mount_mismatches(name, project_id)
             LOG.debug("container already running project=%s container=%s", project_id, name)
             return name
         if state is not None:
+            self.log_mount_mismatches(name, project_id)
             LOG.info("starting existing container project=%s container=%s state=%s", project_id, name, state)
             self._start_existing(name)
             return name
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
         try:
+            volumes = self._docker_volumes(project_id)
             self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -57,6 +64,7 @@ class ContainerManager:
                 name=name,
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
+                volumes=volumes or None,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -66,8 +74,10 @@ class ContainerManager:
         LOG.info("container name conflict, reusing existing container project=%s container=%s", project_id, name)
         state = self.inspect_state(name)
         if state == "running":
+            self.log_mount_mismatches(name, project_id)
             return name
         if state is not None:
+            self.log_mount_mismatches(name, project_id)
             LOG.info("starting conflicted existing container project=%s container=%s state=%s", project_id, name, state)
             self._start_existing(name)
             return name
@@ -85,6 +95,7 @@ class ContainerManager:
         name = f"{self._STARTUP_PREFIX}{uuid.uuid4().hex[:12]}"
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self._config.image)
         try:
+            volumes = self._docker_volumes(self._STARTUP_PROJECT_ID)
             self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -92,10 +103,78 @@ class ContainerManager:
                 name=name,
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
+                volumes=volumes or None,
             )
         except DockerException as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
         return name
+
+    def validate_bind_mounts(self, container_name: str, project_id: str) -> list[str]:
+        errors: list[str] = []
+        for mount in self._render_bind_mounts(project_id):
+            host_path = Path(mount["host_path"])
+            if not host_path.exists():
+                errors.append(f"{mount['name']} host path does not exist: {host_path}")
+                continue
+            if not host_path.is_dir():
+                errors.append(f"{mount['name']} host path is not a directory: {host_path}")
+                continue
+            if not mount["read_only"] and not self._host_dir_writable(host_path):
+                errors.append(f"{mount['name']} host path is not writable: {host_path}")
+                continue
+            probe = self._probe_bind_mount(container_name, mount["container_path"], mount["read_only"])
+            if probe:
+                errors.append(f"{mount['name']} {probe}")
+        return errors
+
+    def log_managed_container_mount_mismatches(self) -> None:
+        for name in self.managed_container_names():
+            project_id = name.removeprefix(self._PREFIX)
+            self.log_mount_mismatches(name, project_id)
+
+    def log_mount_mismatches(self, container_name: str, project_id: str) -> None:
+        mismatches = self.mount_mismatches(container_name, project_id)
+        for mismatch in mismatches:
+            log_key = (container_name, mismatch)
+            if log_key in self._logged_mount_mismatches:
+                continue
+            self._logged_mount_mismatches.add(log_key)
+            LOG.warning("container bind mount mismatch container=%s project=%s %s", container_name, project_id, mismatch)
+
+    def mount_mismatches(self, container_name: str, project_id: str) -> list[str]:
+        expected = self._render_bind_mounts(project_id)
+        if not expected:
+            return []
+        container = self._get_container(container_name)
+        if container is None:
+            return []
+        try:
+            container.reload()
+        except DockerException as exc:
+            return [f"failed to inspect mounts: {exc}"]
+        actual_by_destination = {
+            str(mount.get("Destination")): mount
+            for mount in container.attrs.get("Mounts", [])
+            if mount.get("Destination")
+        }
+        mismatches: list[str] = []
+        for mount in expected:
+            actual = actual_by_destination.get(mount["container_path"])
+            if actual is None:
+                mismatches.append(f"missing {mount['name']} at {mount['container_path']}")
+                continue
+            actual_source = str(Path(str(actual.get("Source", ""))).resolve(strict=False))
+            if actual_source != mount["host_path"]:
+                mismatches.append(
+                    f"{mount['name']} source mismatch expected={mount['host_path']} actual={actual_source}"
+                )
+            actual_rw = bool(actual.get("RW"))
+            expected_rw = not mount["read_only"]
+            if actual_rw != expected_rw:
+                mismatches.append(
+                    f"{mount['name']} mode mismatch expected={'rw' if expected_rw else 'ro'} actual={'rw' if actual_rw else 'ro'}"
+                )
+        return mismatches
 
     def inspect_state(self, name: str) -> str | None:
         container = self._get_container(name)
@@ -139,10 +218,23 @@ class ContainerManager:
     def cleanup_stopped(self, project_id: str) -> bool:
         name = self.container_name(project_id)
         state = self.inspect_state(name)
+        if state is None:
+            return True
+        container = self._require_container(name)
+        if self._config.stopped_action == "remove":
+            LOG.info("removing stopped project container project=%s container=%s", project_id, name)
+            try:
+                container.remove(force=True)
+            except NotFound:
+                return True
+            except DockerException as exc:
+                LOG.warning("failed to remove stopped project container=%s error=%s", name, exc)
+                return False
+            return self.inspect_state(name) is None
+
         if state != "running":
             return True
         LOG.info("stopping stopped project container project=%s container=%s", project_id, name)
-        container = self._require_container(name)
         try:
             container.stop(timeout=1)
         except NotFound:
@@ -188,7 +280,12 @@ class ContainerManager:
         return self.inspect_state(name) is not None
 
     def needs_stopped_cleanup(self, project_id: str) -> bool:
-        return self.inspect_state(self.container_name(project_id)) == "running"
+        state = self.inspect_state(self.container_name(project_id))
+        if state is None:
+            return False
+        if self._config.stopped_action == "remove":
+            return True
+        return state == "running"
 
     def build_exec_process(
         self,
@@ -258,6 +355,75 @@ class ContainerManager:
             raise RuntimeError(f"container not found: {name}")
         return container
 
+    def _docker_volumes(self, project_id: str) -> dict[str, dict[str, str]]:
+        volumes: dict[str, dict[str, str]] = {}
+        for mount in self._render_bind_mounts(project_id):
+            host_path = Path(mount["host_path"])
+            host_path.mkdir(parents=True, exist_ok=True)
+            if not host_path.is_dir():
+                raise RuntimeError(f"bind mount host path is not a directory: {host_path}")
+            if not mount["read_only"]:
+                _ensure_world_writable_dir(host_path)
+            volumes[str(host_path)] = {
+                "bind": mount["container_path"],
+                "mode": "ro" if mount["read_only"] else "rw",
+            }
+        return volumes
+
+    def _render_bind_mounts(self, project_id: str) -> list[dict[str, object]]:
+        rendered: list[dict[str, object]] = []
+        for index, mount in enumerate(self._config.bind_mounts):
+            name = mount.name or f"bind_mount[{index}]"
+            host_path = mount.host_path.replace("{project_id}", project_id)
+            rendered.append(
+                {
+                    "name": name,
+                    "host_path": str(Path(host_path).expanduser().resolve(strict=False)),
+                    "container_path": mount.container_path,
+                    "read_only": mount.read_only,
+                }
+            )
+        return rendered
+
+    @staticmethod
+    def _host_dir_writable(path: Path) -> bool:
+        probe = path / f".cairn-write-test-{uuid.uuid4().hex[:12]}"
+        try:
+            probe.write_text("ok", encoding="utf-8")
+        except OSError:
+            return False
+        try:
+            probe.unlink()
+        except OSError:
+            LOG.debug("failed to remove host bind mount write probe path=%s", probe)
+        return True
+
+    def _probe_bind_mount(self, container_name: str, container_path: str, read_only: bool) -> str | None:
+        script = (
+            'target="$1"\n'
+            'mode="$2"\n'
+            'if [ ! -d "$target" ]; then echo "container path is not a directory: $target" >&2; exit 2; fi\n'
+            'if [ "$mode" = "rw" ]; then\n'
+            '  probe="$target/.cairn-write-test-$(date +%s)-$$"\n'
+            '  printf ok > "$probe" || exit 3\n'
+            '  rm -f "$probe" || exit 4\n'
+            'fi\n'
+        )
+        container = self._require_container(container_name)
+        try:
+            result = container.exec_run(
+                ["/bin/sh", "-lc", script, "--", container_path, "ro" if read_only else "rw"],
+                stdout=True,
+                stderr=True,
+            )
+        except DockerException as exc:
+            return f"probe failed: {exc}"
+        exit_code = result.exit_code if hasattr(result, "exit_code") else 1
+        if exit_code == 0:
+            return None
+        output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
+        return f"probe failed code={exit_code} output={output.strip()}"
+
     @staticmethod
     def _is_name_conflict(exc: APIError) -> bool:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
@@ -296,3 +462,10 @@ class ContainerManager:
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(payload))
         return archive_path, stream.getvalue()
+
+
+def _ensure_world_writable_dir(path: Path) -> None:
+    mode = path.stat().st_mode
+    if mode & 0o002:
+        return
+    os.chmod(path, mode | 0o777)

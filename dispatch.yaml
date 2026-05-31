@@ -43,10 +43,25 @@ container:
   network_mode: "host"
   # "stop" keeps finished containers for inspection; "remove" is cleaner but loses post-run state.
   completed_action: "stop"
+  # Auto-destroy worker containers when a project is stopped.
+  stopped_action: "remove"
   # Add Linux capabilities only when a task truly needs them, such as packet crafting or network admin actions.
   # cap_add:
   #   - "NET_RAW"
   #   - "NET_ADMIN"
+  # Optional host folder sharing for CTF attachments, source trees, large outputs, or project-local workspaces.
+  # Use {project_id} to isolate writable folders per Cairn project.
+  # Tell the agent about the mounted path through the project origin or hints, e.g.
+  # "Attachment source code is mounted at /mnt/attachments/web-src."
+  bind_mounts:
+    - name: "ctf-attachments"
+      host_path: "/Users/jmac/Documents/GitHub/Cairn/datas/attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    - name: "project-files"
+      host_path: "/Users/jmac/Documents/GitHub/Cairn/datas/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
 
 
 workers:
@@ -55,31 +70,31 @@ workers:
   - name: "claudecode_deepseek-v4-pro"
     type: "claudecode"
     task_types: [bootstrap, reason, explore]
-    max_running: 2
-    priority: 0
+    max_running: 6
+    priority: 1
     env:
       ANTHROPIC_MODEL: "deepseek-v4-pro"
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
-      ANTHROPIC_AUTH_TOKEN: "sk-xxx"
+      ANTHROPIC_AUTH_TOKEN: "REDACTED-DEEPSEEK"
 
-  - name: "codex_qwen3.6-plus"
-    type: "codex"
-    task_types: [bootstrap,reason,explore]
-    max_running: 2
-    priority: 0
-    env:
-      CODEX_MODEL: "qwen3.6-plus"
-      CODEX_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-      OPENAI_API_KEY: "sk-xxx"
+#  - name: "codex"
+#    type: "codex"
+#    task_types: [bootstrap,reason,explore]
+#    max_running: 4
+#    priority: 0
+#    env:
+#      CODEX_MODEL: "gpt-5.4"
+#      CODEX_BASE_URL: "https://seuapi.20250731.xyz"
+#      OPENAI_API_KEY: "REDACTED-CODEX"
 
-  - name: "pi_qwen3.6-plus"
-    type: "pi"
-    task_types: [bootstrap,reason,explore]
-    max_running: 2
-    priority: 0
-    env:
-      PI_MODEL: "qwen3.6-plus"
-      PI_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-      PI_API_KEY: "sk-xxx"
-      PI_PROVIDER_API: "openai-completions"
-      PI_MODEL_CONTEXT_WINDOW: "262144"
+#  - name: "pi_qwen3.6-plus"
+#    type: "pi"
+#    task_types: [bootstrap,reason,explore]
+#    max_running: 2
+#    priority: 0
+#    env:
+#      PI_MODEL: "qwen3.6-plus"
+#      PI_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#      PI_API_KEY: "sk-xxx"
+#      PI_PROVIDER_API: "openai-completions"
+#      PI_MODEL_CONTEXT_WINDOW: "262144"

@@ -1,0 +1,533 @@
+<!--
+@ai: 本文件描述 Cairn 项目的核心架构、运行链路和关键设计决策。后续任何 Codex 会话在回答与本项目相关的问题前，应优先阅读本文件，再结合 CODEBASE_ANALYSIS.md 和 AI/docs/project-overview.md。
+
+推荐使用方式：
+- “请参考 AI/ARCHITECTURE.md 完成以下任务...”
+- “请基于 AI/CODEBASE_ANALYSIS.md 定位代码修改点...”
+- “请基于 AI/docs/project-overview.md 快速说明项目运行方式...”
+-->
+
+# Cairn 架构与设计
+
+## 1. 项目概览
+
+### 项目名称与核心目标
+
+Cairn 是一个基于事实图的多 Agent 协作探索与调度系统。
+
+它将渗透测试、CTF、漏洞研究、复杂推理等目标导向任务建模为从 `origin` 到 `goal` 的状态空间搜索。系统不预设固定 Agent 角色，而是维护一张共享黑板式图谱：`Fact` 表示已确认事实，`Intent` 表示待探索方向，`Hint` 表示人类或外部策略输入。Dispatcher 根据当前图状态动态调度 Agent Worker，在隔离的项目容器内执行任务，并将结构化结果写回事实图。
+
+### 技术栈
+
+| 层级 | 技术 |
+| --- | --- |
+| 后端 API | Python 3.12+、FastAPI、Pydantic |
+| 存储 | SQLite、WAL、Docker volume 持久化 |
+| 调度器 | Python ThreadPoolExecutor、Requests、Docker SDK |
+| Worker 运行时 | Docker 容器、Kali Linux、Claude Code CLI、Codex CLI、Pi Coding Agent、Mock |
+| 前端 | 静态 HTML、Tailwind、Alpine.js、Cytoscape、Dagre/Klay/ELK/Cola 布局 |
+| 配置 | YAML、`dispatch.yaml`、`dispatch_mock.yaml` |
+| 部署 | Docker Compose、uv、`ghcr.io/astral-sh/uv:python3.13-trixie` |
+
+### 工程目录结构
+
+```text
+Cairn/
+├── README.md
+├── Dockerfile
+├── docker-compose.yaml
+├── dispatch.yaml
+├── dispatch_mock.yaml
+├── docs/
+│   └── specs/
+│       ├── dispatcher-design.md
+│       └── server-protocol.md
+├── container/
+│   ├── Dockerfile
+│   ├── README.md
+│   └── AGENTS.md
+├── cairn/
+│   ├── pyproject.toml
+│   ├── uv.lock
+│   └── src/cairn/
+│       ├── cli.py
+│       ├── server/
+│       │   ├── app.py
+│       │   ├── db.py
+│       │   ├── models.py
+│       │   ├── services.py
+│       │   ├── routers/
+│       │   │   ├── projects.py
+│       │   │   ├── intents.py
+│       │   │   ├── hints.py
+│       │   │   ├── settings.py
+│       │   │   └── export.py
+│       │   └── static/
+│       │       ├── index.html
+│       │       └── vendor/
+│       └── dispatcher/
+│           ├── config.py
+│           ├── contracts.py
+│           ├── output_parser.py
+│           ├── prompting.py
+│           ├── protocol/client.py
+│           ├── scheduler/
+│           │   ├── loop.py
+│           │   └── worker_select.py
+│           ├── tasks/
+│           │   ├── bootstrap.py
+│           │   ├── reason.py
+│           │   ├── explore.py
+│           │   └── common.py
+│           ├── runtime/
+│           │   ├── containers.py
+│           │   ├── process.py
+│           │   ├── heartbeat.py
+│           │   ├── cancellation.py
+│           │   └── startup_healthcheck.py
+│           ├── workers/
+│           │   ├── base.py
+│           │   ├── registry.py
+│           │   └── adapters/
+│           │       ├── claudecode.py
+│           │       ├── codex.py
+│           │       ├── pi.py
+│           │       └── mock.py
+│           └── prompts/
+│               ├── default/
+│               └── mock/
+└── AI/
+    ├── ARCHITECTURE.md
+    ├── CODEBASE_ANALYSIS.md
+    └── docs/project-overview.md
+```
+
+## 2. 架构设计
+
+### 系统架构图
+
+```mermaid
+flowchart TB
+    User[User / Web UI / API Client]
+    UI[Static UI<br/>Alpine + Cytoscape]
+    Server[Cairn Server<br/>FastAPI Protocol API]
+    DB[(SQLite<br/>Projects/Facts/Intents/Hints)]
+    Dispatcher[Cairn Dispatcher<br/>Scheduler + Control Plane]
+    Docker[Docker Engine]
+    ContainerA[Project Container A<br/>Kali + Agent CLI + Tools]
+    ContainerB[Project Container B<br/>Kali + Agent CLI + Tools]
+    WorkerA[Claude Code / Codex / Pi]
+    WorkerB[Claude Code / Codex / Pi]
+    ToolsA[Kali Tools<br/>nuclei/nmap/ffuf/netexec/...]
+    ToolsB[Kali Tools<br/>nuclei/nmap/ffuf/netexec/...]
+
+    User --> UI
+    UI --> Server
+    User --> Server
+    Server <--> DB
+    Dispatcher <--> Server
+    Dispatcher --> Docker
+    Docker --> ContainerA
+    Docker --> ContainerB
+    ContainerA --> WorkerA
+    ContainerB --> WorkerB
+    WorkerA --> ToolsA
+    WorkerB --> ToolsB
+```
+
+### 核心模块职责
+
+| 模块 | 输入 | 输出 | 主要职责 | 依赖 |
+| --- | --- | --- | --- | --- |
+| `cairn.cli` | CLI 参数 | Server 或 Dispatcher 进程 | 项目命令入口 | Click、Uvicorn、DispatcherLoop |
+| `server.app` | HTTP 请求 | API 响应、静态页面 | FastAPI 应用组装 | routers、db |
+| `server.db` | DB path | SQLite 连接 | 初始化 schema、连接管理 | sqlite3 |
+| `server.models` | 请求/响应数据 | Pydantic 模型 | 协议数据结构与校验 | Pydantic |
+| `server.services` | SQLite row | 业务辅助结果 | ID 生成、超时清理、模型转换 | FastAPI HTTPException |
+| `server.routers.projects` | Project API | Project/Facts/Status | 项目创建、状态、reason lease、complete/reopen | db、services |
+| `server.routers.intents` | Intent API | Intent/Fact | intent 创建、claim、heartbeat、release、conclude | db、services |
+| `server.routers.export` | Project id | YAML/timeline 文本 | Prompt 图快照导出 | PyYAML |
+| `dispatcher.config` | `dispatch.yaml` | DispatchConfig | 配置解析、Worker env 校验、prompt 校验 | Pydantic、PyYAML |
+| `dispatcher.scheduler.loop` | Server 状态 | Worker task futures | 核心调度循环、并发控制、容器清理 | CairnClient、ContainerManager |
+| `dispatcher.tasks.bootstrap` | origin/goal/hints | Fact + optional complete | 初始直接求解任务 | WorkerDriver、HeartbeatLease |
+| `dispatcher.tasks.reason` | graph snapshot | complete 或 intents | 图级推理与新方向生成 | WorkerDriver、contracts |
+| `dispatcher.tasks.explore` | graph + intent | Fact | 执行某个已认领探索方向 | WorkerDriver、contracts |
+| `dispatcher.runtime.containers` | project id、command | Docker container exec | 项目容器生命周期与文件写入 | docker-py |
+| `dispatcher.runtime.process` | Docker exec | stdout/stderr/returncode | 容器内进程控制、kill、输出收集 | Docker API |
+| `dispatcher.runtime.heartbeat` | heartbeat callback | lease 状态 | 周期保活与失效杀进程 | CairnClient |
+| `dispatcher.workers.adapters` | prompt/env | Agent CLI argv | 不同 Worker 后端命令适配 | Claude/Codex/Pi/Mock CLI |
+
+### 架构风格与设计模式
+
+| 设计 | 在本项目中的体现 |
+| --- | --- |
+| Blackboard Architecture | Server 维护共享事实图，Agent 不直接通信，只通过 Fact/Intent/Hint 交互 |
+| Stigmergy | Agent 通过写入图状态间接影响其他 Agent |
+| OODA Loop | Observe 图、Orient 态势、Decide intent、Act 执行探索 |
+| Control Plane / Data Plane 分离 | Dispatcher 是控制面，Worker 容器是执行面，Server 是协议真相源 |
+| Adapter Pattern | `WorkerDriver` 抽象不同 Agent CLI，支持 Claude Code、Codex、Pi、Mock |
+| Lease / Heartbeat | Intent claim 与 reason claim 通过 heartbeat 保活，超时释放 |
+| Append-only Fact Graph | Fact 只增不改，状态变化通过新增事实表达 |
+
+## 3. 核心业务流程
+
+### 3.1 创建项目
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Server
+    participant DB
+
+    User->>Server: POST /projects {title, origin, goal, hints}
+    Server->>DB: INSERT projects(status=active)
+    Server->>DB: INSERT facts(origin)
+    Server->>DB: INSERT facts(goal)
+    Server->>DB: INSERT hints(optional)
+    Server-->>User: ProjectDetail
+```
+
+### 3.2 Dispatcher 主循环
+
+```mermaid
+flowchart TD
+    A[Start Dispatcher] --> B[Startup worker healthchecks]
+    B --> C[Validate server settings]
+    C --> D[Reap finished task futures]
+    D --> E[List projects]
+    E --> F[Cancel inactive project tasks]
+    F --> G[Queue container cleanup]
+    G --> H{Has active project?}
+    H -- No --> S[Sleep interval]
+    H -- Yes --> I{Global / project concurrency available?}
+    I -- No --> S
+    I -- Yes --> J[Try dispatch project]
+    J --> K{Initial project?}
+    K -- Yes --> L[Bootstrap]
+    K -- No --> M{Unclaimed intent exists?}
+    M -- Yes --> N[Explore newest unclaimed intent]
+    M -- No --> O{Reason trigger exists?}
+    O -- Yes --> P[Reason]
+    O -- No --> S
+    L --> S
+    N --> S
+    P --> S
+    S --> D
+```
+
+### 3.3 Bootstrap 任务
+
+```mermaid
+sequenceDiagram
+    participant Dispatcher
+    participant Server
+    participant Docker
+    participant Agent
+
+    Dispatcher->>Server: POST /intents bootstrap
+    Dispatcher->>Server: POST /intents/{id}/heartbeat claim
+    Dispatcher->>Docker: ensure_running(project container)
+    Dispatcher->>Agent: healthcheck
+    Dispatcher->>Agent: bootstrap prompt(origin, goal, hints)
+    Agent-->>Dispatcher: JSON {fact, complete}
+    Dispatcher->>Server: POST /intents/{id}/conclude
+    Dispatcher->>Server: POST /complete from=[new fact]
+```
+
+### 3.4 Reason 任务
+
+```mermaid
+sequenceDiagram
+    participant Dispatcher
+    participant Server
+    participant Docker
+    participant Agent
+
+    Dispatcher->>Server: POST /reason/claim
+    Dispatcher->>Server: GET /projects/{id}/export?format=yaml
+    Dispatcher->>Docker: write graph snapshot file
+    Dispatcher->>Agent: reason prompt(graph, valid facts, open intents)
+    Agent-->>Dispatcher: JSON complete or intents or {}
+    alt complete
+        Dispatcher->>Server: POST /complete
+    else intents
+        Dispatcher->>Server: POST /intents for each new direction
+    else no-op
+        Dispatcher->>Server: POST /reason/release
+    end
+```
+
+### 3.5 Explore 任务
+
+```mermaid
+sequenceDiagram
+    participant Dispatcher
+    participant Server
+    participant Docker
+    participant Agent
+
+    Dispatcher->>Server: POST /intents/{id}/heartbeat claim
+    Dispatcher->>Server: GET /projects/{id}/export?format=yaml
+    Dispatcher->>Docker: ensure_running + write graph snapshot file
+    Dispatcher->>Agent: explore prompt(graph, current intent)
+    Agent-->>Dispatcher: JSON {description}
+    Dispatcher->>Server: POST /intents/{id}/conclude
+    Server-->>Dispatcher: new Fact + concluded Intent
+```
+
+## 4. 工具调用机制
+
+### 不是 Server 直接调用 Kali
+
+Server 不调用 Kali 工具。Dispatcher 也不直接决定执行 `nmap`、`nuclei`、`ffuf` 等具体命令。真实工具调用发生在项目容器内部，由 Agent CLI 根据 prompt 自行执行。
+
+```text
+Dispatcher
+  -> docker exec "codex exec ..." / "claude -p ..." / "pi ..."
+     -> Agent CLI 在 Kali 容器内运行
+        -> Agent 使用 bash/tool 能力调用 nuclei、ffuf、netexec、impacket、playwright 等工具
+           -> Agent 输出结构化 JSON
+              -> Dispatcher 解析并写回 Cairn Server
+```
+
+### Worker 容器环境
+
+`container/Dockerfile` 基于 `kalilinux/kali-rolling`，安装：
+
+| 类别 | 工具 |
+| --- | --- |
+| Kali 基础 | `kali-linux-headless` |
+| Web/漏洞扫描 | `nuclei`、`katana`、`dirsearch`、`nikto`、`dalfox` |
+| 内网/域渗透 | `netexec`、`impacket-*`、`kerbrute`、`bloodyad`、`coercer` |
+| 网络工具 | `ncat`、`chisel-common-binaries`、`iputils-ping` |
+| PoC/知识库 | `/home/kali/pocs`、`/home/kali/tools`、`/home/kali/knowledges` |
+| Agent CLI | `@openai/codex`、`@anthropic-ai/claude-code`、`@mariozechner/pi-coding-agent` |
+
+>>⚠️ 注意：Agent 容器内具备攻击工具链，只应在明确授权、隔离网络和合规场景中使用。
+
+### Host 文件夹共享
+
+项目容器支持通过 `dispatch.yaml` 配置 host bind mount，用于 CTF 附件、源码包、离线工具、字典和大体积执行产物共享。挂载不会改变黑板架构：Fact / Intent / Hint 的真相仍在 Cairn Server 和 SQLite 中，bind mount 只提供容器内文件访问能力。
+
+```yaml
+container:
+  bind_mounts:
+    - name: "ctf-attachments"
+      host_path: "./attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    - name: "project-files"
+      host_path: "./datas/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
+```
+
+`host_path` 支持相对路径和 `{project_id}` 模板；相对路径基于 `dispatch.yaml` 所在目录解析。Dispatcher 会自动创建 host 目录，并在 startup healthcheck 中验证挂载。Agent 不会自动知道附件语义，推荐在项目 `origin` 或 `Hint` 中明确说明，例如：“附件源码已挂载在 `/mnt/attachments/web-src`，请优先审计该目录。”
+
+## 5. Heartbeat 与任务存活
+
+### Lease 类型
+
+| Lease | 使用场景 | Server 字段 | API |
+| --- | --- | --- | --- |
+| Intent lease | `bootstrap`、`explore` | `intents.worker`、`last_heartbeat_at` | `POST /projects/{project_id}/intents/{intent_id}/heartbeat` |
+| Reason lease | `reason` | `projects.reason_worker`、`reason_last_heartbeat_at` | `POST /projects/{project_id}/reason/heartbeat` |
+
+### Heartbeat 工作方式
+
+```mermaid
+sequenceDiagram
+    participant Task
+    participant HeartbeatLease
+    participant Server
+    participant Process
+
+    Task->>HeartbeatLease: start()
+    loop every runtime.interval
+        HeartbeatLease->>Server: heartbeat()
+        alt 2xx
+            Server-->>HeartbeatLease: ok
+        else 403/409
+            Server-->>HeartbeatLease: invalid lease
+            HeartbeatLease->>Process: kill()
+        else transient failure
+            HeartbeatLease->>HeartbeatLease: wait grace window
+            alt exceeds grace
+                HeartbeatLease->>Process: kill()
+            end
+        end
+    end
+    Task->>HeartbeatLease: stop()
+```
+
+### Server 过期清理
+
+Server 在读取项目、列项目、claim/release 等路径中调用超时清理：
+
+| 函数 | 行为 |
+| --- | --- |
+| `expire_workers()` | 对未结论 intent，如果 `last_heartbeat_at` 超过 `intent_timeout`，清空 `worker` |
+| `expire_reason_leases()` | 对项目 reason lease，如果 `reason_last_heartbeat_at` 超过 `reason_timeout`，清空 reason 字段 |
+
+这保证 Dispatcher 崩溃、Agent 卡死、网络异常时，其他调度轮次能重新认领未完成任务。
+
+>>⚠️ 注意：heartbeat 保证的是 claim/lease 存活，不是强行让项目一直 active。项目被用户置为 `stopped` 或 `completed` 后，heartbeat 会失败，Dispatcher 会取消本地任务。
+
+## 6. 防止 Infinite Loop 的机制
+
+系统通过多层机制降低无限循环风险：
+
+| 层级 | 机制 | 作用 |
+| --- | --- | --- |
+| 进程层 | Linux `timeout -k 5s {timeout}s` | 单个 Agent 进程不会无限运行 |
+| 任务层 | `bootstrap.timeout`、`reason.timeout`、`explore.timeout` | 每类任务都有硬时间预算 |
+| 收尾层 | `conclude_timeout` | 超时后只允许短时间总结已确认事实 |
+| 调度层 | `reason_checkpoints` | 图没有新变化时不重复 reason |
+| 图结构 | intent conclude 后有 `to_fact_id` | 已完成 intent 不再被重复探索 |
+| 并发层 | `max_workers`、`max_project_workers`、`max_running_projects` | 防止单项目或单 Worker 占满资源 |
+| 输出层 | JSON contract validation | 非法输出不会写图 |
+| backoff | unhealthy/rejected retry window | 避免短周期反复失败重试 |
+
+### Reason 触发条件
+
+Dispatcher 只在以下情况触发 `reason`：
+
+```text
+checkpoint 不存在
+或 facts 数量增加
+或 hints 数量增加
+或 open_intents 从大于 0 变成 0
+```
+
+如果图状态未变化，Dispatcher 不会重复 reason。
+
+>>⚠️ 注意：系统防的是调度层和进程层死循环，不完全防语义层“不断生成低质量新 intent”。如果 Agent 每次 reason 都提出新方向，系统会继续探索，直到项目 completed、stopped、任务失败、超时或人工干预。
+
+## 7. API 总览
+
+### Settings
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/settings` | 获取 `intent_timeout`、`reason_timeout` |
+| PUT | `/settings` | 更新超时设置 |
+
+### Projects
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/projects` | 获取项目摘要列表 |
+| POST | `/projects` | 创建项目，写入 origin/goal |
+| GET | `/projects/{project_id}` | 获取完整项目图 |
+| DELETE | `/projects/{project_id}` | 删除项目 |
+| PUT | `/projects/{project_id}/title` | 更新标题 |
+| PUT | `/projects/{project_id}/status` | active/stopped 切换 |
+| POST | `/projects/{project_id}/complete` | 标记完成并写 goal intent |
+| POST | `/projects/{project_id}/reopen` | 从 completed 回到 active |
+
+### Reason
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/projects/{project_id}/reason/claim` | 认领项目级 reason lease |
+| POST | `/projects/{project_id}/reason/heartbeat` | 维持 reason lease |
+| POST | `/projects/{project_id}/reason/release` | 释放 reason lease |
+
+### Intents
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/projects/{project_id}/intents` | 创建 open intent |
+| POST | `/projects/{project_id}/intents/{intent_id}/heartbeat` | claim/heartbeat intent |
+| POST | `/projects/{project_id}/intents/{intent_id}/release` | 释放 intent |
+| POST | `/projects/{project_id}/intents/{intent_id}/conclude` | 写入新 fact 并结论 intent |
+
+### Hints 与 Export
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/projects/{project_id}/hints` | 添加 Hint |
+| GET | `/projects/{project_id}/export?format=yaml` | 导出 YAML 图快照 |
+| GET | `/projects/{project_id}/export?format=timeline` | 导出时间线 |
+
+## 8. 配置与运行
+
+### `dispatch.yaml` 关键配置
+
+```yaml
+server: "http://cairn-server:8000"
+
+runtime:
+  interval: 3
+  max_workers: 8
+  max_running_projects: 3
+  max_project_workers: 4
+  healthcheck_timeout: 20
+  prompt_group: "default"
+
+tasks:
+  bootstrap:
+    timeout: 300
+    conclude_timeout: 90
+  reason:
+    timeout: 300
+    max_intents: 2
+  explore:
+    timeout: 300
+    conclude_timeout: 90
+
+container:
+  image: "ghcr.io/oritera/cairn-worker-container:latest"
+  network_mode: "host"
+  completed_action: "stop"
+  stopped_action: "remove"
+  bind_mounts:
+    - name: "ctf-attachments"
+      host_path: "./attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    - name: "project-files"
+      host_path: "./datas/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
+
+workers:
+  - name: "codex"
+    type: "codex"
+    task_types: [bootstrap, reason, explore]
+    max_running: 2
+    priority: 0
+    env:
+      CODEX_MODEL: "{{CODEX_MODEL}}"
+      CODEX_BASE_URL: "{{CODEX_BASE_URL}}"
+      OPENAI_API_KEY: "{{OPENAI_API_KEY}}"
+```
+
+>>⚠️ 注意：仓库中的 `dispatch.yaml` 可能包含真实 API key。文档和示例中必须使用 `{{PLACEHOLDER}}`，不要复制真实密钥。
+
+### 启动命令
+
+```bash
+docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest
+docker pull ghcr.io/astral-sh/uv:python3.13-trixie
+docker compose up --build
+```
+
+手动方式：
+
+```bash
+uv run --project cairn cairn serve
+uv run --project cairn cairn dispatch --config dispatch.yaml
+uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
+```
+
+## 9. 已知风险与架构债务
+
+| 风险 | 说明 |
+| --- | --- |
+| 单 Dispatcher 假设 | 当前设计和文档明确按单 Dispatcher 实例运行，不支持多 Dispatcher 共同调度同一 Server |
+| 语义循环风险 | 可防进程死循环，但不能完全防 Agent 持续生成低价值 intent |
+| 密钥泄露风险 | `dispatch.yaml` 是运行期配置，必须避免提交真实 API key |
+| 高权限执行风险 | Worker CLI 使用危险执行参数，Kali 容器内工具能力强，必须隔离运行 |
+| 测试覆盖不明显 | 当前仓库未看到系统性测试目录，变更后应优先用 mock prompt/worker 做端到端验证 |
+| Intent 历史不足 | 协议只记录当前/最终 worker，不保留完整 worker 历史 |

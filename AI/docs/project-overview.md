@@ -1,0 +1,182 @@
+<!--
+@ai: 本文件是 Cairn 项目的快速上下文。后续 Codex 会话可先读本文件快速建立项目心智模型；需要深入细节时再读 AI/ARCHITECTURE.md 和 AI/CODEBASE_ANALYSIS.md。
+-->
+
+# Cairn 快速项目概览
+
+## 项目一句话
+
+Cairn 是一个以 Fact/Intent 图为核心的多 Agent 协作探索系统，通过 Dispatcher 调度容器内的 Claude Code、Codex、Pi 等 Agent，在 Kali 工具环境中推进从 `origin` 到 `goal` 的任务。
+
+## 最重要的心智模型
+
+```text
+Server = 协议真相源，只维护图和 lease，不做推理
+Dispatcher = 控制面，决定何时跑 bootstrap/reason/explore
+Worker Container = 执行面，每个项目一个 Kali 容器
+Agent CLI = 真实执行者，在容器里调用工具并返回 JSON
+```
+
+## 核心概念
+
+| 概念 | 说明 |
+| --- | --- |
+| Project | 一个问题实例，有 `active/stopped/completed` 状态 |
+| Fact | 已确认事实，只增不改 |
+| Intent | 待探索方向，从一个或多个 Fact 出发，最终 conclude 成新 Fact |
+| Hint | 人工或外部策略提示，不属于因果图 |
+| Reason lease | 项目级互斥，保证单项目同时只有一个 reason |
+| Heartbeat | 维持 intent/reason claim，失败或过期会释放/杀进程 |
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    UI[Web UI / API Client] --> Server[Cairn Server<br/>FastAPI + SQLite]
+    Dispatcher[Cairn Dispatcher] <--> Server
+    Dispatcher --> Docker[Docker Engine]
+    Docker --> PC[Project Container<br/>Kali + Agent CLI]
+    PC --> Agent[Claude Code / Codex / Pi]
+    Agent --> Tools[Kali Tools<br/>nuclei ffuf netexec impacket ...]
+    Agent --> Dispatcher
+```
+
+## 三种任务
+
+| 任务 | 触发 | 输入 | 输出 |
+| --- | --- | --- | --- |
+| `bootstrap` | 新项目初始态 | origin、goal、hints | Fact + optional complete |
+| `reason` | 无可探索 intent 且图有新变化 | graph YAML、valid facts、open intents | complete 或新 intents 或 no-op |
+| `explore` | 存在未认领 intent | graph YAML、intent id、intent description | 一个新 Fact |
+
+## 调度顺序
+
+```text
+1. 项目只有 origin/goal -> bootstrap
+2. 有未认领普通 intent -> explore
+3. 没有 open intent 且状态变化 -> reason
+4. reason 生成 intents 后，下一轮 explore
+5. reason 或 bootstrap 判断目标达成 -> complete
+```
+
+## 工具如 Kali 如何被调用
+
+Cairn 不直接调用 Kali 命令。真实链路是：
+
+```text
+Dispatcher docker exec Agent CLI
+Agent CLI 在 Kali 容器内运行
+Agent 根据 prompt 使用 bash/tool 调用 nuclei、ffuf、netexec、impacket 等
+Agent 输出 JSON
+Dispatcher 解析 JSON 并写回 Server
+```
+
+`container/Dockerfile` 构建了完整 Kali 环境，并安装 `codex`、`claude-code`、`pi-coding-agent`。
+
+## Host 附件共享
+
+项目容器可通过 `dispatch.yaml` 的 `container.bind_mounts` 挂载 host 目录，适合 CTF 附件、源码、字典、离线工具和大输出文件：
+
+```yaml
+container:
+  bind_mounts:
+    - name: "ctf-attachments"
+      host_path: "./attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    - name: "project-files"
+      host_path: "./datas/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
+```
+
+`{project_id}` 会被渲染为当前项目 ID，用于项目级目录隔离。Agent 不会自动知道附件目录语义，需要在 `origin` 或 `Hint` 中说明，例如：`附件源码已挂载在 /mnt/attachments/web-src`。Fact 黑板仍由 Server/SQLite 维护，bind mount 只用于文件共享。
+
+## Heartbeat 如何保证任务存活
+
+Dispatcher 任务启动后会创建 `HeartbeatLease`：
+
+| 任务 | Lease |
+| --- | --- |
+| `bootstrap` | Intent heartbeat |
+| `explore` | Intent heartbeat |
+| `reason` | Project reason heartbeat |
+
+heartbeat 每 `runtime.interval` 秒调用一次 Server：
+
+```text
+成功 -> 更新 last_heartbeat_at
+403/409 -> lease 无效，杀掉当前容器 exec
+临时失败 -> 等待 grace，超过 grace 后杀进程
+```
+
+Server 会按 `/settings` 中的 `intent_timeout` 和 `reason_timeout` 清理过期 claim。
+
+## 如何避免 infinite loop
+
+主要靠多层限制：
+
+| 层级 | 机制 |
+| --- | --- |
+| 命令层 | Docker exec 前加 `timeout -k 5s` |
+| 任务层 | bootstrap/reason/explore 都有 timeout |
+| 收尾层 | conclude fallback 有独立短 timeout |
+| 调度层 | reason 只有图状态变化时触发 |
+| 图层 | concluded intent 不会再次执行 |
+| 并发层 | max_workers/max_project_workers/max_running_projects |
+| 输出层 | JSON contract 校验失败不写图 |
+| backoff | unhealthy/rejected worker 短暂不可选 |
+
+>>⚠️ 注意：这些机制防止进程和调度死循环，但不能完全防止 Agent 语义上不断生成低质量 intent。实际运行仍需要合理 prompt、`max_intents`、人工 Hint 和项目 stop 控制。
+
+## 常用命令
+
+```bash
+uv run --project cairn cairn serve
+uv run --project cairn cairn dispatch --config dispatch.yaml
+uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
+docker compose up --build
+```
+
+## 关键文件速查
+
+| 文件 | 作用 |
+| --- | --- |
+| `cairn/src/cairn/cli.py` | CLI 入口 |
+| `cairn/src/cairn/server/app.py` | FastAPI app |
+| `cairn/src/cairn/server/db.py` | SQLite schema |
+| `cairn/src/cairn/server/routers/projects.py` | Project/status/reason/complete API |
+| `cairn/src/cairn/server/routers/intents.py` | Intent create/heartbeat/release/conclude API |
+| `cairn/src/cairn/server/routers/export.py` | YAML/timeline 导出 |
+| `cairn/src/cairn/dispatcher/scheduler/loop.py` | 主调度循环 |
+| `cairn/src/cairn/dispatcher/tasks/bootstrap.py` | bootstrap 任务 |
+| `cairn/src/cairn/dispatcher/tasks/reason.py` | reason 任务 |
+| `cairn/src/cairn/dispatcher/tasks/explore.py` | explore 任务 |
+| `cairn/src/cairn/dispatcher/runtime/containers.py` | Docker 容器管理 |
+| `cairn/src/cairn/dispatcher/runtime/heartbeat.py` | heartbeat lease |
+| `cairn/src/cairn/dispatcher/workers/adapters/` | Claude/Codex/Pi/Mock 适配器 |
+| `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt |
+| `dispatch.yaml` | 真实运行 Dispatcher 配置 |
+| `dispatch_mock.yaml` | mock 运行配置 |
+| `container/Dockerfile` | Kali Worker 容器镜像 |
+
+## 敏感信息处理
+
+不要在文档、日志或示例里复制真实 API key。所有密钥应写成：
+
+```text
+{{OPENAI_API_KEY}}
+{{ANTHROPIC_AUTH_TOKEN}}
+{{PI_API_KEY}}
+```
+
+## 后续修改建议
+
+| 目标 | 修改入口 |
+| --- | --- |
+| 改调度策略 | `dispatcher/scheduler/loop.py` |
+| 新增 Agent 后端 | `dispatcher/workers/adapters/` + `registry.py` + `config.py` |
+| 改输出 JSON 契约 | `dispatcher/contracts.py` + prompts |
+| 改 Server 协议 | `server/models.py` + routers + `db.py` schema |
+| 改容器生命周期 | `dispatcher/runtime/containers.py` |
+| 改 heartbeat 行为 | `dispatcher/runtime/heartbeat.py` + Server heartbeat API |
