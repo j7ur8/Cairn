@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from cairn.dispatcher.config import WorkerConfig
 from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
 from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver
@@ -10,6 +13,9 @@ ANTHROPIC_VERSION = "2023-06-01"
 
 class ClaudeCodeDriver(SeedSessionDriver):
     type_name = "claudecode"
+
+    def trace_format(self) -> str | None:
+        return "claude_stream_json"
 
     def build_healthcheck(self, worker: WorkerConfig) -> list[str]:
         env = worker.env
@@ -80,6 +86,9 @@ class ClaudeCodeDriver(SeedSessionDriver):
                 "--session-id",
                 session,
                 "--dangerously-skip-permissions",
+                "--output-format",
+                "stream-json",
+                "--verbose",
                 "-p",
                 "--",
                 prompt,
@@ -93,7 +102,55 @@ class ClaudeCodeDriver(SeedSessionDriver):
             "-r",
             session,
             "--dangerously-skip-permissions",
+            "--output-format",
+            "stream-json",
+            "--verbose",
             "-p",
             "--",
             prompt,
         ]
+
+    def extract_response_text(self, stdout: str, stderr: str) -> str:
+        messages: list[str] = []
+        for payload in _iter_jsonl(stdout):
+            payload_type = payload.get("type")
+            if payload_type == "assistant" and isinstance(payload.get("message"), dict):
+                text = _extract_assistant_text(payload["message"].get("content"))
+                if text:
+                    messages.append(text)
+            elif payload_type == "result":
+                result = payload.get("result")
+                if isinstance(result, str) and result:
+                    messages.append(result)
+        if messages:
+            return messages[-1]
+        return stdout
+
+
+def _iter_jsonl(text: str) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _extract_assistant_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "text" and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+    return "\n".join(parts).strip()

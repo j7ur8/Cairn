@@ -6,6 +6,7 @@ import uuid
 from cairn.dispatcher.config import ObservabilityConfig
 from cairn.dispatcher.observability.buffer import OutputBuffer
 from cairn.dispatcher.observability.redaction import redact_content
+from cairn.dispatcher.observability.trace import TraceEvent
 from cairn.dispatcher.protocol.client import CairnClient
 
 LOG = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class ExecutionReporter:
             return
         for item in self._buffer.add(phase, stream, content):
             self._emit(item.phase, item.stream, item.stream, item.content, regular_output=True)
+
+    def emit_trace_event(self, event: TraceEvent) -> None:
+        self.flush()
+        self._emit(event.phase, event.kind, event.stream, event.formatted_content())
 
     def flush(self) -> None:
         for item in self._buffer.flush():
@@ -179,6 +184,9 @@ class DisabledExecutionReporter:
         pass
 
     def emit_output(self, phase: str, stream: str, content: str) -> None:
+        pass
+
+    def emit_trace_event(self, event: TraceEvent) -> None:
         pass
 
     def emit_result(

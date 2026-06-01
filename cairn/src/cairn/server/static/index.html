@@ -501,12 +501,32 @@
         </button>
       </div>
       <div class="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0 space-y-2">
-        <select x-model="llmSelectedExecutionId" class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
+        <select
+          x-model="llmSelectedExecutionId"
+          @focus="beginLlmExecutionSelectionInteraction()"
+          @blur="endLlmExecutionSelectionInteraction()"
+          @mousedown="beginLlmExecutionSelectionInteraction()"
+          @keydown="beginLlmExecutionSelectionInteraction()"
+          @change="handleLlmExecutionSelectionChange()"
+          class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
           <option value="">All executions</option>
           <template x-for="execution in llmExecutions" :key="execution.id">
             <option :value="execution.id" x-text="llmExecutionOptionLabel(execution)"></option>
           </template>
         </select>
+        <div class="grid grid-cols-5 gap-1 text-[10px]">
+          <template x-for="filter in llmEventKindFilters" :key="filter.id">
+            <button type="button"
+              @click="llmEventKindFilter = filter.id"
+              class="h-7 rounded-lg border px-1 font-medium transition truncate"
+              :class="llmEventKindFilter === filter.id ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'"
+              x-text="filter.label"></button>
+          </template>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 select-none">
+          <input type="checkbox" x-model="showUsageLogs" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100">
+          <span>Show Usage</span>
+        </label>
         <div class="grid grid-cols-3 gap-1.5 text-[10px]">
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
             <div class="text-slate-400">Running</div>
@@ -539,7 +559,63 @@
               <div class="mt-1 text-[11px] text-slate-400 truncate" x-text="event.phase"></div>
             </button>
             <div x-show="llmEventExpanded(event)" class="border-t border-slate-100 bg-slate-950 text-slate-100">
-              <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="event.content"></pre>
+              <template x-if="llmEventContentMode(event) === 'json_card'">
+                <div class="p-3" x-data="{ card: llmEventParsedCard(event) }">
+                  <div class="space-y-3" x-show="card">
+                    <div x-show="card && card.summary" class="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                      <div class="text-[10px] uppercase tracking-wide text-slate-400">Summary</div>
+                      <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="card.summary"></div>
+                    </div>
+                    <div x-show="card && card.inlineFields && card.inlineFields.length > 0" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <template x-for="field in (card?.inlineFields || [])" :key="field.label">
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                          <div class="text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                          <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></div>
+                        </div>
+                      </template>
+                    </div>
+                    <div x-show="card && card.blockFields && card.blockFields.length > 0" class="space-y-2">
+                      <template x-for="field in (card?.blockFields || [])" :key="field.label">
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
+                          <div class="border-b border-slate-800 px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                          <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></pre>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template x-if="llmEventContentMode(event) === 'json_lines'">
+                <div class="p-3 space-y-3">
+                  <template x-for="(card, index) in llmEventParsedCards(event)" :key="`${event.sequence}-${index}`">
+                    <div class="rounded-lg border border-slate-800 bg-slate-900/70 p-3 space-y-3">
+                      <div x-show="card.summary" class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                        <div class="text-[10px] uppercase tracking-wide text-slate-400">Summary</div>
+                        <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="card.summary"></div>
+                      </div>
+                      <div x-show="card.inlineFields && card.inlineFields.length > 0" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <template x-for="field in (card.inlineFields || [])" :key="field.label">
+                          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                            <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></div>
+                          </div>
+                        </template>
+                      </div>
+                      <div x-show="card.blockFields && card.blockFields.length > 0" class="space-y-2">
+                        <template x-for="field in (card.blockFields || [])" :key="field.label">
+                          <div class="rounded-lg border border-slate-800 bg-slate-950/70 overflow-hidden">
+                            <div class="border-b border-slate-800 px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                            <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></pre>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="llmEventContentMode(event) === 'plain_text'">
+                <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="event.content"></pre>
+              </template>
               <div x-show="event.truncated || event.redacted" class="px-3 pb-2 flex gap-1.5 text-[10px]">
                 <span x-show="event.truncated" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">truncated</span>
                 <span x-show="event.redacted" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">redacted</span>
@@ -1168,6 +1244,18 @@ function cairnApp() {
     llmEvents: [],
     llmLastSequence: 0,
     llmSelectedExecutionId: '',
+    llmExecutionSelectInteracting: false,
+    llmExecutionsRefreshPending: false,
+    llmEventContentCache: {},
+    llmEventKindFilter: 'all',
+    showUsageLogs: false,
+    llmEventKindFilters: [
+      { id: 'all', label: 'All' },
+      { id: 'tools', label: 'Tools' },
+      { id: 'commands', label: 'Cmds' },
+      { id: 'output', label: 'Output' },
+      { id: 'errors', label: 'Errors' },
+    ],
     llmExpandedEvents: {},
     llmPollTimer: null,
     llmPollingPaused: false,
@@ -1700,6 +1788,10 @@ function cairnApp() {
       this.llmEvents = [];
       this.llmLastSequence = 0;
       this.llmSelectedExecutionId = '';
+      this.llmExecutionSelectInteracting = false;
+      this.llmExecutionsRefreshPending = false;
+      this.llmEventContentCache = {};
+      this.llmEventKindFilter = 'all';
       this.llmExpandedEvents = {};
       this.llmPollingPaused = false;
       this.llmLastSlowPollAt = 0;
@@ -1709,10 +1801,56 @@ function cairnApp() {
       if (!this.selectedProjectId || this.view !== 'graph') return;
       try {
         const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-executions?limit=200`);
-        this.llmExecutions = data.executions || [];
+        const executions = data.executions || [];
+        if (this.llmExecutionSelectInteracting) {
+          this.llmExecutionsRefreshPending = true;
+          return;
+        }
+        this.applyLlmExecutions(executions);
       } catch (e) {
         console.error(e);
       }
+    },
+
+    applyLlmExecutions(executions) {
+      const next = Array.isArray(executions) ? executions : [];
+      const sameLength = this.llmExecutions.length === next.length;
+      const sameItems = sameLength && this.llmExecutions.every((current, index) => {
+        const candidate = next[index];
+        if (!candidate) return false;
+        return current.id === candidate.id
+          && current.process_state === candidate.process_state
+          && current.event_count === candidate.event_count
+          && current.last_event_at === candidate.last_event_at
+          && current.ended_at === candidate.ended_at
+          && current.error_kind === candidate.error_kind
+          && current.intent_id === candidate.intent_id
+          && current.task_type === candidate.task_type
+          && current.worker === candidate.worker;
+      });
+      if (!sameItems) {
+        this.llmExecutions = next;
+      }
+      if (this.llmSelectedExecutionId && !next.some(execution => execution.id === this.llmSelectedExecutionId)) {
+        this.llmSelectedExecutionId = '';
+      }
+      this.llmExecutionsRefreshPending = false;
+    },
+
+    beginLlmExecutionSelectionInteraction() {
+      this.llmExecutionSelectInteracting = true;
+    },
+
+    async endLlmExecutionSelectionInteraction() {
+      this.llmExecutionSelectInteracting = false;
+      if (!this.llmExecutionsRefreshPending) return;
+      await this.loadLlmExecutions();
+    },
+
+    handleLlmExecutionSelectionChange() {
+      this.$nextTick(() => {
+        this.endLlmExecutionSelectionInteraction();
+      });
     },
 
     async pollLlmEvents(force = false) {
@@ -1751,7 +1889,22 @@ function cairnApp() {
       const events = this.llmSelectedExecutionId
         ? this.llmEvents.filter(event => event.execution_id === this.llmSelectedExecutionId)
         : this.llmEvents;
-      return events.slice(-500);
+      return events.filter(event => this.matchesLlmEventKindFilter(event)).slice(-500);
+    },
+
+    matchesLlmEventKindFilter(event) {
+      const kind = event.event_kind || '';
+      if (kind === 'usage') return this.showUsageLogs && ['all', 'output'].includes(this.llmEventKindFilter);
+      if (this.llmEventKindFilter === 'all') return true;
+      if (this.llmEventKindFilter === 'tools') return ['tool_call', 'tool_result'].includes(kind);
+      if (this.llmEventKindFilter === 'commands') return ['command_start', 'command_end'].includes(kind);
+      if (this.llmEventKindFilter === 'output') {
+        return ['stdout', 'stderr', 'model_response', 'agent_message', 'thinking', 'result'].includes(kind);
+      }
+      if (this.llmEventKindFilter === 'errors') {
+        return ['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(kind);
+      }
+      return true;
     },
 
     llmExecutionCount(state) {
@@ -1772,6 +1925,214 @@ function cairnApp() {
       return `${execution.task_type}${intent} · ${execution.worker} · ${execution.process_state}`;
     },
 
+    llmEventContentMode(event) {
+      return this.parseLlmEventContent(event).mode;
+    },
+
+    llmEventParsedCard(event) {
+      return this.parseLlmEventContent(event).card || null;
+    },
+
+    llmEventParsedCards(event) {
+      return this.parseLlmEventContent(event).cards || [];
+    },
+
+    parseLlmEventContent(event) {
+      const key = `${event.sequence}:${event.event_kind}:${event.content || ''}`;
+      const cached = this.llmEventContentCache[event.sequence];
+      if (cached && cached.key === key) return cached.value;
+
+      const raw = typeof event.content === 'string' ? event.content : String(event.content || '');
+      let value = { mode: 'plain_text', card: null, cards: [] };
+
+      const parsedObject = this.tryParseLlmJsonObject(raw);
+      if (parsedObject) {
+        value = {
+          mode: 'json_card',
+          card: this.buildLlmJsonCard(event, parsedObject),
+          cards: [],
+        };
+      } else {
+        const parsedLines = this.tryParseLlmJsonLines(raw);
+        if (parsedLines.length > 1) {
+          value = {
+            mode: 'json_lines',
+            card: null,
+            cards: parsedLines.map((payload, index) => this.buildLlmJsonCard(event, payload, index)),
+          };
+        }
+      }
+
+      this.llmEventContentCache[event.sequence] = { key, value };
+      return value;
+    },
+
+    tryParseLlmJsonObject(raw) {
+      const text = (raw || '').trim();
+      if (!text.startsWith('{') || !text.endsWith('}')) return null;
+      try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    },
+
+    tryParseLlmJsonLines(raw) {
+      const lines = (raw || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+      if (lines.length <= 1) return [];
+      const parsed = [];
+      for (const line of lines) {
+        try {
+          const value = JSON.parse(line);
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+          parsed.push(value);
+        } catch {
+          return [];
+        }
+      }
+      return parsed;
+    },
+
+    buildLlmJsonCard(event, payload, index = 0) {
+      const summary = this.deriveLlmPayloadSummary(event, payload, index);
+      const inlineFields = [];
+      const blockFields = [];
+      const used = new Set();
+
+      const addInline = (key, label, value) => {
+        if (value === undefined || value === null || value === '') return;
+        inlineFields.push({ label, value: this.llmFieldText(key, value) });
+        used.add(key);
+      };
+      const addBlock = (key, label, value) => {
+        if (value === undefined || value === null || value === '') return;
+        blockFields.push({ label, value: this.llmFieldText(key, value) });
+        used.add(key);
+      };
+
+      if (event.event_kind === 'tool_call') {
+        addInline('tool', 'Tool', payload.tool);
+        addInline('call_id', 'Call ID', payload.call_id);
+        addBlock('arguments', 'Arguments', payload.arguments);
+      } else if (event.event_kind === 'tool_result') {
+        addInline('call_id', 'Call ID', payload.call_id);
+        addInline('is_error', 'Is Error', payload.is_error);
+        addBlock('output', 'Output', payload.output);
+      } else if (event.event_kind === 'command_start') {
+        addInline('call_id', 'Call ID', payload.call_id);
+        addInline('workdir', 'Workdir', payload.workdir || payload.cwd);
+        addInline('description', 'Description', payload.description);
+        addBlock('command', 'Command', payload.command);
+      } else if (event.event_kind === 'command_end') {
+        addInline('call_id', 'Call ID', payload.call_id);
+        addInline('status', 'Status', payload.status);
+        addInline('exit_code', 'Exit Code', payload.exit_code);
+        addInline('interrupted', 'Interrupted', payload.interrupted);
+        addInline('cwd', 'CWD', payload.cwd || payload.workdir);
+        addBlock('command', 'Command', payload.command);
+        addBlock('stdout', 'Stdout', payload.stdout);
+        addBlock('stderr', 'Stderr', payload.stderr);
+        addBlock('output', 'Output', payload.output);
+        addBlock('duration', 'Duration', payload.duration);
+      } else if (event.event_kind === 'usage') {
+        for (const key of ['type', 'subtype', 'input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'service_tier', 'model']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+      } else if (event.event_kind === 'session_init') {
+        for (const key of ['model', 'cwd', 'session_id', 'permissionMode', 'apiKeySource', 'claude_code_version', 'output_style']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+        for (const key of ['tools', 'mcp_servers', 'slash_commands', 'agents', 'skills', 'plugins']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addBlock(key, this.llmFieldLabel(key), payload[key]);
+        }
+      } else if (event.event_kind === 'api_retry') {
+        for (const key of ['attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error', 'session_id']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+      } else if (event.event_kind === 'system_event') {
+        for (const key of ['type', 'subtype', 'session_id']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+      } else if (event.event_kind === 'trace_parse_error') {
+        addBlock('line_preview', 'Line Preview', payload.line_preview);
+      }
+
+      for (const [key, value] of Object.entries(payload)) {
+        if (key === 'summary' || used.has(key)) continue;
+        if (this.llmFieldShouldUseBlock(key, value)) addBlock(key, this.llmFieldLabel(key), value);
+        else addInline(key, this.llmFieldLabel(key), value);
+      }
+
+      return { summary, inlineFields, blockFields };
+    },
+
+    deriveLlmPayloadSummary(event, payload, index = 0) {
+      if (typeof payload.summary === 'string' && payload.summary.trim()) return payload.summary.trim();
+      if (typeof payload.subtype === 'string' && typeof payload.type === 'string') return `${payload.type}: ${payload.subtype}`;
+      if (typeof payload.type === 'string' && typeof payload.role === 'string') return `${payload.type}: ${payload.role}`;
+      if (typeof payload.type === 'string' && payload.type) return payload.type;
+      if (payload.message && typeof payload.message === 'object') {
+        const role = payload.message.role;
+        if (typeof role === 'string' && role) return `message: ${role}`;
+      }
+      if (event.event_kind === 'tool_call' && payload.tool) return `${payload.tool}`;
+      if (event.event_kind === 'command_start' || event.event_kind === 'command_end') {
+        const commandText = this.llmFieldText('command', payload.command || payload.summary || '');
+        if (commandText) return commandText;
+      }
+      return `${this.llmEventLabel(event)} ${index > 0 ? `#${index + 1}` : ''}`.trim();
+    },
+
+    llmFieldShouldUseBlock(key, value) {
+      if (['arguments', 'output', 'stdout', 'stderr', 'line_preview', 'content', 'message', 'toolUseResult', 'tools', 'mcp_servers', 'slash_commands', 'agents', 'skills', 'plugins', 'command', 'duration'].includes(key)) return true;
+      if (Array.isArray(value)) return true;
+      if (value && typeof value === 'object') return true;
+      if (typeof value === 'string' && value.length > 160) return true;
+      return false;
+    },
+
+    llmFieldLabel(key) {
+      const labels = {
+        call_id: 'Call ID',
+        cwd: 'CWD',
+        workdir: 'Workdir',
+        stdout: 'Stdout',
+        stderr: 'Stderr',
+        input_tokens: 'Input Tokens',
+        output_tokens: 'Output Tokens',
+        cache_creation_input_tokens: 'Cache Creation Input Tokens',
+        cache_read_input_tokens: 'Cache Read Input Tokens',
+        exit_code: 'Exit Code',
+        session_id: 'Session ID',
+        mcp_servers: 'MCP Servers',
+        slash_commands: 'Slash Commands',
+        permissionMode: 'Permission Mode',
+        apiKeySource: 'API Key Source',
+      };
+      if (labels[key]) return labels[key];
+      return key
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, char => char.toUpperCase());
+    },
+
+    llmFieldText(key, value) {
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'boolean') return value ? 'true' : 'false';
+      if (Array.isArray(value)) {
+        if (key === 'command' && value.every(item => typeof item === 'string' || typeof item === 'number')) {
+          return value.map(item => String(item)).join(' ');
+        }
+        return JSON.stringify(value, null, 2);
+      }
+      if (typeof value === 'object') return JSON.stringify(value, null, 2);
+      return String(value);
+    },
+
     llmEventLabel(event) {
       const labels = {
         prompt: 'Prompt',
@@ -1784,6 +2145,17 @@ function cairnApp() {
         process_end: 'Process End',
         error: 'Error',
         result: 'Result',
+        agent_message: 'Agent',
+        thinking: 'Thinking',
+        tool_call: 'Tool Call',
+        tool_result: 'Tool Result',
+        command_start: 'Command Start',
+        command_end: 'Command End',
+        usage: 'Usage',
+        session_init: 'Session Init',
+        api_retry: 'API Retry',
+        system_event: 'System',
+        trace_parse_error: 'Trace Parse',
       };
       return labels[event.event_kind] || event.event_kind || 'Event';
     },
@@ -1794,13 +2166,21 @@ function cairnApp() {
       if (kind === 'stdout') return 'bg-slate-100 text-slate-700';
       if (kind === 'stderr') return 'bg-amber-50 text-amber-700';
       if (kind === 'model_response' || kind === 'result') return 'bg-teal-50 text-teal-700';
-      if (['parse_error', 'timeout', 'cancelled', 'error'].includes(kind)) return 'bg-rose-50 text-rose-700';
+      if (kind === 'agent_message') return 'bg-teal-50 text-teal-700';
+      if (kind === 'thinking') return 'bg-indigo-50 text-indigo-700';
+      if (kind === 'tool_call' || kind === 'tool_result') return 'bg-sky-50 text-sky-700';
+      if (kind === 'command_start' || kind === 'command_end') return 'bg-slate-100 text-slate-700';
+      if (kind === 'usage') return 'bg-emerald-50 text-emerald-700';
+      if (['session_init', 'api_retry', 'system_event'].includes(kind)) return 'bg-slate-100 text-slate-700';
+      if (['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(kind)) return 'bg-rose-50 text-rose-700';
       return 'bg-sky-50 text-sky-700';
     },
 
     llmEventBorderClass(event) {
-      if (['parse_error', 'timeout', 'cancelled', 'error'].includes(event.event_kind)) return 'border-rose-200';
+      if (['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(event.event_kind)) return 'border-rose-200';
       if (event.event_kind === 'stderr') return 'border-amber-200';
+      if (['tool_call', 'tool_result'].includes(event.event_kind)) return 'border-sky-200';
+      if (['command_start', 'command_end'].includes(event.event_kind)) return 'border-slate-300';
       return 'border-slate-200';
     },
 

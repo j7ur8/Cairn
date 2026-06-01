@@ -22,6 +22,8 @@ Only return the following after you have confirmed that Goal has been satisfied:
 - `complete.description` should explain why the currently confirmed results are sufficient to prove that Goal has been achieved.
 - Do not put long data blobs in `description`. Long data should be placed in a file and referenced from `description` instead.
 
+{remote_support_instructions}
+
 # Context
 ## Origin
 ```

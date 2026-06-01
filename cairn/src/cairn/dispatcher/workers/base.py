@@ -24,6 +24,9 @@ class WorkerDriver(abc.ABC):
     def prepare_session(self) -> str | None:
         return None
 
+    def trace_format(self) -> str | None:
+        return None
+
     def build_startup_healthcheck(self, worker: WorkerConfig) -> list[str]:
         return self.build_healthcheck(worker)
 

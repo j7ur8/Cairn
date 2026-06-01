@@ -6,7 +6,7 @@ import time
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
 from cairn.dispatcher.observability.reporter import ExecutionReporter
-from cairn.dispatcher.prompting import load_prompt, render_prompt
+from cairn.dispatcher.prompting import format_remote_support_instructions, load_prompt, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -123,6 +123,7 @@ def run_explore_task(
                 ),
                 "intent_id": intent.id,
                 "intent_description": intent.description,
+                "remote_support_instructions": format_remote_support_instructions(config.remote_support),
             },
         )
         reporter.emit_prompt("explore_execute", prompt)
@@ -141,6 +142,7 @@ def run_explore_task(
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
+            trace_format=driver.trace_format(),
         )
         execute_ms = int((time.perf_counter() - execute_started) * 1000)
         session = driver.extract_session(session, first.stdout, first.stderr)
@@ -365,6 +367,7 @@ def _try_conclude_fallback(
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
+        trace_format=driver.trace_format(),
     )
     conclude_ms = int((time.perf_counter() - conclude_started) * 1000)
     cancelled = cancel_reason(result, cancellation)
@@ -455,6 +458,7 @@ def _run_process(
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
     reporter: ExecutionReporter,
+    trace_format: str | None = None,
 ):
     return run_worker_process(
         container_manager,
@@ -466,4 +470,5 @@ def _run_process(
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
+        trace_format=trace_format,
     )

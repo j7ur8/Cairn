@@ -152,6 +152,7 @@ class ObservabilityConfig(BaseModel):
     record_prompts: bool = True
     record_stdout: bool = True
     record_stderr: bool = True
+    record_raw_worker_stream: bool = False
     max_event_bytes: int = Field(default=16384, gt=0)
     max_bytes_per_execution: int = Field(default=10485760, gt=0)
     flush_interval_ms: int = Field(default=250, ge=0)
@@ -198,6 +199,74 @@ class BindMountConfig(BaseModel):
         if "\x00" in path:
             raise ValueError("host_path must not contain NUL bytes")
         return path
+
+
+class RemoteDnslogConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return value.strip()
+
+
+class RemoteSshConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = ""
+    port: int = Field(default=22, gt=0, le=65535)
+    username: str = ""
+    password: str = ""
+
+    @field_validator("host", "username", "password")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return value.strip()
+
+    @property
+    def is_complete(self) -> bool:
+        return bool(self.host and self.username and self.password)
+
+
+class RemoteSupportConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    dnslog: RemoteDnslogConfig = Field(default_factory=RemoteDnslogConfig)
+    ssh: RemoteSshConfig = Field(default_factory=RemoteSshConfig)
+
+    @property
+    def dnslog_configured(self) -> bool:
+        return self.enabled and bool(self.dnslog.url)
+
+    @property
+    def ssh_configured(self) -> bool:
+        return self.enabled and self.ssh.is_complete
+
+    @property
+    def has_available_resource(self) -> bool:
+        return self.dnslog_configured or self.ssh_configured
+
+    def environment(self) -> dict[str, str]:
+        if not self.enabled:
+            return {}
+        env: dict[str, str] = {}
+        if self.dnslog.url:
+            env["CAIRN_DNSLOG_URL"] = self.dnslog.url
+        if self.ssh.is_complete:
+            env.update(
+                {
+                    "CAIRN_REMOTE_SSH_HOST": self.ssh.host,
+                    "CAIRN_REMOTE_SSH_PORT": str(self.ssh.port),
+                    "CAIRN_REMOTE_SSH_USERNAME": self.ssh.username,
+                    "CAIRN_REMOTE_SSH_PASSWORD": self.ssh.password,
+                }
+            )
+        if env:
+            env["CAIRN_REMOTE_SUPPORT_ENABLED"] = "true"
+        return env
 
 
 class ContainerConfig(BaseModel):
@@ -268,6 +337,7 @@ class DispatchConfig(BaseModel):
     tasks: TasksConfig
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     container: ContainerConfig
+    remote_support: RemoteSupportConfig = Field(default_factory=RemoteSupportConfig)
     common_env: dict[str, str] = Field(default_factory=dict)
     workers: list[WorkerConfig]
 
@@ -283,6 +353,8 @@ class DispatchConfig(BaseModel):
         if not isinstance(common_env, dict) or not isinstance(workers, list):
             return data
 
+        remote_env = _remote_support_env_from_raw(data.get("remote_support"))
+        merged_common_env = {**common_env, **remote_env}
         merged = dict(data)
         merged_workers: list[Any] = []
         for worker in workers:
@@ -296,7 +368,7 @@ class DispatchConfig(BaseModel):
                 merged_workers.append(worker)
                 continue
             worker_copy = dict(worker)
-            worker_copy["env"] = {**common_env, **worker_env}
+            worker_copy["env"] = {**merged_common_env, **worker_env}
             merged_workers.append(worker_copy)
         merged["workers"] = merged_workers
         return merged
@@ -319,6 +391,16 @@ class DispatchConfig(BaseModel):
         config = cls.model_validate(data)
         validate_prompt_resources(config.runtime.prompt_group)
         return config
+
+
+def _remote_support_env_from_raw(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        return RemoteSupportConfig.model_validate(raw).environment()
+    except Exception:
+        # Let the main DispatchConfig validation raise the detailed configuration error.
+        return {}
 
 
 def _validate_optional_positive_int_env(worker_name: str, env: dict[str, str], key: str) -> None:

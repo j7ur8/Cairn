@@ -17,6 +17,17 @@ EventKind = Literal[
     "process_end",
     "result",
     "error",
+    "agent_message",
+    "thinking",
+    "tool_call",
+    "tool_result",
+    "command_start",
+    "command_end",
+    "usage",
+    "session_init",
+    "api_retry",
+    "system_event",
+    "trace_parse_error",
 ]
 EventStream = Literal["system", "prompt", "stdout", "stderr", "result", "error"]
 

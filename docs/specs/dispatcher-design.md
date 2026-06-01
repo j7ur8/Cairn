@@ -959,7 +959,7 @@ tasks:
 
 container:
   image: "tmp:latest"
-  network_mode: "host"
+  network_mode: "cairn"
   completed_action: "stop"  # options: "remove" | "stop"
   stopped_action: "remove"  # options: "remove" | "stop"
   bind_mounts:

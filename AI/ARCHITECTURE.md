@@ -22,7 +22,7 @@ Cairn 是一个基于事实图的多 Agent 协作探索与调度系统。
 | 层级 | 技术 |
 | --- | --- |
 | 后端 API | Python 3.12+、FastAPI、Pydantic |
-| 存储 | SQLite、WAL、Docker volume 持久化 |
+| 存储 | SQLite、WAL、主业务 DB 与 observability DB 分离、Docker volume 持久化 |
 | 调度器 | Python ThreadPoolExecutor、Requests、Docker SDK |
 | Worker 运行时 | Docker 容器、Kali Linux、Claude Code CLI、Codex CLI、Pi Coding Agent、Mock |
 | 前端 | 静态 HTML、Tailwind、Alpine.js、Cytoscape、Dagre/Klay/ELK/Cola 布局 |
@@ -56,6 +56,13 @@ Cairn/
 │       │   ├── db.py
 │       │   ├── models.py
 │       │   ├── services.py
+│       │   ├── observability/
+│       │   │   ├── db.py
+│       │   │   ├── models.py
+│       │   │   ├── repository.py
+│       │   │   ├── retention.py
+│       │   │   ├── redaction.py
+│       │   │   └── routers.py
 │       │   ├── routers/
 │       │   │   ├── projects.py
 │       │   │   ├── intents.py
@@ -85,6 +92,11 @@ Cairn/
 │           │   ├── heartbeat.py
 │           │   ├── cancellation.py
 │           │   └── startup_healthcheck.py
+│           ├── observability/
+│           │   ├── buffer.py
+│           │   ├── redaction.py
+│           │   ├── reporter.py
+│           │   └── trace.py
 │           ├── workers/
 │           │   ├── base.py
 │           │   ├── registry.py
@@ -112,6 +124,7 @@ flowchart TB
     UI[Static UI<br/>Alpine + Cytoscape]
     Server[Cairn Server<br/>FastAPI Protocol API]
     DB[(SQLite<br/>Projects/Facts/Intents/Hints)]
+    ObsDB[(SQLite<br/>LLM Executions/Events)]
     Dispatcher[Cairn Dispatcher<br/>Scheduler + Control Plane]
     Docker[Docker Engine]
     ContainerA[Project Container A<br/>Kali + Agent CLI + Tools]
@@ -125,6 +138,7 @@ flowchart TB
     UI --> Server
     User --> Server
     Server <--> DB
+    Server <--> ObsDB
     Dispatcher <--> Server
     Dispatcher --> Docker
     Docker --> ContainerA
@@ -142,6 +156,9 @@ flowchart TB
 | `cairn.cli` | CLI 参数 | Server 或 Dispatcher 进程 | 项目命令入口 | Click、Uvicorn、DispatcherLoop |
 | `server.app` | HTTP 请求 | API 响应、静态页面 | FastAPI 应用组装 | routers、db |
 | `server.db` | DB path | SQLite 连接 | 初始化 schema、连接管理 | sqlite3 |
+| `server.observability.db` | observability DB path | SQLite 连接 | LLM execution/event 独立库初始化 | sqlite3 |
+| `server.observability.routers` | LLM execution/event API | Execution Log 响应 | 观察事件写入、查询、finish | repository |
+| `server.observability.repository` | Execution/Event rows | 模型对象 | 观察事件 redaction、截断、序列查询 | observability models |
 | `server.models` | 请求/响应数据 | Pydantic 模型 | 协议数据结构与校验 | Pydantic |
 | `server.services` | SQLite row | 业务辅助结果 | ID 生成、超时清理、模型转换 | FastAPI HTTPException |
 | `server.routers.projects` | Project API | Project/Facts/Status | 项目创建、状态、reason lease、complete/reopen | db、services |
@@ -156,6 +173,8 @@ flowchart TB
 | `dispatcher.runtime.process` | Docker exec | stdout/stderr/returncode | 容器内进程控制、kill、输出收集 | Docker API |
 | `dispatcher.runtime.heartbeat` | heartbeat callback | lease 状态 | 周期保活与失效杀进程 | CairnClient |
 | `dispatcher.workers.adapters` | prompt/env | Agent CLI argv | 不同 Worker 后端命令适配 | Claude/Codex/Pi/Mock CLI |
+| `dispatcher.observability.reporter` | prompt/stdout/trace/result | observability API 事件 | Dispatcher 侧观察事件发送、缓冲、脱敏 | CairnClient |
+| `dispatcher.observability.trace` | Codex JSONL / Claude stream-json | TraceEvent | 结构化执行轨迹解析 | json |
 
 ### 架构风格与设计模式
 
@@ -286,8 +305,9 @@ Dispatcher
   -> docker exec "codex exec ..." / "claude -p ..." / "pi ..."
      -> Agent CLI 在 Kali 容器内运行
         -> Agent 使用 bash/tool 能力调用 nuclei、ffuf、netexec、impacket、playwright 等工具
-           -> Agent 输出结构化 JSON
-              -> Dispatcher 解析并写回 Cairn Server
+           -> Agent 输出 JSONL / stream-json / 文本
+              -> Dispatcher 提取最终 assistant 文本中的 JSON 契约并写回 Cairn Server
+              -> Dispatcher 旁路解析结构化 trace 写入 Execution Log
 ```
 
 ### Worker 容器环境
@@ -450,6 +470,17 @@ checkpoint 不存在
 | GET | `/projects/{project_id}/export?format=yaml` | 导出 YAML 图快照 |
 | GET | `/projects/{project_id}/export?format=timeline` | 导出时间线 |
 
+### Execution Log
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/projects/{project_id}/llm-executions` | 查询项目 execution 列表 |
+| GET | `/projects/{project_id}/llm-events` | 按 sequence 增量查询项目事件 |
+| GET | `/projects/{project_id}/llm-executions/{execution_id}/events` | 查询单个 execution 的事件 |
+| POST | `/projects/{project_id}/llm-executions` | 创建 execution 记录 |
+| POST | `/projects/{project_id}/llm-executions/{execution_id}/events` | 写入 execution event |
+| POST | `/projects/{project_id}/llm-executions/{execution_id}/finish` | 标记 execution 结束 |
+
 ## 8. 配置与运行
 
 ### `dispatch.yaml` 关键配置
@@ -476,9 +507,26 @@ tasks:
     timeout: 300
     conclude_timeout: 90
 
+observability:
+  enabled: true
+  record_prompts: true
+  record_stdout: true
+  record_stderr: true
+  record_raw_worker_stream: false
+
+remote_support:
+  enabled: false
+  dnslog:
+    url: ""
+  ssh:
+    host: ""
+    port: 22
+    username: ""
+    password: ""
+
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
-  network_mode: "host"
+  network_mode: "cairn"
   completed_action: "stop"
   stopped_action: "remove"
   bind_mounts:
@@ -505,6 +553,18 @@ workers:
 
 >>⚠️ 注意：仓库中的 `dispatch.yaml` 可能包含真实 API key。文档和示例中必须使用 `{{PLACEHOLDER}}`，不要复制真实密钥。
 
+### Execution Log 与 Remote Support
+
+- Execution Log 是独立 observability 旁路，不是黑板事实来源。业务真相仍只来自 `facts/intents`。
+- Server 使用独立的 observability SQLite DB，默认路径为 `~/.local/share/cairn/cairn_observability.db`；`cairn serve` 可通过 `--observability-db-path` 指定。
+- Dispatcher 的 `observability` 配置控制是否发送 prompt/stdout/stderr/raw worker stream 以及 Dispatcher 侧缓冲、脱敏和大小限制；Server 端写入 API 仍使用内置 `ObservabilitySettings()` 做二次 redaction/truncation。
+- Worker 的结构化执行轨迹会解析为 `tool_call`、`tool_result`、`command_start`、`command_end`、`agent_message`、`thinking`、`usage` 等事件；Claude `system/init`、`system/api_retry` 分别显示为 `session_init`、`api_retry`。
+- UI 默认隐藏 `usage`，可通过 `Show Usage` 开关查看。
+- Codex/Claude 的结构化流只用于 Execution Log 和最终 assistant 文本提取；真正写入 Fact/Intent/Complete 的仍是 prompts 要求的最终 JSON 契约。
+- `remote_support` 只提供 DNSLog 与远程 SSH 两类资源，并合并进 worker env；它不改变 `container.network_mode`，默认仍是 `cairn`。
+- Remote Support 只注入 `bootstrap.md` 与 `explore.md`，不注入 conclude/reason，避免破坏“执行、总结、推理”边界。
+- prompt 中只出现环境变量名，不渲染 SSH 密码明文；redaction 规则覆盖 `CAIRN_REMOTE_SSH_PASSWORD` 与通用 `*PASSWORD`。
+
 ### 启动命令
 
 ```bash
@@ -517,6 +577,7 @@ docker compose up --build
 
 ```bash
 uv run --project cairn cairn serve
+uv run --project cairn cairn serve --observability-db-path ~/.local/share/cairn/cairn_observability.db
 uv run --project cairn cairn dispatch --config dispatch.yaml
 uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
 ```

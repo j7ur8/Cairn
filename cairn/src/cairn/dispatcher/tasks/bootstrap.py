@@ -11,7 +11,7 @@ from cairn.dispatcher.contracts import (
     validate_bootstrap_execute_payload,
 )
 from cairn.dispatcher.observability.reporter import ExecutionReporter
-from cairn.dispatcher.prompting import format_hints, load_prompt, render_prompt
+from cairn.dispatcher.prompting import format_hints, format_remote_support_instructions, load_prompt, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -123,7 +123,10 @@ def run_bootstrap_task(
 
         prompt = render_prompt(
             load_prompt(config.runtime.prompt_group, "bootstrap.md"),
-            _bootstrap_prompt_replacements(project),
+            {
+                **_bootstrap_prompt_replacements(project),
+                "remote_support_instructions": format_remote_support_instructions(config.remote_support),
+            },
         )
         reporter.emit_prompt("bootstrap", prompt)
 
@@ -141,6 +144,7 @@ def run_bootstrap_task(
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
+            trace_format=driver.trace_format(),
         )
         execute_ms = int((time.perf_counter() - execute_started) * 1000)
         session = driver.extract_session(session, first.stdout, first.stderr)
@@ -362,6 +366,7 @@ def _try_conclude_fallback(
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
+        trace_format=driver.trace_format(),
     )
     conclude_ms = int((time.perf_counter() - conclude_started) * 1000)
     cancelled = cancel_reason(result, cancellation)

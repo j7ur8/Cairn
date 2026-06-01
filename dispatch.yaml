@@ -37,10 +37,36 @@ tasks:
     # Time budget for conclude fallback used to summarize confirmed findings from the same session.
     conclude_timeout: 90
 
+observability:
+  enabled: true
+  record_prompts: true
+  record_stdout: true
+  record_stderr: true
+  record_raw_worker_stream: false
+  max_event_bytes: 16384
+  max_bytes_per_execution: 10485760
+  flush_interval_ms: 250
+  flush_max_bytes: 8192
+  retention_days: 14
+  redaction_patterns: []
+
+remote_support:
+  enabled: true
+  dnslog:
+    url: ""
+  ssh:
+    host: "113.31.113.69"
+    port: 22
+    username: "ubuntu"
+    password: "REDACTED-SSH-PASSWORD"
+
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
   image: "ghcr.io/oritera/cairn-worker-container:latest"
-  network_mode: "host"
+  # Project worker containers join the shared Docker network used by Cairn services.
+  # The docker-compose stack creates this network automatically. When running manually,
+  # create it first with: docker network create cairn
+  network_mode: "cairn"
   # "stop" keeps finished containers for inspection; "remove" is cleaner but loses post-run state.
   completed_action: "stop"
   # Auto-destroy worker containers when a project is stopped.

@@ -11,10 +11,10 @@ Cairn 是一个以 Fact/Intent 图为核心的多 Agent 协作探索系统，通
 ## 最重要的心智模型
 
 ```text
-Server = 协议真相源，只维护图和 lease，不做推理
+Server = 协议真相源，只维护图和 lease，不做推理；另有独立 observability DB 存 Execution Log
 Dispatcher = 控制面，决定何时跑 bootstrap/reason/explore
 Worker Container = 执行面，每个项目一个 Kali 容器
-Agent CLI = 真实执行者，在容器里调用工具并返回 JSON
+Agent CLI = 真实执行者，在容器里调用工具并返回最终 JSON 契约；Codex/Claude 的结构化流只作为日志旁路
 ```
 
 ## 核心概念
@@ -67,8 +67,9 @@ Cairn 不直接调用 Kali 命令。真实链路是：
 Dispatcher docker exec Agent CLI
 Agent CLI 在 Kali 容器内运行
 Agent 根据 prompt 使用 bash/tool 调用 nuclei、ffuf、netexec、impacket 等
-Agent 输出 JSON
-Dispatcher 解析 JSON 并写回 Server
+Agent 输出 JSONL / stream-json / 文本
+Dispatcher 从最终 assistant 文本提取 JSON 契约并写回 Server
+Dispatcher 同时把结构化 trace 作为 Execution Log 写入 observability API
 ```
 
 `container/Dockerfile` 构建了完整 Kali 环境，并安装 `codex`、`claude-code`、`pi-coding-agent`。
@@ -91,6 +92,34 @@ container:
 ```
 
 `{project_id}` 会被渲染为当前项目 ID，用于项目级目录隔离。Agent 不会自动知道附件目录语义，需要在 `origin` 或 `Hint` 中说明，例如：`附件源码已挂载在 /mnt/attachments/web-src`。Fact 黑板仍由 Server/SQLite 维护，bind mount 只用于文件共享。
+
+## Remote Support
+
+`dispatch.yaml` 可配置极简远程协作资源：
+
+```yaml
+remote_support:
+  enabled: true
+  dnslog:
+    url: "example.dnslog.cn"
+  ssh:
+    host: "1.2.3.4"
+    port: 22
+    username: "root"
+    password: "{{REMOTE_SSH_PASSWORD}}"
+```
+
+启用后 Dispatcher 会把资源注入 worker 环境变量：
+
+```text
+CAIRN_DNSLOG_URL
+CAIRN_REMOTE_SSH_HOST
+CAIRN_REMOTE_SSH_PORT
+CAIRN_REMOTE_SSH_USERNAME
+CAIRN_REMOTE_SSH_PASSWORD
+```
+
+默认 prompt 只在 `bootstrap.md` / `explore.md` 提示这些变量可用；`reason` 和 conclude prompt 不注入，避免破坏黑板架构的事实判定边界。
 
 ## Heartbeat 如何保证任务存活
 
@@ -133,6 +162,7 @@ Server 会按 `/settings` 中的 `intent_timeout` 和 `reason_timeout` 清理过
 
 ```bash
 uv run --project cairn cairn serve
+uv run --project cairn cairn serve --observability-db-path ~/.local/share/cairn/cairn_observability.db
 uv run --project cairn cairn dispatch --config dispatch.yaml
 uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
 docker compose up --build
@@ -145,6 +175,7 @@ docker compose up --build
 | `cairn/src/cairn/cli.py` | CLI 入口 |
 | `cairn/src/cairn/server/app.py` | FastAPI app |
 | `cairn/src/cairn/server/db.py` | SQLite schema |
+| `cairn/src/cairn/server/observability/` | 独立 Execution Log DB、API、脱敏与查询 |
 | `cairn/src/cairn/server/routers/projects.py` | Project/status/reason/complete API |
 | `cairn/src/cairn/server/routers/intents.py` | Intent create/heartbeat/release/conclude API |
 | `cairn/src/cairn/server/routers/export.py` | YAML/timeline 导出 |
@@ -155,20 +186,26 @@ docker compose up --build
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Docker 容器管理 |
 | `cairn/src/cairn/dispatcher/runtime/heartbeat.py` | heartbeat lease |
 | `cairn/src/cairn/dispatcher/workers/adapters/` | Claude/Codex/Pi/Mock 适配器 |
-| `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt |
+| `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt；Remote Support 只注入 bootstrap/explore |
+| `cairn/src/cairn/dispatcher/observability/trace.py` | 解析 Codex/Claude 结构化执行轨迹 |
 | `dispatch.yaml` | 真实运行 Dispatcher 配置 |
 | `dispatch_mock.yaml` | mock 运行配置 |
 | `container/Dockerfile` | Kali Worker 容器镜像 |
 
 ## 敏感信息处理
 
-不要在文档、日志或示例里复制真实 API key。所有密钥应写成：
+不要在文档、日志或示例里复制真实 API key、SSH 密码或远程辅助服务器凭据。所有密钥应写成：
 
 ```text
 {{OPENAI_API_KEY}}
 {{ANTHROPIC_AUTH_TOKEN}}
 {{PI_API_KEY}}
+{{REMOTE_SSH_PASSWORD}}
 ```
+
+Execution Log 默认隐藏 `usage`，并会对 `CAIRN_REMOTE_SSH_PASSWORD` / 通用 `*PASSWORD` 做 redaction；但仍应避免主动把真实 secret 写入 prompt、fact 或文档。
+
+Dispatcher 的 `observability` 配置控制是否记录 prompt/stdout/stderr/raw worker stream 以及 Dispatcher 侧缓冲、脱敏和大小限制；Server 端 observability API 仍使用内置默认设置做二次脱敏与截断。
 
 ## 后续修改建议
 

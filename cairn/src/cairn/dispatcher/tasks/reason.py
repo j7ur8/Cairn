@@ -155,6 +155,7 @@ def run_reason_task(
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
+            trace_format=driver.trace_format(),
         )
         execute_ms = int((time.perf_counter() - execute_started) * 1000)
         total_ms = int((time.perf_counter() - task_started) * 1000)

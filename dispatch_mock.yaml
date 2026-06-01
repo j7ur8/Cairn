@@ -24,6 +24,7 @@ observability:
   record_prompts: true
   record_stdout: true
   record_stderr: true
+  record_raw_worker_stream: false
   max_event_bytes: 16384
   max_bytes_per_execution: 10485760
   flush_interval_ms: 250
@@ -31,9 +32,21 @@ observability:
   retention_days: 14
   redaction_patterns: []
 
+remote_support:
+  enabled: false
+  dnslog:
+    url: ""
+  ssh:
+    host: ""
+    port: 22
+    username: ""
+    password: ""
+
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
-  network_mode: "host"
+  # Mock project containers join the shared Cairn Docker network.
+  # Create it first when not using docker compose: docker network create cairn
+  network_mode: "cairn"
   completed_action: "stop"
   stopped_action: "remove"
   # Optional host folder sharing. Paths containing {project_id} are rendered per project.

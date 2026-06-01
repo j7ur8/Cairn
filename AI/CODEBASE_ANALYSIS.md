@@ -17,10 +17,19 @@ cairn = "cairn.cli:main"
 
 | 进程 | 命令 | 职责 |
 | --- | --- | --- |
-| Server | `cairn serve` | FastAPI 协议服务、SQLite 持久化、前端静态页面 |
+| Server | `cairn serve` | FastAPI 协议服务、主业务 SQLite、observability SQLite、前端静态页面 |
 | Dispatcher | `cairn dispatch --config dispatch.yaml` | 读取图状态、选择任务、管理容器、执行 Agent、写回图 |
 
 Docker Compose 启动这两个服务，Server 持久化 `./datas/cairn/`，Dispatcher 挂载 Docker socket 和 `dispatch.yaml`。
+
+Server 当前有两个 SQLite 数据库：
+
+| DB | 默认路径 | 内容 |
+| --- | --- | --- |
+| 主业务 DB | `~/.local/share/cairn/cairn.db` | `projects/facts/intents/intent_sources/hints/settings` |
+| Observability DB | `~/.local/share/cairn/cairn_observability.db` | `llm_executions/llm_execution_events` |
+
+`cairn serve` 可分别通过 `--db-path` 与 `--observability-db-path` 指定路径；compose 挂载同一个 `./datas/cairn/` 目录承载这两个文件。
 
 ## 2. 核心实体与关系
 
@@ -102,6 +111,38 @@ erDiagram
 重要细节：
 
 >>⚠️ 注意：`configure()` 一旦 `_db_path` 已设置就直接 return。测试或多实例场景中，如果同一 Python 进程想切换 DB path，需要额外处理。
+
+### `server/observability/*`
+
+职责：
+
+| 文件 | 作用 |
+| --- | --- |
+| `observability/db.py` | 初始化独立 LLM execution SQLite DB，默认 `cairn_observability.db` |
+| `observability/models.py` | 定义 execution/event、event kind、process state API 模型 |
+| `observability/repository.py` | 写入 execution/event、按 sequence 查询、finish、删除项目观察数据 |
+| `observability/routers.py` | 暴露 `/projects/{id}/llm-*` API |
+| `observability/redaction.py` | Server 侧内置脱敏与单事件截断 |
+| `observability/retention.py` | 按保留天数清理旧 execution/event |
+
+关键端点：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/projects/{project_id}/llm-executions` | 查询项目 execution 列表 |
+| GET | `/projects/{project_id}/llm-events` | 按 sequence 增量查询项目所有事件 |
+| GET | `/projects/{project_id}/llm-executions/{execution_id}/events` | 查询单个 execution 事件 |
+| POST | `/projects/{project_id}/llm-executions` | 创建 execution |
+| POST | `/projects/{project_id}/llm-executions/{execution_id}/events` | 写入 event |
+| POST | `/projects/{project_id}/llm-executions/{execution_id}/finish` | 标记 execution 完成 |
+
+重要边界：
+
+```text
+observability DB 不参与 facts/intents/hints/settings 的业务真相判定。
+Dispatcher 的 observability 配置控制是否发送、发送哪些事件，以及 Dispatcher 侧缓冲/脱敏/大小限制。
+Server 写入 API 当前使用 routers.py 内置的 ObservabilitySettings() 做二次 redaction/truncation，不从 dispatch.yaml 动态读取。
+```
 
 ### `server/models.py`
 
@@ -203,7 +244,8 @@ clear_project_reason()
 | --- | --- |
 | `RuntimeConfig` | `max_workers`、`max_running_projects`、`max_project_workers`、`interval`、`healthcheck_timeout`、`prompt_group` |
 | `TasksConfig` | `bootstrap`、`reason`、`explore` |
-| `ContainerConfig` | `image`、`network_mode`、`completed_action`、`stopped_action`、`cap_add` |
+| `ContainerConfig` | `image`、`network_mode`、`completed_action`、`stopped_action`、`cap_add`、`bind_mounts` |
+| `RemoteSupportConfig` | `enabled`、`dnslog.url`、`ssh.host/port/username/password` |
 | `WorkerConfig` | `name`、`type`、`task_types`、`max_running`、`priority`、`env` |
 
 Worker 类型：
@@ -215,7 +257,23 @@ Worker 类型：
 | `pi` | `PI_MODEL`、`PI_BASE_URL`、`PI_API_KEY`、`PI_PROVIDER_API` |
 | `mock` | 无必需环境变量 |
 
->>⚠️ 注意：`common_env` 会合并进每个 worker 的 `env`，worker 自己的 env 覆盖 common env。
+>>⚠️ 注意：`common_env` 会合并进每个 worker 的 `env`，worker 自己的 env 覆盖 common env。`remote_support` 也会被转换为 `CAIRN_*` 环境变量后合并进 worker env；它只影响 worker runtime，不写入黑板事实。
+
+`remote_support` 当前刻意保持极简：
+
+```yaml
+remote_support:
+  enabled: false
+  dnslog:
+    url: ""
+  ssh:
+    host: ""
+    port: 22
+    username: ""
+    password: ""
+```
+
+启用后可能注入：`CAIRN_REMOTE_SUPPORT_ENABLED`、`CAIRN_DNSLOG_URL`、`CAIRN_REMOTE_SSH_HOST`、`CAIRN_REMOTE_SSH_PORT`、`CAIRN_REMOTE_SSH_USERNAME`、`CAIRN_REMOTE_SSH_PASSWORD`。
 
 ### `dispatcher/protocol/client.py`
 
@@ -505,6 +563,7 @@ timeout -k 5s {timeout_seconds}s ...
 
 ```python
 build_healthcheck(worker) -> list[str]
+trace_format() -> str | None
 build_execute(worker, prompt, session) -> DriverResult
 build_conclude(worker, prompt, session) -> list[str]
 extract_session(session, stdout, stderr) -> str | None
@@ -516,11 +575,19 @@ extract_response_text(stdout, stderr) -> str
 执行命令：
 
 ```bash
-claude --session-id {uuid} --dangerously-skip-permissions -p -- "{prompt}"
-claude -r {session} --dangerously-skip-permissions -p -- "{conclude_prompt}"
+claude --session-id {uuid} --dangerously-skip-permissions \
+  --output-format stream-json \
+  --verbose \
+  -p -- "{prompt}"
+claude -r {session} --dangerously-skip-permissions \
+  --output-format stream-json \
+  --verbose \
+  -p -- "{conclude_prompt}"
 ```
 
 健康检查通过 Anthropic Messages API curl。
+
+`trace_format()` 返回 `claude_stream_json`。Dispatcher 会把 stdout 中的 Claude stream-json 解析成 `agent_message`、`thinking`、`tool_call`、`tool_result`、`command_start`、`command_end`、`usage`、`session_init`、`api_retry`、`system_event` 等 Execution Log 事件；真正进入业务 JSON 校验的是 driver 从最终 assistant/result 文本提取出的内容。
 
 ### Codex
 
@@ -528,8 +595,10 @@ claude -r {session} --dangerously-skip-permissions -p -- "{conclude_prompt}"
 
 ```bash
 codex exec --dangerously-bypass-approvals-and-sandbox \
+  --json \
   --model "$CODEX_MODEL" \
   -c 'model_provider="cairn"' \
+  -c 'model_providers.cairn.name="cairn"' \
   -c 'model_providers.cairn.wire_api="responses"' \
   -c 'model_reasoning_effort="high"' \
   -c "model_providers.cairn.base_url=\"$CODEX_BASE_URL\"" \
@@ -542,6 +611,10 @@ conclude 通过：
 ```bash
 codex exec resume {session} ...
 ```
+
+resume 命令同样携带 `--json`、模型 provider 配置和 `--dangerously-bypass-approvals-and-sandbox`。
+
+`trace_format()` 返回 `codex_jsonl`。Dispatcher 会解析 Codex JSONL 中的 `session_meta`、`response_item`、`event_msg`，用于提取 session id、最终 assistant message 和结构化 Execution Log 事件。
 
 ### Pi
 
@@ -578,12 +651,20 @@ cairn/src/cairn/dispatcher/prompts/mock/
 
 >>⚠️ 注意：conclude prompt 明确要求 Agent 停止探索，只总结已经确认的事实。这是超时后落地 partial Fact 的关键约束。
 
+Remote Support prompt 注入规则：
+
+- 只在 `default/bootstrap.md` 和 `default/explore.md` 中保留 `{remote_support_instructions}` 占位符。
+- `bootstrap_conclude.md`、`explore_conclude.md`、`reason.md` 不注入远程能力提示。
+- 注入内容只说明 `CAIRN_DNSLOG_URL` 与 `CAIRN_REMOTE_SSH_*` 环境变量可用，不包含 SSH 密码值。
+- 这不会改变 JSON 输出契约，也不会改变 facts/intents 写入规则。
+
 ## 8. 外部系统与集成
 
 | 系统 | 连接方式 | 配置 |
 | --- | --- | --- |
 | Docker Engine | Unix socket `/var/run/docker.sock` | docker-compose 挂载到 Dispatcher |
 | SQLite | 文件路径 | `~/.local/share/cairn/cairn.db` 或 compose volume |
+| Observability SQLite | 文件路径 | `~/.local/share/cairn/cairn_observability.db` 或 compose volume |
 | Claude/Anthropic compatible API | HTTP | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` |
 | OpenAI Responses compatible API | Codex CLI | `CODEX_BASE_URL`、`OPENAI_API_KEY` |
 | Pi provider API | Pi CLI | `PI_BASE_URL`、`PI_API_KEY`、`PI_PROVIDER_API` |
@@ -593,7 +674,9 @@ cairn/src/cairn/dispatcher/prompts/mock/
 ### Server
 
 ```bash
-cairn serve --host 127.0.0.1 --port 8000 --db-path ~/.local/share/cairn/cairn.db
+cairn serve --host 127.0.0.1 --port 8000 \
+  --db-path ~/.local/share/cairn/cairn.db \
+  --observability-db-path ~/.local/share/cairn/cairn_observability.db
 ```
 
 ### Dispatcher
@@ -616,8 +699,13 @@ cairn dispatch --config dispatch.yaml
 | `tasks.*.timeout` | 各任务主阶段超时 |
 | `tasks.*.conclude_timeout` | 收尾阶段超时 |
 | `container.image` | Worker 容器镜像 |
-| `container.network_mode` | 容器网络模式 |
+| `container.network_mode` | 容器网络模式，当前默认 `cairn` |
 | `container.bind_mounts` | 可选 host 文件夹映射列表，支持 `{project_id}` |
+| `remote_support.enabled` | 是否向 worker 注入 DNSLog/SSH 远程协作环境变量 |
+| `remote_support.dnslog.url` | 可选 DNSLog/OOB 域名 |
+| `remote_support.ssh.*` | 可选远程辅助服务器 SSH 连接信息 |
+| `observability.record_raw_worker_stream` | 结构化 trace 模式下是否额外记录原始 worker stdout |
+| `observability.redaction_patterns` | Dispatcher 侧额外脱敏正则；Server 侧还有内置二次脱敏 |
 | `workers[].priority` | 越小越优先 |
 
 ## 10. 运行与验证命令

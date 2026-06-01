@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from cairn.dispatcher.config import WorkerConfig
 from cairn.dispatcher.observability.reporter import DisabledExecutionReporter, ExecutionReporter
+from cairn.dispatcher.observability.trace import make_trace_parser
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -116,6 +117,7 @@ def run_worker_process(
     lease: HeartbeatLease | None = None,
     cancellation: TaskCancellation | None = None,
     reporter: ExecutionReporter | DisabledExecutionReporter | None = None,
+    trace_format: str | None = None,
 ) -> ProcessResult:
     LOG.info(
         "starting container exec container=%s worker=%s phase=%s timeout=%ss",
@@ -124,12 +126,32 @@ def run_worker_process(
         phase,
         timeout_seconds,
     )
+    trace_parser = make_trace_parser(trace_format, phase)
+
+    def on_output(stream: str, chunk: str) -> None:
+        if reporter is None:
+            return
+        if stream == "stdout" and trace_parser is not None:
+            try:
+                events = trace_parser.feed(chunk)
+            except Exception as exc:
+                LOG.debug("worker trace parse failed phase=%s format=%s error=%s", phase, trace_format, exc)
+                events = []
+                reporter.emit_error(phase, "trace_parse_error", str(exc))
+            for event in events:
+                reporter.emit_trace_event(event)
+            settings = getattr(reporter, "settings", None)
+            if settings is not None and settings.record_raw_worker_stream:
+                reporter.emit_output(phase, stream, chunk)
+            return
+        reporter.emit_output(phase, stream, chunk)
+
     process = container_manager.build_exec_process(
         container_name,
         dict(worker.env),
         argv,
         timeout_seconds=timeout_seconds,
-        on_output=(lambda stream, chunk: reporter.emit_output(phase, stream, chunk)) if reporter is not None else None,
+        on_output=on_output if reporter is not None else None,
     )
     process.start()
     if lease is not None:
@@ -139,6 +161,15 @@ def run_worker_process(
     try:
         result = process.communicate(timeout=communicate_timeout(timeout_seconds))
         if reporter is not None:
+            if trace_parser is not None:
+                try:
+                    events = trace_parser.finish()
+                except Exception as exc:
+                    LOG.debug("worker trace parser finish failed phase=%s format=%s error=%s", phase, trace_format, exc)
+                    events = []
+                    reporter.emit_error(phase, "trace_parse_error", str(exc))
+                for event in events:
+                    reporter.emit_trace_event(event)
             reporter.flush()
         return result
     finally:

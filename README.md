@@ -161,9 +161,13 @@ This starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server
 Edit `dispatch.yaml` and fill in your LLM endpoints and API keys, then:
  
 ```bash
+# Create the shared Docker network used by Cairn service containers and
+# dispatcher-managed project containers (skip if it already exists)
+docker network create cairn
+
 # Start the server
 uv run --project cairn cairn serve
- 
+
 # Run the dispatcher
 uv run --project cairn cairn dispatch --config dispatch.yaml
  
