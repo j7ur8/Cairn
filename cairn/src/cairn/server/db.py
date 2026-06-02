@@ -78,6 +78,47 @@ CREATE TABLE IF NOT EXISTS scoped_counters (
     value INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (project_id, kind)
 );
+
+CREATE TABLE IF NOT EXISTS capability_catalog (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    task_types TEXT NOT NULL,
+    available INTEGER NOT NULL DEFAULT 1,
+    detail TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+
+CREATE TABLE IF NOT EXISTS project_capabilities (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    capability_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, kind, capability_id)
+);
+
+CREATE TABLE IF NOT EXISTS role_catalog (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL,
+    prompt_sha256 TEXT NOT NULL,
+    task_types TEXT NOT NULL,
+    available INTEGER NOT NULL DEFAULT 1,
+    detail TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_roles (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    role_id TEXT NOT NULL,
+    role_name TEXT NOT NULL,
+    role_prompt TEXT NOT NULL,
+    role_prompt_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 

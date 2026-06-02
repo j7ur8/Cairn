@@ -23,6 +23,10 @@ Normal return example:
 
 {remote_support_instructions}
 
+{capability_instructions}
+
+{role_instructions}
+
 # Context
 ## Graph
 ```

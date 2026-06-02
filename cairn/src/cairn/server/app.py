@@ -9,7 +9,7 @@ from cairn import __version__
 from cairn.server import db
 from cairn.server.observability import db as observability_db
 from cairn.server.observability import routers as observability_routers
-from cairn.server.routers import export, hints, intents, projects, settings
+from cairn.server.routers import capabilities, export, hints, intents, projects, settings
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -33,6 +33,7 @@ app.include_router(projects.router)
 app.include_router(hints.router)
 app.include_router(intents.router)
 app.include_router(export.router)
+app.include_router(capabilities.router)
 app.include_router(observability_routers.router)
 
 

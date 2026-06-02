@@ -9,6 +9,8 @@ from pathlib import Path
 import requests
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.dispatcher.capabilities import catalog_payload as capability_catalog_payload
+from cairn.dispatcher.roles import catalog_payload as role_catalog_payload
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -55,6 +57,8 @@ class DispatcherLoop:
         self._inactive_cleanup_done: dict[str, str] = {}
         self.project_cursor = 0
         self._settings_checked = False
+        self._capability_catalog_registered = False
+        self._role_catalog_registered = False
         self._startup_healthchecks_checked = False
 
     def close(self) -> None:
@@ -77,6 +81,12 @@ class DispatcherLoop:
                     if not self._settings_checked:
                         self._validate_server_settings()
                         self._settings_checked = True
+                    if not self._capability_catalog_registered:
+                        self._register_capability_catalog()
+                        self._capability_catalog_registered = True
+                    if not self._role_catalog_registered:
+                        self._register_role_catalog()
+                        self._role_catalog_registered = True
                     self._reap_futures()
                     self._reap_cleanup_futures()
                     summaries = self.client.list_projects()
@@ -112,6 +122,22 @@ class DispatcherLoop:
             return
         self._run_startup_healthchecks(show_commands=show_commands)
         self._startup_healthchecks_checked = True
+
+    def _register_capability_catalog(self) -> None:
+        response = self.client.register_capability_catalog(capability_catalog_payload(self.config))
+        if not response.ok:
+            raise RuntimeError(f"failed to register capability catalog status={response.status_code}: {response.text}")
+        LOG.info(
+            "registered capability catalog mcp_servers=%s skills=%s",
+            len(self.config.capabilities.mcp_servers),
+            len(self.config.capabilities.skills),
+        )
+
+    def _register_role_catalog(self) -> None:
+        response = self.client.register_role_catalog(role_catalog_payload(self.config))
+        if not response.ok:
+            raise RuntimeError(f"failed to register role catalog status={response.status_code}: {response.text}")
+        LOG.info("registered role catalog roles=%s", len(self.config.roles))
 
     def _dispatch_available(self, summaries: list[ProjectSummary]) -> None:
         if len(self.futures) >= self.config.runtime.max_workers:

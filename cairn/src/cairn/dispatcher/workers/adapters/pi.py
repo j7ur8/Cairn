@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from cairn.dispatcher.config import WorkerConfig
-from cairn.dispatcher.workers.base import DriverResult, WorkerDriver
+from cairn.dispatcher.workers.base import DriverResult, WorkerDriver, WorkerExecutionContext
 
 
 class PiDriver(WorkerDriver):
@@ -32,7 +32,13 @@ class PiDriver(WorkerDriver):
             enable_tools=False,
         )
 
-    def build_execute(self, worker: WorkerConfig, prompt: str, session: str | None) -> DriverResult:
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
         env = worker.env
         argv = [
             "--provider",
@@ -49,7 +55,13 @@ class PiDriver(WorkerDriver):
         argv.extend(["-p", prompt])
         return DriverResult(argv=self._wrap_with_models(worker, argv), session=session)
 
-    def build_conclude(self, worker: WorkerConfig, prompt: str, session: str) -> list[str]:
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
         env = worker.env
         argv = [
             "--provider",

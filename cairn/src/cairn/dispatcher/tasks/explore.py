@@ -4,6 +4,8 @@ import logging
 import time
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.dispatcher.capabilities import inject_project_capabilities
+from cairn.dispatcher.roles import inject_project_role
 from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
 from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.prompting import format_remote_support_instructions, load_prompt, render_prompt
@@ -112,6 +114,30 @@ def run_explore_task(
             reporter.emit_error("explore_healthcheck", "error", healthcheck.result.stderr)
             return outcome
 
+        capabilities = inject_project_capabilities(
+            config,
+            container_manager,
+            container_name,
+            project.project.id,
+            "explore",
+            f"explore-{intent.id}",
+            _project_capability_data(client, project.project.id, reporter, "explore_execute"),
+        )
+        if capabilities.summary:
+            reporter.emit_result("capabilities", capabilities.summary)
+        for error in capabilities.errors:
+            reporter.emit_error("capabilities", "error", error)
+
+        role = inject_project_role(
+            project.project.id,
+            "explore",
+            _project_role_data(client, project.project.id, reporter, "explore_execute"),
+        )
+        if role.summary:
+            reporter.emit_result("role", role.summary)
+        for error in role.errors or []:
+            reporter.emit_error("role", "error", error)
+
         prompt = render_prompt(
             load_prompt(config.runtime.prompt_group, "explore.md"),
             {
@@ -124,12 +150,14 @@ def run_explore_task(
                 "intent_id": intent.id,
                 "intent_description": intent.description,
                 "remote_support_instructions": format_remote_support_instructions(config.remote_support),
+                "capability_instructions": capabilities.instructions,
+                "role_instructions": role.instructions,
             },
         )
         reporter.emit_prompt("explore_execute", prompt)
 
         session = driver.prepare_session()
-        execute = driver.build_execute(worker, prompt, session)
+        execute = driver.build_execute(worker, prompt, session, capabilities.context)
         session = execute.session
         execute_started = time.perf_counter()
         first = _run_process(
@@ -205,6 +233,7 @@ def run_explore_task(
                     lease,
                     cancellation,
                     reporter,
+                    capabilities.context,
                 )
                 return outcome
             if kind == "rejected":
@@ -260,6 +289,7 @@ def run_explore_task(
                 lease,
                 cancellation,
                 reporter,
+                capabilities.context,
             )
             return outcome
         LOG.warning(
@@ -302,6 +332,7 @@ def _try_conclude_fallback(
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
     reporter: ExecutionReporter,
+    capability_context=None,
 ) -> str:
     if not driver.supports_conclude() or not session:
         LOG.info(
@@ -354,7 +385,7 @@ def _try_conclude_fallback(
         },
     )
     reporter.emit_prompt("explore_conclude", prompt)
-    conclude_argv = driver.build_conclude(worker, prompt, session)
+    conclude_argv = driver.build_conclude(worker, prompt, session, capability_context)
     LOG.info("starting conclude fallback project=%s intent=%s worker=%s", project_id, intent.id, worker.name)
     conclude_started = time.perf_counter()
     result = _run_process(
@@ -472,3 +503,29 @@ def _run_process(
         reporter=reporter,
         trace_format=trace_format,
     )
+
+
+def _project_capability_data(
+    client: CairnClient,
+    project_id: str,
+    reporter: ExecutionReporter,
+    phase: str,
+) -> dict | None:
+    response = client.get_project_capabilities(project_id)
+    if response.ok and isinstance(response.data, dict):
+        return response.data
+    reporter.emit_error(phase, "error", f"capability selection fetch failed status={response.status_code}")
+    return None
+
+
+def _project_role_data(
+    client: CairnClient,
+    project_id: str,
+    reporter: ExecutionReporter,
+    phase: str,
+) -> dict | None:
+    response = client.get_project_role(project_id)
+    if response.ok and isinstance(response.data, dict):
+        return response.data
+    reporter.emit_error(phase, "error", f"project role fetch failed status={response.status_code}")
+    return None

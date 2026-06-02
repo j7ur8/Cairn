@@ -79,15 +79,52 @@ class CreateHintInline(BaseModel):
         return text
 
 
+class CapabilitySelection(BaseModel):
+    mcp_server_ids: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("mcp_server_ids", "skill_ids")
+    @classmethod
+    def validate_ids(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = item.strip()
+            if not text:
+                raise ValueError("capability ids must not be empty")
+            if text in seen:
+                continue
+            seen.add(text)
+            cleaned.append(text)
+        return cleaned
+
+
+class ProjectRoleSelection(BaseModel):
+    role_id: str
+
+    @field_validator("role_id")
+    @classmethod
+    def validate_role_id(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("role_id must not be empty")
+        return text
+
+
 class CreateProjectRequest(BaseModel):
     title: str
     origin: str
     goal: str
     hints: list[CreateHintInline] | None = None
+    capabilities: CapabilitySelection | None = None
+    role: ProjectRoleSelection | None = None
+    role_id: str | None = None
 
-    @field_validator("title", "origin", "goal")
+    @field_validator("title", "origin", "goal", "role_id")
     @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
+    def validate_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         text = value.strip()
         if not text:
             raise ValueError("must not be empty")
@@ -240,3 +277,69 @@ class ReopenResponse(BaseModel):
     project: ProjectMeta
     fact: Fact
     intent: Intent
+
+
+class CapabilityCatalogItem(BaseModel):
+    id: str
+    name: str
+    kind: Literal["mcp_server", "skill"]
+    description: str = ""
+    task_types: list[Literal["bootstrap", "explore", "reason"]]
+    available: bool = True
+    detail: str = ""
+
+
+class ProjectCapabilitiesResponse(BaseModel):
+    catalog: list[CapabilityCatalogItem]
+    selection: CapabilitySelection
+    unavailable_mcp_server_ids: list[str] = Field(default_factory=list)
+    unavailable_skill_ids: list[str] = Field(default_factory=list)
+
+
+class RegisterCapabilityCatalogRequest(BaseModel):
+    catalog: list[CapabilityCatalogItem]
+
+
+class RoleCatalogItem(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    task_types: list[Literal["bootstrap", "explore", "reason"]]
+    available: bool = True
+    prompt_sha256: str = ""
+    detail: str = ""
+
+
+class RegisterRoleCatalogItem(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    task_types: list[Literal["bootstrap", "explore", "reason"]]
+    available: bool = True
+    prompt: str
+    detail: str = ""
+
+    @field_validator("id", "name", "prompt")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class RegisterRoleCatalogRequest(BaseModel):
+    roles: list[RegisterRoleCatalogItem]
+
+
+class ProjectRole(BaseModel):
+    project_id: str
+    role_id: str
+    role_name: str
+    role_prompt: str
+    role_prompt_sha256: str
+    created_at: str
+
+
+class ProjectRoleResponse(BaseModel):
+    role: ProjectRole | None = None

@@ -5,7 +5,7 @@ from typing import Any
 
 from cairn.dispatcher.config import WorkerConfig
 from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
-from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver
+from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
 
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -78,8 +78,15 @@ class ClaudeCodeDriver(SeedSessionDriver):
             ),
         )
 
-    def build_execute(self, worker: WorkerConfig, prompt: str, session: str | None) -> DriverResult:
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
         assert session is not None
+        capability_args = self._capability_args(context)
         return DriverResult(
             argv=[
                 "claude",
@@ -89,6 +96,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
                 "--output-format",
                 "stream-json",
                 "--verbose",
+                *capability_args,
                 "-p",
                 "--",
                 prompt,
@@ -96,7 +104,14 @@ class ClaudeCodeDriver(SeedSessionDriver):
             session=session,
         )
 
-    def build_conclude(self, worker: WorkerConfig, prompt: str, session: str) -> list[str]:
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
+        capability_args = self._capability_args(context)
         return [
             "claude",
             "-r",
@@ -105,10 +120,22 @@ class ClaudeCodeDriver(SeedSessionDriver):
             "--output-format",
             "stream-json",
             "--verbose",
+            *capability_args,
             "-p",
             "--",
             prompt,
         ]
+
+    @staticmethod
+    def _capability_args(context: WorkerExecutionContext | None) -> list[str]:
+        if context is None:
+            return []
+        args: list[str] = []
+        if context.mcp_config_path:
+            args.extend(["--mcp-config", context.mcp_config_path])
+        if context.skill_root:
+            args.extend(["--add-dir", context.skill_root])
+        return args
 
     def extract_response_text(self, stdout: str, stderr: str) -> str:
         messages: list[str] = []

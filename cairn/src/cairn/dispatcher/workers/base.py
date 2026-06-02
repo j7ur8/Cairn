@@ -5,6 +5,7 @@ import re
 import shlex
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from cairn.dispatcher.config import WorkerConfig
 
@@ -13,6 +14,15 @@ from cairn.dispatcher.config import WorkerConfig
 class DriverResult:
     argv: list[str]
     session: str | None = None
+
+
+@dataclass(slots=True)
+class WorkerExecutionContext:
+    capability_root: str = ""
+    mcp_config_path: str = ""
+    skill_root: str = ""
+    mcp_servers: list[dict[str, Any]] | None = None
+    skills: list[str] | None = None
 
 
 class WorkerDriver(abc.ABC):
@@ -38,11 +48,23 @@ class WorkerDriver(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def build_execute(self, worker: WorkerConfig, prompt: str, session: str | None) -> DriverResult:
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def build_conclude(self, worker: WorkerConfig, prompt: str, session: str) -> list[str]:
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
         raise NotImplementedError
 
     def extract_session(self, session: str | None, stdout: str, stderr: str) -> str | None:

@@ -107,6 +107,45 @@ def create_project(body: CreateProjectRequest):
                 )
                 hints.append(Hint(id=hid, content=h.content, creator=h.creator, created_at=now))
 
+        if body.capabilities is not None:
+            for capability_id in body.capabilities.mcp_server_ids:
+                conn.execute(
+                    """
+                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
+                    VALUES (?, 'mcp_server', ?, ?)
+                    """,
+                    (pid, capability_id, now),
+                )
+            for capability_id in body.capabilities.skill_ids:
+                conn.execute(
+                    """
+                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
+                    VALUES (?, 'skill', ?, ?)
+                    """,
+                    (pid, capability_id, now),
+                )
+
+        role_id = body.role.role_id if body.role is not None else body.role_id
+        if role_id:
+            role = conn.execute(
+                """
+                SELECT id, name, prompt, prompt_sha256
+                FROM role_catalog
+                WHERE id = ? AND available = 1
+                """,
+                (role_id,),
+            ).fetchone()
+            if role is None:
+                raise HTTPException(404, f"Role {role_id} not found or unavailable")
+            conn.execute(
+                """
+                INSERT INTO project_roles (
+                    project_id, role_id, role_name, role_prompt, role_prompt_sha256, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (pid, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
+            )
+
         return ProjectDetail(
             project=ProjectMeta(id=pid, title=body.title, status="active", created_at=now, reason=None),
             facts=[

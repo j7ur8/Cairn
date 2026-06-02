@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from cairn.dispatcher.config import WorkerConfig
-from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver
+from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
 
 
 class CodexDriver(RegexSessionDriver):
@@ -22,10 +22,22 @@ class CodexDriver(RegexSessionDriver):
     def describe_startup_healthcheck(self, worker: WorkerConfig) -> str:
         return "codex exec healthcheck via official client"
 
-    def build_execute(self, worker: WorkerConfig, prompt: str, session: str | None) -> DriverResult:
-        return DriverResult(argv=self._build_exec(worker, prompt))
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
+        return DriverResult(argv=self._build_exec(worker, prompt, context))
 
-    def build_conclude(self, worker: WorkerConfig, prompt: str, session: str) -> list[str]:
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
         env = worker.env
         return [
             "codex",
@@ -48,12 +60,13 @@ class CodexDriver(RegexSessionDriver):
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
             'model_providers.cairn.env_key="OPENAI_API_KEY"',
+            *self._capability_args(context),
             "--",
             prompt,
         ]
 
     @staticmethod
-    def _build_exec(worker: WorkerConfig, prompt: str) -> list[str]:
+    def _build_exec(worker: WorkerConfig, prompt: str, context: WorkerExecutionContext | None = None) -> list[str]:
         env = worker.env
         return [
             "codex",
@@ -74,9 +87,36 @@ class CodexDriver(RegexSessionDriver):
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
             'model_providers.cairn.env_key="OPENAI_API_KEY"',
+            *CodexDriver._capability_args(context),
             "--",
             prompt,
         ]
+
+    @staticmethod
+    def _capability_args(context: WorkerExecutionContext | None) -> list[str]:
+        if context is None:
+            return []
+        args: list[str] = []
+        if context.skill_root:
+            args.extend(["--add-dir", context.skill_root])
+        for server in context.mcp_servers or []:
+            server_id = server.get("id")
+            command = server.get("command")
+            if not isinstance(server_id, str) or not server_id:
+                continue
+            if not isinstance(command, str) or not command:
+                continue
+            prefix = f"mcp_servers.{server_id}"
+            args.extend(["-c", f"{prefix}.command={json.dumps(command)}"])
+            server_args = server.get("args")
+            if isinstance(server_args, list):
+                args.extend(["-c", f"{prefix}.args={json.dumps([str(item) for item in server_args])}"])
+            env = server.get("env")
+            if isinstance(env, dict):
+                for key, value in env.items():
+                    if isinstance(key, str) and key:
+                        args.extend(["-c", f"{prefix}.env.{key}={json.dumps(str(value))}"])
+        return args
 
     def extract_session(self, session: str | None, stdout: str, stderr: str) -> str | None:
         if session:

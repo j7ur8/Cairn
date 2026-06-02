@@ -1,10 +1,10 @@
 <!--
-@ai: 本文件描述 Cairn 项目的核心架构、运行链路和关键设计决策。后续任何 Codex 会话在回答与本项目相关的问题前，应优先阅读本文件，再结合 CODEBASE_ANALYSIS.md 和 AI/docs/project-overview.md。
+@ai: 本文件描述 Cairn 项目的核心架构、运行链路和关键设计决策。后续任何 Codex 会话在回答与本项目相关的问题前，应优先阅读本文件，再结合 CODEBASE_ANALYSIS.md 和 AI/PROJECT_OVERVIEW.md。
 
 推荐使用方式：
 - “请参考 AI/ARCHITECTURE.md 完成以下任务...”
 - “请基于 AI/CODEBASE_ANALYSIS.md 定位代码修改点...”
-- “请基于 AI/docs/project-overview.md 快速说明项目运行方式...”
+- “请基于 AI/PROJECT_OVERVIEW.md 快速说明项目运行方式...”
 -->
 
 # Cairn 架构与设计
@@ -15,7 +15,7 @@
 
 Cairn 是一个基于事实图的多 Agent 协作探索与调度系统。
 
-它将渗透测试、CTF、漏洞研究、复杂推理等目标导向任务建模为从 `origin` 到 `goal` 的状态空间搜索。系统不预设固定 Agent 角色，而是维护一张共享黑板式图谱：`Fact` 表示已确认事实，`Intent` 表示待探索方向，`Hint` 表示人类或外部策略输入。Dispatcher 根据当前图状态动态调度 Agent Worker，在隔离的项目容器内执行任务，并将结构化结果写回事实图。
+它将渗透测试、CTF、漏洞研究、复杂推理等目标导向任务建模为从 `origin` 到 `goal` 的状态空间搜索。系统核心黑板不预设固定 Agent 角色，而是维护一张共享图谱：`Fact` 表示已确认事实，`Intent` 表示待探索方向，`Hint` 表示人类或外部策略输入。项目可以额外选择 primary role 与 MCP/skill capabilities，这些属于控制面上下文，不改变黑板语义。Dispatcher 根据当前图状态动态调度 Agent Worker，在隔离的项目容器内执行任务，并将结构化结果写回事实图。
 
 ### 技术栈
 
@@ -68,7 +68,8 @@ Cairn/
 │       │   │   ├── intents.py
 │       │   │   ├── hints.py
 │       │   │   ├── settings.py
-│       │   │   └── export.py
+│       │   │   ├── export.py
+│       │   │   └── capabilities.py
 │       │   └── static/
 │       │       ├── index.html
 │       │       └── vendor/
@@ -77,6 +78,8 @@ Cairn/
 │           ├── contracts.py
 │           ├── output_parser.py
 │           ├── prompting.py
+│           ├── capabilities.py
+│           ├── roles.py
 │           ├── protocol/client.py
 │           ├── scheduler/
 │           │   ├── loop.py
@@ -107,11 +110,18 @@ Cairn/
 │           │       └── mock.py
 │           └── prompts/
 │               ├── default/
+│               ├── cypher/
 │               └── mock/
+├── capabilities/
+│   ├── README.md
+│   ├── mcp/
+│   ├── skills/
+│   └── roles/
 └── AI/
     ├── ARCHITECTURE.md
     ├── CODEBASE_ANALYSIS.md
-    └── docs/project-overview.md
+    ├── PROJECT_OVERVIEW.md
+    └── UPDATE.md
 ```
 
 ## 2. 架构设计
@@ -164,12 +174,15 @@ flowchart TB
 | `server.routers.projects` | Project API | Project/Facts/Status | 项目创建、状态、reason lease、complete/reopen | db、services |
 | `server.routers.intents` | Intent API | Intent/Fact | intent 创建、claim、heartbeat、release、conclude | db、services |
 | `server.routers.export` | Project id | YAML/timeline 文本 | Prompt 图快照导出 | PyYAML |
-| `dispatcher.config` | `dispatch.yaml` | DispatchConfig | 配置解析、Worker env 校验、prompt 校验 | Pydantic、PyYAML |
+| `server.routers.capabilities` | Catalog / Project capability / Role API | 能力选择、role catalog、role snapshot | MCP/skill/role 控制面 API | db、models |
+| `dispatcher.config` | `dispatch.yaml` | DispatchConfig | 配置解析、Worker env、capability/role 路径、prompt placeholder 校验 | Pydantic、PyYAML |
 | `dispatcher.scheduler.loop` | Server 状态 | Worker task futures | 核心调度循环、并发控制、容器清理 | CairnClient、ContainerManager |
 | `dispatcher.tasks.bootstrap` | origin/goal/hints | Fact + optional complete | 初始直接求解任务 | WorkerDriver、HeartbeatLease |
 | `dispatcher.tasks.reason` | graph snapshot | complete 或 intents | 图级推理与新方向生成 | WorkerDriver、contracts |
 | `dispatcher.tasks.explore` | graph + intent | Fact | 执行某个已认领探索方向 | WorkerDriver、contracts |
-| `dispatcher.runtime.containers` | project id、command | Docker container exec | 项目容器生命周期与文件写入 | docker-py |
+| `dispatcher.capabilities` | DispatchConfig + project selection | WorkerExecutionContext | MCP/skill catalog 与容器注入 | ContainerManager |
+| `dispatcher.roles` | DispatchConfig + project role snapshot | role instructions | Role catalog 与 role prompt 注入 | RoleConfig |
+| `dispatcher.runtime.containers` | project id、command | Docker container exec | 项目容器生命周期与文件/目录写入 | docker-py |
 | `dispatcher.runtime.process` | Docker exec | stdout/stderr/returncode | 容器内进程控制、kill、输出收集 | Docker API |
 | `dispatcher.runtime.heartbeat` | heartbeat callback | lease 状态 | 周期保活与失效杀进程 | CairnClient |
 | `dispatcher.workers.adapters` | prompt/env | Agent CLI argv | 不同 Worker 后端命令适配 | Claude/Codex/Pi/Mock CLI |
@@ -198,11 +211,13 @@ sequenceDiagram
     participant Server
     participant DB
 
-    User->>Server: POST /projects {title, origin, goal, hints}
+    User->>Server: POST /projects {title, origin, goal, hints, capabilities?, role?}
     Server->>DB: INSERT projects(status=active)
     Server->>DB: INSERT facts(origin)
     Server->>DB: INSERT facts(goal)
     Server->>DB: INSERT hints(optional)
+    Server->>DB: INSERT project_capabilities(optional IDs)
+    Server->>DB: SELECT role_catalog and INSERT project_roles(optional prompt snapshot)
     Server-->>User: ProjectDetail
 ```
 
@@ -344,7 +359,53 @@ container:
 
 `host_path` 支持相对路径和 `{project_id}` 模板；相对路径基于 `dispatch.yaml` 所在目录解析。Dispatcher 会自动创建 host 目录，并在 startup healthcheck 中验证挂载。Agent 不会自动知道附件语义，推荐在项目 `origin` 或 `Hint` 中明确说明，例如：“附件源码已挂载在 `/mnt/attachments/web-src`，请优先审计该目录。”
 
-## 5. Heartbeat 与任务存活
+## 5. MCP / Skill / Role 控制面
+
+### 设计边界
+
+Capability 与 Role 是控制面配置，不是黑板数据：
+
+| 类型 | 存储 | 运行时用途 | 是否写入 Fact/Intent/Hint |
+| --- | --- | --- | --- |
+| MCP / Skill catalog | Dispatcher `dispatch.yaml`，启动时注册到 Server | UI 创建/编辑项目时可选 | 否 |
+| Project capability selection | Server `project_capabilities` 保存 ID | 任务启动前复制到 worker 容器 | 否 |
+| Role catalog | Dispatcher `roles[]`，启动时注册到 Server | UI 创建项目时可选 primary role | 否 |
+| Project role snapshot | Server `project_roles` 保存 prompt 快照和 sha256 | 注入 `bootstrap` / `explore` / `reason` prompt | 否 |
+
+黑板语义保持不变：`Fact` 只代表已确认客观发现，`Intent` 只代表待探索方向，`Hint` 只代表人工/外部策略输入。
+
+### 注入路径
+
+任务启动前 Dispatcher 调用 `inject_project_capabilities()`，按项目和任务实例隔离复制资源：
+
+```text
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/
+├── mcp.json
+├── mcp/<mcp_id>/
+└── skills/<skill_id>/
+```
+
+- `bootstrap` task instance: `bootstrap-{intent_id}`
+- `explore` task instance: `explore-{intent_id}`
+- `reason` task instance: `reason-{worker_name}-{random}`
+
+MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使用 `--mcp-config` / `--add-dir`；Codex adapter 使用 `--add-dir` 与 `-c mcp_servers.<id>.*=...`。
+
+### Cypher Agent
+
+`dispatch.yaml` 当前可使用 `runtime.prompt_group: "cypher"` 启用 Cypher Agent prompt group，面向自动化 CTF、授权渗透测试和漏洞研究。预置资源：
+
+| 目录 | 内容 |
+| --- | --- |
+| `capabilities/skills/cypher-ctf` | CTF workflow |
+| `capabilities/skills/cypher-pentest` | 授权渗透测试 workflow |
+| `capabilities/skills/cypher-vuln-research` | 漏洞研究 / PoC / root cause workflow |
+| `capabilities/skills/cypher-flag-oob` | flag 提交、OOB、tmux listener 约定 |
+| `capabilities/roles/cypher-ctf-operator/ROLE.md` | CTF primary role |
+| `capabilities/roles/cypher-pentest-operator/ROLE.md` | Pentest primary role |
+| `capabilities/roles/cypher-vuln-researcher/ROLE.md` | Vulnerability research primary role |
+
+## 6. Heartbeat 与任务存活
 
 ### Lease 类型
 
@@ -393,7 +454,7 @@ Server 在读取项目、列项目、claim/release 等路径中调用超时清�
 
 >>⚠️ 注意：heartbeat 保证的是 claim/lease 存活，不是强行让项目一直 active。项目被用户置为 `stopped` 或 `completed` 后，heartbeat 会失败，Dispatcher 会取消本地任务。
 
-## 6. 防止 Infinite Loop 的机制
+## 7. 防止 Infinite Loop 的机制
 
 系统通过多层机制降低无限循环风险：
 
@@ -423,7 +484,7 @@ checkpoint 不存在
 
 >>⚠️ 注意：系统防的是调度层和进程层死循环，不完全防语义层“不断生成低质量新 intent”。如果 Agent 每次 reason 都提出新方向，系统会继续探索，直到项目 completed、stopped、任务失败、超时或人工干预。
 
-## 7. API 总览
+## 8. API 总览
 
 ### Settings
 
@@ -437,7 +498,7 @@ checkpoint 不存在
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/projects` | 获取项目摘要列表 |
-| POST | `/projects` | 创建项目，写入 origin/goal |
+| POST | `/projects` | 创建项目，写入 origin/goal/hints，可保存 capability selection 与 role prompt 快照 |
 | GET | `/projects/{project_id}` | 获取完整项目图 |
 | DELETE | `/projects/{project_id}` | 删除项目 |
 | PUT | `/projects/{project_id}/title` | 更新标题 |
@@ -470,6 +531,18 @@ checkpoint 不存在
 | GET | `/projects/{project_id}/export?format=yaml` | 导出 YAML 图快照 |
 | GET | `/projects/{project_id}/export?format=timeline` | 导出时间线 |
 
+### Capabilities 与 Roles
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/capabilities/catalog` | 查询 MCP/skill catalog |
+| POST | `/capabilities/catalog` | Dispatcher 注册 MCP/skill catalog |
+| GET | `/projects/{project_id}/capabilities` | 查询项目启用能力 |
+| PUT | `/projects/{project_id}/capabilities` | 更新项目启用能力 |
+| GET | `/roles/catalog` | 查询可选 primary roles |
+| POST | `/roles/catalog` | Dispatcher 注册 role catalog |
+| GET | `/projects/{project_id}/role` | 查询项目 role prompt 快照 |
+
 ### Execution Log
 
 | 方法 | 路径 | 用途 |
@@ -481,7 +554,7 @@ checkpoint 不存在
 | POST | `/projects/{project_id}/llm-executions/{execution_id}/events` | 写入 execution event |
 | POST | `/projects/{project_id}/llm-executions/{execution_id}/finish` | 标记 execution 结束 |
 
-## 8. 配置与运行
+## 9. 配置与运行
 
 ### `dispatch.yaml` 关键配置
 
@@ -494,7 +567,7 @@ runtime:
   max_running_projects: 3
   max_project_workers: 4
   healthcheck_timeout: 20
-  prompt_group: "default"
+  prompt_group: "cypher"
 
 tasks:
   bootstrap:
@@ -523,6 +596,27 @@ remote_support:
     port: 22
     username: ""
     password: ""
+
+capabilities:
+  mcp_servers:
+    - id: "example-mcp"
+      name: "Example MCP"
+      command: "python3"
+      args: ["{capability_root}/mcp/example-mcp/server.py", "--stdio"]
+      env: {}
+      source_path: "./capabilities/mcp/example-mcp"
+      task_types: ["bootstrap", "explore", "reason"]
+  skills:
+    - id: "cypher-ctf"
+      name: "Cypher CTF"
+      source_path: "./capabilities/skills/cypher-ctf"
+      task_types: ["bootstrap", "explore", "reason"]
+
+roles:
+  - id: "cypher-ctf-operator"
+    name: "Cypher CTF Operator"
+    source_path: "./capabilities/roles/cypher-ctf-operator/ROLE.md"
+    task_types: ["bootstrap", "explore", "reason"]
 
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
@@ -564,6 +658,7 @@ workers:
 - `remote_support` 只提供 DNSLog 与远程 SSH 两类资源，并合并进 worker env；它不改变 `container.network_mode`，默认仍是 `cairn`。
 - Remote Support 只注入 `bootstrap.md` 与 `explore.md`，不注入 conclude/reason，避免破坏“执行、总结、推理”边界。
 - prompt 中只出现环境变量名，不渲染 SSH 密码明文；redaction 规则覆盖 `CAIRN_REMOTE_SSH_PASSWORD` 与通用 `*PASSWORD`。
+- Capability / Role 注入同样只影响 worker runtime 与 prompt 控制面，不改变 `facts/intents/hints` 的真相来源。
 
 ### 启动命令
 
@@ -582,11 +677,12 @@ uv run --project cairn cairn dispatch --config dispatch.yaml
 uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
 ```
 
-## 9. 已知风险与架构债务
+## 10. 已知风险与架构债务
 
 | 风险 | 说明 |
 | --- | --- |
 | 单 Dispatcher 假设 | 当前设计和文档明确按单 Dispatcher 实例运行，不支持多 Dispatcher 共同调度同一 Server |
+| Catalog 全量覆盖 | Dispatcher 启动时全量覆盖 capability/role catalog；多 Dispatcher 时配置必须一致 |
 | 语义循环风险 | 可防进程死循环，但不能完全防 Agent 持续生成低价值 intent |
 | 密钥泄露风险 | `dispatch.yaml` 是运行期配置，必须避免提交真实 API key |
 | 高权限执行风险 | Worker CLI 使用危险执行参数，Kali 容器内工具能力强，必须隔离运行 |

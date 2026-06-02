@@ -18,7 +18,8 @@ runtime:
   # Healthcheck timeout for each worker process before a task is assigned.
   healthcheck_timeout: 20
   # Prompt set loaded from cairn/src/cairn/dispatcher/prompts/.
-  prompt_group: "default"
+  # Use "cypher" for automated CTF / pentest / vuln-research operation.
+  prompt_group: "cypher"
 
 tasks:
   bootstrap:
@@ -59,6 +60,60 @@ remote_support:
     port: 22
     username: "ubuntu"
     password: "REDACTED-SSH-PASSWORD"
+
+capabilities:
+  # 能力 catalog 真相源。Dispatcher 启动时会全量 POST 到 Server 的 /capabilities/catalog。
+  # 本地资源统一放 capabilities/mcp/ 与 capabilities/skills/<id>/，详见 capabilities/README.md。
+  mcp_servers: []
+  # 示例 MCP（需要时取消注释，并把文件放入 capabilities/mcp/<id>/）：
+  # mcp_servers:
+  #   - id: "example-mcp"
+  #     name: "Example MCP"
+  #     command: "python3"
+  #     args: ["{capability_root}/mcp/example-mcp/server.py", "--stdio"]
+  #     env: {}
+  #     source_path: "./capabilities/mcp/example-mcp"
+  #     task_types: ["bootstrap", "explore", "reason"]
+  skills:
+    - id: "cypher-ctf"
+      name: "Cypher CTF"
+      description: "CTF automation workflows for web, pwn, reverse, crypto, forensics, stego and misc tasks."
+      source_path: "./capabilities/skills/cypher-ctf"
+      task_types: ["bootstrap", "explore", "reason"]
+    - id: "cypher-pentest"
+      name: "Cypher Pentest"
+      description: "Scope-bound authorized penetration testing workflows, evidence capture, cleanup and reporting."
+      source_path: "./capabilities/skills/cypher-pentest"
+      task_types: ["bootstrap", "explore", "reason"]
+    - id: "cypher-vuln-research"
+      name: "Cypher Vulnerability Research"
+      description: "Source audit, CVE reproduction, PoC adaptation, fuzzing and root-cause analysis workflows."
+      source_path: "./capabilities/skills/cypher-vuln-research"
+      task_types: ["bootstrap", "explore", "reason"]
+    - id: "cypher-flag-oob"
+      name: "Cypher Flag / OOB"
+      description: "Flag submission, OOB callback, reverse listener and tmux session conventions."
+      source_path: "./capabilities/skills/cypher-flag-oob"
+      task_types: ["bootstrap", "explore"]
+
+roles:
+  # 角色 catalog 真相源。Dispatcher 启动时会全量 POST 到 Server 的 /roles/catalog。
+  # 创建项目时 UI 可选一个 primary role；项目保存的是 role prompt 快照。
+  - id: "cypher-ctf-operator"
+    name: "Cypher CTF Operator"
+    description: "Fast CTF / cyber-range operator focused on flags, shells, proofs, and reproducible exploit paths."
+    source_path: "./capabilities/roles/cypher-ctf-operator/ROLE.md"
+    task_types: ["bootstrap", "explore", "reason"]
+  - id: "cypher-pentest-operator"
+    name: "Cypher Pentest Operator"
+    description: "Authorized pentest operator focused on scope, evidence, impact validation, cleanup, and reporting."
+    source_path: "./capabilities/roles/cypher-pentest-operator/ROLE.md"
+    task_types: ["bootstrap", "explore", "reason"]
+  - id: "cypher-vuln-researcher"
+    name: "Cypher Vulnerability Researcher"
+    description: "Vulnerability researcher focused on root cause, reproducible PoC, exploitability, and fixes."
+    source_path: "./capabilities/roles/cypher-vuln-researcher/ROLE.md"
+    task_types: ["bootstrap", "explore", "reason"]
 
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.

@@ -1,5 +1,10 @@
 <!--
-@ai: 本文件是 Cairn 项目的快速上下文。后续 Codex 会话可先读本文件快速建立项目心智模型；需要深入细节时再读 AI/ARCHITECTURE.md 和 AI/CODEBASE_ANALYSIS.md。
+@ai: 本文件是 Cairn 项目的快速概览。当需要快速了解项目是什么、用了哪些技术、目录结构如何时，请优先阅读本文件。
+如需深入了解架构细节，请查阅 AI/ARCHITECTURE.md；如需了解具体实现，请查阅 AI/CODEBASE_ANALYSIS.md。
+
+@update: 本文件应在项目发生重大变更（如核心目标调整、技术栈升级、目录重构）时更新。
+
+生成日期：2026-06-01
 -->
 
 # Cairn 快速项目概览
@@ -11,9 +16,9 @@ Cairn 是一个以 Fact/Intent 图为核心的多 Agent 协作探索系统，通
 ## 最重要的心智模型
 
 ```text
-Server = 协议真相源，只维护图和 lease，不做推理；另有独立 observability DB 存 Execution Log
-Dispatcher = 控制面，决定何时跑 bootstrap/reason/explore
-Worker Container = 执行面，每个项目一个 Kali 容器
+Server = 协议真相源，只维护图、lease、项目级 capability/role 控制面快照；另有独立 observability DB 存 Execution Log
+Dispatcher = 控制面，决定何时跑 bootstrap/reason/explore，并在任务启动前注入项目已选 MCP/Skills/Role
+Worker Container = 执行面，每个项目一个 Kali 容器，每个任务实例有独立 `/tmp/cairn-capabilities/{project_id}/{task_instance_id}`
 Agent CLI = 真实执行者，在容器里调用工具并返回最终 JSON 契约；Codex/Claude 的结构化流只作为日志旁路
 ```
 
@@ -121,6 +126,83 @@ CAIRN_REMOTE_SSH_PASSWORD
 
 默认 prompt 只在 `bootstrap.md` / `explore.md` 提示这些变量可用；`reason` 和 conclude prompt 不注入，避免破坏黑板架构的事实判定边界。
 
+## MCP / Skill / Role Capabilities
+
+`dispatch.yaml` 可声明可用 MCP、skill 和 primary role catalog。Server 只保存项目启用的能力 ID 与 role prompt 快照，不保存 MCP env、token 或 skill 内容。Dispatcher 启动后把 catalog 注册到 Server；任务执行前读取项目选择，并在项目容器内按任务实例生成：
+
+```text
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/
+├── mcp.json
+├── mcp/<mcp_id>/
+└── skills/<skill_id>/
+```
+
+当前能力边界：
+
+- MCP：支持容器内 `stdio + env`，可选 `source_path` 目录会复制到 `mcp/<mcp_id>/`；`command/args/env` 支持 `{capability_root}` 占位符。
+- Skill：支持 host/repo 目录文件包，整体复制到 `skills/<skill_id>/`。
+- Role：创建项目时选择一个 primary role；Server 保存 role prompt 快照，Dispatcher 在 `bootstrap` / `explore` / `reason` prompt 中注入 `{role_instructions}`。
+- 未声明、未启用、task type 不匹配或注入失败的能力 fail closed，并写入 Execution Log；业务 Fact/Intent/Hint 语义不变。
+
+### 本地资源目录
+
+能力相关资源统一放在项目根的 `capabilities/` 目录，`dispatch.yaml` 用相对路径引用：
+
+```text
+capabilities/
+├── README.md
+├── mcp/                          # 本地 MCP server 资料：仓库说明、构建脚本、容器配置、mcp.json 模板
+├── skills/<skill_id>/            # 单个 skill 文件包，会被整体复制到容器内
+│   └── SKILL.md
+└── roles/<role_id>/              # primary role 固定 prompt
+    └── ROLE.md
+```
+
+`dispatch.yaml` 示例：
+
+```yaml
+runtime:
+  prompt_group: "cypher"
+
+capabilities:
+  mcp_servers:
+    - id: "example-mcp"
+      name: "Example MCP"
+      command: "python3"
+      args: ["{capability_root}/mcp/example-mcp/server.py", "--stdio"]
+      env: {}
+      source_path: "./capabilities/mcp/example-mcp"
+      task_types: ["bootstrap", "explore", "reason"]
+  skills:
+    - id: "cypher-ctf"
+      name: "Cypher CTF"
+      source_path: "./capabilities/skills/cypher-ctf"
+      task_types: ["bootstrap", "explore", "reason"]
+
+roles:
+  - id: "cypher-ctf-operator"
+    name: "Cypher CTF Operator"
+    source_path: "./capabilities/roles/cypher-ctf-operator/ROLE.md"
+    task_types: ["bootstrap", "explore", "reason"]
+```
+
+### Cypher Agent 预置能力
+
+本轮已落地 `cypher` prompt group 和 4 个内置 skill：
+
+- `cypher-ctf`
+- `cypher-pentest`
+- `cypher-vuln-research`
+- `cypher-flag-oob`
+
+并提供 3 个 primary role：
+
+- `cypher-ctf-operator`
+- `cypher-pentest-operator`
+- `cypher-vuln-researcher`
+
+这些都是控制面上下文，不会把角色或能力本身写成 Fact；只有 Agent 验证后的结论才写入黑板。
+
 ## Heartbeat 如何保证任务存活
 
 Dispatcher 任务启动后会创建 `HeartbeatLease`：
@@ -176,6 +258,7 @@ docker compose up --build
 | `cairn/src/cairn/server/app.py` | FastAPI app |
 | `cairn/src/cairn/server/db.py` | SQLite schema |
 | `cairn/src/cairn/server/observability/` | 独立 Execution Log DB、API、脱敏与查询 |
+| `cairn/src/cairn/server/routers/capabilities.py` | 项目 MCP/skill 能力启用、capability catalog、role catalog 与 project role API |
 | `cairn/src/cairn/server/routers/projects.py` | Project/status/reason/complete API |
 | `cairn/src/cairn/server/routers/intents.py` | Intent create/heartbeat/release/conclude API |
 | `cairn/src/cairn/server/routers/export.py` | YAML/timeline 导出 |
@@ -185,8 +268,14 @@ docker compose up --build
 | `cairn/src/cairn/dispatcher/tasks/explore.py` | explore 任务 |
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Docker 容器管理 |
 | `cairn/src/cairn/dispatcher/runtime/heartbeat.py` | heartbeat lease |
+| `cairn/src/cairn/dispatcher/capabilities.py` | MCP/skill catalog 构造、项目能力选择解析与容器注入 |
+| `cairn/src/cairn/dispatcher/roles.py` | Role catalog 构造、项目 role prompt 快照注入 |
+| `capabilities/README.md` | MCP/skill/role 本地资源目录约定 |
+| `capabilities/skills/` | Cypher 与示例 skill 文件包 |
+| `capabilities/roles/` | Cypher primary role prompt 文件 |
 | `cairn/src/cairn/dispatcher/workers/adapters/` | Claude/Codex/Pi/Mock 适配器 |
-| `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt；Remote Support 只注入 bootstrap/explore |
+| `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt；已支持 capability 与 role 注入 |
+| `cairn/src/cairn/dispatcher/prompts/cypher/` | Cypher Agent 专用 bootstrap/explore/reason/conclude prompt |
 | `cairn/src/cairn/dispatcher/observability/trace.py` | 解析 Codex/Claude 结构化执行轨迹 |
 | `dispatch.yaml` | 真实运行 Dispatcher 配置 |
 | `dispatch_mock.yaml` | mock 运行配置 |
@@ -217,3 +306,4 @@ Dispatcher 的 `observability` 配置控制是否记录 prompt/stdout/stderr/raw
 | 改 Server 协议 | `server/models.py` + routers + `db.py` schema |
 | 改容器生命周期 | `dispatcher/runtime/containers.py` |
 | 改 heartbeat 行为 | `dispatcher/runtime/heartbeat.py` + Server heartbeat API |
+| 改 MCP/skill/role 本地资源位置 | `capabilities/mcp/` / `capabilities/skills/<id>/` / `capabilities/roles/<id>/ROLE.md` + `dispatch.yaml` 的 `capabilities.*` / `roles.*` |

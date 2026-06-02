@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.dispatcher.capabilities import inject_project_capabilities
+from cairn.dispatcher.roles import inject_project_role
 from cairn.dispatcher.contracts import parse_json_output, validate_reason_payload
 from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.prompting import (
@@ -106,6 +109,28 @@ def run_reason_task(
             outcome = "unhealthy"
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
+        capabilities = inject_project_capabilities(
+            config,
+            container_manager,
+            container_name,
+            project.project.id,
+            "reason",
+            f"reason-{worker.name}-{uuid.uuid4().hex[:12]}",
+            _project_capability_data(client, project.project.id, reporter, "reason_execute"),
+        )
+        if capabilities.summary:
+            reporter.emit_result("capabilities", capabilities.summary)
+        for error in capabilities.errors:
+            reporter.emit_error("capabilities", "error", error)
+        role = inject_project_role(
+            project.project.id,
+            "reason",
+            _project_role_data(client, project.project.id, reporter, "reason_execute"),
+        )
+        if role.summary:
+            reporter.emit_result("role", role.summary)
+        for error in role.errors or []:
+            reporter.emit_error("role", "error", error)
         open_intents = [
             {
                 "id": intent.id,
@@ -138,12 +163,14 @@ def run_reason_task(
                 "fact_ids": format_fact_ids(allowed_fact_ids),
                 "open_intents": format_open_intents(open_intents),
                 "max_intents": str(config.tasks.reason.max_intents),
+                "capability_instructions": capabilities.instructions,
+                "role_instructions": role.instructions,
             },
         )
         reporter.emit_prompt("reason_execute", prompt)
 
         session = driver.prepare_session()
-        command = driver.build_execute(worker, prompt, session)
+        command = driver.build_execute(worker, prompt, session, capabilities.context)
         execute_started = time.perf_counter()
         result = run_worker_process(
             container_manager,
@@ -339,3 +366,29 @@ def run_reason_task(
         reporter.finish(process_state_for_task_outcome(outcome), error_kind=None if outcome == "success" else outcome)
         lease.stop()
         best_effort_release_reason(client, project.project.id, worker.name)
+
+
+def _project_capability_data(
+    client: CairnClient,
+    project_id: str,
+    reporter: ExecutionReporter,
+    phase: str,
+) -> dict | None:
+    response = client.get_project_capabilities(project_id)
+    if response.ok and isinstance(response.data, dict):
+        return response.data
+    reporter.emit_error(phase, "error", f"capability selection fetch failed status={response.status_code}")
+    return None
+
+
+def _project_role_data(
+    client: CairnClient,
+    project_id: str,
+    reporter: ExecutionReporter,
+    phase: str,
+) -> dict | None:
+    response = client.get_project_role(project_id)
+    if response.ok and isinstance(response.data, dict):
+        return response.data
+    reporter.emit_error(phase, "error", f"project role fetch failed status={response.status_code}")
+    return None

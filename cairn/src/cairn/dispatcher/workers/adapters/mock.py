@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from cairn.dispatcher.config import WorkerConfig, resolve_mock_behavior
-from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver
+from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
 
 _SCRIPT = """
 import json,random,sys,time
@@ -131,8 +131,20 @@ class MockDriver(SeedSessionDriver):
     def build_healthcheck(self, worker: WorkerConfig) -> list[str]:
         return self._argv(worker, '{"phase":"healthcheck"}')
 
-    def build_execute(self, worker: WorkerConfig, prompt: str, session: str | None) -> DriverResult:
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
         return DriverResult(argv=self._argv(worker, prompt), session=session)
 
-    def build_conclude(self, worker: WorkerConfig, prompt: str, session: str) -> list[str]:
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
         return self._argv(worker, prompt)

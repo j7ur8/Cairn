@@ -321,6 +321,16 @@ class ContainerManager:
         if not ok:
             raise RuntimeError(f"failed to write container file {path}")
 
+    def write_directory(self, container_name: str, path: str, source: Path) -> None:
+        archive_path, archive = self._directory_archive(path, source)
+        container = self._require_container(container_name)
+        try:
+            ok = container.put_archive(archive_path, archive)
+        except DockerException as exc:
+            raise RuntimeError(f"failed to write container directory {path}: {exc}") from exc
+        if not ok:
+            raise RuntimeError(f"failed to write container directory {path}")
+
     def remove_container(self, name: str, *, force: bool = True) -> None:
         container = self._get_container(name)
         if container is None:
@@ -463,6 +473,40 @@ class ContainerManager:
             info.size = len(payload)
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(payload))
+        return archive_path, stream.getvalue()
+
+    @staticmethod
+    def _directory_archive(path: str, source: Path) -> tuple[str, bytes]:
+        target = PurePosixPath(path)
+        if not target.is_absolute() or target.name in ("", ".", ".."):
+            raise ValueError(f"container directory path must be absolute: {path}")
+        parts = target.parts[1:]
+        if not parts or any(part in ("", ".", "..") for part in parts):
+            raise ValueError(f"invalid container directory path: {path}")
+        source = source.resolve(strict=True)
+        if not source.is_dir():
+            raise ValueError(f"source must be a directory: {source}")
+        archive_path = f"/{parts[0]}" if len(parts) > 1 else "/"
+        prefix = "/".join(parts[1:]) if len(parts) > 1 else parts[0]
+
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            root_info = tarfile.TarInfo(prefix)
+            root_info.type = tarfile.DIRTYPE
+            root_info.mode = 0o755
+            archive.addfile(root_info)
+            for item in sorted(source.rglob("*")):
+                relative = item.relative_to(source)
+                if any(part in ("", ".", "..") for part in relative.parts):
+                    continue
+                arcname = f"{prefix}/{relative}"
+                if item.is_dir():
+                    info = tarfile.TarInfo(arcname)
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+                    archive.addfile(info)
+                elif item.is_file():
+                    archive.add(item, arcname=arcname, recursive=False)
         return archive_path, stream.getvalue()
 
 

@@ -42,6 +42,10 @@ remote_support:
     username: ""
     password: ""
 
+capabilities:
+  mcp_servers: []
+  skills: []
+
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
   # Mock project containers join the shared Cairn Docker network.

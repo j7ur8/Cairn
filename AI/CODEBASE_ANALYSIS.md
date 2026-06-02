@@ -153,7 +153,11 @@ Server 写入 API 当前使用 routers.py 内置的 ObservabilitySettings() 做�
 | `Settings` | 全局超时配置 |
 | `Fact`、`Intent`、`Hint` | 图对象响应模型 |
 | `ProjectMeta`、`ProjectSummary`、`ProjectDetail` | 项目元信息和完整图 |
-| `CreateProjectRequest` | 创建项目 |
+| `CreateProjectRequest` | 创建项目；支持 `capabilities` 与 `role` / `role_id` |
+| `CapabilitySelection` | 项目启用的 MCP server IDs 与 skill IDs |
+| `ProjectRoleSelection` | 创建项目时选择的 primary role ID |
+| `CapabilityCatalogItem`、`ProjectCapabilitiesResponse` | capability catalog 与项目能力选择响应 |
+| `RoleCatalogItem`、`RegisterRoleCatalogItem`、`ProjectRole`、`ProjectRoleResponse` | role catalog、role prompt 注册与项目 role 快照 |
 | `CreateIntentRequest` | 创建探索方向 |
 | `HeartbeatRequest` | intent/reason heartbeat |
 | `ConcludeRequest` | intent 结论写入 |
@@ -185,7 +189,7 @@ Server 写入 API 当前使用 routers.py 内置的 ObservabilitySettings() 做�
 | 方法 | 路径 | 函数 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/projects` | `list_projects()` | 返回摘要并执行超时清理 |
-| POST | `/projects` | `create_project()` | 创建项目、写 origin/goal/hints |
+| POST | `/projects` | `create_project()` | 创建项目、写 origin/goal/hints，并保存可选 capability selection 与 role prompt 快照 |
 | GET | `/projects/{project_id}` | `get_project()` | 返回完整图 |
 | PUT | `/projects/{project_id}/status` | `update_project_status()` | active/stopped 切换 |
 | POST | `/projects/{project_id}/reason/claim` | `claim_project_reason()` | 认领 reason |
@@ -203,6 +207,29 @@ clear_project_reason()
 ```
 
 这会让 Dispatcher 下一轮取消本地任务。
+
+### `server/routers/capabilities.py`
+
+职责：项目级 MCP/skill 能力选择、capability catalog、role catalog 与项目 role 快照查询。
+
+关键端点：
+
+| 方法 | 路径 | 函数 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/capabilities/catalog` | `get_capability_catalog()` | 查询 Dispatcher 注册的 MCP/skill catalog，不包含 secret |
+| POST | `/capabilities/catalog` | `register_capability_catalog()` | Dispatcher 启动时全量注册 capability catalog |
+| GET | `/projects/{project_id}/capabilities` | `get_project_capabilities()` | 查询项目已选能力与 unavailable IDs |
+| PUT | `/projects/{project_id}/capabilities` | `update_project_capabilities()` | 更新项目能力选择 |
+| GET | `/roles/catalog` | `get_role_catalog()` | 查询可选 primary role，不返回 prompt 正文 |
+| POST | `/roles/catalog` | `register_role_catalog()` | Dispatcher 启动时全量注册 role catalog，Server 计算 prompt sha256 |
+| GET | `/projects/{project_id}/role` | `get_project_role()` | 查询项目创建时保存的 role prompt 快照 |
+
+边界：
+
+```text
+Server 保存 capability ID selection 与 role prompt snapshot；不保存 MCP env/token 或 skill 文件内容。
+Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语义。
+```
 
 ### `server/routers/intents.py`
 
@@ -246,6 +273,10 @@ clear_project_reason()
 | `TasksConfig` | `bootstrap`、`reason`、`explore` |
 | `ContainerConfig` | `image`、`network_mode`、`completed_action`、`stopped_action`、`cap_add`、`bind_mounts` |
 | `RemoteSupportConfig` | `enabled`、`dnslog.url`、`ssh.host/port/username/password` |
+| `McpServerCapabilityConfig` | `id`、`name`、`command`、`args`、`env`、`source_path`、`task_types`、`description` |
+| `SkillCapabilityConfig` | `id`、`name`、`source_path`、`task_types`、`description` |
+| `CapabilitiesConfig` | `mcp_servers`、`skills` |
+| `RoleConfig` | `id`、`name`、`task_types`、`description`、`prompt` 或 `source_path` |
 | `WorkerConfig` | `name`、`type`、`task_types`、`max_running`、`priority`、`env` |
 
 Worker 类型：
@@ -275,6 +306,14 @@ remote_support:
 
 启用后可能注入：`CAIRN_REMOTE_SUPPORT_ENABLED`、`CAIRN_DNSLOG_URL`、`CAIRN_REMOTE_SSH_HOST`、`CAIRN_REMOTE_SSH_PORT`、`CAIRN_REMOTE_SSH_USERNAME`、`CAIRN_REMOTE_SSH_PASSWORD`。
 
+Capability / Role 解析规则：
+
+- `prepare_capability_data()` 会把 skill 和 MCP `source_path` 解析成基于 `dispatch.yaml` 的绝对路径。
+- `prepare_role_data()` 会把 role `source_path` 解析成基于 `dispatch.yaml` 的绝对路径。
+- `validate_capability_resources()` 校验 skill/MCP `source_path` 存在且为目录。
+- `validate_role_resources()` 校验 role `source_path` 存在且为文件。
+- 默认 prompt required tokens 已要求 `bootstrap.md` / `explore.md` / `reason.md` 包含 `{capability_instructions}` 与 `{role_instructions}`；`mock` prompt group 例外。
+
 ### `dispatcher/protocol/client.py`
 
 `CairnClient` 封装 Server API：
@@ -293,6 +332,11 @@ remote_support:
 | `conclude()` | POST intent conclude |
 | `complete()` | POST project complete |
 | `create_intent()` | POST project intent |
+| `get_project_capabilities()` | GET project capability selection |
+| `get_project_role()` | GET project role snapshot |
+| `register_capability_catalog()` | POST capability catalog |
+| `register_role_catalog()` | POST role catalog |
+| `create_llm_execution()` / `create_llm_event()` / `finish_llm_execution()` | observability 写入 API |
 
 它使用 thread-local `requests.Session`，适配多线程任务执行。
 
@@ -307,6 +351,8 @@ run()
   run_startup_healthchecks()
   while True:
     _validate_server_settings()
+    _register_capability_catalog()
+    _register_role_catalog()
     _reap_futures()
     _reap_cleanup_futures()
     summaries = client.list_projects()
@@ -497,6 +543,36 @@ finally:
 
 ## 5. Runtime 代码分析
 
+### `dispatcher/capabilities.py`
+
+职责：把 `dispatch.yaml` 中声明的 MCP/skill catalog 转换为 Server 可展示的脱敏 payload，并在任务启动前把项目已选能力注入容器。
+
+关键行为：
+
+| 函数 | 作用 |
+| --- | --- |
+| `catalog_payload(config)` | 生成 MCP/skill catalog 注册 payload |
+| `inject_project_capabilities(...)` | 解析项目 selection，按 task type 过滤，复制 MCP/skill 目录，写 `mcp.json`，返回 prompt instructions 与 `WorkerExecutionContext` |
+
+注入路径按任务实例隔离：
+
+```text
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/mcp.json
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/mcp/<mcp_id>/
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/skills/<skill_id>/
+```
+
+### `dispatcher/roles.py`
+
+职责：构造 role catalog 注册 payload，从项目 role snapshot 生成 `{role_instructions}`。
+
+| 函数 | 作用 |
+| --- | --- |
+| `catalog_payload(config)` | 读取 `RoleConfig.prompt` 或 `source_path`，生成含 prompt 的注册 payload |
+| `inject_project_role(project_id, task_type, role_data)` | 校验项目 role snapshot，生成 prompt 注入文本和摘要 |
+
+Role prompt 是控制面上下文：创建项目时保存快照，运行时注入 `bootstrap` / `explore` / `reason`，不作为 Fact 写入。
+
 ### `runtime/containers.py`
 
 核心行为：
@@ -510,6 +586,7 @@ finally:
 | `cleanup_stopped(project_id)` | stopped 后 stop/remove |
 | `build_exec_process()` | 构建带 Linux timeout 的 `ManagedProcess` |
 | `write_text_file()` | tar archive 写文件进容器 |
+| `write_directory()` | tar archive 写目录进容器，用于 capability MCP/skill 注入 |
 | `validate_bind_mounts()` | startup 阶段验证 host bind mount 可用性 |
 | `mount_mismatches()` | 诊断已存在项目容器与当前 bind mount 配置是否一致 |
 
@@ -564,8 +641,8 @@ timeout -k 5s {timeout_seconds}s ...
 ```python
 build_healthcheck(worker) -> list[str]
 trace_format() -> str | None
-build_execute(worker, prompt, session) -> DriverResult
-build_conclude(worker, prompt, session) -> list[str]
+build_execute(worker, prompt, session, context=None) -> DriverResult
+build_conclude(worker, prompt, session, context=None) -> list[str]
 extract_session(session, stdout, stderr) -> str | None
 extract_response_text(stdout, stderr) -> str
 ```
@@ -584,6 +661,8 @@ claude -r {session} --dangerously-skip-permissions \
   --verbose \
   -p -- "{conclude_prompt}"
 ```
+
+如果 `WorkerExecutionContext` 中有能力注入，Claude adapter 会追加 `--mcp-config {mcp_config_path}` 与 `--add-dir {skill_root}`。
 
 健康检查通过 Anthropic Messages API curl。
 
@@ -605,6 +684,8 @@ codex exec --dangerously-bypass-approvals-and-sandbox \
   -c 'model_providers.cairn.env_key="OPENAI_API_KEY"' \
   -- "{prompt}"
 ```
+
+如果 `WorkerExecutionContext` 中有能力注入，Codex adapter 会追加 `--add-dir {skill_root}`，并通过 `-c mcp_servers.<id>.*=...` 注入 MCP server 配置。
 
 conclude 通过：
 
@@ -636,6 +717,7 @@ Prompt 组位于：
 
 ```text
 cairn/src/cairn/dispatcher/prompts/default/
+cairn/src/cairn/dispatcher/prompts/cypher/
 cairn/src/cairn/dispatcher/prompts/mock/
 ```
 
@@ -648,6 +730,10 @@ cairn/src/cairn/dispatcher/prompts/mock/
 | `reason.md` | 判断完成或生成新 intents |
 | `explore.md` | 执行某个具体 intent |
 | `explore_conclude.md` | explore 超时/解析失败后的事实总结 |
+
+`default` 与 `cypher` 的 `bootstrap` / `explore` / `reason` prompt 都支持 `{capability_instructions}` 与 `{role_instructions}`；conclude prompt 保持只总结既有事实。
+
+`cypher` prompt group 面向自动化 CTF、授权渗透测试和漏洞研究，要求输出带 `[cypher:finding ...]` 或 `[cypher:intent ...]` 的结构化前缀。
 
 >>⚠️ 注意：conclude prompt 明确要求 Agent 停止探索，只总结已经确认的事实。这是超时后落地 partial Fact 的关键约束。
 
@@ -704,6 +790,9 @@ cairn dispatch --config dispatch.yaml
 | `remote_support.enabled` | 是否向 worker 注入 DNSLog/SSH 远程协作环境变量 |
 | `remote_support.dnslog.url` | 可选 DNSLog/OOB 域名 |
 | `remote_support.ssh.*` | 可选远程辅助服务器 SSH 连接信息 |
+| `capabilities.mcp_servers[]` | MCP server catalog；支持 `source_path` 与 `{capability_root}` |
+| `capabilities.skills[]` | Skill 文件包 catalog；`source_path` 指向 `capabilities/skills/<id>` |
+| `roles[]` | Primary role catalog；`prompt` 或 `source_path` 二选一 |
 | `observability.record_raw_worker_stream` | 结构化 trace 模式下是否额外记录原始 worker stdout |
 | `observability.redaction_patterns` | Dispatcher 侧额外脱敏正则；Server 侧还有内置二次脱敏 |
 | `workers[].priority` | 越小越优先 |
@@ -758,6 +847,9 @@ uv run --project cairn cairn dispatch --config dispatch_mock.yaml --once
 | --- | --- |
 | 新增 API 字段 | `server/models.py`、对应 router、DB schema |
 | 新增 Worker 后端 | `dispatcher/workers/adapters/`、`registry.py`、`config.py` WorkerType/env 校验 |
+| 新增 MCP/skill 能力 | `capabilities/mcp/` / `capabilities/skills/` + `dispatch.yaml capabilities.*` + 必要时 `dispatcher/capabilities.py` |
+| 新增 primary role | `capabilities/roles/<id>/ROLE.md` + `dispatch.yaml roles[]` + 必要时 `dispatcher/roles.py` |
+| 调整 Cypher Agent 行为 | `dispatcher/prompts/cypher/` + `capabilities/skills/cypher-*` + `capabilities/roles/cypher-*` |
 | 调整调度策略 | `dispatcher/scheduler/loop.py` |
 | 调整输出契约 | `dispatcher/contracts.py` 和对应 prompt |
 | 调整 prompt | `dispatcher/prompts/{group}/`，同步 `config.py` placeholder 校验 |

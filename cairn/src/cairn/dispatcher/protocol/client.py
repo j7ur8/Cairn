@@ -128,6 +128,48 @@ class CairnClient:
             json={"from": from_ids, "description": description, "creator": creator, "worker": None},
         )
 
+    def get_project_capabilities(self, project_id: str) -> ApiResult:
+        try:
+            response = self._session().get(
+                self._url(f"/projects/{project_id}/capabilities"),
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=GET path=/projects/%s/capabilities error=%s", project_id, exc)
+            return ApiResult(status_code=0, text=str(exc))
+        data: Any | None = None
+        if response.headers.get("content-type", "").startswith("application/json"):
+            data = response.json()
+        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+
+    def get_project_role(self, project_id: str) -> ApiResult:
+        try:
+            response = self._session().get(
+                self._url(f"/projects/{project_id}/role"),
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=GET path=/projects/%s/role error=%s", project_id, exc)
+            return ApiResult(status_code=0, text=str(exc))
+        data: Any | None = None
+        if response.headers.get("content-type", "").startswith("application/json"):
+            data = response.json()
+        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+
+    def register_capability_catalog(self, catalog: list[dict[str, Any]]) -> ApiResult:
+        return self._request_json(
+            "POST",
+            "/capabilities/catalog",
+            json={"catalog": catalog},
+        )
+
+    def register_role_catalog(self, roles: list[dict[str, Any]]) -> ApiResult:
+        return self._request_json(
+            "POST",
+            "/roles/catalog",
+            json={"roles": roles},
+        )
+
     def create_llm_execution(
         self,
         project_id: str,

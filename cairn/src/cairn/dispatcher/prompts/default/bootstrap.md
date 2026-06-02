@@ -24,6 +24,10 @@ Only return the following after you have confirmed that Goal has been satisfied:
 
 {remote_support_instructions}
 
+{capability_instructions}
+
+{role_instructions}
+
 # Context
 ## Origin
 ```

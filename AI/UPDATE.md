@@ -9,6 +9,198 @@
 
 # Cairn 更新记录
 
+## 2026-06-02 · Cypher Agent capabilities / roles 全链路实现与 AI 文档同步（已完成）
+
+### 背景
+
+用户要求以 Cairn 为母版，参考自动化 CTF、渗透测试、漏洞挖掘方向，实现 Cypher Agent，并满足：
+
+- 本地 MCP / skills 统一放到 `capabilities/mcp` 与 `capabilities/skills`。
+- 创建项目时 UI 可选择 skills 与 MCP，worker 启动任务时复制已选项到 worker 容器，供 Codex / Claude 调用。
+- 创建项目时可选择项目主要角色，将固定 role prompt 注入 `bootstrap`、`explore`、`reason`。
+- 保持健壮性、高可用、水平伸缩、安全、可维护、性能、可观测、数据一致性和黑板架构边界。
+
+### 已完成变更
+
+- 新增 Cypher prompt group：`cairn/src/cairn/dispatcher/prompts/cypher/`。
+- 新增 Cypher skills：
+  - `capabilities/skills/cypher-ctf/`
+  - `capabilities/skills/cypher-pentest/`
+  - `capabilities/skills/cypher-vuln-research/`
+  - `capabilities/skills/cypher-flag-oob/`
+- 新增 primary role prompt：
+  - `capabilities/roles/cypher-ctf-operator/ROLE.md`
+  - `capabilities/roles/cypher-pentest-operator/ROLE.md`
+  - `capabilities/roles/cypher-vuln-researcher/ROLE.md`
+- Server 新增/扩展：
+  - `role_catalog`、`project_roles` 表。
+  - `GET /roles/catalog`、`POST /roles/catalog`、`GET /projects/{project_id}/role`。
+  - `POST /projects` 支持 `capabilities` 与 `role` / `role_id`，并保存 role prompt 快照。
+- Dispatcher 新增/扩展：
+  - `RoleConfig` 与 `roles[]` 配置。
+  - `dispatcher/roles.py` 负责 role catalog 与 role prompt 注入。
+  - `dispatcher/capabilities.py` 改为按任务实例路径注入：`/tmp/cairn-capabilities/{project_id}/{task_instance_id}/...`。
+  - Scheduler 启动时同时注册 capability catalog 和 role catalog。
+  - `bootstrap` / `explore` / `reason` 都会读取项目 role 与 capabilities，并渲染 `{capability_instructions}` / `{role_instructions}`。
+- Worker adapter 扩展：
+  - `WorkerExecutionContext` 传递 MCP/skill 注入上下文。
+  - Claude 追加 `--mcp-config` / `--add-dir`。
+  - Codex 追加 `--add-dir` 与 `-c mcp_servers.<id>.*`。
+  - Pi / Mock 签名兼容 `context=None`。
+- UI 扩展：
+  - New Project modal 可选择 Primary Role、MCP Servers、Skills。
+  - 创建项目时提交 capability selection 与 role selection。
+  - Graph 侧栏 `Caps` 仍可维护项目能力选择。
+- 配置与文档：
+  - `dispatch.yaml` 切换到 `prompt_group: "cypher"`，并声明 Cypher skills / roles。
+  - `capabilities/README.md` 补 role 目录与 task-instance 注入路径约定。
+  - `docs/designs/cypher-agent.md`、`docs/designs/cypher-capabilities-roles.md` 记录设计。
+  - 本次已同步更新 `AI/ARCHITECTURE.md`、`AI/CODEBASE_ANALYSIS.md`、`AI/PROJECT_OVERVIEW.md`、`AI/UPDATE.md`。
+
+### 架构边界
+
+- Capability / Role 属于控制面配置，不写入 `facts` / `intents` / `hints`。
+- `Fact` 仍只表示已确认客观发现；`Intent` 仍只表示待探索方向；`Hint` 仍只表示人工/外部策略输入。
+- Server 不保存 MCP env、token 或 skill 内容；role catalog API 不向 UI 返回 prompt 正文，只返回 hash/detail。
+- 项目保存 role prompt 快照，避免后续 role catalog 变化影响既有项目一致性。
+- 每个任务实例使用独立 capability 注入目录，避免同项目并发任务互相覆盖。
+
+### 验证结果
+
+已通过：
+
+- `PYTHONPATH=cairn/src python3 -m compileall -q cairn/src/cairn`
+- `DispatchConfig.load()` 加载 `dispatch_mock.yaml` 与 `dispatch.yaml`
+- 前端 inline JS `node --check`
+- `git diff --check`
+- 临时 DB FastAPI TestClient smoke test：
+  - 注册 role catalog
+  - 注册 capability catalog
+  - 创建带 role / capability 的项目
+  - 查询 `/projects/{project_id}/role`
+  - 查询 `/projects/{project_id}/capabilities`
+
+### 未完成事项/风险
+
+- Codex MCP 注入使用 `-c mcp_servers.<id>.*`，需在真实 Codex CLI 环境做端到端 MCP 调用验证。
+- Claude `--mcp-config` / `--add-dir` 已接线，仍需真实 Claude Code 端到端验证。
+- 多 Dispatcher 场景仍要求各 Dispatcher 的 `capabilities` 与 `roles` catalog 保持一致，否则后启动实例会全量覆盖 Server catalog。
+- `dispatch.yaml` 是运行期配置，仍需避免提交真实 API key / token / SSH 密码到公开仓库。
+
+---
+
+## 2026-06-01 · AI 文档目录结构对齐 project-review 技能（已完成）
+## 2026-06-01 · capabilities/ 本地资源目录建立（已完成）
+
+### 背景
+
+MCP/skill 已接入但 `dispatch.yaml` 直接引用分散的目录，约定不显式。本轮在项目根新增 `capabilities/` 子目录，统一存放 MCP 资料和 skill 文件包，`dispatch.yaml` 的 `capabilities.*` 用相对路径引用。
+
+### 已完成变更
+
+- 新建 `capabilities/mcp/`、`capabilities/skills/`，各加 `.gitkeep` 保留空目录
+- 新建 `capabilities/README.md` 描述目录约定与 yaml 引用示例
+- 新建 `capabilities/skills/example-recon/SKILL.md` 作为最小可复制 skill 模板
+- `dispatch.yaml` 的 `capabilities:` 节点增加注释与示例，指向 `./capabilities/skills/example-recon`
+- `AI/PROJECT_OVERVIEW.md` MCP / Skill Capabilities 章节补 `本地资源目录` 小节，关键文件速查与后续修改建议同步更新
+
+### 验证结果
+
+- `python3 -m compileall -q cairn/src/cairn` 通过
+- `DispatchConfig.load(dispatch.yaml)` 通过
+- `git status --short` 仅增加新文件与 `dispatch.yaml` 注释扩展
+
+### 未完成事项/风险
+
+- `capabilities/mcp/` 当前没有强制内容；后续若引入本地 MCP server 资料或 `mcp.json` 模板，建议在 `capabilities/README.md` 中补一份命名约定。
+- Skill 资源缺少 size/数量/符号链接限制仍属已有风险，未在本轮处理。
+
+---
+
+
+### 背景
+
+`project-review` 技能在模式一要求生成 `AI/ARCHITECTURE.md`、`AI/CODEBASE_ANALYSIS.md`、`AI/PROJECT_OVERVIEW.md`、`AI/UPDATE.md` 四份文档，全部直接放在 `AI/` 下。
+此前 Cairn 把项目概览放在 `AI/docs/project-overview.md`，与技能模板不一致，也使项目级阅读路径多一层子目录。本轮把概览文档迁回 `AI/PROJECT_OVERVIEW.md`，删除空目录，统一引用。
+
+### 已完成变更
+
+- `git mv AI/docs/project-overview.md AI/PROJECT_OVERVIEW.md`
+- 删除空目录 `AI/docs/`
+- `AI/PROJECT_OVERVIEW.md` 元指令头按技能标准增加 `@update` 提示与 `生成日期`
+- `AI/ARCHITECTURE.md` 顶部两处引用、目录树入口同步改为 `AI/PROJECT_OVERVIEW.md`
+- `AI/UPDATE.md` 历史条目中两处 `AI/docs/project-overview.md` 同步改为 `AI/PROJECT_OVERVIEW.md`
+
+### 验证结果
+
+- `git status --short AI/` 仅剩重命名与两处文本修改
+- `rg -n "AI/docs|project-overview" AI/` 已无残留旧引用
+- 仅做文档结构整理，未修改任何业务代码
+
+### 未完成事项/风险
+
+- 本轮只重命名/改引用，未同步 MCP/Skill 在 `AI/ARCHITECTURE.md`、`AI/CODEBASE_ANALYSIS.md` 中的内容（参见上一轮已识别的增量同步建议）
+
+---
+
+## 2026-06-01 · MCP / Skill 项目级能力管理接入（已完成）
+
+### 背景
+
+本轮实现 MCP 与 skill 的第一阶段能力管理闭环，同时保持 Cairn 黑板核心架构不变：
+
+- `dispatch.yaml` 是能力目录和敏感凭据真相源。
+- Server 只保存项目级启用 ID，不保存 secret。
+- Dispatcher 在任务启动前把启用能力注入项目容器。
+
+### 已完成变更
+
+- 新增 Server 表：
+  - `capability_catalog`
+  - `project_capabilities`
+- 新增能力 API：
+  - `GET /projects/{project_id}/capabilities`
+  - `PUT /projects/{project_id}/capabilities`
+  - `POST /capabilities/catalog`
+- 新增 dispatcher 配置模型：
+  - `capabilities.mcp_servers[]`
+  - `capabilities.skills[]`
+- MCP 第一阶段支持容器内 `stdio + env` 配置生成。
+- Skill 第一阶段支持 host/repo 目录注入。
+- Dispatcher 启动后注册脱敏能力目录到 Server。
+- bootstrap/explore/reason 执行前生成：
+  - `/tmp/cairn-capabilities/{project_id}/{task_type}/mcp.json`
+  - `/tmp/cairn-capabilities/{project_id}/{task_type}/skills/`
+- 默认 prompt 增加 `{capability_instructions}`。
+- Graph 侧栏新增 `Caps` tab，可按项目启用/禁用 MCP server 和 skill。
+- Execution Log 记录 capability 注入摘要和错误。
+
+### 架构边界
+
+- 不改变 `facts/intents/hints/settings` 的业务语义。
+- 不改变 bootstrap/reason/explore JSON contract。
+- 不在 Server DB/API/UI 中保存 MCP env、token 或 skill 内容。
+- 未声明、未启用、task type 不匹配或注入失败的能力 fail closed。
+
+### 验证结果
+
+已完成：
+
+- `PYTHONPATH=cairn/src python3 -m compileall -q cairn/src/cairn`
+- `DispatchConfig.load()` 加载 `dispatch.yaml` / `dispatch_mock.yaml`
+- FastAPI TestClient smoke test：
+  - 注册 capability catalog
+  - 创建项目
+  - 保存项目 capability selection
+  - 查询 selection
+  - 悬挂 capability ID 被标记为 unavailable
+
+### 未完成事项/风险
+
+- 尚未做真实 MCP server 端到端调用验证。
+- 尚未做真实 skill 文件包注入后的 Agent 使用验证。
+- 多 Dispatcher 场景仍要求各 Dispatcher 的 `dispatch.yaml` 能力目录一致。
+
 ## 2026-06-01 · AI 文档代码行为校准（已完成）
 
 ### 背景
@@ -26,7 +218,7 @@
   - 补充 `--observability-db-path`、`server/observability/*` 模块、observability API 与配置边界。
   - 修正 `WorkerDriver` 接口说明，加入 `trace_format()`。
   - 修正 Claude/Codex 命令说明：Claude 使用 `--output-format stream-json --verbose`，Codex 使用 `--json`。
-- `AI/docs/project-overview.md`
+- `AI/PROJECT_OVERVIEW.md`
   - 同步快速心智模型、工具调用链路、关键文件和敏感信息处理说明。
 
 ### 验证结果
@@ -106,7 +298,7 @@
 
 - `AI/ARCHITECTURE.md`：补充 observability / remote_support 配置示例与架构边界说明。
 - `AI/CODEBASE_ANALYSIS.md`：补充 `RemoteSupportConfig`、env 注入规则、prompt 注入范围与配置字段说明。
-- `AI/docs/project-overview.md`：补充 Remote Support 快速说明、关键文件与敏感信息处理说明。
+- `AI/PROJECT_OVERVIEW.md`：补充 Remote Support 快速说明、关键文件与敏感信息处理说明。
 
 ### 受影响文件（本轮）
 

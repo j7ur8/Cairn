@@ -35,10 +35,10 @@ WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
 }
 
 DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
-    "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-    "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
+    "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}", "{capability_instructions}", "{role_instructions}"),
+    "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{capability_instructions}", "{role_instructions}"),
     "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
-    "bootstrap.md": ("{origin}", "{goal}", "{hints}"),
+    "bootstrap.md": ("{origin}", "{goal}", "{hints}", "{capability_instructions}", "{role_instructions}"),
     "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}"),
 }
 
@@ -269,6 +269,161 @@ class RemoteSupportConfig(BaseModel):
         return env
 
 
+class McpServerCapabilityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    source_path: str | None = None
+    task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
+    description: str = ""
+
+    @field_validator("id", "name", "command", "source_path")
+    @classmethod
+    def validate_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("id must not be empty")
+        if any(ch.isspace() for ch in text) or "/" in text or "\\" in text:
+            raise ValueError("id must not contain whitespace, '/', or '\\'")
+        return text
+
+    @field_validator("task_types")
+    @classmethod
+    def validate_task_types(cls, value: list[TaskType]) -> list[TaskType]:
+        if not value:
+            raise ValueError("task_types must not be empty")
+        if len(set(value)) != len(value):
+            raise ValueError("task_types must be unique")
+        return value
+
+
+class SkillCapabilityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    source_path: str
+    task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore", "reason"])
+    description: str = ""
+
+    @field_validator("id", "name", "source_path")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("id must not be empty")
+        if any(ch.isspace() for ch in text) or "/" in text or "\\" in text:
+            raise ValueError("id must not contain whitespace, '/', or '\\'")
+        return text
+
+    @field_validator("task_types")
+    @classmethod
+    def validate_task_types(cls, value: list[TaskType]) -> list[TaskType]:
+        if not value:
+            raise ValueError("task_types must not be empty")
+        if len(set(value)) != len(value):
+            raise ValueError("task_types must be unique")
+        return value
+
+
+class CapabilitiesConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mcp_servers: list[McpServerCapabilityConfig] = Field(default_factory=list)
+    skills: list[SkillCapabilityConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "CapabilitiesConfig":
+        mcp_ids = [item.id for item in self.mcp_servers]
+        skill_ids = [item.id for item in self.skills]
+        if len(mcp_ids) != len(set(mcp_ids)):
+            raise ValueError("capabilities.mcp_servers ids must be unique")
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError("capabilities.skills ids must be unique")
+        return self
+
+
+class RoleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore", "reason"])
+    description: str = ""
+    prompt: str | None = None
+    source_path: str | None = None
+
+    @field_validator("id", "name", "prompt", "source_path")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        text = value.strip()
+        if any(ch.isspace() for ch in text) or "/" in text or "\\" in text:
+            raise ValueError("id must not contain whitespace, '/', or '\\'")
+        return text
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("task_types")
+    @classmethod
+    def validate_task_types(cls, value: list[TaskType]) -> list[TaskType]:
+        if not value:
+            raise ValueError("task_types must not be empty")
+        if len(set(value)) != len(value):
+            raise ValueError("task_types must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def validate_prompt_source(self) -> "RoleConfig":
+        if bool(self.prompt) == bool(self.source_path):
+            raise ValueError(f"role {self.id} must set exactly one of prompt or source_path")
+        return self
+
+
 class ContainerConfig(BaseModel):
     image: str
     network_mode: str
@@ -338,6 +493,8 @@ class DispatchConfig(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     container: ContainerConfig
     remote_support: RemoteSupportConfig = Field(default_factory=RemoteSupportConfig)
+    capabilities: CapabilitiesConfig = Field(default_factory=CapabilitiesConfig)
+    roles: list[RoleConfig] = Field(default_factory=list)
     common_env: dict[str, str] = Field(default_factory=dict)
     workers: list[WorkerConfig]
 
@@ -380,6 +537,9 @@ class DispatchConfig(BaseModel):
             raise ValueError("worker names must be unique")
         if not self.workers:
             raise ValueError("workers must not be empty")
+        role_ids = [role.id for role in self.roles]
+        if len(role_ids) != len(set(role_ids)):
+            raise ValueError("roles ids must be unique")
         if self.runtime.max_project_workers > self.runtime.max_workers:
             raise ValueError("max_project_workers cannot exceed max_workers")
         return self
@@ -388,8 +548,12 @@ class DispatchConfig(BaseModel):
     def load(cls, path: Path) -> "DispatchConfig":
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         data = prepare_bind_mount_data(data, path.parent)
+        data = prepare_capability_data(data, path.parent)
+        data = prepare_role_data(data, path.parent)
         config = cls.model_validate(data)
         validate_prompt_resources(config.runtime.prompt_group)
+        validate_capability_resources(config)
+        validate_role_resources(config)
         return config
 
 
@@ -446,6 +610,76 @@ def prepare_bind_mount_data(data: Any, config_dir: Path) -> Any:
     return data_copy
 
 
+def prepare_capability_data(data: Any, config_dir: Path) -> Any:
+    if not isinstance(data, dict):
+        return data
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return data
+    mcp_servers = capabilities.get("mcp_servers")
+    skills = capabilities.get("skills")
+    prepared_mcp_servers: list[Any] = []
+    if isinstance(mcp_servers, list):
+        for mcp in mcp_servers:
+            if not isinstance(mcp, dict):
+                prepared_mcp_servers.append(mcp)
+                continue
+            mcp_copy = dict(mcp)
+            source_path = mcp_copy.get("source_path")
+            if isinstance(source_path, str):
+                path = Path(source_path).expanduser()
+                if not path.is_absolute():
+                    path = config_dir / path
+                mcp_copy["source_path"] = str(path.resolve(strict=False))
+            prepared_mcp_servers.append(mcp_copy)
+    prepared_skills: list[Any] = []
+    if isinstance(skills, list):
+        for skill in skills:
+            if not isinstance(skill, dict):
+                prepared_skills.append(skill)
+                continue
+            skill_copy = dict(skill)
+            source_path = skill_copy.get("source_path")
+            if isinstance(source_path, str):
+                path = Path(source_path).expanduser()
+                if not path.is_absolute():
+                    path = config_dir / path
+                skill_copy["source_path"] = str(path.resolve(strict=False))
+            prepared_skills.append(skill_copy)
+    capabilities_copy = dict(capabilities)
+    if isinstance(mcp_servers, list):
+        capabilities_copy["mcp_servers"] = prepared_mcp_servers
+    if isinstance(skills, list):
+        capabilities_copy["skills"] = prepared_skills
+    data_copy = dict(data)
+    data_copy["capabilities"] = capabilities_copy
+    return data_copy
+
+
+def prepare_role_data(data: Any, config_dir: Path) -> Any:
+    if not isinstance(data, dict):
+        return data
+    roles = data.get("roles")
+    if not isinstance(roles, list):
+        return data
+    prepared_roles: list[Any] = []
+    for role in roles:
+        if not isinstance(role, dict):
+            prepared_roles.append(role)
+            continue
+        role_copy = dict(role)
+        source_path = role_copy.get("source_path")
+        if isinstance(source_path, str):
+            path = Path(source_path).expanduser()
+            if not path.is_absolute():
+                path = config_dir / path
+            role_copy["source_path"] = str(path.resolve(strict=False))
+        prepared_roles.append(role_copy)
+    data_copy = dict(data)
+    data_copy["roles"] = prepared_roles
+    return data_copy
+
+
 def _resolve_bind_mount_host_path(config_dir: Path, host_path: str) -> str:
     path = Path(host_path).expanduser()
     if not path.is_absolute():
@@ -480,6 +714,34 @@ def validate_prompt_resources(prompt_group: str) -> None:
         missing = [token for token in tokens if token not in content]
         if missing:
             raise ValueError(f"prompt group {prompt_group} resource {name} missing placeholders: {', '.join(missing)}")
+
+
+def validate_capability_resources(config: DispatchConfig) -> None:
+    for mcp in config.capabilities.mcp_servers:
+        if not mcp.source_path:
+            continue
+        path = Path(mcp.source_path)
+        if not path.exists():
+            raise ValueError(f"capability mcp_server {mcp.id} source_path does not exist: {path}")
+        if not path.is_dir():
+            raise ValueError(f"capability mcp_server {mcp.id} source_path must be a directory: {path}")
+    for skill in config.capabilities.skills:
+        path = Path(skill.source_path)
+        if not path.exists():
+            raise ValueError(f"capability skill {skill.id} source_path does not exist: {path}")
+        if not path.is_dir():
+            raise ValueError(f"capability skill {skill.id} source_path must be a directory: {path}")
+
+
+def validate_role_resources(config: DispatchConfig) -> None:
+    for role in config.roles:
+        if role.source_path is None:
+            continue
+        path = Path(role.source_path)
+        if not path.exists():
+            raise ValueError(f"role {role.id} source_path does not exist: {path}")
+        if not path.is_file():
+            raise ValueError(f"role {role.id} source_path must be a file: {path}")
 
 
 def resolve_mock_behavior(worker_name: str, env: dict[str, str]) -> dict[str, dict[str, Any]]:
