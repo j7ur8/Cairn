@@ -121,6 +121,94 @@ def get_claimable_open_intent_or_404(
     return row
 
 
+def claim_open_intent_or_409(
+    conn: sqlite3.Connection, project_id: str, intent_id: str, worker: str, now: str
+) -> sqlite3.Row:
+    get_claimable_open_intent_or_404(conn, project_id, intent_id, worker)
+    cursor = conn.execute(
+        """
+        UPDATE intents
+        SET worker = ?, last_heartbeat_at = ?
+        WHERE id = ?
+          AND project_id = ?
+          AND to_fact_id IS NULL
+          AND (worker IS NULL OR worker = ?)
+        """,
+        (worker, now, intent_id, project_id, worker),
+    )
+    if cursor.rowcount != 1:
+        row = get_intent_or_404(conn, project_id, intent_id)
+        if row["to_fact_id"] is not None:
+            raise HTTPException(409, "Intent already concluded")
+        if row["worker"] is not None and row["worker"] != worker:
+            raise HTTPException(409, f"Intent is currently claimed by {row['worker']}")
+        raise HTTPException(409, "Intent claim failed")
+    updated = get_intent_or_404(conn, project_id, intent_id)
+    if updated["to_fact_id"] is not None or updated["worker"] != worker:
+        raise HTTPException(409, "Intent claim failed")
+    return updated
+
+
+def release_open_intent_or_409(
+    conn: sqlite3.Connection, project_id: str, intent_id: str, worker: str
+) -> sqlite3.Row:
+    row = get_releasable_open_intent_or_404(conn, project_id, intent_id, worker)
+    if row["worker"] is None:
+        return row
+    cursor = conn.execute(
+        """
+        UPDATE intents
+        SET worker = NULL
+        WHERE id = ?
+          AND project_id = ?
+          AND to_fact_id IS NULL
+          AND worker = ?
+        """,
+        (intent_id, project_id, worker),
+    )
+    if cursor.rowcount != 1:
+        row = get_intent_or_404(conn, project_id, intent_id)
+        if row["to_fact_id"] is not None:
+            raise HTTPException(409, "Intent already concluded")
+        if row["worker"] is not None and row["worker"] != worker:
+            raise HTTPException(409, f"Intent is currently claimed by {row['worker']}")
+        raise HTTPException(409, "Intent release failed")
+    return get_intent_or_404(conn, project_id, intent_id)
+
+
+def conclude_open_intent_or_409(
+    conn: sqlite3.Connection,
+    project_id: str,
+    intent_id: str,
+    worker: str,
+    fact_id: str,
+    now: str,
+) -> sqlite3.Row:
+    get_claimable_open_intent_or_404(conn, project_id, intent_id, worker)
+    cursor = conn.execute(
+        """
+        UPDATE intents
+        SET to_fact_id = ?, worker = ?, last_heartbeat_at = ?, concluded_at = ?
+        WHERE id = ?
+          AND project_id = ?
+          AND to_fact_id IS NULL
+          AND (worker IS NULL OR worker = ?)
+        """,
+        (fact_id, worker, now, now, intent_id, project_id, worker),
+    )
+    if cursor.rowcount != 1:
+        row = get_intent_or_404(conn, project_id, intent_id)
+        if row["to_fact_id"] is not None:
+            raise HTTPException(409, "Intent already concluded")
+        if row["worker"] is not None and row["worker"] != worker:
+            raise HTTPException(409, f"Intent is currently claimed by {row['worker']}")
+        raise HTTPException(409, "Intent conclude failed")
+    updated = get_intent_or_404(conn, project_id, intent_id)
+    if updated["to_fact_id"] != fact_id or updated["worker"] != worker:
+        raise HTTPException(409, "Intent conclude failed")
+    return updated
+
+
 def get_releasable_open_intent_or_404(
     conn: sqlite3.Connection, project_id: str, intent_id: str, worker: str
 ) -> sqlite3.Row:
@@ -216,6 +304,118 @@ def clear_project_reason(conn: sqlite3.Connection, project_id: str) -> None:
         """,
         (project_id,),
     )
+
+
+def claim_project_reason_or_409(
+    conn: sqlite3.Connection, project_id: str, worker: str, trigger: str, now: str
+) -> sqlite3.Row:
+    expire_reason_leases(conn, project_id)
+    row = get_project_or_404(conn, project_id)
+    if row["status"] != "active":
+        raise HTTPException(403, f"Project is {row['status']}")
+    current_worker = row["reason_worker"]
+    if current_worker is not None and current_worker != worker:
+        raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+    if current_worker == worker:
+        return row
+
+    cursor = conn.execute(
+        """
+        UPDATE projects
+        SET reason_worker = ?,
+            reason_trigger = ?,
+            reason_started_at = ?,
+            reason_last_heartbeat_at = ?
+        WHERE id = ?
+          AND status = 'active'
+          AND reason_worker IS NULL
+        """,
+        (worker, trigger, now, now, project_id),
+    )
+    if cursor.rowcount != 1:
+        row = get_project_or_404(conn, project_id)
+        if row["status"] != "active":
+            raise HTTPException(403, f"Project is {row['status']}")
+        current_worker = row["reason_worker"]
+        if current_worker is not None and current_worker != worker:
+            raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+        raise HTTPException(409, "Project reason claim failed")
+    return get_project_or_404(conn, project_id)
+
+
+def heartbeat_project_reason_or_409(
+    conn: sqlite3.Connection, project_id: str, worker: str, now: str
+) -> sqlite3.Row:
+    expire_reason_leases(conn, project_id)
+    row = get_project_or_404(conn, project_id)
+    if row["status"] != "active":
+        raise HTTPException(403, f"Project is {row['status']}")
+    current_worker = row["reason_worker"]
+    if current_worker is None:
+        raise HTTPException(409, "Project reason is not currently claimed")
+    if current_worker != worker:
+        raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+
+    cursor = conn.execute(
+        """
+        UPDATE projects
+        SET reason_last_heartbeat_at = ?
+        WHERE id = ?
+          AND status = 'active'
+          AND reason_worker = ?
+        """,
+        (now, project_id, worker),
+    )
+    if cursor.rowcount != 1:
+        row = get_project_or_404(conn, project_id)
+        if row["status"] != "active":
+            raise HTTPException(403, f"Project is {row['status']}")
+        current_worker = row["reason_worker"]
+        if current_worker is None:
+            raise HTTPException(409, "Project reason is not currently claimed")
+        if current_worker != worker:
+            raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+        raise HTTPException(409, "Project reason heartbeat failed")
+    return get_project_or_404(conn, project_id)
+
+
+def release_project_reason_or_409(
+    conn: sqlite3.Connection, project_id: str, worker: str
+) -> sqlite3.Row:
+    expire_reason_leases(conn, project_id)
+    row = get_project_or_404(conn, project_id)
+    if row["status"] != "active":
+        raise HTTPException(403, f"Project is {row['status']}")
+    current_worker = row["reason_worker"]
+    if current_worker is None:
+        return row
+    if current_worker != worker:
+        raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+
+    cursor = conn.execute(
+        """
+        UPDATE projects
+        SET reason_worker = NULL,
+            reason_trigger = NULL,
+            reason_started_at = NULL,
+            reason_last_heartbeat_at = NULL
+        WHERE id = ?
+          AND status = 'active'
+          AND reason_worker = ?
+        """,
+        (project_id, worker),
+    )
+    if cursor.rowcount != 1:
+        row = get_project_or_404(conn, project_id)
+        if row["status"] != "active":
+            raise HTTPException(403, f"Project is {row['status']}")
+        current_worker = row["reason_worker"]
+        if current_worker is None:
+            return row
+        if current_worker != worker:
+            raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+        raise HTTPException(409, "Project reason release failed")
+    return get_project_or_404(conn, project_id)
 
 
 def expire_workers(conn: sqlite3.Connection, project_id: str | None = None) -> None:

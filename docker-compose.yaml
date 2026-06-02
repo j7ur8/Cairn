@@ -7,8 +7,12 @@ services:
     container_name: cairn-server
     ports:
       - "8000:8000"
+    environment:
+      CAIRN_ATTACHMENTS_ROOT: /Users/jmac/Documents/GitHub/Cairn/datas/attachments
+      CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
     volumes:
       - ./datas/cairn/:/root/.local/share/cairn/
+      - ./datas:/Users/jmac/Documents/GitHub/Cairn/datas
     healthcheck:
       test:
         - "CMD"

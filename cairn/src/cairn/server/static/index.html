@@ -1011,7 +1011,7 @@
 <!-- ═══════════ MODALS ═══════════ -->
 
 <!-- New Project -->
-<div x-show="showNewProject" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showNewProject = false">
+<div x-show="showNewProject" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="if (!isCreatingProject) showNewProject = false">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 border border-slate-200/60" @click.stop>
     <h3 class="text-base font-semibold text-slate-700 mb-4">New Project</h3>
     <div class="space-y-3">
@@ -1091,11 +1091,39 @@
         </template>
         <p class="text-[11px] text-slate-400">Hint creator uses local actor: <span class="font-medium text-slate-600" x-text="actorName()"></span></p>
       </div>
+
+      <div class="rounded-2xl border border-dashed border-slate-200 bg-white p-3 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Attachments (optional)</div>
+            <p class="text-[11px] text-slate-400 mt-1">Uploaded files are mounted read-only for workers under <span class="font-mono text-slate-500">/mnt/attachments/&lt;project_id&gt;/</span>.</p>
+          </div>
+          <label class="shrink-0 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-500 hover:bg-slate-50 cursor-pointer transition">
+            Choose files
+            <input type="file" multiple class="hidden" @change="handleNewProjectAttachmentFiles($event)">
+          </label>
+        </div>
+        <template x-if="newProject.attachments.length === 0">
+          <p class="text-xs text-slate-300">No attachments selected</p>
+        </template>
+        <div class="space-y-2">
+          <template x-for="(attachment, idx) in newProject.attachments" :key="attachment.key">
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto] gap-2 items-center rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+              <div class="min-w-0">
+                <div class="text-xs font-medium text-slate-700 truncate" x-text="attachment.file.name"></div>
+                <div class="text-[10px] text-slate-400" x-text="formatBytes(attachment.file.size)"></div>
+              </div>
+              <input x-model="attachment.description" placeholder="用途，如 源码 / 爆破字典" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+              <button type="button" @click="newProject.attachments.splice(idx, 1)" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+            </div>
+          </template>
+        </div>
+      </div>
     </div>
     <div class="flex justify-end gap-2 mt-5">
-      <button @click="showNewProject = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
-      <button @click="createProject()" :disabled="!newProject.title || !newProject.origin || !newProject.goal"
-        class="px-5 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition disabled:opacity-30 shadow-sm shadow-brand-200">Create</button>
+      <button @click="showNewProject = false" :disabled="isCreatingProject" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+      <button @click="createProject()" :disabled="isCreatingProject || !newProject.title || !newProject.origin || !newProject.goal"
+        class="px-5 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition disabled:opacity-30 shadow-sm shadow-brand-200" x-text="isCreatingProject ? 'Creating...' : 'Create'"></button>
     </div>
   </div>
 </div>
@@ -1388,6 +1416,7 @@ function cairnApp() {
       unavailable_skill_ids: [],
     },
     capabilitiesSaving: false,
+    isCreatingProject: false,
     newProjectCatalog: {
       capabilities: [],
       roles: [],
@@ -1412,6 +1441,7 @@ function cairnApp() {
       origin: '',
       goal: '',
       hints: [{ content: '' }],
+      attachments: [],
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
     },
@@ -1949,9 +1979,44 @@ function cairnApp() {
         origin: '',
         goal: '',
         hints: [{ content: '' }],
+        attachments: [],
         role_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
       };
+    },
+
+    handleNewProjectAttachmentFiles(event) {
+      const files = Array.from(event.target.files || []);
+      if (files.length === 0) return;
+      const stamp = Date.now();
+      const offset = this.newProject.attachments.length;
+      const attachments = files.map((file, idx) => ({
+        file,
+        description: '',
+        key: `${stamp}-${offset + idx}-${file.name}-${file.size}-${file.lastModified}`,
+      }));
+      this.newProject.attachments = [...this.newProject.attachments, ...attachments];
+      event.target.value = '';
+    },
+
+    async uploadProjectAttachments(projectId, attachments, actor) {
+      if (!attachments || attachments.length === 0) return null;
+      const form = new FormData();
+      for (const attachment of attachments) {
+        form.append('files', attachment.file, attachment.file.name);
+        form.append('descriptions', attachment.description?.trim() || '附件');
+      }
+      form.append('creator', actor);
+      const r = await fetch(`/projects/${encodeURIComponent(projectId)}/attachments`, { method: 'POST', body: form });
+      let data = null;
+      try { data = await r.json(); } catch {}
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        if (typeof data?.detail === 'string') msg = data.detail;
+        else if (Array.isArray(data?.detail)) msg = data.detail.map(e => e.msg).join('; ');
+        throw new Error(msg);
+      }
+      return data;
     },
 
     async openNewProject() {
@@ -4197,9 +4262,26 @@ function cairnApp() {
       return `${seconds}s`;
     },
 
+    formatBytes(bytes) {
+      const value = Number(bytes || 0);
+      if (value < 1024) return `${value} B`;
+      const units = ['KB', 'MB', 'GB'];
+      let size = value / 1024;
+      let idx = 0;
+      while (size >= 1024 && idx < units.length - 1) {
+        size /= 1024;
+        idx += 1;
+      }
+      return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[idx]}`;
+    },
+
     async createProject() {
+      if (this.isCreatingProject) return;
+      let createdProjectId = null;
       try {
+        this.isCreatingProject = true;
         const actor = this.actorName();
+        const attachments = [...(this.newProject.attachments || [])];
         const hintContents = this.newProject.hints.filter(h => h.content?.trim());
         const body = { title: this.newProject.title, origin: this.newProject.origin, goal: this.newProject.goal };
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
@@ -4212,12 +4294,25 @@ function cairnApp() {
           body.role = { role_id: this.newProject.role_id };
         }
         const data = await this.api('POST', '/projects', body);
+        createdProjectId = data.project.id;
+        await this.uploadProjectAttachments(createdProjectId, attachments, actor);
         this.showNewProject = false;
         this.resetNewProject();
         await this.loadProjects();
-        await this.openProject(data.project.id);
-        this.showToast('Project created');
-      } catch(e) { this.showToast(e.message, 'error'); }
+        await this.openProject(createdProjectId);
+        this.showToast(attachments.length > 0 ? `Project created with ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}` : 'Project created');
+      } catch(e) {
+        if (createdProjectId) {
+          this.showNewProject = false;
+          await this.loadProjects();
+          await this.openProject(createdProjectId);
+          this.showToast(`Project created, but attachment upload failed: ${e.message}`, 'error');
+        } else {
+          this.showToast(e.message, 'error');
+        }
+      } finally {
+        this.isCreatingProject = false;
+      }
     },
 
     openCreateIntent() {

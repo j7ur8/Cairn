@@ -12,10 +12,13 @@ USER kali
 RUN sudo apt update && \
     sudo apt install -y bsdextrautils npm jq iputils-ping sshpass ncat rlwrap \
     bloodyad coercer enum4linux-ng pwncat chisel-common-binaries \
-    dirsearch yq krb5-user gitleaks naabu nikto netexec adb && \
+    dirsearch yq krb5-user gitleaks naabu nikto netexec adb \
+    mcp-kali-server metasploit-framework \
+    libgtk-3-0t64 libx11-xcb1 libasound2t64 && \
     sudo apt clean && \
     sudo rm -rf /var/lib/apt/lists/* && \
-    pip3 install pwntools pymongo --break-system-packages && \
+    pip3 install pwntools pymongo "camoufox[geoip]" --break-system-packages && \
+    python3 -m camoufox fetch && \
     sudo npm install -g @playwright/cli@latest && \
     cd /tmp && playwright-cli install
 
@@ -64,6 +67,10 @@ RUN cd /tmp && \
 RUN sudo npm install -g @openai/codex@0.118.0
 RUN sudo npm install -g @anthropic-ai/claude-code@2.1.98
 RUN sudo npm install -g @mariozechner/pi-coding-agent@0.73.0
+
+COPY ./bin/kali-mcp-stdio /usr/local/bin/kali-mcp-stdio
+COPY ./bin/metasploit-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
+RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
 
 RUN sudo chmod +x /usr/local/bin/kerbrute
 RUN mkdir -p /home/kali/.config/nuclei && \

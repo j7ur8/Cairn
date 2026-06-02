@@ -1,0 +1,23 @@
+# Host/local development artifacts must not enter the Docker build context.
+# In particular, copying cairn/.venv into /cairn shadows the image-built venv
+# and makes uv warn about a host Python symlink that does not exist in the container.
+cairn/.venv
+.venv
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# VCS and local OS/editor files
+.git/
+.DS_Store
+*.swp
+*.swo
+
+# Runtime data is bind-mounted by compose; it is not needed for image builds.
+datas/

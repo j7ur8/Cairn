@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: metasploit-mcp-stdio [msfmcpd args...]
+
+Runs Metasploit's msfmcpd in stdio MCP mode. By default it uses a random local
+MessagePack RPC port and lets msfmcpd auto-start msfrpcd with generated
+credentials.
+
+Environment:
+  MSF_MCP_TRANSPORT   MCP transport (default: stdio)
+  MSF_AUTO_START_RPC  Auto-start msfrpcd (default: true)
+  MSF_API_TYPE        RPC API type (default: messagepack)
+  MSF_API_HOST        RPC host (default: localhost)
+  MSF_API_PORT        RPC port (default: random free port)
+  MSF_API_SSL         Use SSL for MessagePack RPC (default: true)
+USAGE
+}
+
+find_msfmcpd() {
+  if command -v msfmcpd >/dev/null 2>&1; then
+    command -v msfmcpd
+    return 0
+  fi
+  for candidate in \
+    /usr/share/metasploit-framework/msfmcpd \
+    /opt/metasploit-framework/bin/msfmcpd \
+    /opt/metasploit-framework/msfmcpd
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+choose_port() {
+  python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+MSFMCPD="$(find_msfmcpd || true)"
+if [ -z "$MSFMCPD" ]; then
+  echo "missing required command: msfmcpd" >&2
+  exit 127
+fi
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    "$MSFMCPD" --help || true
+    exit 0
+    ;;
+esac
+
+export MSF_MCP_TRANSPORT="${MSF_MCP_TRANSPORT:-stdio}"
+export MSF_AUTO_START_RPC="${MSF_AUTO_START_RPC:-true}"
+export MSF_API_TYPE="${MSF_API_TYPE:-messagepack}"
+export MSF_API_HOST="${MSF_API_HOST:-localhost}"
+export MSF_API_PORT="${MSF_API_PORT:-$(choose_port)}"
+export MSF_API_SSL="${MSF_API_SSL:-true}"
+
+exec "$MSFMCPD" --mcp-transport "$MSF_MCP_TRANSPORT" "$@"

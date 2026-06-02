@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Generator
 
 DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
+SQLITE_TIMEOUT_SECONDS = 5.0
+SQLITE_BUSY_TIMEOUT_MS = 5000
 
 _db_path: Path | None = None
 
@@ -135,9 +137,10 @@ def configure(path: Path) -> None:
 @contextmanager
 def get_conn() -> Generator[sqlite3.Connection, None, None]:
     assert _db_path is not None
-    conn = sqlite3.connect(str(_db_path))
+    conn = sqlite3.connect(str(_db_path), timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn

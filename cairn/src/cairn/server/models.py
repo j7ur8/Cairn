@@ -36,6 +36,20 @@ class Hint(BaseModel):
     created_at: str
 
 
+class AttachmentUpload(BaseModel):
+    original_filename: str
+    stored_filename: str
+    size: int
+    path: str
+    hint_id: str
+    hint: str
+
+
+class AttachmentUploadResponse(BaseModel):
+    project_id: str
+    attachments: list[AttachmentUpload]
+
+
 class ProjectReason(BaseModel):
     worker: str
     trigger: str
