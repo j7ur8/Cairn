@@ -32,6 +32,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dispatch.yaml:/cairn/dispatch.yaml
+      - ./capabilities:/cairn/capabilities:ro
       - ./datas:/Users/jmac/Documents/GitHub/Cairn/datas
     depends_on:
       cairn-server:
