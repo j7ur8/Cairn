@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,7 +36,7 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "description": item.description,
                 "task_types": item.task_types,
                 "available": True,
-                "detail": "stdio",
+                "detail": item.transport,
             }
         )
     for item in config.capabilities.skills:
@@ -79,6 +81,10 @@ def inject_project_capabilities(
             continue
         if task_type not in item.task_types:
             errors.append(f"mcp_server:{capability_id}: not enabled for task type {task_type}")
+            continue
+        probe_error = _validate_selected_mcp(item, task_type)
+        if probe_error:
+            errors.append(probe_error)
             continue
         mcp_servers.append(item)
 
@@ -154,6 +160,24 @@ def _mcp_json(mcp_servers: list[McpServerCapabilityConfig], capability_root: str
 
 
 def _mcp_config_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[str, Any]:
+    """Render the per-server entry in the mcp.json file.
+
+    For ``stdio``: emit ``{command, args, env}`` (Claude Code / Codex will
+    fork the subprocess). For ``http``: emit ``{type: "http", url, headers}``
+    with the bearer token resolved inline (Claude Code does not dereference
+    env vars in mcp.json headers). The token is read from the dispatcher's
+    ``os.environ`` at call time and is not cached on the config object.
+    """
+    if item.transport == "http":
+        detail: dict[str, Any] = {"type": "http", "url": _render_capability_path(item.url, capability_root)}
+        if item.bearer_token_env:
+            token = os.environ.get(item.bearer_token_env)
+            if token:
+                # Read the token here, inline; do not store on the item. The
+                # returned dict is consumed immediately by json.dumps in
+                # _mcp_json and released after the task ends.
+                detail["headers"] = {"Authorization": f"Bearer {token}"}
+        return detail
     return {
         "command": _render_capability_path(item.command, capability_root),
         "args": [_render_capability_path(arg, capability_root) for arg in item.args],
@@ -162,15 +186,75 @@ def _mcp_config_detail(item: McpServerCapabilityConfig, capability_root: str) ->
 
 
 def _mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[str, Any]:
-    detail = {
+    """Adapter-facing context detail.
+
+    Contains only the schema-level fields the worker adapter needs to
+    construct its argv. The resolved bearer token (if any) is intentionally
+    NOT included — it lives in mcp.json's ``headers`` only, and is read
+    at mcp.json write time via ``_mcp_config_detail``. The adapter either
+    uses ``bearer_token_env`` to ask the agent to read the env (Codex) or
+    does not need a token at all (Claude reads mcp.json directly).
+    """
+    detail: dict[str, Any] = {
         "id": item.id,
-        **_mcp_config_detail(item, capability_root),
+        "transport": item.transport,
     }
+    if item.transport == "http":
+        detail["url"] = _render_capability_path(item.url, capability_root)
+        if item.bearer_token_env:
+            detail["bearer_token_env"] = item.bearer_token_env
+    else:
+        detail["command"] = _render_capability_path(item.command, capability_root)
+        if item.args:
+            detail["args"] = [_render_capability_path(arg, capability_root) for arg in item.args]
+        if item.env:
+            detail["env"] = {
+                key: _render_capability_path(value, capability_root)
+                for key, value in item.env.items()
+            }
     return detail
 
 
 def _render_capability_path(value: str, capability_root: str) -> str:
     return value.replace("{capability_root}", capability_root)
+
+
+def _probe_http_url(url: str, timeout: float) -> tuple[bool, str]:
+    """Best-effort reachability probe for an http MCP server.
+
+    Does a TCP connect to (host, port) so the probe does not depend on
+    path correctness, auth, or the upstream agent's HTTP semantics. Any
+    successful connect (including a 4xx/5xx from the server) is treated
+    as "reachable". Returns ``(ok, reason)``.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return False, "url has no host"
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, ""
+    except (OSError, socket.timeout) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+
+def _validate_selected_mcp(
+    mcp: McpServerCapabilityConfig,
+    task_type: TaskType,
+) -> str | None:
+    """Per-task healthcheck for a selected MCP. Returns an error string or None."""
+    if mcp.transport != "http" or not mcp.url:
+        return None
+    ok, reason = _probe_http_url(mcp.url, mcp.healthcheck_timeout)
+    if not ok:
+        return f"mcp_server:{mcp.id}: http probe failed: {reason}"
+    return None
 
 
 def _instructions(

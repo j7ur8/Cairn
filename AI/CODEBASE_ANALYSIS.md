@@ -187,6 +187,14 @@ erDiagram
 observability DB 不参与 facts/intents/hints/settings 的业务真相判定。
 Dispatcher 的 observability 配置控制是否发送、发送哪些事件，以及 Dispatcher 侧缓冲/脱敏/大小限制。
 Server 写入 API 当前使用 routers.py 内置的 ObservabilitySettings() 做二次 redaction/truncation，不从 dispatch.yaml 动态读取。
+
+**BUILTIN 脱敏正则**（Dispatcher 与 Server 两端对齐）覆盖：
+- `CAIRN_REMOTE_SSH_PASSWORD=...` 形式
+- 通用 `*PASSWORD` / `*TOKEN` / `*SECRET` 形式
+- `Authorization: Bearer <token>` 形式（包括 `Authorization: "Bearer <token>"` 与 JSON 编码 `"Authorization": "Bearer <token>"`），不命中 `XAuthorization` 等非授权头
+- `Bearer <token>` 单独成行/词的形式
+
+加入 HTTP MCP transport 后，header 形式的 `Authorization: Bearer ...` 进入 worker 事件流；上述正则保证在 observability 落库前替换为 `Authorization: Bearer ***`。dispatch.yaml 的 `observability.redaction_patterns` 是补充层，不要去掉这些内置项。
 ```
 
 ### `server/models.py`
@@ -295,6 +303,25 @@ Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语�
 如果 intent.worker 是其他 worker，则 409。
 ```
 
+### MCP transport: http
+
+`McpServerCapabilityConfig` 支持两种 transport:
+
+- `stdio`(默认): `command` + `args` + `env`,容器内 spawn 子进程走 stdio,与既有 Kali/Metasploit 桥一致。
+- `http`: `url` 必须,可选 `bearer_token_env` 指向环境变量名,容器内 worker 通过 streamable HTTP 与远端 MCP server 通信。
+
+实现要点:
+
+- **token 注入**: `bearer_token_env` 是 env var **名**(非值),被 `DispatchConfig._interpolate_env_data` 的 skip 列表排除,避免被 `${VAR}` 插值吞掉。`DispatchConfig.load()` 在 `model_validator` 阶段校验该 env 必须存在,缺失即抛 `ValueError`,不延迟到运行时。
+- **Codex 路径**: codex adapter 走 `-c mcp_servers.<id>.url=...` + `-c mcp_servers.<id>.bearer_token_env_var=<NAME>`,由 Codex 自身在调用时读 env。
+- **Claude 路径**: 写到 `mcp.json` 的 `headers.Authorization: Bearer <token>` 是 `_mcp_config_detail` **现场拼**、序列化后立即释放,不长期持有,不进 `WorkerExecutionContext`。
+- **可达性预检**: `inject_project_capabilities` 写 `mcp.json` 前对 http 类型的 server 做一次 TCP `socket.create_connection` 探活(默认超时 1s,由 `healthcheck_timeout` 控制);失败 → 跳过该 mcp,`injection.errors` 记录 `mcp_server:<id>: http probe failed`,UI 显示 `unavailable`。catalog_payload 的 `available` 字段仍为 `true` 表示 config 有效,与 per-task 探活解耦。
+- **Worker env 传播**: `ContainerManager` 启动容器时把 `bearer_token_env_keys` 合并进 container `environment`,与 `common_env` 合并规则一致;容器内 worker 进程可 `os.environ[name]` 取到。**这要求 dispatcher 进程 os.environ 也有该 var** —— 已由 `DispatchConfig.load()` 强校验。
+- **网络可达性**: HTTP MCP server 与 worker 容器的网络连通由部署者负责;若 HTTP MCP 在 host 上,需 `container.network_mode: host` 或把 host 端口 bind 到 cairn network(本项目不自动改 `network_mode` / `extra_hosts`)。
+- **未做**: TLS 软提示(按用户要求跳过)、SSRF 防护(允许 `http://` 与内网 URL)、多 URL 故障转移、Basic auth / OAuth / mTLS,token 轮换后 in-flight worker 不会主动失效(靠 `container.completed_action` 自然回收)。
+
+相关测试: `cairn/tests/test_mcp_http_transport.py`(24 case 覆盖 schema、插值、Codex adapter、worker env 传播、探活、redaction)。
+
 ### `server/routers/attachments.py`
 
 `POST /projects/{project_id}/attachments` 接收 `multipart/form-data` 上传，将文件落到 `CAIRN_ATTACHMENTS_ROOT/{project_id}/`（默认 `datas/attachments/{project_id}/`），并在成功落盘后写一条指向 worker 容器内路径的 Hint。
@@ -354,7 +381,7 @@ replay 入口与推进：
 | `TasksConfig` | `bootstrap`、`reason`、`explore` |
 | `ContainerConfig` | `image`、`network_mode`、`completed_action`、`stopped_action`、`cap_add`、`bind_mounts` |
 | `RemoteSupportConfig` | `enabled`、`dnslog.url`、`ssh.host/port/username/password` |
-| `McpServerCapabilityConfig` | `id`、`name`、`command`、`args`、`env`、`source_path`、`task_types`、`description` |
+| `McpServerCapabilityConfig` | `id`、`name`、`transport` (`stdio`/`http`)、`command`/`url` 二选一、`args`、`env`、`bearer_token_env`、`healthcheck_timeout`、`source_path`、`task_types`、`description` |
 | `SkillCapabilityConfig` | `id`、`name`、`source_path`、`task_types`、`description` |
 | `CapabilitiesConfig` | `mcp_servers`、`skills` |
 | `RoleConfig` | `id`、`name`、`task_types`、`description`、`prompt` 或 `source_path` |

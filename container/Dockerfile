@@ -87,8 +87,8 @@ ENV PLAYWRIGHT_MCP_BROWSER=chromium
 ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 ENV PYTHONUNBUFFERED=1
 
-COPY ./.agents /home/kali/workspace/.agents
-COPY ./.agents /home/kali/workspace/.claude
+# COPY ./.agents /home/kali/workspace/.agents
+# COPY ./.agents /home/kali/workspace/.claude
 COPY ./AGENTS.md /home/kali/workspace/AGENTS.md
 COPY ./AGENTS.md /home/kali/workspace/CLAUDE.md
 

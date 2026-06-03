@@ -89,6 +89,84 @@
 
 ---
 
+## 2026-06-03 · HTTP (Streamable HTTP) MCP transport 接入（已完成）
+
+### 背景
+
+MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kali/Metasploit stdio 桥一致。但实际部署里很多 MCP server 是独立的 HTTP 服务(可能是 host 上的进程,另一台机器上的服务,或 SaaS)。本轮新增 `transport: "http"`,允许 `McpServerCapabilityConfig` 走 Streamable HTTP (MCP 2025-03-26),并补齐 token 注入、observability 脱敏、可达性预检三处安全/可观测关注点。
+
+### 已完成变更
+
+**Schema** (`cairn/src/cairn/dispatcher/config.py`)
+
+- `McpServerCapabilityConfig.transport: Literal["stdio", "http"] = "stdio"`
+- `command` 改为可选;新增 `url: str | None`、`bearer_token_env: str | None`、`healthcheck_timeout: float = 1.0`
+- `field_validator` 校验 `url` 必须以 `http://` 或 `https://` 开头;`model_validator` 保证:
+  - `stdio` 必须有 `command`,不允许 `bearer_token_env`
+  - `http` 必须有 `url`,`bearer_token_env` 引用到的 env var 必须在 `os.environ` 中(否则 `ValueError`,加载即失败,不是延迟到运行时)
+- 类 docstring 写清两 transport 的安全/性能取舍
+- `bearer_token_env` 加入 `_INTERPOLATION_SKIP_KEYS`,不被 `${ENV_VAR}` 插值吞掉
+
+**Capabilities 注入** (`cairn/src/cairn/dispatcher/capabilities.py`)
+
+- `_mcp_config_detail` 按 transport 分支:
+  - `stdio`: 既有行为(写 `command` / `args` / `env`)
+  - `http`: 写 `type: "http"` + `url`,`bearer_token_env` 存在则**现场拼** `headers.Authorization: Bearer <token>`,序列化后立即释放,不长期持有,不进 `WorkerExecutionContext`
+- `_mcp_detail` 不再含 `headers`,避免 token 通过 Codex adapter context 泄漏
+- 新增 `_probe_http_url(url, timeout)` — `socket.create_connection((host, port), timeout=timeout)`,在 `inject_project_capabilities` 写 `mcp.json` 前对 http 类型 server 做探活;失败 → 跳过该 mcp 并 `injection.errors.append(f"mcp_server:<id>: http probe failed ...")`,UI 已有 `unavailable` 展示
+- `catalog_payload(...).available` 仍为 "config 有效",不接探活结果(探活 per-task,不 per-catalog)
+
+**Codex adapter** (`cairn/src/cairn/dispatcher/workers/adapters/codex.py`)
+
+- `_capability_args` 分支:
+  - `http`: `-c mcp_servers.<id>.url=...` + 可选 `-c mcp_servers.<id>.bearer_token_env_var=<NAME>`,由 Codex 自身读 env
+  - `stdio`: 既有行为
+
+**Worker container env 传播** (`cairn/src/cairn/dispatcher/runtime/containers.py` + `scheduler/loop.py`)
+
+- `ContainerManager.__init__` 多接 `bearer_token_env_keys: list[str]`
+- 新增 `_bearer_token_environment()` 在 dispatcher 进程 `os.environ` 中按名取值,与 `common_env` 合并后通过 `docker.containers.run(environment=...)` 传给容器
+- `DispatcherLoop` 启动时把 `cfg.capabilities.mcp_servers` 中所有 `bearer_token_env` 抽出来传给 `ContainerManager`
+- 这要求 dispatcher 进程 `os.environ` 也有该 var,已由 `DispatchConfig.load()` 的 model_validator 强校验
+
+**Observability redaction** (`cairn/src/cairn/dispatcher/observability/redaction.py` + `cairn/src/cairn/server/observability/redaction.py`)
+
+- 升级 BUILTIN bearer 正则为 `(?i)(?<![A-Za-z_])(Authorization"?\s*:\s*"?Bearer"?\s+)[A-Za-z0-9._~+/=-]+`
+- 覆盖 `Authorization: Bearer <tk>` / `Authorization: "Bearer <tk>"` / JSON 编码 `"Authorization": "Bearer <tk>"`,不命中 `XAuthorization` 等
+- dispatch.yaml `observability.redaction_patterns` 默认加 `Authorization: Bearer \\S+`,用户可继续追加
+
+**dispatch.yaml / .env.example**
+
+- dispatch.yaml 增加一个 http MCP server 的注释样例(默认未启用,留给用户 uncomment 改)
+- `.env.example` 增加 `MCP_AUTH_TOKEN=` 占位 + 末尾 SECURITY 注释(不要把 `.env` 内容贴到 issue tracker / IM / 邮件 / 截图;轮换 `MCP_AUTH_TOKEN` 后 in-flight worker 需自然回收,见 `container.completed_action`)
+
+**测试** (`cairn/tests/test_mcp_http_transport.py`,24 case)
+
+- `McpServerCapabilityConfigHttpTests` (9): stdio 缺 `command` / http 缺 `url` / url scheme 校验 / bearer_token_env env 未设 → ValueError / bearer_token_env env 已设 → 通过 / healthcheck_timeout bounds / stdio 不接受 bearer_token_env / http 仅 url / stdio 不带 transport 字段
+- `DispatchConfigInterpTests` (1): bearer_token_env 引用到的 env 名不会被 `${VAR}` 插值吞掉
+- `McpInjectionTests` (5): stdio detail shape / http detail with bearer resolves token / http detail without bearer / mcp_detail 不含 transport & bearer_env / mcp.json 混合 transport
+- `HttpProbeTests` (3): localhost 可达 / 不可达 host 返回 False / 无 host URL 返回 False
+- `CodexAdapterHttpTests` (3): stdio 走 command / http 走 url + bearer_token_env_var / http 无 bearer 只走 url
+- `RedactionTests` (3): dispatcher 模块 bearer token 被脱敏 / server 模块 bearer token 被脱敏 / JSON 形式 `Authorization` header 也被脱敏
+
+### 验证结果
+
+- `compileall -q cairn/src/cairn` 0 错误
+- `unittest tests.test_mcp_http_transport` 24/24 通过
+- `DispatchConfig.load(dispatch.yaml)` 在 `DEEPSEEK_AUTH_TOKEN / CAIRN_REMOTE_SSH_HOST / USERNAME / PASSWORD` 4 个 env 设上后成功加载
+
+### 未完成事项 / 风险
+
+- **TLS 软提示未做** — 用户在上一轮明确"不对 http 访问告警",所以没在 schema 加 `warnings` 字段也没在 dispatch.yaml 注释里写 http→https 升级提示。后续若需要,可单独 PR 加 `McpServerCapabilityConfig.warnings: list[str]`。
+- **SSRF 未做** — schema 接受任意 `http://` 与内网 URL;worker 容器可通过 `cairn` network 触达内网 MCP。SSRF 是 deployment / egress 过滤问题,留作后续。
+- **多 URL / failover** — schema 仍为单 `url: str`,不支持主备轮询。需要时升 `urls: list[str] + failover: bool`,向后兼容(`url` 退化为单元素 `urls`)。
+- **Basic auth / OAuth / mTLS** — 未做;需要时 schema 升为 `auth: {type, ...}` discriminated union,`type=basic` / `oauth2` / `mtls`,向后兼容 `type=none`(默认)。
+- **Token 轮换不主动失效 in-flight worker** — 依赖 `container.completed_action` 自然回收;`.env.example` SECURITY 注释已写明。
+- **真实 Codex CLI 字段验证** — `mcp_servers.<id>.bearer_token_env_var` 这个 Codex CLI 字段名来自 MCP 文档与社区实践,未在真机 CI 跑通(本仓库的 worker container 没有真实 Codex CLI)。**首次联调时需实际起一个 HTTP MCP server,跑一次 bootstrap 任务,确认 Codex worker 真的能通过这个 env 拿 token 调通。** 若 Codex CLI 实际字段名不同,改 codex adapter 即可,不影响其他模块。
+- **网络可达性** — HTTP MCP server 在 host 上时,worker 容器默认走 `cairn` docker network,无法直接访问 host `127.0.0.1`。部署者需:把 host 端口 publish 到 cairn network 上的 sidecar / 反代,或改 `container.network_mode: host`(本项目不自动改)。dispatch.yaml 注释里已写。
+
+---
+
 ## 2026-06-03 · dispatch.yaml 密钥清理 + 增量同步 attachments/files/replay（已完成）
 
 ### 背景

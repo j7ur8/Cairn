@@ -394,6 +394,16 @@ Capability 与 Role 是控制面配置，不是黑板数据：
 
 MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使用 `--mcp-config` / `--add-dir`；Codex adapter 使用 `--add-dir` 与 `-c mcp_servers.<id>.*=...`。
 
+**HTTP transport**（Streamable HTTP, MCP 2025-03-26）— `McpServerCapabilityConfig.transport: "http"` 时走 `url` + 可选 `bearer_token_env`:
+
+- token 通过 env 注入,**不**写入 `mcp.json` 持久文件 (Codex 路径) 或**仅在序列化时现场拼**到 `headers` (Claude 路径),序列化后立即释放;
+- `bearer_token_env` 指向的 env var 名会合并进 worker container `environment`,确保 Codex / Claude 进程可通过 `os.environ` 拿到;
+- HTTP server 与 worker 容器的网络连通由部署者负责(可走 `cairn` docker network 或 `network_mode: host`),dispatch.yaml 不自动改 `network_mode` / `extra_hosts`;
+- `Authorization: Bearer ...` 由 observability `redaction.py` 内置正则兜底,即使下游 SDK 漏脱敏,落库前也会替换为 `Authorization: Bearer ***`;
+- HTTP MCP server 可达性由 `inject_project_capabilities` 在写 `mcp.json` 前做一次 TCP 探活(默认 1s,`healthcheck_timeout` 可配),失败 → 跳过该 mcp 并写 `injection.errors`;`catalog_payload.available` 不接探活结果,代表 config 有效而非 per-task 可达。
+
+未做(显式留作后续): TLS 软提示(按用户要求跳过)、SSRF 防护、多 URL 故障转移、Basic auth / OAuth / mTLS;token 轮换后 in-flight worker 需自然回收(`container.completed_action` 控制)。
+
 ### Cypher Agent
 
 `dispatch.yaml` 当前可使用 `runtime.prompt_group: "cypher"` 启用 Cypher Agent prompt group，面向自动化 CTF、授权渗透测试和漏洞研究。预置资源：

@@ -4,7 +4,7 @@ import re
 
 BUILTIN_PATTERNS = [
     r"(?i)(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|[A-Z0-9_]*(?:API_KEY|AUTH_TOKEN))\s*[:=]\s*['\"]?[^'\"\s,}]+",
-    r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+",
+    r"""(?i)(?<![A-Za-z_])(Authorization"?\s*:\s*"?Bearer"?\s+)[A-Za-z0-9._~+/=-]+""",
 ]
 
 

@@ -43,7 +43,15 @@ class DispatcherLoop:
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
         self.client = CairnClient(self.config.server)
-        self.container_manager = ContainerManager(self.config.container)
+        bearer_token_env_keys = tuple(
+            mcp.bearer_token_env
+            for mcp in self.config.capabilities.mcp_servers
+            if mcp.transport == "http" and mcp.bearer_token_env
+        )
+        self.container_manager = ContainerManager(
+            self.config.container,
+            bearer_token_env_keys=bearer_token_env_keys,
+        )
         self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
         self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, self.config.runtime.max_workers)))
         self.futures: dict[Future[str], RunningTask] = {}

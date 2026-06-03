@@ -262,6 +262,8 @@ docker compose up --build
 | `cairn/src/cairn/server/app.py` | FastAPI app |
 | `cairn/src/cairn/server/db.py` | SQLite schema |
 | `cairn/src/cairn/server/observability/` | 独立 Execution Log DB、API、脱敏与查询 |
+| `cairn/src/cairn/server/observability/redaction.py` | Server 侧内置脱敏(密码 / `*PASSWORD` / `*TOKEN` / `Authorization: Bearer ...`) |
+| `cairn/src/cairn/dispatcher/observability/redaction.py` | Dispatcher 侧内置脱敏,与 Server 端正则集合对齐 |
 | `cairn/src/cairn/server/routers/capabilities.py` | 项目 MCP/skill 能力启用、capability catalog、role catalog 与 project role API |
 | `cairn/src/cairn/server/routers/attachments.py` | 附件上传（multipart），自动写 Hint |
 | `cairn/src/cairn/server/routers/files.py` | 项目报告 / exploit / 附件文件列举与下载 |
@@ -313,6 +315,15 @@ ${CAIRN_REMOTE_SSH_PASSWORD}
 | `${VAR-default}` | 仅未设时使用 default；显式空串保留为空（等同 bash `-` 语义） |
 
 `dispatch.yaml` 中 SSH 字段用 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；LLM token 用 `${DEEPSEEK_AUTH_TOKEN}` 这种无默认形式，强制要求。
+
+**MCP HTTP transport**（`McpServerCapabilityConfig.transport: "http"`）— token 走 `${MCP_AUTH_TOKEN}` 形式注入:
+
+- `bearer_token_env: MCP_AUTH_TOKEN` 引用**变量名**而非值,被 `${VAR}` 插值跳过,加载时校验 env 必须存在,缺失即 `ValueError`。
+- Codex adapter 走 `-c mcp_servers.<id>.bearer_token_env_var=MCP_AUTH_TOKEN`,由 Codex 自身读 env;Claude adapter 在写 `mcp.json` 时**现场拼** `headers.Authorization: Bearer <token>`,序列化后立即释放,不进 `WorkerExecutionContext`。
+- 变量名会合并进 worker container `environment`,确保容器内 worker 进程能 `os.environ` 拿到。
+- HTTP MCP server 可达性由 `inject_project_capabilities` 在写 `mcp.json` 前做 TCP 探活(默认 1s),失败 → 跳过该 mcp,UI 标 `unavailable`。
+- HTTP MCP server 与 worker 容器的网络连通由部署者负责(可改 `container.network_mode` 或把端口 bind 到 `cairn` network);`Authorization: Bearer ...` 由 observability `redaction.py` 兜底,落库前替换为 `Authorization: Bearer ***`。
+- `.env.example` 末尾有 SECURITY 注释(不要把 `.env` 内容贴到 issue tracker / IM / 邮件 / 截图,定期轮换 `MCP_AUTH_TOKEN`)。
 
 **本地运行（直接 `uv run`）** — 在 shell 临时 export，或用 direnv:
 

@@ -272,18 +272,37 @@ class RemoteSupportConfig(BaseModel):
 
 
 class McpServerCapabilityConfig(BaseModel):
+    """Capability config for a single MCP server.
+
+    Two transports are supported:
+
+    - ``stdio`` (default, back-compat): the MCP server runs as a local subprocess
+      inside the worker container, addressed by ``command`` / ``args`` / ``env``.
+    - ``http``: the agent connects to a remote MCP server over HTTP. The server
+      is typically reached via ``host.docker.internal`` (macOS/Windows Docker
+      Desktop) or a user-defined alias (Linux Docker Engine: ``--add-host``).
+      Auth is bearer-token-in-env (``bearer_token_env`` names an env var that
+      must be set in ``os.environ`` at ``DispatchConfig.load()`` time and is
+      passed through to the worker container so Codex / Claude can resolve it
+      at call time).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     id: str
     name: str
-    command: str
+    transport: Literal["stdio", "http"] = "stdio"
+    command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    bearer_token_env: str | None = None
+    healthcheck_timeout: float = Field(default=1.0, gt=0, le=30)
     source_path: str | None = None
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
     description: str = ""
 
-    @field_validator("id", "name", "command", "source_path")
+    @field_validator("id", "name", "command", "source_path", "url", "bearer_token_env")
     @classmethod
     def validate_required_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -292,6 +311,42 @@ class McpServerCapabilityConfig(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("url must start with http:// or https://")
+        return value
+
+    @model_validator(mode="after")
+    def validate_transport(self) -> "McpServerCapabilityConfig":
+        if self.transport == "stdio":
+            if not self.command:
+                raise ValueError(
+                    f"mcp_server {self.id}: stdio transport requires 'command'"
+                )
+        elif self.transport == "http":
+            if not self.url:
+                raise ValueError(
+                    f"mcp_server {self.id}: http transport requires 'url'"
+                )
+            if self.bearer_token_env and self.bearer_token_env not in os.environ:
+                raise ValueError(
+                    f"mcp_server {self.id}: bearer_token_env references ${self.bearer_token_env} "
+                    f"but that env var is not set in the dispatcher process"
+                )
+        else:
+            raise ValueError(
+                f"mcp_server {self.id}: transport must be 'stdio' or 'http', got {self.transport!r}"
+            )
+        if self.transport != "http" and self.bearer_token_env is not None:
+            raise ValueError(
+                f"mcp_server {self.id}: bearer_token_env is only valid for http transport"
+            )
+        return self
 
     @field_validator("description")
     @classmethod
@@ -899,9 +954,21 @@ def _interpolate_env_string(value: str, source: str) -> str:
     return _ENV_VAR_RE.sub(replace, value)
 
 
+# Keys that store an env var NAME (not a value). ${ENV_VAR} interpolation is
+# intentionally skipped for these so the literal name reaches the schema, and
+# the value is resolved at use time (e.g. when injecting into worker env or
+# emitting mcp_servers.<id>.bearer_token_env_var).
+_INTERPOLATION_SKIP_KEYS = frozenset({"bearer_token_env"})
+
+
 def _interpolate_env_data(data, source):
     if isinstance(data, dict):
-        return {key: _interpolate_env_data(item, f"{source}.{key}" if source else str(key)) for key, item in data.items()}
+        return {
+            key: data[key] if key in _INTERPOLATION_SKIP_KEYS else _interpolate_env_data(
+                item, f"{source}.{key}" if source else str(key),
+            )
+            for key, item in data.items()
+        }
     if isinstance(data, list):
         return [_interpolate_env_data(item, f"{source}[{index}]") for index, item in enumerate(data)]
     if isinstance(data, str):

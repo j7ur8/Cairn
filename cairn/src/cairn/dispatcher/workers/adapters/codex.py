@@ -101,12 +101,26 @@ class CodexDriver(RegexSessionDriver):
             args.extend(["--add-dir", context.skill_root])
         for server in context.mcp_servers or []:
             server_id = server.get("id")
-            command = server.get("command")
             if not isinstance(server_id, str) or not server_id:
                 continue
+            transport = server.get("transport", "stdio")
+            prefix = f"mcp_servers.{server_id}"
+            if transport == "http":
+                url = server.get("url")
+                if not isinstance(url, str) or not url:
+                    continue
+                args.extend(["-c", f"{prefix}.url={json.dumps(url)}"])
+                bearer_env = server.get("bearer_token_env")
+                if isinstance(bearer_env, str) and bearer_env:
+                    args.extend([
+                        "-c",
+                        f"{prefix}.bearer_token_env_var={json.dumps(bearer_env)}",
+                    ])
+                continue
+            # stdio (default)
+            command = server.get("command")
             if not isinstance(command, str) or not command:
                 continue
-            prefix = f"mcp_servers.{server_id}"
             args.extend(["-c", f"{prefix}.command={json.dumps(command)}"])
             server_args = server.get("args")
             if isinstance(server_args, list):

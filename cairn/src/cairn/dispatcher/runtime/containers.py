@@ -25,12 +25,30 @@ class ContainerManager:
     _STARTUP_PREFIX = "cairn-startup-healthcheck-"
     _STARTUP_PROJECT_ID = "startup-healthcheck"
 
-    def __init__(self, config: ContainerConfig):
+    def __init__(
+        self,
+        config: ContainerConfig,
+        bearer_token_env_keys: tuple[str, ...] = (),
+    ):
         self._config = config
+        self._bearer_token_env_keys = tuple(dict.fromkeys(bearer_token_env_keys))  # dedupe, keep order
         self._client = docker.from_env()
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
         self._logged_mount_mismatches: set[tuple[str, str]] = set()
+
+    def _bearer_token_environment(self) -> dict[str, str]:
+        """Resolve bearer-token env var references to actual values from the
+        dispatcher's ``os.environ``. Only includes vars that are set, so a
+        missing var (which would have failed ``DispatchConfig.load()`` anyway)
+        is silently dropped here.
+        """
+        env: dict[str, str] = {}
+        for name in self._bearer_token_env_keys:
+            value = os.environ.get(name)
+            if value is not None:
+                env[name] = value
+        return env
 
     def close(self) -> None:
         self._client.close()
@@ -58,6 +76,7 @@ class ContainerManager:
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
         try:
             volumes = self._docker_volumes(project_id)
+            env = self._bearer_token_environment() or None
             self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -66,6 +85,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
+                environment=env,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -97,6 +117,7 @@ class ContainerManager:
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self._config.image)
         try:
             volumes = self._docker_volumes(self._STARTUP_PROJECT_ID)
+            env = self._bearer_token_environment() or None
             self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -105,6 +126,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
+                environment=env,
             )
         except DockerException as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
