@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 import json
+import os
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
@@ -547,6 +549,7 @@ class DispatchConfig(BaseModel):
     @classmethod
     def load(cls, path: Path) -> "DispatchConfig":
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = _interpolate_env_data(data, str(path))
         data = prepare_bind_mount_data(data, path.parent)
         data = prepare_capability_data(data, path.parent)
         data = prepare_role_data(data, path.parent)
@@ -859,3 +862,48 @@ def _parse_mock_probability(worker_name: str, phase_key: str, outcomes: dict[str
     if value < 0 or value > 1:
         raise ValueError(f"worker {worker_name} {phase_key}.outcomes.{outcome} must be between 0 and 1")
     return value
+
+
+_ENV_VAR_RE = re.compile(
+    r"\$\{(?P<name>[A-Z_][A-Z0-9_]*)(?:(?P<colon>:)?-(?P<default>[^}]*))?\}"
+)
+
+
+def _interpolate_env_string(value: str, source: str) -> str:
+    def replace(match):
+        name = match.group("name")
+        colon = match.group("colon")
+        default = match.group("default")
+        env_value = os.environ.get(name)
+
+        if colon == ":":
+            # ${VAR:-default}: default if env is unset OR empty (bash :- semantics)
+            if env_value is None or env_value == "":
+                if default is None:
+                    raise ValueError(
+                        f"{source} references ${{{name}:-}} but env var is unset or empty"
+                    )
+                return default
+            return env_value
+        if default is not None:
+            # ${VAR-default}: default only if env is unset; empty stays empty (bash - semantics)
+            if env_value is None:
+                return default
+            return env_value
+        # ${VAR}: required, error if unset
+        if env_value is None:
+            raise ValueError(
+                f"{source} references ${{{name}}} but environment variable is not set"
+            )
+        return env_value
+    return _ENV_VAR_RE.sub(replace, value)
+
+
+def _interpolate_env_data(data, source):
+    if isinstance(data, dict):
+        return {key: _interpolate_env_data(item, f"{source}.{key}" if source else str(key)) for key, item in data.items()}
+    if isinstance(data, list):
+        return [_interpolate_env_data(item, f"{source}[{index}]") for index, item in enumerate(data)]
+    if isinstance(data, str):
+        return _interpolate_env_string(data, source)
+    return data

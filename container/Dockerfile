@@ -1,7 +1,7 @@
 FROM --platform=amd64 kalilinux/kali-rolling:latest
 
-RUN apt update && \
-    apt -y install kali-linux-headless && \
+RUN apt update
+RUN apt -y install kali-linux-headless && \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -9,8 +9,8 @@ RUN useradd -m -s /bin/bash kali && \
     echo "kali ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER kali
 
-RUN sudo apt update && \
-    sudo apt install -y bsdextrautils npm jq iputils-ping sshpass ncat rlwrap \
+RUN sudo apt update
+RUN sudo apt install -y bsdextrautils npm jq iputils-ping sshpass ncat rlwrap \
     bloodyad coercer enum4linux-ng pwncat chisel-common-binaries \
     dirsearch yq krb5-user gitleaks naabu nikto netexec adb \
     mcp-kali-server metasploit-framework \

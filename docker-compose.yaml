@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     environment:
       CAIRN_ATTACHMENTS_ROOT: /Users/jmac/Documents/GitHub/Cairn/datas/attachments
+      CAIRN_PROJECT_FILES_ROOT: /Users/jmac/Documents/GitHub/Cairn/datas/project-files
       CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
     volumes:
       - ./datas/cairn/:/root/.local/share/cairn/
@@ -33,6 +34,12 @@ services:
       dockerfile: Dockerfile
     image: cairn-app
     container_name: cairn-dispatcher
+    # Pull ${ENV_VAR} substitutions (DEEPSEEK_AUTH_TOKEN, etc.) from the
+    # project-root .env file. The file must NEVER be committed; see
+    # .gitignore and .dockerignore. SSH defaults in dispatch.yaml use
+    # ${VAR:-} so the dispatcher still starts when these are unset.
+    env_file:
+      - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dispatch.yaml:/cairn/dispatch.yaml

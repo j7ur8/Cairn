@@ -69,7 +69,10 @@ Cairn/
 │       │   │   ├── hints.py
 │       │   │   ├── settings.py
 │       │   │   ├── export.py
-│       │   │   └── capabilities.py
+│       │   │   ├── capabilities.py
+│       │   │   ├── attachments.py
+│       │   │   ├── files.py
+│       │   │   └── replay.py
 │       │   └── static/
 │       │       ├── index.html
 │       │       └── vendor/
@@ -400,7 +403,6 @@ MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使
 | `capabilities/skills/cypher-ctf` | CTF workflow |
 | `capabilities/skills/cypher-pentest` | 授权渗透测试 workflow |
 | `capabilities/skills/cypher-vuln-research` | 漏洞研究 / PoC / root cause workflow |
-| `capabilities/skills/cypher-flag-oob` | flag 提交、OOB、tmux listener 约定 |
 | `capabilities/roles/cypher-ctf-operator/ROLE.md` | CTF primary role |
 | `capabilities/roles/cypher-pentest-operator/ROLE.md` | Pentest primary role |
 | `capabilities/roles/cypher-vuln-researcher/ROLE.md` | Vulnerability research primary role |
@@ -531,6 +533,32 @@ checkpoint 不存在
 | GET | `/projects/{project_id}/export?format=yaml` | 导出 YAML 图快照 |
 | GET | `/projects/{project_id}/export?format=timeline` | 导出时间线 |
 
+### Attachments
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/projects/{project_id}/attachments` | 上传文件到项目附件目录，并自动写入指向 `/mnt/attachments/{project_id}/<file>` 的 Hint |
+
+> 🔧 向后兼容：附件上传通过 `multipart/form-data` 的 `files` 与可选 `descriptions` 字段，文件名会经过 `[^A-Za-z0-9._ -]+` 安全过滤。Worker 容器内挂载点固定为 `CAIRN_WORKER_ATTACHMENTS_ROOT`（默认 `/mnt/attachments`）。
+
+### Files
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/projects/{project_id}/files` | 列出项目报告 / exploit / vuln-research / 附件文件 |
+| GET | `/projects/{project_id}/files/download?source=project\|attachment&path=...` | 下载指定文件 |
+
+> ⚠️ 注意：路径必须相对于 `datas/project-files/{project_id}/` 或 `datas/attachments/{project_id}/`，且不可包含 `..`。源码在 `cairn/src/cairn/server/routers/files.py` 中实现。
+
+### Replay
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/projects/{project_id}/replay-runs` | 基于已完成项目创建 replay run（含 replay 子项目 + 步骤表） |
+| POST | `/projects/{project_id}/replay-runs/{run_id}/advance` | Dispatcher 推进下一步 replay intent |
+
+> ⚡ 性能敏感：replay 不重新跑 LLM，而是按原项目的 step 顺序复演 `intents → facts` 关系，每步创建新 intent 并等候 worker 产出新 fact。Dispatcher 在主循环中通过 `_advance_replay_project()` 调用 advance API。
+
 ### Capabilities 与 Roles
 
 | 方法 | 路径 | 用途 |
@@ -611,6 +639,19 @@ capabilities:
       name: "Cypher CTF"
       source_path: "./capabilities/skills/cypher-ctf"
       task_types: ["bootstrap", "explore", "reason"]
+  mcp_servers:
+    - id: "kali-server-mcp"
+      name: "Kali Server MCP"
+      command: "/usr/local/bin/kali-mcp-stdio"
+      args: []
+      env: {}
+      task_types: ["bootstrap", "explore", "reason"]
+    - id: "metasploit-mcp"
+      name: "Metasploit MCP"
+      command: "/usr/local/bin/metasploit-mcp-stdio"
+      args: []
+      env: {}
+      task_types: ["explore", "reason"]
 
 roles:
   - id: "cypher-ctf-operator"
@@ -634,18 +675,27 @@ container:
       read_only: false
 
 workers:
+  - name: "claudecode"
+    type: "claudecode"
+    task_types: [bootstrap, reason, explore]
+    max_running: 4
+    priority: 0
+    env:
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL}"
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL}"
+      ANTHROPIC_AUTH_TOKEN: "${ANTHROPIC_AUTH_TOKEN}"
   - name: "codex"
     type: "codex"
     task_types: [bootstrap, reason, explore]
     max_running: 2
-    priority: 0
+    priority: 1
     env:
-      CODEX_MODEL: "{{CODEX_MODEL}}"
-      CODEX_BASE_URL: "{{CODEX_BASE_URL}}"
-      OPENAI_API_KEY: "{{OPENAI_API_KEY}}"
+      CODEX_MODEL: "${CODEX_MODEL}"
+      CODEX_BASE_URL: "${CODEX_BASE_URL}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
 ```
 
->>⚠️ 注意：仓库中的 `dispatch.yaml` 可能包含真实 API key。文档和示例中必须使用 `{{PLACEHOLDER}}`，不要复制真实密钥。
+> 🔧 向后兼容：`DispatchConfig.load()` 在 YAML 解析后、`pydantic` 校验前会递归地把所有字符串里的 `${ENV_VAR}` 替换成环境变量值；引用未设置的环境变量会立刻抛错，错误信息带 YAML 路径（如 `dispatch.yaml.remote_support.ssh.password`）。文档示例统一使用 `${...}` 形式占位。
 
 ### Execution Log 与 Remote Support
 
@@ -684,7 +734,7 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 | 单 Dispatcher 假设 | 当前设计和文档明确按单 Dispatcher 实例运行，不支持多 Dispatcher 共同调度同一 Server |
 | Catalog 全量覆盖 | Dispatcher 启动时全量覆盖 capability/role catalog；多 Dispatcher 时配置必须一致 |
 | 语义循环风险 | 可防进程死循环，但不能完全防 Agent 持续生成低价值 intent |
-| 密钥泄露风险 | `dispatch.yaml` 是运行期配置，必须避免提交真实 API key |
+| 密钥泄露风险 | 已迁移：`dispatch.yaml` 使用 `${ENV_VAR}` 引用敏感凭据，Config 加载时强制要求环境变量被设置 |
 | 高权限执行风险 | Worker CLI 使用危险执行参数，Kali 容器内工具能力强，必须隔离运行 |
 | 测试覆盖不明显 | 当前仓库未看到系统性测试目录，变更后应优先用 mock prompt/worker 做端到端验证 |
 | Intent 历史不足 | 协议只记录当前/最终 worker，不保留完整 worker 历史 |

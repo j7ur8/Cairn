@@ -234,6 +234,9 @@ class DispatcherLoop:
                 project.project.status,
             )
             return False
+        replay_action = self._advance_replay_project(project.project.id)
+        if replay_action is not None:
+            return replay_action
         if self._is_initial_project(project):
             if project.project.reason is not None:
                 return False
@@ -283,6 +286,53 @@ class DispatcherLoop:
             return False
         export_yaml = self.client.export_project(summary.id)
         return self._dispatch_reason(project, export_yaml, reason_trigger)
+
+    def _advance_replay_project(self, project_id: str) -> bool | None:
+        response = self.client.advance_replay_run(project_id)
+        if response.status_code == 404:
+            return None
+        if not response.ok:
+            self._log_changed(
+                f"project:{project_id}:replay_advance_error",
+                logging.WARNING,
+                "replay advance failed project=%s status=%s body=%s",
+                project_id,
+                response.status_code,
+                response.text,
+            )
+            return False
+        data = response.data
+        if not isinstance(data, dict) or not data.get("is_replay"):
+            return None
+        action = str(data.get("action") or "")
+        if action == "created_intent":
+            self._clear_project_log_state(project_id)
+            LOG.info("advanced replay project=%s created_intent=%s", project_id, data.get("intent_id"))
+            return True
+        if action == "completed":
+            self._clear_project_log_state(project_id)
+            LOG.info("advanced replay project=%s completed", project_id)
+            return True
+        if action == "blocked":
+            self._log_changed(
+                f"project:{project_id}:replay_blocked",
+                logging.WARNING,
+                "replay project blocked project=%s detail=%s",
+                project_id,
+                data.get("detail") or "",
+            )
+            return False
+        if action == "waiting":
+            return None
+        self._log_changed(
+            f"project:{project_id}:replay_waiting",
+            logging.DEBUG,
+            "replay project waiting project=%s action=%s intent=%s",
+            project_id,
+            action,
+            data.get("intent_id"),
+        )
+        return False
 
     def _dispatch_initial_project(self, project: ProjectDetail) -> bool:
         intent = self._get_bootstrap_intent(project)

@@ -16,6 +16,7 @@ Use this skill for source-code audit, CVE reproduction, exploit adaptation, bina
 4. Build the smallest reproducible trigger.
 5. Confirm impact and constraints.
 6. Save PoC, logs, crash samples, root-cause notes, and patch suggestions.
+7. Before completion, write the final Markdown vulnerability research report to `/mnt/project/reports/vulnerability-research-report.md`.
 
 ## Evidence layout
 
@@ -25,7 +26,20 @@ Use this skill for source-code audit, CVE reproduction, exploit adaptation, bina
 /mnt/project/vuln-research/repro.sh
 /mnt/project/vuln-research/crash.bin
 /mnt/project/vuln-research/patch.diff
+/mnt/project/reports/vulnerability-research-report.md
 ```
+
+## Final report requirements
+
+`/mnt/project/reports/vulnerability-research-report.md` must include:
+
+- Target component, version/commit, runtime truth, and assumptions.
+- Root cause with source file/line or binary offset when available.
+- Input vector, vulnerable sink, and exploitability analysis.
+- Minimal PoC/reproducer path and exact reproduction steps.
+- Crash logs, traces, request/response, or other decisive evidence.
+- Affected versions/prerequisites and confidence/severity.
+- Fix direction, patch diff, or mitigation.
 
 ## Required fields for a strong finding
 
@@ -47,9 +61,9 @@ Use this skill for source-code audit, CVE reproduction, exploit adaptation, bina
 ## Prefix examples
 
 ```text
-[cypher:finding type=REPO_FINDING confidence=0.88 severity=high tags=code-audit,path-traversal artifacts=/mnt/project/vuln-research/root-cause.md cleanup=none] User-controlled `filename` reaches `os.path.join(upload_dir, filename)` without normalization in app/routes.py:88, enabling path traversal.
+[cypher:finding type=REPO_FINDING confidence=0.88 severity=high tags=code-audit,path-traversal artifacts=/mnt/project/vuln-research/root-cause.md,/mnt/project/reports/vulnerability-research-report.md cleanup=none] User-controlled `filename` reaches `os.path.join(upload_dir, filename)` without normalization in app/routes.py:88, enabling path traversal.
 ```
 
 ```text
-[cypher:finding type=EXPLOIT_RESULT confidence=0.95 severity=critical tags=cve,poc,rce artifacts=/mnt/project/vuln-research/poc.py,/mnt/project/vuln-research/repro.log cleanup=none] The saved PoC triggers unauthenticated template injection and executes `id` on the vulnerable local service.
+[cypher:finding type=EXPLOIT_RESULT confidence=0.95 severity=critical tags=cve,poc,rce artifacts=/mnt/project/vuln-research/poc.py,/mnt/project/vuln-research/repro.log,/mnt/project/reports/vulnerability-research-report.md cleanup=none] The saved PoC triggers unauthenticated template injection and executes `id` on the vulnerable local service.
 ```

@@ -56,10 +56,13 @@ remote_support:
   dnslog:
     url: ""
   ssh:
-    host: "113.31.113.69"
+    # Remote SSH support is opt-in. Empty defaults (${VAR:-}) mean "feature
+    # disabled" — RemoteSupportConfig.ssh.is_complete stays False and no
+    # CAIRN_REMOTE_SSH_* env is injected into workers.
+    host: "${CAIRN_REMOTE_SSH_HOST:-}"
     port: 22
-    username: "ubuntu"
-    password: "REDACTED-SSH-PASSWORD"
+    username: "${CAIRN_REMOTE_SSH_USERNAME:-}"
+    password: "${CAIRN_REMOTE_SSH_PASSWORD:-}"
 
 capabilities:
   # 能力 catalog 真相源。Dispatcher 启动时会全量 POST 到 Server 的 /capabilities/catalog。
@@ -150,11 +153,11 @@ container:
   # "Attachment source code is mounted at /mnt/attachments/web-src."
   bind_mounts:
     - name: "ctf-attachments"
-      host_path: "/Users/jmac/Documents/GitHub/Cairn/datas/attachments"
+      host_path: "./datas/attachments"
       container_path: "/mnt/attachments"
       read_only: true
     - name: "project-files"
-      host_path: "/Users/jmac/Documents/GitHub/Cairn/datas/project-files/{project_id}"
+      host_path: "./datas/project-files/{project_id}"
       container_path: "/mnt/project"
       read_only: false
 
@@ -170,7 +173,7 @@ workers:
     env:
       ANTHROPIC_MODEL: "deepseek-v4-pro"
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
-      ANTHROPIC_AUTH_TOKEN: "REDACTED-DEEPSEEK"
+      ANTHROPIC_AUTH_TOKEN: "${DEEPSEEK_AUTH_TOKEN}"
 
 #  - name: "codex"
 #    type: "codex"
@@ -180,7 +183,7 @@ workers:
 #    env:
 #      CODEX_MODEL: "gpt-5.4"
 #      CODEX_BASE_URL: "https://seuapi.20250731.xyz"
-#      OPENAI_API_KEY: "REDACTED-CODEX"
+#      OPENAI_API_KEY: "${CODEX_OPENAI_API_KEY}"
 
 #  - name: "pi_qwen3.6-plus"
 #    type: "pi"

@@ -128,6 +128,13 @@ class CairnClient:
             json={"from": from_ids, "description": description, "creator": creator, "worker": None},
         )
 
+    def advance_replay_run(self, project_id: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/replay-runs/advance",
+            json={},
+        )
+
     def get_project_capabilities(self, project_id: str) -> ApiResult:
         try:
             response = self._session().get(

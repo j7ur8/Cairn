@@ -121,6 +121,36 @@ CREATE TABLE IF NOT EXISTS project_roles (
     role_prompt_sha256 TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS replay_runs (
+    id TEXT PRIMARY KEY,
+    source_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    replay_project_id TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'active',
+    completion_description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS replay_fact_map (
+    run_id TEXT NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE,
+    source_fact_id TEXT NOT NULL,
+    replay_fact_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, source_fact_id)
+);
+
+CREATE TABLE IF NOT EXISTS replay_steps (
+    run_id TEXT NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL,
+    source_intent_id TEXT NOT NULL,
+    source_to_fact_id TEXT NOT NULL,
+    replay_intent_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT,
+    concluded_at TEXT,
+    PRIMARY KEY (run_id, step_index),
+    UNIQUE (run_id, source_intent_id)
+);
 """
 
 

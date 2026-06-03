@@ -166,13 +166,18 @@ runtime:
 
 capabilities:
   mcp_servers:
-    - id: "example-mcp"
-      name: "Example MCP"
-      command: "python3"
-      args: ["{capability_root}/mcp/example-mcp/server.py", "--stdio"]
+    - id: "kali-server-mcp"
+      name: "Kali Server MCP"
+      command: "/usr/local/bin/kali-mcp-stdio"
+      args: []
       env: {}
-      source_path: "./capabilities/mcp/example-mcp"
       task_types: ["bootstrap", "explore", "reason"]
+    - id: "metasploit-mcp"
+      name: "Metasploit MCP"
+      command: "/usr/local/bin/metasploit-mcp-stdio"
+      args: []
+      env: {}
+      task_types: ["explore", "reason"]
   skills:
     - id: "cypher-ctf"
       name: "Cypher CTF"
@@ -188,12 +193,11 @@ roles:
 
 ### Cypher Agent 预置能力
 
-本轮已落地 `cypher` prompt group 和 4 个内置 skill：
+本轮已落地 `cypher` prompt group 和 3 个内置 skill：
 
 - `cypher-ctf`
 - `cypher-pentest`
 - `cypher-vuln-research`
-- `cypher-flag-oob`
 
 并提供 3 个 primary role：
 
@@ -259,6 +263,9 @@ docker compose up --build
 | `cairn/src/cairn/server/db.py` | SQLite schema |
 | `cairn/src/cairn/server/observability/` | 独立 Execution Log DB、API、脱敏与查询 |
 | `cairn/src/cairn/server/routers/capabilities.py` | 项目 MCP/skill 能力启用、capability catalog、role catalog 与 project role API |
+| `cairn/src/cairn/server/routers/attachments.py` | 附件上传（multipart），自动写 Hint |
+| `cairn/src/cairn/server/routers/files.py` | 项目报告 / exploit / 附件文件列举与下载 |
+| `cairn/src/cairn/server/routers/replay.py` | Replay run 创建与推进（基于已完成项目） |
 | `cairn/src/cairn/server/routers/projects.py` | Project/status/reason/complete API |
 | `cairn/src/cairn/server/routers/intents.py` | Intent create/heartbeat/release/conclude API |
 | `cairn/src/cairn/server/routers/export.py` | YAML/timeline 导出 |
@@ -275,22 +282,56 @@ docker compose up --build
 | `capabilities/roles/` | Cypher primary role prompt 文件 |
 | `cairn/src/cairn/dispatcher/workers/adapters/` | Claude/Codex/Pi/Mock 适配器 |
 | `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt；已支持 capability 与 role 注入 |
-| `cairn/src/cairn/dispatcher/prompts/cypher/` | Cypher Agent 专用 bootstrap/explore/reason/conclude prompt |
+| `cairn/src/cairn/dispatcher/prompts/cypher/` | Cypher Agent 专用 bootstrap/explore/reason/conclude prompt；强制最终交付物写盘 |
 | `cairn/src/cairn/dispatcher/observability/trace.py` | 解析 Codex/Claude 结构化执行轨迹 |
-| `dispatch.yaml` | 真实运行 Dispatcher 配置 |
+| `dispatch.yaml` | 真实运行 Dispatcher 配置；密钥全部用 `${ENV_VAR}` 引用 |
+| `.env.example` | 密钥模板，提交到 git；真实 `.env` 由本机 `cp` 出来使用 |
 | `dispatch_mock.yaml` | mock 运行配置 |
-| `container/Dockerfile` | Kali Worker 容器镜像 |
+| `container/Dockerfile` | Worker 容器镜像（Kali + Claude/Codex/Pi + MCP stdio 桥） |
+| `container/AGENTS.md` | Worker 容器内 Agent 操作约定 |
+| `container/README.md` | Worker 容器构建与 smoke test 步骤 |
+| `container/bin/kali-mcp-stdio` | Kali MCP stdio 桥，对应 dispatch.yaml `kali-server-mcp` |
+| `container/bin/metasploit-mcp-stdio` | Metasploit MCP stdio 桥，对应 dispatch.yaml `metasploit-mcp` |
 
 ## 敏感信息处理
 
-不要在文档、日志或示例里复制真实 API key、SSH 密码或远程辅助服务器凭据。所有密钥应写成：
+不要在文档、日志或示例里复制真实 API key、SSH 密码或远程辅助服务器凭据。文档示例统一写成 `${ENV_VAR}`：
 
 ```text
-{{OPENAI_API_KEY}}
-{{ANTHROPIC_AUTH_TOKEN}}
-{{PI_API_KEY}}
-{{REMOTE_SSH_PASSWORD}}
+${OPENAI_API_KEY}
+${ANTHROPIC_AUTH_TOKEN}
+${PI_API_KEY}
+${CAIRN_REMOTE_SSH_PASSWORD}
 ```
+
+`dispatch.yaml` 现在用 `${ENV_VAR}` 引用敏感字段。`DispatchConfig.load()` 加载时按以下规则解析:
+
+| 语法 | 行为 |
+| --- | --- |
+| `${VAR}` | 必须设置；未设则抛 `ValueError: ... environment variable is not set` |
+| `${VAR:-default}` | 未设或为空时使用 default（等同 bash `:-` 语义） |
+| `${VAR-default}` | 仅未设时使用 default；显式空串保留为空（等同 bash `-` 语义） |
+
+`dispatch.yaml` 中 SSH 字段用 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；LLM token 用 `${DEEPSEEK_AUTH_TOKEN}` 这种无默认形式，强制要求。
+
+**本地运行（直接 `uv run`）** — 在 shell 临时 export，或用 direnv:
+
+```bash
+brew install direnv
+# ~/.zshrc: eval "$(direnv hook zsh)"
+echo 'export DEEPSEEK_AUTH_TOKEN=sk-...' > Cairn/.envrc
+cd Cairn && direnv allow
+```
+
+**docker compose 部署** — 项目根的 `.env` 文件被 `cairn-dispatcher` 服务的 `env_file: - .env` 注入容器。`.env` 已被 `.gitignore` 和 `.dockerignore` 排除；`.env.example` 进了 git 作为模板:
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入真实密钥
+docker compose up --build cairn-dispatcher
+```
+
+这样 `dispatch.yaml` 和 `docker-compose.yaml` 都可以提交到公开仓库而不会泄露密钥。
 
 Execution Log 默认隐藏 `usage`，并会对 `CAIRN_REMOTE_SSH_PASSWORD` / 通用 `*PASSWORD` 做 redaction；但仍应避免主动把真实 secret 写入 prompt、fact 或文档。
 
@@ -307,3 +348,7 @@ Dispatcher 的 `observability` 配置控制是否记录 prompt/stdout/stderr/raw
 | 改容器生命周期 | `dispatcher/runtime/containers.py` |
 | 改 heartbeat 行为 | `dispatcher/runtime/heartbeat.py` + Server heartbeat API |
 | 改 MCP/skill/role 本地资源位置 | `capabilities/mcp/` / `capabilities/skills/<id>/` / `capabilities/roles/<id>/ROLE.md` + `dispatch.yaml` 的 `capabilities.*` / `roles.*` |
+| 加附件上传行为 | `cairn/src/cairn/server/routers/attachments.py` + `datas/attachments/` 主机目录 |
+| 加项目文件浏览/下载 | `cairn/src/cairn/server/routers/files.py` |
+| 加 Replay run 行为 | `cairn/src/cairn/server/routers/replay.py` + `dispatcher/scheduler/loop.py:_advance_replay_project()` |
+| 改 Worker 容器镜像/工具 | `container/Dockerfile` + `container/bin/*-mcp-stdio` + `dispatch.yaml` 的 `capabilities.mcp_servers` |

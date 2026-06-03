@@ -50,6 +50,20 @@ class AttachmentUploadResponse(BaseModel):
     attachments: list[AttachmentUpload]
 
 
+class ProjectFileItem(BaseModel):
+    source: Literal["project", "attachment"]
+    path: str
+    name: str
+    size: int
+    modified_at: str
+    category: Literal["reports", "exploit", "attachments", "other"]
+
+
+class ProjectFilesResponse(BaseModel):
+    project_id: str
+    files: list[ProjectFileItem]
+
+
 class ProjectReason(BaseModel):
     worker: str
     trigger: str
@@ -291,6 +305,41 @@ class ReopenResponse(BaseModel):
     project: ProjectMeta
     fact: Fact
     intent: Intent
+
+
+class ReplayRunCreateRequest(BaseModel):
+    title: str
+    origin: str
+    goal: str
+    hints: list[CreateHintInline] | None = None
+    capabilities: CapabilitySelection | None = None
+    role_id: str | None = None
+
+    @field_validator("title", "origin", "goal", "role_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class ReplayRunCreateResponse(BaseModel):
+    run_id: str
+    source_project_id: str
+    project: ProjectDetail
+
+
+class ReplayRunAdvanceResponse(BaseModel):
+    is_replay: bool
+    action: Literal["not_replay", "created_intent", "waiting", "completed", "blocked"]
+    status: Literal["not_replay", "active", "completed", "blocked"]
+    run_id: str | None = None
+    project_id: str | None = None
+    intent_id: str | None = None
+    detail: str | None = None
 
 
 class CapabilityCatalogItem(BaseModel):

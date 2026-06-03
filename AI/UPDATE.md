@@ -89,6 +89,97 @@
 
 ---
 
+## 2026-06-03 · dispatch.yaml 密钥清理 + 增量同步 attachments/files/replay（已完成）
+
+### 背景
+
+`dispatch.yaml` 在 2026-06-02 提交的真实运行配置中保留了真实 API key、SSH 密码等敏感字段；同 commit 起的若干工作又把若干个新模块（attachments / files / replay / container MCP stdio 桥）落到了代码里。本次按"先处理密钥，再增量同步 AI 文档"两步推进。
+
+### 已完成变更
+
+- `cairn/src/cairn/dispatcher/config.py` 新增 `${ENV_VAR}` 插值支持：
+  - `_ENV_VAR_RE` 匹配 `${NAME}` 形式（仅大写字母/下划线/数字）。
+  - `_interpolate_env_data()` 在 `DispatchConfig.load()` 入口处递归遍历 YAML 数据，替换所有字符串中的 `${ENV_VAR}`；未设置的环境变量会立刻抛错并带 YAML 路径。
+  - 不动 `{project_id}` 等 dispatcher 模板占位符，仍由 `prepare_*_data` 解析。
+- `dispatch.yaml`：
+  - 真实 SSH 主机/用户名/密码 → `${CAIRN_REMOTE_SSH_HOST}` / `${CAIRN_REMOTE_SSH_USERNAME}` / `${CAIRN_REMOTE_SSH_PASSWORD}`。
+  - 真实 deepseek token → `${DEEPSEEK_AUTH_TOKEN}`。
+  - 注释里的 codex 真 key → `${CODEX_OPENAI_API_KEY}`。
+  - `bind_mounts.host_path` 从机器绝对路径改为相对路径 `./datas/attachments` 与 `./datas/project-files/{project_id}`，由 `_resolve_bind_mount_host_path()` 相对 `dispatch.yaml` 解析。
+- 增量同步 AI 文档：
+  - `AI/ARCHITECTURE.md`：§1 目录树补 `attachments.py / files.py / replay.py`；§5 Cypher 表移除 `cypher-flag-oob`；§8 API 概览补 Attachments / Files / Replay 三组端点；§9 dispatch.yaml 示例用 `${...}` 形式与新增 MCP；§10 密钥风险更新为"已迁移"。
+  - `AI/CODEBASE_ANALYSIS.md`：ER 图补 `PROJECT_CAPABILITIES / PROJECT_ROLES / REPLAY_RUNS / REPLAY_FACT_MAP / REPLAY_STEPS` 五张表；§3 加 attachments / files / replay 三个 router 子节；§4 加 env 插值说明、`advance_replay_run` 协议方法、`_advance_replay_project` 调度钩子。
+  - `AI/PROJECT_OVERVIEW.md`：§Cypher Agent 移除 `cypher-flag-oob`；§本地资源目录示例切换为 kali-server-mcp / metasploit-mcp；§关键文件速查补三个新 router、container/{Dockerfile,AGENTS.md,README.md,bin/*-mcp-stdio}；§敏感信息处理更新为 `${ENV_VAR}` 形式与 `DispatchConfig.load()` 行为；§后续修改建议加新模块入口。
+  - 本文件追加本条记录。
+
+### 架构边界
+
+- `${ENV_VAR}` 插值发生在 YAML 解析之后、`pydantic` 校验之前，行为对所有 router / worker / capability / role 透明。
+- 仍然不持久化任何 secret：catalog / project_capabilities / project_roles 表里都只存 ID 与 sha256，token 必须由环境注入。
+- Replay 走的是"按原项目 step 顺序复演"，不调用任何 LLM 接口；只创建新 intent + 等待 worker 产出新 fact，所以它与 capability / role 控制面不交叉。
+- Attachments 自动落 Hint，Hint 写盘路径在 `datas/attachments/{project_id}/`，worker 容器内挂载点固定为 `${CAIRN_WORKER_ATTACHMENTS_ROOT}`（默认 `/mnt/attachments`）。
+
+### 验证结果
+
+- `PYTHONPATH=cairn/src python3 -m compileall -q cairn/src/cairn` 通过。
+- `DispatchConfig.load(Path('dispatch_mock.yaml'))` 通过。
+- `DispatchConfig.load(Path('dispatch.yaml'))`：
+  - 未设环境变量时抛 `ValueError: dispatch.yaml.remote_support.ssh.host references ${CAIRN_REMOTE_SSH_HOST} but environment variable is not set`。
+  - 设 `CAIRN_REMOTE_SSH_HOST / CAIRN_REMOTE_SSH_USERNAME / CAIRN_REMOTE_SSH_PASSWORD / DEEPSEEK_AUTH_TOKEN` 后加载成功，`remote_support.ssh.password` 与 `workers[0].env.ANTHROPIC_AUTH_TOKEN` 都正确替换。
+
+### 未完成事项/风险
+
+- 本次只清理 `dispatch.yaml` 当前文件，git 历史里仍有 `sk-d04ac7b031c648c7ad66a6fad48c0d0e` 与 `2sM4VkT4JczzaiNW`。这两个值已经在 DeepSeek 控制台与对应 SSH 主机侧轮换/失效后，可考虑用 `git filter-repo` 重写历史；如不重写，建议在仓库 README/安全策略中显式声明"已知历史密钥已失效"。
+- `docker-compose.yaml` 的 `CAIRN_ATTACHMENTS_ROOT / CAIRN_PROJECT_FILES_ROOT` 仍写死机器绝对路径 `/Users/jmac/Documents/GitHub/Cairn/datas/...`；本轮没改，原因是它们需要和容器内 bind-mount target 路径保持一致，跨机器时由部署方调整。
+- `files.py` / `replay.py` 仍处于工作树未提交状态（untracked / modified），其 API 形态可能在 commit 前再调整；如果 commit 前有 breaking change，需要再回同步 ARCHITECTURE.md §8 的表格。
+- 推进 replay 的 `_advance_replay_project` 没有处理 Server 返回 5xx 之外的所有 transient 错误（如 503），下一步应参考 `_dispatch_reason` 的一致重试策略。
+
+
+## 2026-06-03 · bash 风格 env 默认值 + docker compose `.env` / `env_file` 接入（已完成）
+
+### 背景
+
+上一轮把 `dispatch.yaml` 的敏感字段改为 `${ENV_VAR}` 引用，但实现里“未设就抛错”的策略让用户必须把所有 5 个变量都设上才能启动 Dispatcher（包含暂时用不到的 SSH 三个）。本轮加上 bash 风格默认值语法，并把 docker compose 的 `.env` + `env_file` 通路补齐。
+
+### 已完成变更
+
+- `cairn/src/cairn/dispatcher/config.py`:
+  - 正则升级为 `\${(?P<name>[A-Z_][A-Z0-9_]*)(?:(?P<colon>:)?-(?P<default>[^}]*))?\}`，支持 `${VAR}` / `${VAR:-default}` / `${VAR-default}` 三种语法。
+  - 替换函数对应三种分支：`${VAR}` 未设报错；`${VAR:-default}` 在 unset 或空时取 default；`${VAR-default}` 仅在 unset 时取 default。
+  - 19 个边界用例测试全部通过（覆盖 unset/空/已设、字符串拼接、未知前缀 `$NOT_REPLACED`、默认含空格等）。
+- `dispatch.yaml`：`remote_support.ssh.{host,username,password}` 改为 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；`RemoteSupportConfig.ssh.is_complete` 在三个字段为空时返回 `False`，SSH 支持自动禁用，`CAIRN_REMOTE_SSH_*` 不会被注入 worker env。`DEEPSEEK_AUTH_TOKEN` 与 `CODEX_OPENAI_API_KEY` 仍是无默认形式（强制设置）。
+- `docker-compose.yaml`：`cairn-dispatcher` 服务加 `env_file: - .env`，从项目根 `.env` 注入密钥。`cairn-server` 的现有 `environment:` 块不动（它本身不需要密钥）。
+- `.gitignore`：新增 `.env`。
+- `.dockerignore`：新增 `.env`（避免 `.env` 进入镜像构建上下文）。
+- 新建 `.env.example`：已提交到 git 的密钥模板，标注 `DEEPSEEK_AUTH_TOKEN` / `CODEX_OPENAI_API_KEY` / SSH 三个变量。
+- 增量同步 `AI/PROJECT_OVERVIEW.md` §敏感信息处理（新增语法表 + direnv 流程 + docker compose 流程），`AI/PROJECT_OVERVIEW.md` §关键文件速查（补 `.env.example`），`AI/CODEBASE_ANALYSIS.md` §4 `${ENV_VAR}` 插值（升级为 bash 风格说明）。
+- 本文件追加本条记录。
+
+### 架构边界
+
+- `${ENV_VAR}` 插值仍只发生在 `DispatchConfig.load()` 入口，对所有 router / worker / capability / role 透明。
+- Server DB / API 仍不持久化任何 secret；token 必须由 `os.environ` 注入（直接设、`.env`、direnv、CI secret 等任意途径都行）。
+- 密码默认值在 `dispatch.yaml` 里以 `${VAR:-}`（空默认）出现，从不写真值；LLM token 仍以无默认形式要求必须设置。
+- 部署者用 `.env` 喂入真实密钥，但 `.env` 不进 git、不进 Docker build context，只在容器运行时被 compose 读出。
+
+### 验证结果
+
+- `PYTHONPATH=cairn/src python3 -m compileall -q cairn/src/cairn` 通过。
+- `_interpolate_env_string` 19 个用例全过（覆盖 unset / 空 / 已设 / 字符串拼接 / 前缀 `$` / 默认值含空格等）。
+- `DispatchConfig.load(Path('dispatch.yaml'))`:
+  - 不设任何 env → 抛 `ValueError: dispatch.yaml.workers[0].env.ANTHROPIC_AUTH_TOKEN references ${DEEPSEEK_AUTH_TOKEN} but environment variable is not set`（DEEPSEEK 必设；SSH 三个空默认后不再报错）。
+  - 仅设 `DEEPSEEK_AUTH_TOKEN` → 加载成功，`remote_support.ssh.is_complete=False`，SSH 自动禁用。
+  - 设齐 `CAIRN_REMOTE_SSH_*` 与 `DEEPSEEK_AUTH_TOKEN` → 加载成功，`remote_support.ssh.is_complete=True`，SSH 启用。
+- `docker compose config` 在 `.env` 存在时正确 merge：`cairn-dispatcher.environment.DEEPSEEK_AUTH_TOKEN=sk-REPLACE-ME`。
+- `git check-ignore -v .env.example` 不返回任何规则，确认 `.env.example` 不被 `.env` 规则误忽略。
+
+### 未完成事项/风险
+
+- `.env` 文件本身仍可能在编辑器/IDE 同步、截图、复制粘贴时泄到 git 外。`AI/UPDATE.md` 第 132 行的密钥轮换/失效建议仍然适用。
+- 当前只支持 `${VAR}` / `${VAR:-}` / `${VAR-}` 三种语法。bash 的 `${VAR:=word}`（赋值默认）、`${VAR:?msg}`（带错误信息报错）、`${VAR:+word}`（反用）暂未实现；如果之后需要，regex 多加一组分支即可，行为与 `os.environ` 一一对齐。
+- `docker compose config` 在缺 `.env` 时会硬失败（`stat ... no such file or directory`）。文档已要求 `cp .env.example .env` 后再 `docker compose up`，但首次启动如果忘了 copy 会被这条硬卡住。可以考虑改成“缺 .env 时给空 env”，但默认 compose 行为对运维更安全（显式 fail fast）。
+
+
 ## 2026-06-01 · AI 文档目录结构对齐 project-review 技能（已完成）
 ## 2026-06-01 · capabilities/ 本地资源目录建立（已完成）
 

@@ -35,9 +35,15 @@ If no new intent is currently needed:
 
 First judge completion. Complete only when facts already prove the Goal.
 
-- CTF: flag / user+root / requested shell / successful submission is confirmed.
-- Pentest: requested vulnerability/evidence/reporting goal is met with proof.
-- Vuln research: root cause + reproducible PoC/impact + fix direction is confirmed.
+- CTF: flag / user+root / requested shell / successful submission is confirmed,
+  and facts reference `/mnt/project/reports/writeup.md`. A solve script under
+  `/mnt/project/exploit/solve.*` is required when the path is scriptable; if no
+  concrete script is possible, the WriteUp must explicitly say so and provide
+  exact manual reproduction steps.
+- Pentest: requested vulnerability/evidence/reporting goal is met with proof,
+  and facts reference `/mnt/project/reports/vulnerability-report.md`.
+- Vuln research: root cause + reproducible PoC/impact + fix direction is confirmed,
+  and facts reference `/mnt/project/reports/vulnerability-research-report.md`.
 
 `data.complete.from` must use IDs from `Valid facts` only.
 
@@ -77,15 +83,18 @@ Useful expected types:
 
 Use this priority order:
 
-1. If a high-confidence `FLAG`, `EXPLOIT_RESULT`, `SESSION`, root proof, or
-   report evidence already satisfies Goal, complete.
-2. If there are high-confidence vulnerability candidates, propose targeted
+1. If high-confidence objective evidence satisfies Goal AND the required final
+   deliverable artifact is already referenced by facts, complete.
+2. If objective evidence satisfies Goal but the required WriteUp, solve script,
+   or vulnerability report is missing, propose a `report_cleanup` intent to
+   create the missing deliverable instead of completing.
+3. If there are high-confidence vulnerability candidates, propose targeted
    verification intents before broader recon.
-3. If only a target exists, propose bounded recon.
-4. If web assets exist, propose endpoint/parameter/tech-specific paths.
-5. If credentials or sessions exist, propose post-exploitation / privesc paths.
-6. If source or binary attachments exist, propose audit/reversing/fuzzing paths.
-7. If the graph shows repeated failure, propose a course-correction intent.
+4. If only a target exists, propose bounded recon.
+5. If web assets exist, propose endpoint/parameter/tech-specific paths.
+6. If credentials or sessions exist, propose post-exploitation / privesc paths.
+7. If source or binary attachments exist, propose audit/reversing/fuzzing paths.
+8. If the graph shows repeated failure, propose a course-correction intent.
 
 {capability_instructions}
 

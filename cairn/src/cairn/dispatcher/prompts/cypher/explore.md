@@ -18,6 +18,10 @@ Read Origin / Hints / existing facts to confirm the active profile:
 - `/mnt/attachments` is read-only attachment/source mount.
 - `/mnt/project/{recon,exploit,vuln-research,reports,cleanup}` is your evidence
   workspace. Use it. Long scan / request / response bodies belong here.
+- When your intent confirms the goal or a report-ready result, update the final
+  deliverable draft: CTF `/mnt/project/reports/writeup.md` plus solve script under
+  `/mnt/project/exploit/` when scriptable; pentest `/mnt/project/reports/vulnerability-report.md`;
+  vuln research `/mnt/project/reports/vulnerability-research-report.md`.
 - Long-running listeners / shells / agents MUST run in `tmux` and be registered
   in `/mnt/project/cleanup/actions.md`.
 
@@ -55,10 +59,16 @@ Normal:
 - Do not output `complete` here; only the reason task may mark completion.
 - CTF: when a flag appears, write the exact flag string verbatim in the fact
   (and also save it to `/mnt/project/reports/`). If submission is in scope,
-  submit and record the response.
+  submit and record the response. If the exploit path is now known, save a
+  reusable solve script under `/mnt/project/exploit/solve.*` when feasible and
+  write/update `/mnt/project/reports/writeup.md`; if no script is possible,
+  document the exact manual reproduction in the WriteUp.
 - Pentest: every impact fact includes request file, response file, payload
-  reference, severity, and cleanup status.
-- Vuln research: include file:line, repro, PoC path, confidence, severity.
+  reference, severity, and cleanup status. If the requested vulnerability is
+  confirmed, write/update `/mnt/project/reports/vulnerability-report.md`.
+- Vuln research: include file:line, repro, PoC path, confidence, severity. If
+  root cause and impact are confirmed, write/update
+  `/mnt/project/reports/vulnerability-research-report.md`.
 
 {remote_support_instructions}
 

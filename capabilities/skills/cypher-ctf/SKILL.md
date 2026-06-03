@@ -15,15 +15,30 @@ A CTF task is complete only when one of these is confirmed:
 - The requested `flag{...}` / platform-specific flag is recovered.
 - The platform submit API returns success.
 - The requested shell / user / root proof is confirmed.
+- A Markdown WriteUp is saved at `/mnt/project/reports/writeup.md`.
+- A reusable solve/exploit script is saved under `/mnt/project/exploit/solve.*` whenever the path can be scripted.
+- If a concrete script cannot be produced, the WriteUp explicitly explains why and gives exact manual commands, inputs, and verification steps.
 - The Goal explicitly asks for an exploit or writeup and the required artifact is saved.
 
 ## Evidence rules
 
 - Save flags to `/mnt/project/reports/flags.txt`.
-- Save exploit scripts to `/mnt/project/exploit/`.
+- Save exploit scripts to `/mnt/project/exploit/`; prefer `/mnt/project/exploit/solve.py`, `solve.sh`, or another `solve.*` file for the final reusable path.
+- Save the final Markdown WriteUp to `/mnt/project/reports/writeup.md`.
 - Save scan output to `/mnt/project/recon/`.
 - Save reverse / pwn / crypto intermediate files to `/mnt/project/vuln-research/`.
 - If using a long-running listener, use `tmux` and record the session in `/mnt/project/cleanup/actions.md`.
+
+## Required WriteUp content
+
+`/mnt/project/reports/writeup.md` must include:
+
+- Challenge summary and detected category.
+- Attachment/service inventory used for the solve.
+- Vulnerability or trick root cause.
+- Step-by-step exploitation or solving commands.
+- Final flag/proof and where it was obtained.
+- Script path, or a clear reason no script is possible.
 
 ## Fast triage
 
@@ -44,7 +59,7 @@ A CTF task is complete only when one of these is confirmed:
 ## Output prefix examples
 
 ```text
-[cypher:finding type=FLAG confidence=1.0 severity=info tags=ctf,web artifacts=/mnt/project/reports/flags.txt cleanup=none] Recovered flag flag{example} from /var/www/html/config.php.
+[cypher:finding type=FLAG confidence=1.0 severity=info tags=ctf,web artifacts=/mnt/project/reports/flags.txt,/mnt/project/reports/writeup.md,/mnt/project/exploit/solve.py cleanup=none] Recovered flag flag{example} from /var/www/html/config.php.
 ```
 
 ```text

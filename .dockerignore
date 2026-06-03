@@ -21,3 +21,4 @@ htmlcov/
 
 # Runtime data is bind-mounted by compose; it is not needed for image builds.
 datas/
+.env

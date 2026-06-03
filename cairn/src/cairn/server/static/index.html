@@ -420,7 +420,7 @@
     </div>
     <div class="flex items-center gap-1.5">
       <template x-if="!replay.active">
-        <button @click="startProjectReplay()" class="px-2.5 py-1 rounded-lg border border-violet-200 text-xs text-violet-600 hover:bg-violet-50 transition flex items-center gap-1.5">
+        <button @click="handleReplayClick()" class="px-2.5 py-1 rounded-lg border border-violet-200 text-xs text-violet-600 hover:bg-violet-50 transition flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/><path d="M4 5v14"/></svg>
           Replay
         </button>
@@ -731,15 +731,19 @@
     <!-- Side panel -->
     <div class="border-l border-slate-200/60 bg-white flex flex-col overflow-hidden shrink-0 relative z-20" :style="{ width: sidePanelWidth + 'px', minWidth: sidePanelWidth + 'px', flexBasis: sidePanelWidth + 'px' }">
       <div class="flex border-b border-slate-100 shrink-0">
-        <button @click="sideTab = 'detail'" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
+        <button @click="switchSideTab('detail')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
           :class="sideTab === 'detail' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Detail</button>
-        <button @click="sideTab = 'hints'" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
+        <button @click="switchSideTab('hints')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
           :class="sideTab === 'hints' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
           Hints <span class="ml-0.5 text-[10px] opacity-60" x-text="project.hints.length"></span>
         </button>
-        <button @click="sideTab = 'capabilities'; loadCapabilities()" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
+        <button @click="switchSideTab('files')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'files' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
+          Files <span class="ml-0.5 text-[10px] opacity-60" x-show="projectFiles.length > 0" x-text="projectFiles.length"></span>
+        </button>
+        <button @click="switchSideTab('capabilities')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
           :class="sideTab === 'capabilities' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Caps</button>
-        <button @click="sideTab = 'log'" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
+        <button @click="switchSideTab('log')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
           :class="sideTab === 'log' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Log</button>
       </div>
 
@@ -803,6 +807,11 @@
             </div>
             <div class="p-4 space-y-4">
               <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
+              <template x-if="hasProjectFileRefs(selectedFactRecord().description)">
+                <button type="button" @click="viewProjectFiles()" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700 transition">
+                  View referenced files
+                </button>
+              </template>
               <div class="space-y-3 text-xs">
                 <template x-if="selectedFactId() === 'origin'">
                   <div class="pt-4 border-t border-slate-100">
@@ -887,6 +896,58 @@
             </div>
           </button>
         </template>
+      </div>
+
+      <!-- Files -->
+      <div x-show="sideTab === 'files'" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/40">
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold text-slate-700">Project Files</div>
+              <div class="text-[10px] text-slate-400">Download reports, exploit scripts, PoCs, and uploaded attachments</div>
+            </div>
+            <button @click="loadProjectFiles(true)" :disabled="filesLoading" class="px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50 transition disabled:opacity-40">Refresh</button>
+          </div>
+          <div class="p-4 space-y-4">
+            <template x-if="filesLoading">
+              <p class="text-xs text-slate-400">Loading files...</p>
+            </template>
+            <template x-if="filesError">
+              <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" x-text="filesError"></div>
+            </template>
+            <template x-if="!filesLoading && !filesError && projectFiles.length === 0">
+              <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center">
+                <p class="text-sm text-slate-300">No downloadable files yet</p>
+                <p class="text-xs text-slate-300 mt-1">Worker outputs under /mnt/project and uploaded attachments will appear here.</p>
+              </div>
+            </template>
+            <template x-for="group in projectFileGroups()" :key="group.id">
+              <section x-show="group.files.length > 0" class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest" x-text="group.label"></div>
+                  <span class="text-[10px] text-slate-300" x-text="`${group.files.length} file${group.files.length === 1 ? '' : 's'}`"></span>
+                </div>
+                <div class="space-y-2">
+                  <template x-for="file in group.files" :key="`${file.source}:${file.path}`">
+                    <article class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                      <div class="flex items-start gap-3">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="file.name"></div>
+                          <div class="mt-0.5 text-[10px] font-mono text-slate-400 break-all" x-text="projectFileDisplayPath(file)"></div>
+                          <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-slate-400">
+                            <span x-text="formatBytes(file.size)"></span>
+                            <span x-text="formatTime(file.modified_at)"></span>
+                          </div>
+                        </div>
+                        <a :href="projectFileDownloadUrl(file)" :download="file.name" class="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-700 transition">Download</a>
+                      </div>
+                    </article>
+                  </template>
+                </div>
+              </section>
+            </template>
+          </div>
+        </section>
       </div>
 
       <!-- Capabilities -->
@@ -1124,6 +1185,101 @@
       <button @click="showNewProject = false" :disabled="isCreatingProject" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
       <button @click="createProject()" :disabled="isCreatingProject || !newProject.title || !newProject.origin || !newProject.goal"
         class="px-5 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition disabled:opacity-30 shadow-sm shadow-brand-200" x-text="isCreatingProject ? 'Creating...' : 'Create'"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Replay Configuration -->
+<div x-show="showReplayConfigModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="if (!isCreatingReplayRun) showReplayConfigModal = false">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 border border-slate-200/60" @click.stop>
+    <h3 class="text-base font-semibold text-slate-700 mb-1">Replay Configuration</h3>
+    <p class="text-xs text-slate-400 mb-4" x-text="projectLabel(replayConfig.sourceProjectId, replayConfig.sourceProjectTitle)"></p>
+    <div class="space-y-3">
+      <input x-model="replayConfig.title" placeholder="Replay project title" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+      <textarea x-model="replayConfig.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <textarea x-model="replayConfig.goal" placeholder="Goal — what to achieve" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+
+      <div class="rounded-2xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
+        <div>
+          <label class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-1.5 block">Primary Role</label>
+          <select x-model="replayConfig.role_id" class="w-full px-3 py-2 border border-violet-100 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            <option value="">No role selected</option>
+            <template x-for="role in replayConfigRoleItems()" :key="role.id">
+              <option :value="role.id" x-text="role.name"></option>
+            </template>
+          </select>
+          <template x-if="replayConfigRoleItems().length === 0">
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles registered yet. Start a dispatcher to register role catalog.</p>
+          </template>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-2">MCP Servers</div>
+            <template x-if="replayConfigCapabilityItems('mcp_server').length === 0">
+              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No MCP servers declared</p>
+            </template>
+            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
+              <template x-for="item in replayConfigCapabilityItems('mcp_server')" :key="item.id">
+                <label class="block rounded-xl border border-violet-100 bg-white px-3 py-2 hover:bg-violet-50/40 transition">
+                  <div class="flex items-start gap-2">
+                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="replayConfigCapabilitySelected('mcp_server', item.id)" @change="toggleReplayConfigCapability('mcp_server', item.id, $event.target.checked)">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
+                    </div>
+                  </div>
+                </label>
+              </template>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-2">Skills</div>
+            <template x-if="replayConfigCapabilityItems('skill').length === 0">
+              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No skills declared</p>
+            </template>
+            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
+              <template x-for="item in replayConfigCapabilityItems('skill')" :key="item.id">
+                <label class="block rounded-xl border border-violet-100 bg-white px-3 py-2 hover:bg-violet-50/40 transition">
+                  <div class="flex items-start gap-2">
+                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="replayConfigCapabilitySelected('skill', item.id)" @change="toggleReplayConfigCapability('skill', item.id, $event.target.checked)">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
+                    </div>
+                  </div>
+                </label>
+              </template>
+            </div>
+          </div>
+        </div>
+        <p class="text-[11px] text-violet-500/80">Replay creates a new active project, copies original attachments, and strictly reruns the successful route with workers.</p>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Hints</span>
+          <button type="button" @click="replayConfig.hints.push({ content: '' })" class="text-[11px] text-violet-500 hover:text-violet-600 font-medium">+ Add</button>
+        </div>
+        <template x-for="(hint, idx) in replayConfig.hints" :key="idx">
+          <div class="flex gap-2 mb-2">
+            <input x-model="hint.content" placeholder="Hint content" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition placeholder:text-slate-300">
+            <button type="button" @click="replayConfig.hints.splice(idx, 1)" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+          </div>
+        </template>
+      </div>
+
+      <div class="rounded-2xl border border-dashed border-slate-200 bg-white p-3">
+        <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Attachments</div>
+        <p class="text-[11px] text-slate-400 mt-1">Attachments are not edited here. Existing project attachments will be copied to the replay project and exposed under <span class="font-mono text-slate-500">/mnt/attachments/&lt;new_project_id&gt;/</span>.</p>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showReplayConfigModal = false" :disabled="isCreatingReplayRun" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+      <button @click="createReplayRun()" :disabled="isCreatingReplayRun || !replayConfig.title || !replayConfig.origin || !replayConfig.goal"
+        class="px-5 py-2 text-sm bg-violet-500 text-white rounded-xl font-medium hover:bg-violet-600 transition disabled:opacity-30 shadow-sm shadow-violet-200" x-text="isCreatingReplayRun ? 'Starting...' : 'Start Worker Replay'"></button>
     </div>
   </div>
 </div>
@@ -1429,6 +1585,7 @@ function cairnApp() {
     showHintModal: false,
     showReopenModal: false,
     showRenameModal: false,
+    showReplayConfigModal: false,
     showLocalPrefs: false,
     showSettings: false,
     showYamlModal: false,
@@ -1451,10 +1608,25 @@ function cairnApp() {
     hintForm: { content: '' },
     reopenForm: { projectId: '', projectTitle: '', description: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
+    replayConfig: {
+      sourceProjectId: '',
+      sourceProjectTitle: '',
+      title: '',
+      origin: '',
+      goal: '',
+      hints: [],
+      role_id: '',
+      capabilities: { mcp_server_ids: [], skill_ids: [] },
+      catalog: { capabilities: [], roles: [] },
+    },
+    isCreatingReplayRun: false,
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
     deleteConfirm: { id: '', title: '' },
     isDeletingProject: false,
+    projectFiles: [],
+    filesLoading: false,
+    filesError: '',
     yamlPreviewTitle: '',
     yamlPreviewText: '',
     yamlPreviewHtml: '',
@@ -1949,7 +2121,10 @@ function cairnApp() {
     },
 
     async loadProject(id) {
-      try { this.project = await this.api('GET', `/projects/${id}`); } catch(e) { this.showToast(e.message, 'error'); }
+      try {
+        this.project = await this.api('GET', `/projects/${id}`);
+        if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
+      } catch(e) { this.showToast(e.message, 'error'); }
     },
 
     async loadCapabilities() {
@@ -1971,6 +2146,67 @@ function cairnApp() {
           unavailable_skill_ids: [],
         };
       }
+    },
+
+    async loadProjectFiles(force = false) {
+      if (!this.selectedProjectId) return;
+      if (!force && this.projectFiles.length > 0) return;
+      try {
+        this.filesLoading = true;
+        this.filesError = '';
+        const data = await this.api('GET', `/projects/${this.selectedProjectId}/files`);
+        this.projectFiles = data.files || [];
+      } catch (e) {
+        this.filesError = e.message;
+        this.projectFiles = [];
+      } finally {
+        this.filesLoading = false;
+      }
+    },
+
+    switchSideTab(tab) {
+      this.sideTab = tab;
+      if (tab === 'capabilities') this.loadCapabilities();
+      if (tab === 'files') this.loadProjectFiles(true);
+    },
+
+    viewProjectFiles() {
+      this.switchSideTab('files');
+    },
+
+    hasProjectFileRefs(text) {
+      return /\/mnt\/(project|attachments)\//.test(String(text || ''));
+    },
+
+    projectFileGroups() {
+      const labels = {
+        reports: 'Reports',
+        exploit: 'Exploit / PoC',
+        attachments: 'Attachments',
+        other: 'Other project files',
+      };
+      return ['reports', 'exploit', 'attachments', 'other'].map(id => ({
+        id,
+        label: labels[id],
+        files: this.projectFiles.filter(file => file.category === id),
+      }));
+    },
+
+    projectFileDisplayPath(file) {
+      const root = file.source === 'attachment'
+        ? `/mnt/attachments/${this.selectedProjectId}`
+        : '/mnt/project';
+      return `${root}/${file.path}`;
+    },
+
+    projectFileDownloadUrl(file) {
+      return `/projects/${encodeURIComponent(this.selectedProjectId)}/files/download?source=${encodeURIComponent(file.source)}&path=${encodeURIComponent(file.path)}`;
+    },
+
+    resetProjectFiles() {
+      this.projectFiles = [];
+      this.filesLoading = false;
+      this.filesError = '';
     },
 
     resetNewProject() {
@@ -2063,6 +2299,45 @@ function cairnApp() {
       this.newProject.capabilities = {
         mcp_server_ids: this.newProject.capabilities?.mcp_server_ids || [],
         skill_ids: this.newProject.capabilities?.skill_ids || [],
+        [key]: Array.from(current).sort(),
+      };
+    },
+
+    resetReplayConfig() {
+      this.replayConfig = {
+        sourceProjectId: '',
+        sourceProjectTitle: '',
+        title: '',
+        origin: '',
+        goal: '',
+        hints: [],
+        role_id: '',
+        capabilities: { mcp_server_ids: [], skill_ids: [] },
+        catalog: { capabilities: [], roles: [] },
+      };
+    },
+
+    replayConfigRoleItems() {
+      return (this.replayConfig.catalog?.roles || []).filter(item => item.available !== false);
+    },
+
+    replayConfigCapabilityItems(kind) {
+      return (this.replayConfig.catalog?.capabilities || []).filter(item => item.kind === kind && item.available !== false);
+    },
+
+    replayConfigCapabilitySelected(kind, id) {
+      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
+      return (this.replayConfig.capabilities?.[key] || []).includes(id);
+    },
+
+    toggleReplayConfigCapability(kind, id, checked) {
+      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
+      const current = new Set(this.replayConfig.capabilities?.[key] || []);
+      if (checked) current.add(id);
+      else current.delete(id);
+      this.replayConfig.capabilities = {
+        mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
+        skill_ids: this.replayConfig.capabilities?.skill_ids || [],
         [key]: Array.from(current).sort(),
       };
     },
@@ -2898,6 +3173,86 @@ function cairnApp() {
       this.followReplayTimelineTail();
     },
 
+    async handleReplayClick() {
+      if (!this.project || this.replay.active || !this.selectedProjectId) return;
+      if (this.project.project.status === 'completed') {
+        await this.openReplayConfig();
+        return;
+      }
+      await this.startProjectReplay();
+    },
+
+    async openReplayConfig() {
+      if (!this.project || !this.selectedProjectId || this.project.project.status !== 'completed') return;
+      try {
+        const sourceProject = await this.api('GET', `/projects/${this.selectedProjectId}`);
+        const [catalogCapabilities, catalogRoles, projectCapabilities, projectRole] = await Promise.all([
+          this.api('GET', '/capabilities/catalog'),
+          this.api('GET', '/roles/catalog'),
+          this.api('GET', `/projects/${this.selectedProjectId}/capabilities`),
+          this.api('GET', `/projects/${this.selectedProjectId}/role`),
+        ]);
+        const origin = sourceProject.facts.find(f => f.id === 'origin')?.description || '';
+        const goal = sourceProject.facts.find(f => f.id === 'goal')?.description || '';
+        const currentRoleId = projectRole?.role?.role_id || '';
+        const replayRoleId = (catalogRoles || []).some(role => role.available !== false && role.id === currentRoleId) ? currentRoleId : '';
+        this.replayConfig = {
+          sourceProjectId: this.selectedProjectId,
+          sourceProjectTitle: sourceProject.project.title,
+          title: `${sourceProject.project.title} Replay`,
+          origin,
+          goal,
+          hints: (sourceProject.hints || []).map(h => ({ content: h.content })),
+          role_id: replayRoleId,
+          capabilities: {
+            mcp_server_ids: projectCapabilities?.selection?.mcp_server_ids || [],
+            skill_ids: projectCapabilities?.selection?.skill_ids || [],
+          },
+          catalog: {
+            capabilities: catalogCapabilities || [],
+            roles: catalogRoles || [],
+          },
+        };
+        if (this.replayConfig.hints.length === 0) this.replayConfig.hints = [{ content: '' }];
+        this.showReplayConfigModal = true;
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async createReplayRun() {
+      if (this.isCreatingReplayRun || !this.replayConfig.sourceProjectId) return;
+      try {
+        this.isCreatingReplayRun = true;
+        const actor = this.actorName();
+        const hints = (this.replayConfig.hints || [])
+          .filter(h => h.content?.trim())
+          .map(h => ({ content: h.content.trim(), creator: actor }));
+        const body = {
+          title: this.replayConfig.title,
+          origin: this.replayConfig.origin,
+          goal: this.replayConfig.goal,
+          hints,
+          role_id: this.replayConfig.role_id || null,
+          capabilities: {
+            mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
+            skill_ids: this.replayConfig.capabilities?.skill_ids || [],
+          },
+        };
+        const data = await this.api('POST', `/projects/${this.replayConfig.sourceProjectId}/replay-runs`, body);
+        const replayProjectId = data.project?.project?.id;
+        this.showReplayConfigModal = false;
+        this.resetReplayConfig();
+        await this.loadProjects();
+        if (replayProjectId) await this.openProject(replayProjectId);
+        this.showToast('Replay project created');
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.isCreatingReplayRun = false;
+      }
+    },
+
     async startProjectReplay() {
       if (!this.project || this.replay.active || !this.selectedProjectId) return;
       try {
@@ -3045,6 +3400,9 @@ function cairnApp() {
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;
+      this.showReplayConfigModal = false;
+      this.resetReplayConfig();
+      this.resetProjectFiles();
       await this.loadProject(id);
       await this.loadCapabilities();
       this.view = 'graph';
@@ -3089,6 +3447,9 @@ function cairnApp() {
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;
+      this.showReplayConfigModal = false;
+      this.resetReplayConfig();
+      this.resetProjectFiles();
       this.teardownAutoFit();
       if (this.cy) { this.cy.destroy(); this.cy = null; }
       if (!fromRoute) location.hash = '/';

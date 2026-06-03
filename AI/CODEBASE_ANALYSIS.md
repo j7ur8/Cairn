@@ -38,8 +38,14 @@ erDiagram
     PROJECTS ||--o{ FACTS : owns
     PROJECTS ||--o{ INTENTS : owns
     PROJECTS ||--o{ HINTS : owns
+    PROJECTS ||--o{ PROJECT_CAPABILITIES : "selects"
+    PROJECTS ||--o{ PROJECT_ROLES : "snapshots"
+    PROJECTS ||--o{ REPLAY_RUNS : "source of"
+    PROJECTS ||--o{ REPLAY_RUNS : "replayed as"
     INTENTS ||--o{ INTENT_SOURCES : has
     FACTS ||--o{ INTENT_SOURCES : source
+    REPLAY_RUNS ||--o{ REPLAY_FACT_MAP : "maps"
+    REPLAY_RUNS ||--o{ REPLAY_STEPS : "schedules"
 
     PROJECTS {
         text id PK
@@ -82,6 +88,45 @@ erDiagram
         text content
         text creator
         text created_at
+    }
+
+    PROJECT_CAPABILITIES {
+        text project_id PK
+        text capability_id PK
+        text kind
+        text available
+    }
+
+    PROJECT_ROLES {
+        text project_id PK
+        text role_id PK
+        text role_prompt_sha256
+        text created_at
+    }
+
+    REPLAY_RUNS {
+        text id PK
+        text source_project_id FK
+        text replay_project_id FK
+        text status
+        text completion_description
+        text created_at
+        text completed_at
+    }
+
+    REPLAY_FACT_MAP {
+        text run_id PK
+        text source_fact_id PK
+        text replay_fact_id
+    }
+
+    REPLAY_STEPS {
+        text run_id PK
+        int step_index PK
+        text source_intent_id
+        text source_to_fact_id
+        text replay_intent_id
+        text status
     }
 ```
 
@@ -250,6 +295,42 @@ Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语�
 如果 intent.worker 是其他 worker，则 409。
 ```
 
+### `server/routers/attachments.py`
+
+`POST /projects/{project_id}/attachments` 接收 `multipart/form-data` 上传，将文件落到 `CAIRN_ATTACHMENTS_ROOT/{project_id}/`（默认 `datas/attachments/{project_id}/`），并在成功落盘后写一条指向 worker 容器内路径的 Hint。
+
+关键行为：
+
+| 步骤 | 说明 |
+| --- | --- |
+| 1. 校验项目 `hint_writable` | 复用 `check_project_hint_writable()`；已 stopped/completed 项目拒绝 |
+| 2. 安全文件名 + dedupe | `[^A-Za-z0-9._ -]+` 替换为 `_`，重复文件名自动追加 `-N` |
+| 3. 分块写盘（1 MiB） | 失败时回滚已写文件 |
+| 4. 写 Hint | 默认 creator=`Human`，`description` 形如 `附件为 worker 容器内文件：/mnt/attachments/{project_id}/{filename}` |
+
+> 🔧 向后兼容：API 路径是稳定的 `/projects/{project_id}/attachments`；新增字段必须可在 `descriptions` 缺失时 fallback 到 `""`。
+
+### `server/routers/files.py`
+
+`GET /projects/{project_id}/files` 列举项目报告 / exploit / vuln-research / 附件四类文件，按 `category` 标签分组；`GET /projects/{project_id}/files/download?source=project\|attachment&path=...` 走 `FileResponse` 暴露文件。
+
+路径安全：相对路径校验不允许 `..`、绝对路径或空段；`source` 仅接受 `project` 或 `attachment`。
+
+> ⚡ 性能敏感：列表遍历以 `Path.rglob` 触发，不做索引；大项目目录需要 server 端做缓存或截断。
+
+### `server/routers/replay.py`
+
+replay 入口与推进：
+
+| 端点 | 函数 | 说明 |
+| --- | --- | --- |
+| `POST /projects/{project_id}/replay-runs` | `create_replay_run()` | 校验源项目 completed + 存在 completion intent + 存在 replayable worker route，复制 `datas/attachments/{source}/` 到新项目子目录并写 `replay_runs` / `replay_steps` / `replay_fact_map` |
+| `POST /projects/{project_id}/replay-runs/{run_id}/advance` | `advance_replay_run()` | 按 `step_index` 顺序取出下一个 pending step，创建 replay intent 并等 worker conclude 落新 fact |
+
+`_extract_replay_route()` 解析 completion intent 的 source facts，找出 `worker` 字段，构造 `(worker_name, source_to_fact_id)` 序列；`_replay_intent_description()` 替换 attachment 路径中的 source project id。
+
+> 🔧 向后兼容：replay run id 形如 `replay_{replay_project_id}`，方便用项目 id 直接定位。
+
 ### `server/routers/export.py`
 
 用途：
@@ -306,6 +387,18 @@ remote_support:
 
 启用后可能注入：`CAIRN_REMOTE_SUPPORT_ENABLED`、`CAIRN_DNSLOG_URL`、`CAIRN_REMOTE_SSH_HOST`、`CAIRN_REMOTE_SSH_PORT`、`CAIRN_REMOTE_SSH_USERNAME`、`CAIRN_REMOTE_SSH_PASSWORD`。
 
+`${ENV_VAR}` 插值:
+
+`DispatchConfig.load()` 在 YAML 解析后、`pydantic` 校验前递归遍历所有字符串，按 bash 风格解析以下三种引用:
+
+| 语法 | 解析 |
+| --- | --- |
+| `${VAR}` | 必须设置；`os.environ` 缺则抛 `ValueError`，错误信息带 YAML 路径 |
+| `${VAR:-default}` | unset OR 空时用 default（空字符串也算） |
+| `${VAR-default}` | 仅 unset 时用 default；显式空串保留 |
+
+正则只识别大写字母/下划线/数字开头的变量名，默认值中 `}` 为终止符。`{project_id}` 之类的 dispatcher 模板占位符不匹配，原样保留给后续 `prepare_bind_mount_data()` / `prepare_role_data()` 解析；`$VAR`（无花括号）不识别，保留原样。
+
 Capability / Role 解析规则：
 
 - `prepare_capability_data()` 会把 skill 和 MCP `source_path` 解析成基于 `dispatch.yaml` 的绝对路径。
@@ -336,6 +429,7 @@ Capability / Role 解析规则：
 | `get_project_role()` | GET project role snapshot |
 | `register_capability_catalog()` | POST capability catalog |
 | `register_role_catalog()` | POST role catalog |
+| `advance_replay_run(project_id)` | POST `/projects/{project_id}/replay-runs/{run_id}/advance` |
 | `create_llm_execution()` / `create_llm_event()` / `finish_llm_execution()` | observability 写入 API |
 
 它使用 thread-local `requests.Session`，适配多线程任务执行。
@@ -374,6 +468,10 @@ run()
 否则如果 reason_trigger 存在：调度 reason
 否则跳过
 ```
+
+#### Replay project 推进
+
+replay 项目在主循环里被单独钩起：每次 tick 先调 `_advance_replay_project(project_id)`，向 Server 询问下一步动作（`created_intent` / `completed` / `blocked` / `waiting`），按返回值决定本轮是否把该项目视为"有进展"。它复用普通调度前的并发预算，所以 replay 与正常项目共享 `max_project_workers`。
 
 #### Worker 选择规则
 

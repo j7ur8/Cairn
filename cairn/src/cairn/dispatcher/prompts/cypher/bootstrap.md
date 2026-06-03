@@ -18,6 +18,10 @@ mounted workspace, drive the task to the point where Goal is satisfied.
 - Writable evidence workspace is `/mnt/project/{recon,exploit,vuln-research,reports,cleanup}`.
   Use it for nmap/katana/httpx outputs, PoC scripts, request/response captures,
   and final report drafts.
+- Final deliverables live under `/mnt/project`: CTF writeups at
+  `/mnt/project/reports/writeup.md`, CTF solve scripts under `/mnt/project/exploit/`,
+  pentest reports at `/mnt/project/reports/vulnerability-report.md`, and vulnerability
+  research reports at `/mnt/project/reports/vulnerability-research-report.md`.
 - Long-running listeners (HTTP, NC, DNSLog agents, tmux sessions) MUST be
   launched inside a `tmux` session and recorded in `/mnt/project/cleanup/actions.md`.
 
@@ -73,17 +77,28 @@ Common `type` values (see docs/designs/cypher-agent.md for the full taxonomy):
 - If the problem is not yet solved, keep working. Do not stop on your own.
 - If a later conclude-phase instruction arrives, it overrides this keep-working rule
   immediately: stop, return the summary JSON, do not run more commands.
-- Output `complete` only if Goal has been definitively achieved. Do not summarize
-  partial progress as completion.
+- Output `complete` only if Goal has been definitively achieved AND the required
+  final deliverable files for the detected profile have been written. Do not
+  summarize partial progress as completion.
 - `fact.description` states confirmed objective results. Do not put raw scan
   dumps in `description`; reference the artifact file instead.
 - For CTF: capture the flag in the fact, including format and source. If a
   platform submission endpoint is provided (see Hints or environment), submit
-  it and record the server response in artifacts.
+  it and record the server response in artifacts. Before completion, save a
+  Markdown WriteUp to `/mnt/project/reports/writeup.md`. Also save a concrete
+  solve/exploit script under `/mnt/project/exploit/solve.*` whenever the path can
+  be scripted; if it cannot, the WriteUp MUST explain why and provide exact
+  manual commands, inputs, and verification steps.
 - For pentest: every successful impact MUST have request, response, payload
-  reference, and cleanup status.
+  reference, and cleanup status. Before completion, save a detailed Markdown
+  vulnerability report to `/mnt/project/reports/vulnerability-report.md` with
+  scope, affected asset, vulnerability class, evidence, reproduction, impact,
+  severity/confidence, cleanup, and remediation.
 - For vuln research: every finding MUST have root cause file/line, repro steps,
-  PoC artifact, and an explicit confidence + severity rating.
+  PoC artifact, and an explicit confidence + severity rating. Before completion,
+  save a detailed Markdown report to `/mnt/project/reports/vulnerability-research-report.md`
+  with root cause, affected versions/components, exploitability, PoC/repro,
+  evidence, and fix direction.
 - Long-running listeners / shells / workers / OOB agents go into `tmux`.
   Register the session name in the fact.
 
