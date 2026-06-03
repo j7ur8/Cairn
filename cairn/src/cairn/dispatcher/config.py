@@ -482,12 +482,40 @@ class RoleConfig(BaseModel):
 
 
 class ContainerConfig(BaseModel):
+    """Worker container configuration.
+
+    The ``user`` field controls which UID:GID the worker process runs as inside
+    the container, passed straight through to ``docker.containers.run(user=...)``.
+
+    - On macOS Docker Desktop, host bind mounts go through VirtioFS / gRPC-FUSE,
+      which does not preserve the world-writable bit when the container's UID
+      differs from the host file's owner. The worker (running as ``kali``,
+      UID 1000) therefore cannot write to ``/mnt/project`` if the host dir is
+      owned by a different UID (e.g. host ``jmac`` = UID 501). Set ``user`` to
+      the host user's ``uid:gid`` (``id -u`` / ``id -g``) to fix.
+    - On Linux Docker Engine the UID namespace is shared 1:1 with the host, so
+      ``user`` is optional and the default (use the image's ``USER kali``)
+      usually works.
+    - Leaving ``user`` unset (``None``) preserves the prior behavior.
+    """
+
     image: str
+    user: str | None = None
     network_mode: str
     completed_action: ContainerInactiveAction
     stopped_action: ContainerInactiveAction = "stop"
     cap_add: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMountConfig] = Field(default_factory=list)
+
+    @field_validator("user")
+    @classmethod
+    def validate_user(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("user must not be empty or whitespace")
+        return value
 
     @model_validator(mode="after")
     def validate_bind_mounts(self) -> "ContainerConfig":

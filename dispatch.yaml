@@ -1,3 +1,4 @@
+
 # Cairn server API endpoint.
 server: "http://cairn-server:8000"
 
@@ -49,8 +50,6 @@ observability:
   flush_interval_ms: 250
   flush_max_bytes: 8192
   retention_days: 14
-  # Built-in patterns already cover `Authorization: Bearer <token>`,
-  # `*PASSWORD`, and `*_AUTH_TOKEN`. Add project-specific patterns here.
   redaction_patterns: []
 
 remote_support:
@@ -104,25 +103,6 @@ capabilities:
       description: "CTF automation workflows for web, pwn, reverse, crypto, forensics, stego and misc tasks."
       source_path: "./capabilities/skills/cypher-ctf"
       task_types: ["bootstrap", "explore", "reason"]
-  # --- HTTP transport (Streamable HTTP, MCP 2025-03-26 spec) ---
-  # Use this when the MCP server runs on the host (or a sidecar) and is
-  # reachable over HTTP. Bearer auth reads the token from an env var
-  # declared in `bearer_token_env`; the var must be set in the
-  # dispatcher's environment (see .env / dispatch.yaml env / shell).
-  # Container reachability is the deployer's responsibility:
-  # - macOS / Windows Docker Desktop: `host.docker.internal` resolves automatically
-  # - Linux Docker Engine: launch the worker container with
-  #   `--add-host=host.docker.internal:host-gateway`
-  # - or set `container.network_mode: "host"` (sacrifices isolation)
-  # mcp_servers:
-  #   - id: "host-fs-mcp"
-  #     name: "Host Filesystem MCP"
-  #     description: "Example HTTP MCP server reached via host.docker.internal."
-  #     transport: "http"
-  #     url: "http://host.docker.internal:${MCP_PORT:-8765}/mcp"
-  #     bearer_token_env: "MCP_AUTH_TOKEN"
-  #     healthcheck_timeout: 1.0
-  #     task_types: ["bootstrap", "explore", "reason"]
     - id: "cypher-pentest"
       name: "Cypher Pentest"
       description: "Scope-bound authorized penetration testing workflows, evidence capture, cleanup and reporting."
@@ -156,6 +136,13 @@ roles:
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
   image: "ghcr.io/oritera/cairn-worker-container:latest"
+  # Worker process UID:GID, passed straight through to docker.containers.run(user=...).
+  # On macOS Docker Desktop, bind mounts go through VirtioFS which only honours
+  # write syscalls from root (UID 0) regardless of file mode or owner UID — verified
+  # with a real `docker run` probe. Uncomment the next line to run the worker as
+  # root so /mnt/project becomes writable. On Linux Docker Engine the UID
+  # namespace is shared 1:1 with the host, so this is optional.
+  user: "0:0"
   # Project worker containers join the shared Docker network used by Cairn services.
   # The docker-compose stack creates this network automatically. When running manually,
   # create it first with: docker network create cairn

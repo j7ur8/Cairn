@@ -86,6 +86,7 @@ class ContainerManager:
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
                 environment=env,
+                user=self._config.user,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -127,6 +128,7 @@ class ContainerManager:
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
                 environment=env,
+                user=self._config.user,
             )
         except DockerException as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
@@ -533,7 +535,24 @@ class ContainerManager:
 
 
 def _ensure_world_writable_dir(path: Path) -> None:
+    """Best-effort: make the host bind-mount dir world-writable.
+
+    If the dispatcher's process does not own ``path`` (e.g. it is running as a
+    non-root user inside the ``cairn-dispatcher`` container while the file is
+    owned by the host user), ``os.chmod`` raises ``PermissionError``. The
+    probe inside the worker container is the real source of truth for write
+    permission, so we downgrade the chmod failure to a warning rather than
+    crashing container creation.
+    """
     mode = path.stat().st_mode
     if mode & 0o002:
         return
-    os.chmod(path, mode | 0o777)
+    try:
+        os.chmod(path, mode | 0o777)
+    except PermissionError as exc:
+        LOG.warning(
+            "skipping chmod 0o777 on host bind mount (dispatcher lacks owner privilege); "
+            "operator should ensure the path is world-writable. path=%s err=%s",
+            path,
+            exc,
+        )

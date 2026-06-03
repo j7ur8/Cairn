@@ -89,6 +89,78 @@
 
 ---
 
+## 2026-06-03 · 修复 startup healthcheck 在 macOS Docker Desktop 上的 bind mount 权限错误（已完成）
+
+### 背景
+
+`docker compose up cairn-dispatcher` 在 macOS Docker Desktop 上跑 startup healthcheck 时失败,worker 容器内的 probe 写 `/mnt/project/.cairn-write-test-...` 报 `Permission denied` (exit 3)。本仓库 CI 用的 Linux runner 不会出现这个错,用户本机是 macOS,首次落地才暴露。
+
+### 根因(经过 `docker run --user=...` 实测校正)
+
+macOS Docker Desktop 的 bind mount 走 VirtioFS 桥接,**write syscall 在容器内非 root 用户(无论 host 文件 mode 是什么、容器用户 UID 是不是 file owner)一律拒绝**。我最初以为是简单的 host UID 不匹配,推荐 `user: "501:20"`(host 用户 UID),但用 `docker run --user=501:20 -v ...:/mnt/project alpine sh -c 'touch /mnt/test'` 真机验证,**仍然 Permission denied**,即使容器内 `id` 是 `uid=501 gid=20`、`/mnt/project` 显示 `drwxrwx`。改 `user: "0:0"` 立即 OK。
+
+这是 macOS Docker Desktop + VirtioFS 的内核层已知行为,跟 host 文件 mode、容器用户 UID、bind mount 选项都无关。具体到本仓库:
+
+- host `datas/project-files` 实际权限:`drwxrwxrwx jmac staff`(UID 501, GID 20, mode 0o777) — `ls -ld` 已确认
+- worker 容器以 image 内 `USER kali`(UID 1000)运行,或即使改成 `user: "501:20"`,在 macOS VirtioFS 下都写不进
+- **唯一可行方案**: `user: "0:0"` (root)
+
+`cairn/src/cairn/dispatcher/runtime/containers.py::_ensure_world_writable_dir` 在 host 端做的 `os.chmod 0o777` 在 macOS 上也无效——dispatcher 自己在容器内以非 root 跑,不能 chmod owner=不同 UID 的 host 文件(EPERM)。但这个不是 bug 主因,主因是 VirtioFS 行为。
+
+### 已完成变更
+
+**Schema** (`cairn/src/cairn/dispatcher/config.py`)
+
+- `ContainerConfig` 加 `user: str | None = None`,docstring 写清 macOS 必须设 / Linux 可选 / 不设保留旧行为
+- 不做格式校验,直接透传给 `docker.containers.run`
+
+**Runtime** (`cairn/src/cairn/dispatcher/runtime/containers.py`)
+
+- `ContainerManager._create_container` 和 `_create_startup_container` 两条路径都把 `user=self._config.user` 透传到 `self._client.containers.run(..., user=...)`。Docker SDK 接受 `None` 等效不传
+- `_ensure_world_writable_dir` 把 `os.chmod` 包 `try/except PermissionError as exc: LOG.warning(...)`——chmod 失败不再 crash 进程。Probe 才是真测试,chmod 是 best-effort
+
+**dispatch.yaml**
+
+- `container:` 段加注释 `# user: "0:0"`,说明 macOS Docker Desktop VirtioFS 下必须 root,Linux 可不设或用 host uid:gid
+
+**AI 文档**
+
+- `AI/CODEBASE_ANALYSIS.md` §4 schema 表 `ContainerConfig` 行加 `user`
+- `AI/CODEBASE_ANALYSIS.md` §9 config keys 表新增 `container.user` 行
+- `AI/PROJECT_OVERVIEW.md` 新增 "## 部署环境前置条件" 小节,讲清 macOS / Linux 区别
+
+**测试** (`cairn/tests/test_bind_mount_user_uid.py`,8 case)
+
+- `ContainerConfigUserSchemaTests` (4): 默认 `user is None` / `"501:20"` 通过 / 空字符串拒绝 / 任意非空字符串通过(透传 Docker)
+- `ContainerUserRuntimeTests` (3): mock docker client 验证 `user=None` 时 `docker.containers.run` 不传 `user` kwarg / `user="501:20"` 时传 `user="501:20"` / 两条路径(create + startup)都验证
+- `EnsureWorldWritableDirEpermTests` (1): `os.chmod` 抛 `PermissionError` 时 `_ensure_world_writable_dir` 记 warning, 不 raise
+
+### 验证结果
+
+- `compileall -q cairn/src/cairn` 0 错误
+- `unittest discover -s tests -p 'test_*.py'` 24 旧测试 + 8 新测试 = 32/32 通过
+- `DispatchConfig.load(dispatch.yaml)` 成功,`cfg.container.user is None`(向后兼容)
+
+### 用户操作
+
+用户需在 `dispatch.yaml` 显式 uncomment `# user: "0:0"`(或直接 uncomment 不改,推荐值就是 root)。改完 `docker compose up cairn-dispatcher`,startup healthcheck 即通过。
+
+如迁到 Linux Docker Engine,改回 host `uid:gid`(`id -u` / `id -g`)即可,不需要 root。
+
+### 关键教训
+
+**不要相信"host 文件 mode 0o777 = 任何人都能写"的隐含假设**。macOS Docker Desktop + VirtioFS 不走标准 POSIX 检查,只允许 root 通过。**任何"修 host chmod"的方案在 macOS 上都是无效猜测**。正确做法是 `docker run --user=...` 真机验一遍再下结论。
+
+### 未完成事项 / 风险
+
+- **不在 dispatcher 内自动探测 host UID**——dispatcher 自己在容器内,`os.getuid()` 拿到的是容器内 UID 不是 host UID。可靠做法只能 operator 显式配。
+- **不动 Dockerfile 的 `USER kali` UID**——锁 UID 1000 会影响 Linux 部署兼容性(Linux host 上 `jmac` 经常是 UID 1000,会冲突)。
+- **probe 仍用 bind mount 写测试文件做健康检查**——这是有意的,真要判断"能不能写"只能真写一次。
+- **macOS 上 worker 容器内是 root**——网络已 `cairn` 网络隔离,bind mount 只暴露 `/mnt/project`(operator 控盘),image 内 `kali` 已有 `NOPASSWD:ALL`,实际权限等级等同 root,这个让步在 macOS 上是必要的;Linux 上仍可设 host uid:gid,无需 root。
+- **VirtioFS 行为可能随 Docker Desktop 版本变化**——如果未来 Docker Desktop 修了 VirtioFS 允许非 root 写,可以把推荐值改回 host uid:gid。
+
+---
+
 ## 2026-06-03 · HTTP (Streamable HTTP) MCP transport 接入（已完成）
 
 ### 背景

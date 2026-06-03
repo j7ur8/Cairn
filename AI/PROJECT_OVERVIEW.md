@@ -348,6 +348,14 @@ Execution Log 默认隐藏 `usage`，并会对 `CAIRN_REMOTE_SSH_PASSWORD` / 通
 
 Dispatcher 的 `observability` 配置控制是否记录 prompt/stdout/stderr/raw worker stream 以及 Dispatcher 侧缓冲、脱敏和大小限制；Server 端 observability API 仍使用内置默认设置做二次脱敏与截断。
 
+## 部署环境前置条件
+
+**macOS Docker Desktop** — `container.user` **必须** 在 `dispatch.yaml` 显式设成 `"0:0"`,否则 worker 写 `/mnt/project` 报 `Permission denied`,startup healthcheck 不过。根因是 VirtioFS 的内核层行为:write syscall 在容器内非 root 用户(无论 host 文件 mode 是不是 0o777、容器用户 UID 是不是 file owner)一律拒绝,已用 `docker run --user=...` 真机验证过 3 次。worker 容器本身已用 `network_mode: cairn` 限制网络、bind mount 只暴露到 `/mnt/project`、image 内 `kali` 用户已 `NOPASSWD:ALL`,实际权限等级等同 root,这个让步在 macOS 上是必要的。
+
+**Linux Docker Engine** — UID namespace 与 host 1:1 共享,`container.user` 可不设,默认行为(image 内 `USER kali`)直接可用。如要最小化攻击面,设成 host `uid:gid`(`id -u` / `id -g`)即可,不需要 root。
+
+详细根因分析见 `AI/UPDATE.md` 2026-06-03 "修复 startup healthcheck 在 macOS Docker Desktop 上的 bind mount 权限错误" 条目。
+
 ## 后续修改建议
 
 | 目标 | 修改入口 |

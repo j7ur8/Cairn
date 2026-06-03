@@ -379,7 +379,7 @@ replay 入口与推进：
 | --- | --- |
 | `RuntimeConfig` | `max_workers`、`max_running_projects`、`max_project_workers`、`interval`、`healthcheck_timeout`、`prompt_group` |
 | `TasksConfig` | `bootstrap`、`reason`、`explore` |
-| `ContainerConfig` | `image`、`network_mode`、`completed_action`、`stopped_action`、`cap_add`、`bind_mounts` |
+| `ContainerConfig` | `image`、`user`、`network_mode`、`completed_action`、`stopped_action`、`cap_add`、`bind_mounts` |
 | `RemoteSupportConfig` | `enabled`、`dnslog.url`、`ssh.host/port/username/password` |
 | `McpServerCapabilityConfig` | `id`、`name`、`transport` (`stdio`/`http`)、`command`/`url` 二选一、`args`、`env`、`bearer_token_env`、`healthcheck_timeout`、`source_path`、`task_types`、`description` |
 | `SkillCapabilityConfig` | `id`、`name`、`source_path`、`task_types`、`description` |
@@ -909,6 +909,7 @@ cairn dispatch --config dispatch.yaml
 | `runtime.prompt_group` | prompt 目录名 |
 | `tasks.*.timeout` | 各任务主阶段超时 |
 | `tasks.*.conclude_timeout` | 收尾阶段超时 |
+| `container.user` | 可选,worker 进程 uid:gid,透传到 `docker.containers.run(user=...)`;macOS Docker Desktop 上必须设成 host 用户 uid:gid,Linux 上可选 |
 | `container.image` | Worker 容器镜像 |
 | `container.network_mode` | 容器网络模式，当前默认 `cairn` |
 | `container.bind_mounts` | 可选 host 文件夹映射列表，支持 `{project_id}` |
