@@ -89,6 +89,39 @@
 
 ---
 
+## 2026-06-03 · 接入 hello_js_reverse_skill + camoufox-reverse-mcp + 项目级代理 (已完成)
+
+### 背景
+
+用户要求新增前端 JS 逆向工作流(hello-js-reverse + camoufox-reverse-mcp browser MCP)和系统级代理池管理。
+代理统一在 Server Settings 页面管理(socks5/http/https)，新建项目时选择，Dispatcher 在 worker 容器启动时注入对应 env 变量。
+
+### 已完成变更
+
+- DB: 新增 `proxies` 表(id/name/type/host/port/username/password/created_at/updated_at) + `projects.proxy_id` 渐进式 ALTER TABLE + ON DELETE SET NULL
+- 模型: `ProxySummary`(列表/项目详情，不含 password) / `ProxyConfig`(GET /proxies/{id}，含凭据) / `ProxyCreate` / `ProxyUpdate`
+- Server API: `cairn/src/cairn/server/routers/proxies.py` — GET/POST/PUT/DELETE /proxies/*
+- UI: Settings modal 扩展为代理管理面板(添加/编辑/删除)；New Project 新增 Outbound Proxy `<select>` (默认直连)
+- Dispatcher 注入: `_proxy_config_to_env()`(socks5→ALL_PROXY, http/https→HTTP_PROXY+HTTPS_PROXY+NO_PROXY)；`_resolve_project_proxy()` 每次调度刷新；`_resolve_proxy_env()` 传给 `ContainerManager(proxy_resolver=...)`；startup-healthcheck 容器不走代理
+- 两端 observability redaction: BUILTIN_PATTERNS 覆盖 `HTTP_PROXY=` / `HTTPS_PROXY=` / `ALL_PROXY=` / `SOCKS5_PROXY=` env 赋值
+- `dispatch.yaml`: 注册 `camoufox-reverse` MCP server(stdio, 带 CAMOUFOX_PROFILE_DIR / CAMOUFOX_HEADLESS) + `hello-js-reverse` skill
+- `container/Dockerfile`: 安装 `camoufox-reverse-mcp` + COPY skill 到 workspace
+- `capabilities/skills/hello-js-reverse/SKILL.md`: JS 逆向 skill 文档(profile / proxy / 完成标准)
+- 测试: `cairn/tests/test_proxy_settings.py` 28 用例覆盖 schema / env 转换 / redaction / 缓存 / DB CRUD / FK cascade
+
+### 验证结果
+
+- `compileall cairn/src/cairn` — clean (0 warnings/errors)
+- `DispatchConfig.load(dispatch.yaml)` — OK(3 MCP servers: kali-server-mcp / metasploit-mcp / camoufox-reverse; 26 skills)
+- `unittest discover` — 63 tests OK (原有 35 + 新 28)
+
+### 未完成事项/风险
+
+- 代理密码明文存储于 SQLite;加密列为后续
+- `container/Dockerfile` 需构建后才能使用 camoufox-reverse-mcp 和 hello-js-reverse skill
+- HTTP MCP transport 的 TLS 软提示按用户要求跳过
+- token 轮换后 in-flight worker 不会主动失效(靠 container.completed_action 自然回收)
+
 ## 2026-06-03 · 修复 startup healthcheck 在 macOS Docker Desktop 上的 bind mount 权限错误（已完成）
 
 ### 背景

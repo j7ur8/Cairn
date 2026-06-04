@@ -29,9 +29,11 @@ class ContainerManager:
         self,
         config: ContainerConfig,
         bearer_token_env_keys: tuple[str, ...] = (),
+        proxy_resolver: Callable[[str], dict[str, str] | None] | None = None,
     ):
         self._config = config
         self._bearer_token_env_keys = tuple(dict.fromkeys(bearer_token_env_keys))  # dedupe, keep order
+        self._proxy_resolver = proxy_resolver
         self._client = docker.from_env()
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
@@ -49,6 +51,19 @@ class ContainerManager:
             if value is not None:
                 env[name] = value
         return env
+
+    def _proxy_environment(self, project_id: str) -> dict[str, str]:
+        """Resolve the per-project proxy at container-launch time.
+
+        Returns an empty dict when no proxy is configured. The resolver is a
+        callable (not a value) so each container start picks up the latest
+        proxy config from the Server without a long-lived cache in
+        ``ContainerManager``.
+        """
+        if self._proxy_resolver is None:
+            return {}
+        resolved = self._proxy_resolver(project_id) or {}
+        return dict(resolved)
 
     def close(self) -> None:
         self._client.close()
@@ -85,7 +100,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
-                environment=env,
+                environment={**(env or {}), **self._proxy_environment(project_id)} or None,
                 user=self._config.user,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
@@ -127,7 +142,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
-                environment=env,
+                environment={**(env or {}), **self._proxy_environment(self._STARTUP_PROJECT_ID)} or None,
                 user=self._config.user,
             )
         except DockerException as exc:
@@ -333,7 +348,7 @@ class ContainerManager:
                 ]
             )
         argv.extend(command)
-        return ManagedProcess(container, argv, env, on_output=on_output)
+        return ManagedProcess(container, argv, env, user=self._config.exec_user, on_output=on_output)
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
         archive_path, archive = self._text_file_archive(path, content)

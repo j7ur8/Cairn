@@ -80,7 +80,12 @@ def inject_project_capabilities(
             errors.append(f"mcp_server:{capability_id}: not declared in dispatch config")
             continue
         if task_type not in item.task_types:
-            errors.append(f"mcp_server:{capability_id}: not enabled for task type {task_type}")
+            LOG.info(
+                "skip mcp_server=%s because task_type=%s is not enabled enabled_task_types=%s",
+                capability_id,
+                task_type,
+                item.task_types,
+            )
             continue
         probe_error = _validate_selected_mcp(item, task_type)
         if probe_error:
@@ -95,7 +100,12 @@ def inject_project_capabilities(
             errors.append(f"skill:{capability_id}: not declared in dispatch config")
             continue
         if task_type not in item.task_types:
-            errors.append(f"skill:{capability_id}: not enabled for task type {task_type}")
+            LOG.info(
+                "skip skill=%s because task_type=%s is not enabled enabled_task_types=%s",
+                capability_id,
+                task_type,
+                item.task_types,
+            )
             continue
         skills.append(item)
 

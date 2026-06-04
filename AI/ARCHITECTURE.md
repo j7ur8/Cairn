@@ -417,6 +417,25 @@ MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使
 | `capabilities/roles/cypher-pentest-operator/ROLE.md` | Pentest primary role |
 | `capabilities/roles/cypher-vuln-researcher/ROLE.md` | Vulnerability research primary role |
 
+
+### 项目级代理池
+
+代理是 worker 容器的网络出口配置；项目在创建时可以选择一个已定义的代理，Dispatcher 在启动 worker 容器时注入对应环境变量。
+
+| 属性 | 值 |
+| --- | --- |
+| 管理方式 | Server Settings 页面(proxies CRUD)；新增/编辑/删除代理 |
+| 传输类型 | `socks5`(设 `ALL_PROXY` + `NO_PROXY`)、`http` / `https`(设 `HTTP_PROXY` + `HTTPS_PROXY` + `NO_PROXY`) |
+| 认证 | 可选 username + password；渲染为 `user:pass@host:port` 格式 |
+| 存储 | `proxies` SQLite 表；凭据明文存储(加密列为后续)；列表/项目详情只返回 `ProxySummary`(不含 password) |
+| 生命周期 | 每次调度时 `_resolve_project_proxy()` 从 Server 重新获取定义；编辑/删除下次调度立即生效 |
+| 不可达处理 | `LookupError` / `RequestException` → fallback 为直连，LOG warning；startup-healthcheck 容器不走代理 |
+| 可观测性 | 两端 redaction.py BUILTIN_PATTERNS 覆盖 `HTTP_PROXY=...` / `HTTPS_PROXY=...` / `ALL_PROXY=...` / `SOCKS5_PROXY=...` 形式的 env 赋值 |
+| 无代理项目 | `proxy_id` 为 None — cache 直接存 None，零 HTTP 开销 |
+
+关键代码路径: `cairn/src/cairn/dispatcher/scheduler/loop.py`(`_proxy_config_to_env` / `_resolve_project_proxy` / `_resolve_proxy_env`) → `cairn/src/cairn/dispatcher/runtime/containers.py`(`proxy_resolver` 参数 / `_proxy_environment`) → `cairn/src/cairn/dispatcher/protocol/client.py`(`get_proxy`) → `cairn/src/cairn/server/routers/proxies.py`(CRUD)
+
+
 ## 6. Heartbeat 与任务存活
 
 ### Lease 类型

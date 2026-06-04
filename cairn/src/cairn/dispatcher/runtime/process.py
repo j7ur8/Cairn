@@ -30,10 +30,12 @@ class ManagedProcess:
         container: Container,
         command: list[str],
         env: dict[str, str],
+        user: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
     ):
         self.command = command
         self.env = env
+        self.user = user
         self.on_output = on_output
         self._container = container
         self._api = container.client.api
@@ -56,6 +58,7 @@ class ManagedProcess:
             stdin=False,
             tty=False,
             environment=self.env,
+            user=self.user,
         )
         self._exec_id = exec_info["Id"]
         self._reader = threading.Thread(target=self._read_stream, daemon=True)

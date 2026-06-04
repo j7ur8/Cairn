@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,6 +16,7 @@ from cairn.server.models import (
     ProjectDetail,
     ProjectMeta,
     ProjectSummary,
+    ProxySummary,
     ReopenRequest,
     ReopenResponse,
     ReasonClaimRequest,
@@ -81,16 +83,42 @@ def list_projects():
         ]
 
 
+def _proxy_summary_from_row(row: sqlite3.Row) -> ProxySummary:
+    return ProxySummary(
+        id=row["id"],
+        name=row["name"],
+        type=row["type"],
+        host=row["host"],
+        port=row["port"],
+        has_auth=bool(row["username"] or row["password"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 @router.post("/projects", response_model=ProjectDetail, status_code=201)
 def create_project(body: CreateProjectRequest):
     with get_conn() as conn:
         pid = next_project_id(conn)
         now = utcnow()
 
-        conn.execute(
-            "INSERT INTO projects (id, title, status, created_at) VALUES (?, ?, 'active', ?)",
-            (pid, body.title, now),
-        )
+        proxy_summary: ProxySummary | None = None
+        if body.proxy_id:
+            proxy_row = conn.execute(
+                "SELECT * FROM proxies WHERE id = ?", (body.proxy_id,)
+            ).fetchone()
+            if proxy_row is None:
+                raise HTTPException(400, f"proxy_id references missing proxy: {body.proxy_id}")
+            proxy_summary = _proxy_summary_from_row(proxy_row)
+
+        try:
+            conn.execute(
+                "INSERT INTO projects (id, title, status, created_at, proxy_id) "
+                "VALUES (?, ?, 'active', ?, ?)",
+                (pid, body.title, now, body.proxy_id),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(400, f"invalid proxy_id: {body.proxy_id}") from exc
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
             ("origin", pid, body.origin),
@@ -157,6 +185,7 @@ def create_project(body: CreateProjectRequest):
             ],
             intents=[],
             hints=hints,
+            proxy=proxy_summary,
         )
 
 
@@ -175,11 +204,20 @@ def get_project(project_id: str):
             (project_id,),
         ).fetchall()
 
+        proxy_summary: ProxySummary | None = None
+        if row["proxy_id"]:
+            proxy_row = conn.execute(
+                "SELECT * FROM proxies WHERE id = ?", (row["proxy_id"],)
+            ).fetchone()
+            if proxy_row is not None:
+                proxy_summary = _proxy_summary_from_row(proxy_row)
+
         return ProjectDetail(
             project=project_meta_from_row(row),
             facts=[Fact(**dict(f)) for f in facts],
             intents=build_intents(conn, project_id),
             hints=[Hint(**dict(h)) for h in hints],
+            proxy=proxy_summary,
         )
 
 

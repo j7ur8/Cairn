@@ -116,13 +116,14 @@ class _DockerMock:
 
 
 class ContainerUserRuntimeTests(unittest.TestCase):
-    def _make_manager(self, user):
+    def _make_manager(self, user, exec_user=None):
         from cairn.dispatcher.config import BindMountConfig, ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(
             image="cairn/test:latest",
             user=user,
+            exec_user=exec_user,
             network_mode="cairn",
             completed_action="stop",
             bind_mounts=[
@@ -168,6 +169,17 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         self.assertEqual(dm.containers.run.call_count, 1)
         kwargs = dm.containers.run.call_args.kwargs
         self.assertEqual(kwargs.get("user"), "501:20")
+
+    def test_exec_user_is_passed_to_managed_process(self):
+        dm = _DockerMock()
+        container = MagicMock()
+        container.client.api = MagicMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0", exec_user="kali")
+            with patch.object(mgr, "_require_container", return_value=container):
+                process = mgr.build_exec_process("c", {}, ["echo", "ok"])
+
+        self.assertEqual(process.user, "kali")
 
 
 # ---------------------------------------------------------------------------

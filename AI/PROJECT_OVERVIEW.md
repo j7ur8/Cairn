@@ -269,6 +269,7 @@ docker compose up --build
 | `cairn/src/cairn/server/routers/files.py` | 项目报告 / exploit / 附件文件列举与下载 |
 | `cairn/src/cairn/server/routers/replay.py` | Replay run 创建与推进（基于已完成项目） |
 | `cairn/src/cairn/server/routers/projects.py` | Project/status/reason/complete API |
+| `cairn/src/cairn/server/routers/proxies.py` | Proxy pool CRUD (settings UI + dispatcher injection) |
 | `cairn/src/cairn/server/routers/intents.py` | Intent create/heartbeat/release/conclude API |
 | `cairn/src/cairn/server/routers/export.py` | YAML/timeline 导出 |
 | `cairn/src/cairn/dispatcher/scheduler/loop.py` | 主调度循环 |
@@ -280,7 +281,7 @@ docker compose up --build
 | `cairn/src/cairn/dispatcher/capabilities.py` | MCP/skill catalog 构造、项目能力选择解析与容器注入 |
 | `cairn/src/cairn/dispatcher/roles.py` | Role catalog 构造、项目 role prompt 快照注入 |
 | `capabilities/README.md` | MCP/skill/role 本地资源目录约定 |
-| `capabilities/skills/` | Cypher 与示例 skill 文件包 |
+| `capabilities/skills/` | Cypher + hello-js-reverse skill 文件包 |
 | `capabilities/roles/` | Cypher primary role prompt 文件 |
 | `cairn/src/cairn/dispatcher/workers/adapters/` | Claude/Codex/Pi/Mock 适配器 |
 | `cairn/src/cairn/dispatcher/prompts/default/` | 默认任务 prompt；已支持 capability 与 role 注入 |
@@ -322,7 +323,10 @@ ${CAIRN_REMOTE_SSH_PASSWORD}
 - Codex adapter 走 `-c mcp_servers.<id>.bearer_token_env_var=MCP_AUTH_TOKEN`,由 Codex 自身读 env;Claude adapter 在写 `mcp.json` 时**现场拼** `headers.Authorization: Bearer <token>`,序列化后立即释放,不进 `WorkerExecutionContext`。
 - 变量名会合并进 worker container `environment`,确保容器内 worker 进程能 `os.environ` 拿到。
 - HTTP MCP server 可达性由 `inject_project_capabilities` 在写 `mcp.json` 前做 TCP 探活(默认 1s),失败 → 跳过该 mcp,UI 标 `unavailable`。
-- HTTP MCP server 与 worker 容器的网络连通由部署者负责(可改 `container.network_mode` 或把端口 bind 到 `cairn` network);`Authorization: Bearer ...` 由 observability `redaction.py` 兜底,落库前替换为 `Authorization: Bearer ***`。
+- **项目级代理池** — 新增 `proxies` 表、`ProxyConfig` / `ProxySummary` / `ProxyCreate` / `ProxyUpdate` 模型、`GET/POST/PUT/DELETE /proxies/*` API。Settings 页面可管理代理(添加/编辑/删除 socks5/http/https,可选用户名密码认证)，创建项目时可选择一个代理。Dispatcher 每次调度时通过 `_resolve_project_proxy` 从 Server 重新获取代理定义，注入到 worker 容器环境变量(`ALL_PROXY` / `HTTP_PROXY` / `HTTPS_PROXY` + `NO_PROXY`)。代理密码在 observability redaction 正则中覆盖(`*PROXY_PASSWORD` / `*PROXY_URL` + 额外 `(?:ALL_PROXY|SOCKS5_PROXY|HTTP_PROXY|HTTPS_PROXY)=<credentials>`)。
+- 未配 proxy_id 的项目直连；`_resolve_proxy_env` 对 startup-healthcheck 容器特殊返回 `None`。
+
+HTTP MCP server 与 worker 容器的网络连通由部署者负责(可改 `container.network_mode` 或把端口 bind 到 `cairn` network);`Authorization: Bearer ...` 由 observability `redaction.py` 兜底,落库前替换为 `Authorization: Bearer ***`。
 - `.env.example` 末尾有 SECURITY 注释(不要把 `.env` 内容贴到 issue tracker / IM / 邮件 / 截图,定期轮换 `MCP_AUTH_TOKEN`)。
 
 **本地运行（直接 `uv run`）** — 在 shell 临时 export，或用 direnv:

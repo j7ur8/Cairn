@@ -20,7 +20,7 @@ from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary
+from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -38,6 +38,42 @@ class WorkerSelection:
     blocked_task_type: list[str]
 
 
+def _proxy_config_to_env(cfg: ProxyConfig) -> dict[str, str]:
+    """Translate a :class:`ProxyConfig` into the env vars a worker container
+    needs in order to route traffic through the proxy.
+
+    Behaviour:
+
+    * ``socks5`` -> ``ALL_PROXY`` + ``NO_PROXY`` (socks is the all-protocols
+      fallback; ``HTTP_PROXY`` / ``HTTPS_PROXY`` are *not* set because most
+      HTTPS libraries will only honour ``ALL_PROXY`` for SOCKS).
+    * ``http`` / ``https`` -> ``HTTP_PROXY`` + ``HTTPS_PROXY`` + ``NO_PROXY``.
+      ``http`` is used for both so existing tools that read either variable
+      get the same value.
+
+    Auth is rendered into the URL as ``user:pass@`` when both are set, or
+    ``user@`` when only the username is set. ``NO_PROXY`` always excludes the
+    Cairn-internal hostnames so the dispatcher -> server RPC keeps working.
+    """
+    userpass = ""
+    if cfg.username and cfg.password:
+        userpass = f"{cfg.username}:{cfg.password}@"
+    elif cfg.username:
+        userpass = f"{cfg.username}@"
+    no_proxy = "localhost,127.0.0.1,cairn-server,cairn"
+    if cfg.type == "socks5":
+        return {
+            "ALL_PROXY": f"socks5://{userpass}{cfg.host}:{cfg.port}",
+            "NO_PROXY": no_proxy,
+        }
+    scheme = "http"
+    return {
+        "HTTP_PROXY": f"{scheme}://{userpass}{cfg.host}:{cfg.port}",
+        "HTTPS_PROXY": f"{scheme}://{userpass}{cfg.host}:{cfg.port}",
+        "NO_PROXY": no_proxy,
+    }
+
+
 class DispatcherLoop:
     def __init__(self, config_path: Path):
         self.config_path = config_path
@@ -51,6 +87,7 @@ class DispatcherLoop:
         self.container_manager = ContainerManager(
             self.config.container,
             bearer_token_env_keys=bearer_token_env_keys,
+            proxy_resolver=self._resolve_proxy_env,
         )
         self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
         self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, self.config.runtime.max_workers)))
@@ -68,6 +105,10 @@ class DispatcherLoop:
         self._capability_catalog_registered = False
         self._role_catalog_registered = False
         self._startup_healthchecks_checked = False
+        # Per-project proxy cache: project_id -> resolved ProxyConfig (or None
+        # when the project has no proxy). Refreshed from Server on each
+        # dispatch pass before a worker container may be created.
+        self._project_proxy_cache: dict[str, ProxyConfig | None] = {}
 
     def close(self) -> None:
         if self.futures:
@@ -210,6 +251,54 @@ class DispatcherLoop:
         self.project_cursor += 1
         return [by_id[project_id] for project_id in ordered_ids]
 
+    def _resolve_project_proxy(self, project: ProjectDetail) -> None:
+        """Refresh ``self._project_proxy_cache`` for one project.
+
+        Called from :meth:`_try_dispatch_project` on every dispatch pass so
+        that the cache always reflects the latest ``projects.proxy_id`` and
+        proxy definition. A proxy_id of ``None`` (or a missing/errored fetch)
+        is cached as ``None``.
+        """
+        project_id = project.project.id
+        proxy_id = project.proxy.id if project.proxy else None
+        if not proxy_id:
+            self._project_proxy_cache[project_id] = None
+            return
+        try:
+            self._project_proxy_cache[project_id] = self.client.get_proxy(proxy_id)
+            LOG.info("resolved proxy for project=%s proxy_id=%s", project_id, proxy_id)
+        except LookupError:
+            LOG.warning(
+                "project=%s references missing proxy_id=%s; worker will run direct",
+                project_id,
+                proxy_id,
+            )
+            self._project_proxy_cache[project_id] = None
+        except requests.RequestException as exc:
+            LOG.warning(
+                "project=%s proxy lookup failed proxy_id=%s error=%s; worker will run direct",
+                project_id,
+                proxy_id,
+                exc,
+            )
+            self._project_proxy_cache[project_id] = None
+
+    def _resolve_proxy_env(self, project_id: str) -> dict[str, str] | None:
+        """Resolver passed to :class:`ContainerManager`.
+
+        Returns the proxy env vars to merge into the worker's ``environment=``
+        kwarg. ``None`` means "no proxy" (the worker runs direct). The
+        startup-healthcheck container is special-cased to ``None`` so the
+        probe never tries to dial a proxy that may not be reachable from
+        inside the dispatcher's network namespace.
+        """
+        if project_id == ContainerManager._STARTUP_PROJECT_ID:
+            return None
+        cfg = self._project_proxy_cache.get(project_id)
+        if cfg is None:
+            return None
+        return _proxy_config_to_env(cfg)
+
     def _try_dispatch_project(self, summary: ProjectSummary) -> bool:
         skip_scope = f"project:{summary.id}:skip"
         container_name = self.container_manager.container_name(summary.id)
@@ -233,6 +322,11 @@ class DispatcherLoop:
             return False
 
         project = self.client.get_project(summary.id)
+        # Populate the per-project proxy cache *before* any skip checks so
+        # that even short-circuit returns (status != active, etc.) keep the
+        # cache consistent. Resolver failures are tolerated: a project
+        # whose proxy_id points to a deleted proxy simply runs direct.
+        self._resolve_project_proxy(project)
         if project.project.status != "active":
             self._log_changed(
                 f"{skip_scope}:status",

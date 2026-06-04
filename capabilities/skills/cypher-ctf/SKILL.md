@@ -1,12 +1,26 @@
 ---
 name: cypher-ctf
-description: CTF automation workflows for web, pwn, reverse, crypto, forensics, stego and misc tasks.
-version: 0.1.0
+description: CTF orchestration skill — triages challenge type, delegates to specialist sub-skills (pwn, reverse, crypto, forensics, web), coordinates multi-step solve paths, and enforces evidence/writeup standards.
+version: 0.2.0
 ---
 
-# Cypher CTF Skill
+# Cypher CTF Skill (Orchestration Layer)
 
-Use this skill when the project looks like a CTF challenge, cyber range, HTB/THM-style box, or competition sandbox.
+Use this skill when the project looks like a CTF challenge, cyber range, HTB/THM-style box, or competition sandbox. This skill acts as the **orchestration layer** — it triages, delegates to specialist sub-skills, and coordinates the overall solve path.
+
+## Sub-skill delegation
+
+When a challenge category is identified, load the corresponding specialist skill for detailed methodology:
+
+| Category | Sub-skill | Key role |
+|----------|-----------|----------|
+| Web | `cypher-sqli`, `cypher-xss`, `cypher-ssrf`, `cypher-command-injection`, `cypher-file-upload`, `cypher-idor`, `cypher-deserialization`, `cypher-xxe`, `cypher-jwt`, `cypher-auth-bypass`, `cypher-ssti` | Web exploit chains |
+| Pwn / Binary | `cypher-pwn` | Stack/heap/ROP |
+| Reverse | `cypher-reverse` | Disassembly, deobfuscation |
+| Crypto | `cypher-crypto` | Cipher attacks, oracle exploitation |
+| Forensics / Stego | `cypher-forensics` | File carving, memory analysis |
+| Blockchain | `cypher-blockchain` | Smart contract exploits |
+| Full-box | All of the above + post-exploit sub-skills | Multi-stage compromise |
 
 ## Completion standards
 
@@ -44,14 +58,15 @@ A CTF task is complete only when one of these is confirmed:
 
 1. Read Origin, Goal, Hints, and `/mnt/attachments`.
 2. Identify category: web / pwn / reverse / crypto / forensics / stego / misc / full-box.
-3. Build one narrow path to the goal before broadening.
-4. Prefer exact reproducibility over broad speculation.
-5. If a path fails, write a `BLOCKER` fact with the decisive negative evidence.
+3. Load the appropriate specialist sub-skill(s) from `capabilities/skills/`.
+4. Build one narrow path to the goal before broadening.
+5. Prefer exact reproducibility over broad speculation.
+6. If a path fails, write a `BLOCKER` fact with the decisive negative evidence.
 
 ## Common lanes
 
 - `recon`: asset and attachment inventory.
-- `web_exploit`: endpoint, auth, upload, SSRF, SQLi, command injection, deserialization.
+- `web_exploit`: endpoint, auth, upload, SSRF, SQLi, command injection, deserialization, SSTI.
 - `service_exploit`: version-specific service exploitation, default creds, protocol bugs.
 - `ctf_specialist`: pwn/reverse/crypto/forensics/stego transforms.
 - `post_exploit`: shell stabilization, local enum, privesc, flag collection.

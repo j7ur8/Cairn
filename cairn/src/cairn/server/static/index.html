@@ -1094,6 +1094,24 @@
           </template>
         </div>
 
+        <div>
+          <label class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-1.5 block">Outbound Proxy</label>
+          <select x-model="newProject.proxy_id" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="">No proxy (direct connection)</option>
+            <template x-for="p in proxies" :key="p.id">
+              <option :value="p.id" x-text="`${p.name} — ${p.type}://${p.host}:${p.port}${p.has_auth ? ' (auth)' : ''}`"></option>
+            </template>
+          </select>
+          <p class="text-[11px] text-slate-400 mt-1.5">
+            <template x-if="!newProject.proxy_id">
+              <span>Workers will reach the network directly. Add a proxy in Settings first if you need one.</span>
+            </template>
+            <template x-if="newProject.proxy_id">
+              <span>Workers will route outbound traffic through this proxy at task-launch time.</span>
+            </template>
+          </p>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-2">MCP Servers</div>
@@ -1443,17 +1461,74 @@
 
 <!-- Settings -->
 <div x-show="showSettings" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showSettings = false">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 border border-slate-200/60" @click.stop>
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 border border-slate-200/60" @click.stop>
     <h3 class="text-base font-semibold text-slate-700 mb-4">Server Settings</h3>
-    <div>
-      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent timeout (seconds)</label>
-      <input type="number" x-model.number="settingsForm.intent_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+    <div class="space-y-3">
+      <div>
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent timeout (seconds)</label>
+        <input type="number" x-model.number="settingsForm.intent_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+      </div>
+      <div>
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason timeout (seconds)</label>
+        <input type="number" x-model.number="settingsForm.reason_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+        <p class="text-[11px] text-slate-400 mt-2">Shared backend configuration.</p>
+      </div>
     </div>
-    <div class="mt-4">
-      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason timeout (seconds)</label>
-      <input type="number" x-model.number="settingsForm.reason_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-      <p class="text-[11px] text-slate-400 mt-2">Shared backend configuration.</p>
+
+    <div class="mt-6 pt-5 border-t border-slate-200/80">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Proxies</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Workers route outbound traffic through the proxy assigned to their project. Pick a proxy at project creation; new projects default to no proxy.</p>
+        </div>
+        <button @click="openCreateProxy()" class="shrink-0 px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add</button>
+      </div>
+
+      <div x-show="proxyForm.id || proxyFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
+          <input x-model="proxyForm.name" placeholder="Name (e.g. corp-socks)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <select x-model="proxyForm.type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
+          <input x-model="proxyForm.host" placeholder="host" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model.number="proxyForm.port" type="number" min="1" max="65535" placeholder="port" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input x-model="proxyForm.username" placeholder="username (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="proxyForm.password" type="password" placeholder="password (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="flex justify-end gap-2">
+          <button @click="cancelProxyEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+          <button @click="saveProxy()" :disabled="!proxyForm.name.trim() || !proxyForm.host.trim() || !proxyForm.port" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="proxyForm.id ? 'Save' : 'Create'"></button>
+        </div>
+      </div>
+
+      <template x-if="proxies.length === 0">
+        <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No proxies configured.</p>
+      </template>
+      <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+        <template x-for="p in proxies" :key="p.id">
+          <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.name"></div>
+                <div class="text-[10px] font-mono text-slate-400" x-text="`${p.type}://${p.host}:${p.port}`"></div>
+                <div class="text-[10px] text-slate-400 mt-0.5" x-text="p.has_auth ? 'auth: required' : 'auth: none'"></div>
+              </div>
+              <div class="flex gap-1 shrink-0">
+                <button @click="openEditProxy(p.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                <button @click="deleteProxy(p.id, p.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
     </div>
+
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showSettings = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Close</button>
       <button @click="saveServerSettings()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Server</button>
@@ -1622,6 +1697,9 @@ function cairnApp() {
     isCreatingReplayRun: false,
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
+    proxies: [],
+    proxyForm: { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' },
+    proxyFormOpen: false,
     deleteConfirm: { id: '', title: '' },
     isDeletingProject: false,
     projectFiles: [],
@@ -2120,6 +2198,85 @@ function cairnApp() {
       } catch(e) { console.error(e); }
     },
 
+    async loadProxies() {
+      try {
+        this.proxies = await this.api('GET', '/proxies') || [];
+      } catch (e) {
+        console.error(e);
+        this.proxies = [];
+      }
+    },
+
+    resetProxyForm() {
+      this.proxyForm = { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' };
+      this.proxyFormOpen = false;
+    },
+
+    openCreateProxy() {
+      this.resetProxyForm();
+      this.proxyFormOpen = true;
+    },
+
+    async openEditProxy(proxyId) {
+      try {
+        const p = await this.api('GET', `/proxies/${encodeURIComponent(proxyId)}`);
+        this.proxyForm = {
+          id: p.id,
+          name: p.name || '',
+          type: p.type || 'socks5',
+          host: p.host || '',
+          port: p.port || 1080,
+          username: p.username || '',
+          password: p.password || '',
+        };
+        this.proxyFormOpen = true;
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    cancelProxyEdit() {
+      this.resetProxyForm();
+    },
+
+    async saveProxy() {
+      const body = {
+        name: this.proxyForm.name.trim(),
+        type: this.proxyForm.type,
+        host: this.proxyForm.host.trim(),
+        port: Number(this.proxyForm.port),
+        username: this.proxyForm.username || null,
+        password: this.proxyForm.password || null,
+      };
+      try {
+        if (this.proxyForm.id) {
+          await this.api('PUT', `/proxies/${encodeURIComponent(this.proxyForm.id)}`, body);
+          this.showToast('Proxy saved');
+        } else {
+          await this.api('POST', '/proxies', body);
+          this.showToast('Proxy created');
+        }
+        this.resetProxyForm();
+        await this.loadProxies();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async deleteProxy(proxyId, proxyName) {
+      const ok = window.confirm(`Delete proxy "${proxyName}"? Projects that reference it will fall back to direct connection.`);
+      if (!ok) return;
+      try {
+        await this.api('DELETE', `/proxies/${encodeURIComponent(proxyId)}`);
+        this.showToast('Proxy deleted');
+        if (this.proxyForm.id === proxyId) this.resetProxyForm();
+        await this.loadProxies();
+        if (this.newProject && this.newProject.proxy_id === proxyId) this.newProject.proxy_id = '';
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
     async loadProject(id) {
       try {
         this.project = await this.api('GET', `/projects/${id}`);
@@ -2217,6 +2374,7 @@ function cairnApp() {
         hints: [{ content: '' }],
         attachments: [],
         role_id: '',
+        proxy_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
       };
     },
@@ -2258,7 +2416,7 @@ function cairnApp() {
     async openNewProject() {
       this.resetNewProject();
       this.showNewProject = true;
-      await this.loadNewProjectCatalog();
+      await Promise.all([this.loadNewProjectCatalog(), this.loadProxies()]);
     },
 
     async loadNewProjectCatalog() {
@@ -4653,6 +4811,9 @@ function cairnApp() {
         };
         if (this.newProject.role_id) {
           body.role = { role_id: this.newProject.role_id };
+        }
+        if (this.newProject.proxy_id) {
+          body.proxy_id = this.newProject.proxy_id;
         }
         const data = await this.api('POST', '/projects', body);
         createdProjectId = data.project.id;

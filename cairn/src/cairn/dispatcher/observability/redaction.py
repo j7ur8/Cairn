@@ -5,6 +5,12 @@ import re
 BUILTIN_PATTERNS = [
     r"(?i)(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|[A-Z0-9_]*(?:API_KEY|AUTH_TOKEN))\s*[:=]\s*['\"]?[^'\"\s,}]+",
     r"""(?i)(?<![A-Za-z_])(Authorization"?\s*:\s*"?Bearer"?\s+)[A-Za-z0-9._~+/=-]+""",
+    # Proxy secrets: covers HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / SOCKS5_PROXY
+    # env values that may contain `user:pass@host:port` (basic-auth-in-URL).
+    # The whole `KEY=VALUE` is redacted, including credentials, so a single
+    # regex replaces the entire env-var assignment without leaving the auth
+    # tuple in the redacted output.
+    r"(?i)((?:HTTP|HTTPS|ALL|SOCKS5)_PROXY|[A-Z0-9_]*PROXY_(?:PASSWORD|URL))\s*[:=]\s*[^\s,}]+",
 ]
 
 

@@ -270,28 +270,65 @@ triggers:
 
 ## 11. Skill 设计
 
-最小 skill 组：
+### 11.1 编排层技能（v0.2.0）— 位于 `capabilities/skills/cypher-{ctf,pentest,vuln-research}/`
 
 | Skill | 用途 |
 | --- | --- |
-| `cypher-ctf` | CTF 类型识别、flag 工作流、Web/Pwn/Reverse/Crypto/Forensics 方法 |
-| `cypher-pentest` | 授权渗透测试、scope、证据、漏洞验证、清理与报告 |
-| `cypher-vuln-research` | 代码审计、CVE 复现、PoC 改造、fuzz、root cause |
-| `cypher-flag-oob` | flag 提交、DNSLog/OOB、反连接收、tmux 长任务记录 |
+| `cypher-ctf` (v0.2.0) | CTF 编排层：类型识别、子技能委派、flag 工作流协调、WriteUp 标准 |
+| `cypher-pentest` (v0.2.0) | 渗透测试编排层：scope/ROE、漏洞分诊、子技能委派、证据与报告 |
+| `cypher-vuln-research` (v0.2.0) | 漏洞研究编排层：代码审计、CVE 复现、PoC 改造、子技能委派 |
 
-后续可从 CyberStrikeAI 迁移细分 skill：
+### 11.2 Web 漏洞专项技能（v0.1.0）— 位于 `capabilities/skills/cypher-{sqli,xss,...}/`
 
-- `sql-injection-testing`
-- `xss-testing`
-- `ssrf-testing`
-- `file-upload-testing`
-- `command-injection-testing`
-- `idor-testing`
-- `xxe-testing`
-- `network-penetration-testing`
-- `container-security-testing`
-- `cloud-security-audit`
-- `secure-code-review`
+参照 CyberStrikeAI 的 20+ 技能体系实现：
+
+| Skill | 用途 |
+| --- | --- |
+| `cypher-sqli` | SQL 注入：错误/联合/布尔盲注/时间盲注/堆叠/二阶/OOB，覆盖 MySQL/PG/MSSQL/Oracle/SQLite |
+| `cypher-xss` | XSS：反射/存储/DOM/mXSS/CSP 绕过/postMessage，上下文感知 payload |
+| `cypher-ssrf` | SSRF：内网端口扫描、云元数据窃取(AWS/GCP/Azure)、协议走私、DNS rebinding、盲 SSRF |
+| `cypher-command-injection` | 命令注入：盲注/回显/OOB 检测、过滤绕过、参数注入、Linux/Windows |
+| `cypher-file-upload` | 文件上传：扩展名绕过、Magic Bytes、polyglot、条件竞争、图片处理、ZIP slip |
+| `cypher-idor` | IDOR/授权：顺序 ID/UUID/HashID 遍历、批量参数篡改、多租户隔离 |
+| `cypher-deserialization` | 反序列化：PHP/Java/.NET/Python/Ruby/Node.js gadget chains、ysoserial/phpggc |
+| `cypher-xxe` | XXE：带内/OOB/参数实体/XInclude/SVG/SOAP/Office 文档 |
+| `cypher-jwt` | JWT 攻击：alg 混淆、密钥混淆(RS256→HS256)、kid/jku/x5u 注入、弱 HMAC |
+| `cypher-auth-bypass` | 认证绕过：OAuth/OIDC 配置缺陷、SAML 签名缺陷、2FA 绕过、密码重置投毒 |
+| `cypher-ssti` | 服务端模板注入：Jinja2/Twig/Freemarker/Velocity/ERB/Pug/Smarty/Mako 沙箱逃逸 |
+
+### 11.3 CTF 专项技能（v0.1.0）
+
+| Skill | 用途 |
+| --- | --- |
+| `cypher-pwn` | 二进制利用：栈/堆溢出、ROP/JOP、ret2libc、格式化字符串、整数攻击、tcache/fastbin |
+| `cypher-reverse` | 逆向工程：Ghidra/IDA/radare2/gdb、去混淆、脱壳、反调试绕过、语言专项 |
+| `cypher-crypto` | 密码学：RSA(small e/Wiener/Coppersmith)、ECC、padding oracle、哈希长度扩展、PRNG |
+| `cypher-forensics` | 取证：Volatility3 内存分析、磁盘取证、文件雕刻、隐写检测、PCAP 分析 |
+| `cypher-blockchain` | 区块链：重入/溢出/访问控制/闪电贷/预言机操纵/delegatecall/Solidity 审计 |
+
+### 11.4 基础设施与后渗透技能（v0.1.0）
+
+| Skill | 用途 |
+| --- | --- |
+| `cypher-ad` | Active Directory：BloodHound、Kerberoasting、AS-REP、DCSync、委派滥用、NTLM 中继、ADCS |
+| `cypher-privesc-linux` | Linux 提权：SUID/capabilities/sudo/cron/NFS/Docker 逃逸/内核漏洞/LD_PRELOAD |
+| `cypher-privesc-windows` | Windows 提权：服务配置/AlwaysInstallElevated/UAC 绕过/Token 窃取/Potato 家族 |
+| `cypher-cloud` | 云安全：AWS/Azure/GCP 元数据、IAM 提权、存储枚举、Serverless 利用 |
+| `cypher-container` | 容器/K8s：Docker socket 滥用、特权逃逸、capabilities、K8s RBAC、pod 逃逸 |
+| `cypher-post-exploit` | 后渗透：Shell 稳定化、文件传输、隧道(chisel/ligolo/SSH)、凭据收集、横向移动、持久化 |
+
+### 11.5 载荷与模板资源
+
+位于 `capabilities/payloads/` 和 `capabilities/templates/`：
+
+- `payloads/sqli-payloads.md` — SQL 注入 payload 集（认证绕过、联合注入、时间盲注、WAF 绕过）
+- `payloads/xss-payloads.md` — XSS payload 集（上下文分类、WAF 绕过、短 payload、CSP 绕过）
+- `payloads/ssrf-payloads.md` — SSRF payload 集（云元数据、内网探测、URL 解析器绕过）
+- `payloads/ssti-payloads.md` — SSTI payload 集（7 种模板引擎检测与利用）
+- `payloads/rce-commands.md` — 反向 shell/命令执行 one-liner（5 种语言 + 盲检测探针）
+- `templates/vulnerability-report.md` — 渗透测试漏洞报告模板
+- `templates/ctf-writeup.md` — CTF WriteUp 模板
+- `templates/vuln-research-report.md` — 漏洞研究报告模板
 
 ## 12. 工具层建议
 
@@ -373,93 +410,88 @@ Fact 中只写摘要和路径，避免塞长日志。
 - Explore 阶段只做当前 intent，不漂移。
 - Conclude 阶段禁止继续执行，只总结已确认事实。
 
-## 16. `dispatch.yaml` 示例片段
+## 16. `dispatch.yaml` 示例片段（当前版本概览）
 
-不要直接复制真实 key。示例：
+完整配置见项目根目录 `dispatch.yaml`。Skills 现包含 3 个编排层 + 22 个专项 + 1 个前端逆向 = 26 个：
 
 ```yaml
-runtime:
-  prompt_group: "cypher"
-
-tasks:
-  bootstrap:
-    timeout: 600
-    conclude_timeout: 120
-  reason:
-    timeout: 240
-    max_intents: 3
-  explore:
-    timeout: 900
-    conclude_timeout: 120
-
 capabilities:
   skills:
+    # -- Orchestration (v0.2.0) --
     - id: "cypher-ctf"
-      name: "Cypher CTF"
-      description: "CTF solving workflows for web/pwn/reverse/crypto/forensics/misc."
-      source_path: "./capabilities/skills/cypher-ctf"
-      task_types: ["bootstrap", "explore", "reason"]
     - id: "cypher-pentest"
-      name: "Cypher Pentest"
-      description: "Authorized pentest workflows, evidence, scope, cleanup, reporting."
-      source_path: "./capabilities/skills/cypher-pentest"
-      task_types: ["bootstrap", "explore", "reason"]
     - id: "cypher-vuln-research"
-      name: "Cypher Vuln Research"
-      description: "Code audit, CVE reproduction, PoC adaptation, fuzzing and root cause analysis."
-      source_path: "./capabilities/skills/cypher-vuln-research"
-      task_types: ["bootstrap", "explore", "reason"]
-    - id: "cypher-flag-oob"
-      name: "Cypher Flag and OOB"
-      description: "Flag submission, DNSLog/OOB callback and tmux long-running listener conventions."
-      source_path: "./capabilities/skills/cypher-flag-oob"
-      task_types: ["bootstrap", "explore"]
+    # -- Web vulnerabilities --
+    - id: "cypher-sqli" / "cypher-xss" / "cypher-ssrf"
+    - id: "cypher-command-injection" / "cypher-file-upload" / "cypher-idor"
+    - id: "cypher-deserialization" / "cypher-xxe" / "cypher-jwt"
+    - id: "cypher-auth-bypass" / "cypher-ssti"
+    # -- CTF specialist --
+    - id: "cypher-pwn" / "cypher-reverse" / "cypher-crypto"
+    - id: "cypher-forensics" / "cypher-blockchain"
+    # -- Infrastructure & Post-Exploit --
+    - id: "cypher-ad" / "cypher-privesc-linux" / "cypher-privesc-windows"
+    - id: "cypher-cloud" / "cypher-container" / "cypher-post-exploit"
+    # -- Frontend --
+    - id: "hello-js-reverse"
 ```
 
 ## 17. 里程碑
 
-### M0：Prompt + Skill 最小可用
+### M0 ✅：Prompt + Skill 最小可用（已完成）
 
 - 新增 `cairn/src/cairn/dispatcher/prompts/cypher/`。
 - 新增 `capabilities/skills/cypher-*`。
 - 修改 `dispatch.yaml` 的 `runtime.prompt_group` 和 `capabilities.skills`。
 - 不改数据库、不改 dispatcher。
 
-### M1：结构化前缀解析与优先级探索
+### M0.5 ✅：Skill 体系扩展（2026-06 完成）
+
+- 新增 11 个 Web 漏洞专项技能（SQLi、XSS、SSRF、命令注入、文件上传、IDOR、反序列化、XXE、JWT、认证绕过、SSTI）。
+- 新增 5 个 CTF 专项技能（Pwn、Reverse、Crypto、Forensics、Blockchain）。
+- 新增 6 个基础设施与后渗透技能（AD、Linux/Windows 提权、Cloud、Container、Post-Exploit）。
+- 编排层技能升级到 v0.2.0，增加子技能委派指引。
+- 新增 payload/字典资源包和报告模板。
+- 技能总数：4 → 26。
+
+### M1：结构化前缀解析与优先级探索（待实施）
 
 - 新增 Cypher metadata parser。
 - Dispatcher 选择 intent 时按 priority 排序。
 - UI 展示 fact/intents tags。
 
-### M2：Schema 扩展
+### M2：Schema 扩展（待实施）
 
 - Facts / Intents 增加 metadata 字段。
 - API / UI 支持查询、过滤、统计。
 - Reason 可基于结构化 taxonomy 做更稳的去重。
 
-### M3：Tool/MCP 与报告系统
+### M3：Tool/MCP 与报告系统（待实施）
 
 - 引入 CyberStrikeAI 风格 tool catalog。
 - 关键工具输出统一归档到 `/mnt/project`。
 - 自动生成 Markdown / JSON / SARIF 报告。
 
-### M4：Pheromone Swarm
+### M4：Pheromone Swarm（待实施）
 
 - 增加 half-life、decay、trigger predicate。
 - 独立 lane 并发限流。
 - Budget-aware 调度。
 - Duplicate suppression 与 memory graft。
 
-## 18. 推荐的第一版落地方式
+## 18. 当前落地状态
 
-最稳路线：
+已落地：
+1. ✅ `cypher` prompt group 运行中。
+2. ✅ `dispatch.yaml` 中启用 26 个 Cypher skills（3 个编排层 + 22 个专项 + 1 个前端逆向）。
+3. ✅ 新建项目时支持选择 Role / MCP / Skills。
+4. ✅ Report templates 和 payload packs 可用。
 
-1. 使用本设计附带的 `cypher` prompt group。
-2. 在 `dispatch.yaml` 中启用四个 Cypher skills。
-3. 新建项目时，在 Origin/Hints 中明确：profile、scope、goal、附件路径、禁止项。
-4. 先跑 CTF / 靶场 / 离线源码审计场景验证。
-5. 再做授权 Web / SRC 场景。
-6. 稳定后再做 dispatcher priority 与 schema 扩展。
+推荐验证路径：
+1. 先跑 CTF / 靶场 / 离线源码审计场景验证——使用 `cypher-ctf` + 专项子技能。
+2. 再做授权 Web / SRC 场景——使用 `cypher-pentest` + Web 漏洞子技能。
+3. 再做内网/AD 场景——使用 `cypher-ad` + 提权/后渗透子技能。
+4. 稳定后实施 M1 dispatcher priority 与 schema 扩展。
 
 ## 19. 项目命名解释
 

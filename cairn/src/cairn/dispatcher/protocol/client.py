@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
 
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, Settings
+from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, Settings
 
 LOG = logging.getLogger(__name__)
 
@@ -62,6 +62,20 @@ class CairnClient:
         response = self._session().get(self._url("/settings"), timeout=self._timeout)
         response.raise_for_status()
         return Settings.model_validate(response.json())
+
+    def get_proxy(self, proxy_id: str) -> ProxyConfig:
+        """Fetch a proxy definition (with credentials) for worker env injection.
+
+        Called by the dispatcher at task-launch time when the project has a
+        ``proxy_id`` set. Returns the full ``ProxyConfig`` including
+        ``username`` / ``password`` so the worker can construct authenticated
+        proxy URLs.
+        """
+        response = self._session().get(self._url(f"/proxies/{proxy_id}"), timeout=self._timeout)
+        if response.status_code == 404:
+            raise LookupError(f"proxy not found: {proxy_id}")
+        response.raise_for_status()
+        return ProxyConfig.model_validate(response.json())
 
     def export_project(self, project_id: str) -> str:
         response = self._session().get(

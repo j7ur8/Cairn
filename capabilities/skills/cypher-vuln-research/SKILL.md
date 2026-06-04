@@ -1,12 +1,24 @@
 ---
 name: cypher-vuln-research
-description: Vulnerability research workflows for source audit, CVE reproduction, PoC adaptation, fuzzing and root-cause analysis.
-version: 0.1.0
+description: Vulnerability research orchestration skill — delegates source audit, CVE reproduction, PoC adaptation, fuzzing, and root-cause analysis to specialist sub-skills, coordinates evidence collection and research report generation.
+version: 0.2.0
 ---
 
-# Cypher Vulnerability Research Skill
+# Cypher Vulnerability Research Skill (Orchestration Layer)
 
-Use this skill for source-code audit, CVE reproduction, exploit adaptation, binary analysis, fuzzing, or patch-diff research.
+Use this skill for source-code audit, CVE reproduction, exploit adaptation, binary analysis, fuzzing, or patch-diff research. This skill acts as the **orchestration layer** — it triages the target, delegates to specialist sub-skills, and coordinates root-cause evidence.
+
+## Sub-skill delegation
+
+| Research area | Sub-skill |
+|--------------|-----------|
+| Binary / Pwnable | `cypher-pwn` |
+| Reverse Engineering | `cypher-reverse` |
+| Cryptographic Analysis | `cypher-crypto` |
+| Forensics / Artifact Analysis | `cypher-forensics` |
+| Blockchain / Smart Contract | `cypher-blockchain` |
+| Web Vulnerability Research | `cypher-sqli`, `cypher-deserialization`, `cypher-ssti`, `cypher-xxe`, etc. |
+| Container / Cloud | `cypher-container`, `cypher-cloud` |
 
 ## Core loop
 

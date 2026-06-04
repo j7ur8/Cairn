@@ -151,6 +151,18 @@ CREATE TABLE IF NOT EXISTS replay_steps (
     PRIMARY KEY (run_id, step_index),
     UNIQUE (run_id, source_intent_id)
 );
+
+CREATE TABLE IF NOT EXISTS proxies (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('socks5','http','https')),
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    username TEXT,
+    password TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -162,6 +174,18 @@ def configure(path: Path) -> None:
     _db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Progressive migration: add projects.proxy_id to databases created
+        # before proxies were introduced. SQLite has no ADD COLUMN IF NOT
+        # EXISTS, so we introspect via PRAGMA table_info.
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(projects)").fetchall()
+        }
+        if "proxy_id" not in cols:
+            conn.execute(
+                "ALTER TABLE projects ADD COLUMN proxy_id TEXT "
+                "REFERENCES proxies(id) ON DELETE SET NULL"
+            )
 
 
 @contextmanager

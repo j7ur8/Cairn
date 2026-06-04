@@ -303,6 +303,12 @@ Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语�
 如果 intent.worker 是其他 worker，则 409。
 ```
 
+#### 项目级代理注入
+
+每次调度时 `_resolve_project_proxy()` 从 Server 重新获取代理定义并缓存到 `_project_proxy_cache`；`_resolve_proxy_env()` 传给 `ContainerManager`(通过 `proxy_resolver` 参数)，启动 worker 容器时合并 env。socks5 注入 `ALL_PROXY` + `NO_PROXY`，http/https 注入 `HTTP_PROXY` + `HTTPS_PROXY` + `NO_PROXY`。startup-healthcheck 容器不走代理。代理凭据在 observability redaction 中覆盖。
+
+相关测试：`test_proxy_settings.py`(28 case 覆盖 schema / env 转换 / redaction / 缓存 / DB CRUD / FK cascade)。
+
 ### MCP transport: http
 
 `McpServerCapabilityConfig` 支持两种 transport:
