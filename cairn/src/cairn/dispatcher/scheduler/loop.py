@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 import requests
@@ -12,6 +14,7 @@ import requests
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import catalog_payload as capability_catalog_payload
 from cairn.dispatcher.roles import catalog_payload as role_catalog_payload
+from cairn.dispatcher.ai_health import probe_snapshot
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -34,6 +37,7 @@ UNHEALTHY_RETRY_AFTER_SECONDS = 5
 REJECTED_RETRY_AFTER_SECONDS = 5
 BOOTSTRAP_INTENT_DESCRIPTION = "bootstrap"
 BOOTSTRAP_INTENT_CREATOR = "dispatcher.bootstrap"
+REASON_CONSUMED_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
 
 
 @dataclass(slots=True)
@@ -121,7 +125,7 @@ class DispatcherLoop:
         # alongside the proxy cache before worker selection. ``None`` when
         # the project has not opted into AI profile selection, in which
         # case the dispatcher falls back to the global worker pool.
-        self._project_ai_cache: dict[str, list[ProjectAiProfileSnapshot] | None] = {}
+        self._project_ai_cache: dict[str, dict[str, list[ProjectAiProfileSnapshot]] | None] = {}
 
     def close(self) -> None:
         if self.futures:
@@ -332,23 +336,32 @@ class DispatcherLoop:
             )
             self._project_ai_cache[project_id] = None
             return
-        ordered = sorted(
-            snapshots,
-            key=lambda snap: (0 if snap.role == "primary" else 1, snap.position),
-        )
-        if not ordered:
+        chains: dict[str, list[ProjectAiProfileSnapshot]] = {}
+        legacy = [snap for snap in snapshots if snap.task_type == "legacy"]
+        for task_type in ("bootstrap", "explore", "reason"):
+            task_snaps = [snap for snap in snapshots if snap.task_type == task_type] or legacy
+            ordered = sorted(
+                task_snaps,
+                key=lambda snap: (0 if snap.role == "primary" else 1, snap.position),
+            )
+            if ordered:
+                chains[task_type] = ordered
+        if not chains:
             self._project_ai_cache[project_id] = None
             return
-        self._project_ai_cache[project_id] = ordered
-        LOG.info(
-            "project=%s ai selection primary=%s fallback=%s",
-            project_id,
-            next((snap.profile_id for snap in ordered if snap.role == "primary"), None),
-            [snap.profile_id for snap in ordered if snap.role == "fallback"],
-        )
+        self._project_ai_cache[project_id] = chains
+        for task_type, ordered in chains.items():
+            LOG.info(
+                "project=%s ai selection task_type=%s primary=%s fallback=%s",
+                project_id,
+                task_type,
+                next((snap.profile_id for snap in ordered if snap.role == "primary"), None),
+                [snap.profile_id for snap in ordered if snap.role == "fallback"],
+            )
 
-    def _project_ai_snapshots(self, project_id: str) -> list[ProjectAiProfileSnapshot]:
-        return self._project_ai_cache.get(project_id) or []
+    def _project_ai_snapshots(self, project_id: str, task_type: str) -> list[ProjectAiProfileSnapshot]:
+        chains = self._project_ai_cache.get(project_id) or {}
+        return chains.get(task_type) or []
 
     @staticmethod
     def _ai_worker_env_overlay(snapshot: ProjectAiProfileSnapshot) -> dict[str, str]:
@@ -485,8 +498,20 @@ class DispatcherLoop:
                 len(project.intents),
             )
             return False
+        reason_trigger_hash = self._reason_trigger_hash(reason_trigger)
+        reason_blocker = self._reason_dispatch_blocker(project, reason_trigger_hash)
+        if reason_blocker is not None:
+            self._log_changed(
+                f"{skip_scope}:reason_state",
+                logging.INFO,
+                "skip reason project=%s trigger=%s reason=%s",
+                summary.id,
+                reason_trigger,
+                reason_blocker,
+            )
+            return False
         export_yaml = self.client.export_project(summary.id)
-        return self._dispatch_reason(project, export_yaml, reason_trigger)
+        return self._dispatch_reason(project, export_yaml, reason_trigger, reason_trigger_hash)
 
     def _advance_replay_project(self, project_id: str) -> bool | None:
         response = self.client.advance_replay_run(project_id)
@@ -561,7 +586,7 @@ class DispatcherLoop:
             return False
         return self._dispatch_bootstrap(project, intent)
 
-    def _dispatch_reason(self, project: ProjectDetail, export_yaml: str, trigger: str) -> bool:
+    def _dispatch_reason(self, project: ProjectDetail, export_yaml: str, trigger: str, trigger_hash: str) -> bool:
         selection = self._select_worker(project.project.id, "reason")
         worker = selection.worker
         if worker is None:
@@ -576,7 +601,20 @@ class DispatcherLoop:
             )
             return False
         self._clear_log_state(f"project:{project.project.id}:worker:reason")
-        claim = self.client.claim_reason(project.project.id, worker.name, trigger)
+        fact_count = len(project.facts)
+        hint_count = len(project.hints)
+        open_intent_count = self._project_open_intent_count(project)
+        run_id = uuid.uuid4().hex
+        claim = self.client.claim_reason(
+            project.project.id,
+            worker.name,
+            trigger,
+            run_id=run_id,
+            trigger_hash=trigger_hash,
+            fact_count=fact_count,
+            hint_count=hint_count,
+            open_intent_count=open_intent_count,
+        )
         if claim.status_code in (403, 409):
             level = logging.INFO if claim.status_code == 403 else logging.WARNING
             LOG.log(
@@ -604,6 +642,12 @@ class DispatcherLoop:
                 project,
                 export_yaml,
                 worker,
+                run_id,
+                trigger,
+                trigger_hash,
+                fact_count,
+                hint_count,
+                open_intent_count,
                 cancellation := TaskCancellation(),
             )
         except Exception:
@@ -616,9 +660,11 @@ class DispatcherLoop:
             worker.name,
             cancellation,
             intent_id=None,
-            fact_count=len(project.facts),
-            hint_count=len(project.hints),
-            open_intent_count=self._project_open_intent_count(project),
+            fact_count=fact_count,
+            hint_count=hint_count,
+            open_intent_count=open_intent_count,
+            reason_trigger=trigger,
+            reason_trigger_hash=trigger_hash,
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
@@ -743,7 +789,7 @@ class DispatcherLoop:
         return True
 
     def _select_worker(self, project_id: str, task_type: str) -> WorkerSelection:
-        snapshots = self._project_ai_snapshots(project_id)
+        snapshots = self._project_ai_snapshots(project_id, task_type)
         if snapshots:
             return self._select_worker_for_ai_chain(project_id, task_type, snapshots)
         return self._select_worker_default(project_id, task_type)
@@ -1055,6 +1101,39 @@ class DispatcherLoop:
         if not changes:
             return None
         return ",".join(changes)
+
+    @staticmethod
+    def _reason_trigger_hash(trigger: str) -> str:
+        return sha256(trigger.encode("utf-8")).hexdigest()
+
+    def _reason_dispatch_blocker(self, project: ProjectDetail, trigger_hash: str) -> str | None:
+        try:
+            response = self.client.get_reason_state(project.project.id)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("reason state fetch raised project=%s error=%s", project.project.id, exc)
+            return None
+        if not response.ok:
+            LOG.warning(
+                "reason state fetch failed project=%s status=%s",
+                project.project.id,
+                response.status_code,
+            )
+            return None
+        state = response.data
+        if state is None:
+            return None
+        if (
+            state.trigger_hash != trigger_hash
+            or state.fact_count != len(project.facts)
+            or state.hint_count != len(project.hints)
+            or state.open_intent_count != self._project_open_intent_count(project)
+        ):
+            return None
+        if state.outcome in REASON_CONSUMED_OUTCOMES:
+            return f"already consumed outcome={state.outcome}"
+        if state.next_retry_at and state.next_retry_at > time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()):
+            return f"backoff until {state.next_retry_at}"
+        return None
 
     def _reap_futures(self) -> None:
         done = [future for future in self.futures if future.done()]

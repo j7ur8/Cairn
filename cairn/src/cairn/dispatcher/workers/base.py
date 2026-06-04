@@ -37,6 +37,9 @@ class WorkerDriver(abc.ABC):
     def trace_format(self) -> str | None:
         return None
 
+    def requires_tty(self) -> bool:
+        return False
+
     def build_startup_healthcheck(self, worker: WorkerConfig) -> list[str]:
         return self.build_healthcheck(worker)
 

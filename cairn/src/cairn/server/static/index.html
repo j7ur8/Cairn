@@ -1277,36 +1277,43 @@
 
         <div class="mt-3 pt-3 border-t border-slate-200/80">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">AI Worker Chain</span>
-            <button type="button" x-show="newProject.ai_profiles.primary_profile_id || (newProject.ai_profiles.fallback_profile_ids || []).length > 0" @click="clearNewProjectAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">AI Worker Chains</span>
+            <button type="button" x-show="taskAiProfileSelectionsHasValue(newProject.ai_profile_selections)" @click="clearNewProjectAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
           </div>
           <template x-if="newProjectAiProfileItems().length === 0">
             <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
           </template>
-          <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
-            <template x-for="item in newProjectAiProfileItems()" :key="item.id">
-              <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                <div class="flex items-start gap-2">
-                  <div class="flex flex-col gap-1 pt-0.5">
-                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                      <input type="radio" name="newProjectAiPrimary" :value="item.id" :checked="newProjectPrimaryAiProfileSelected() === item.id" @change="setNewProjectPrimaryAiProfile(item.id)" class="h-3 w-3 border-slate-300 text-brand-500 focus:ring-brand-100">
-                      <span>primary</span>
-                    </label>
-                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                      <input type="checkbox" :disabled="newProjectPrimaryAiProfileSelected() === item.id" :checked="isNewProjectFallbackAiProfile(item.id)" @change="toggleNewProjectFallbackAiProfile(item.id, $event.target.checked)" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100 disabled:opacity-30">
-                      <span>fallback</span>
-                    </label>
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                    <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
-                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
-                  </div>
+          <div class="space-y-3 max-h-72 overflow-y-auto pr-1">
+            <template x-for="task in aiProfileTaskTypes()" :key="task.key">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2" x-text="task.label"></div>
+                <div class="space-y-2">
+                  <template x-for="item in newProjectAiProfileItems()" :key="`${task.key}:${item.id}`">
+                    <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div class="flex items-start gap-2">
+                        <div class="flex flex-col gap-1 pt-0.5">
+                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                            <input type="radio" :name="`newProjectAiPrimary-${task.key}`" :value="item.id" :checked="newProjectPrimaryAiProfileSelected(task.key) === item.id" @change="setNewProjectPrimaryAiProfile(item.id, task.key)" class="h-3 w-3 border-slate-300 text-brand-500 focus:ring-brand-100">
+                            <span>primary</span>
+                          </label>
+                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                            <input type="checkbox" :disabled="newProjectPrimaryAiProfileSelected(task.key) === item.id" :checked="isNewProjectFallbackAiProfile(item.id, task.key)" @change="toggleNewProjectFallbackAiProfile(item.id, $event.target.checked, task.key)" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100 disabled:opacity-30">
+                            <span>fallback</span>
+                          </label>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
+                          <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </div>
             </template>
           </div>
-          <p class="text-[11px] text-slate-400 mt-2">Primary is used first; if it's busy or unhealthy the dispatcher walks the fallback list. API keys live in <span class="font-mono">api_key_env</span> on the dispatcher host and are injected at task launch.</p>
+          <p class="text-[11px] text-slate-400 mt-2">Bootstrap, Intent, and Reason can use different primary/fallback chains. Empty chains use the default worker pool.</p>
         </div>
 
       <div>
@@ -1430,36 +1437,43 @@
 
         <div class="mt-3 pt-3 border-t border-violet-100">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">AI Worker Chain</span>
-            <button type="button" x-show="replayConfig.ai_profiles.primary_profile_id || (replayConfig.ai_profiles.fallback_profile_ids || []).length > 0" @click="clearReplayConfigAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+            <span class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">AI Worker Chains</span>
+            <button type="button" x-show="taskAiProfileSelectionsHasValue(replayConfig.ai_profile_selections)" @click="clearReplayConfigAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
           </div>
           <template x-if="replayConfigAiProfileItems().length === 0">
             <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
           </template>
-          <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
-            <template x-for="item in replayConfigAiProfileItems()" :key="item.id">
-              <div class="rounded-xl border border-violet-100 bg-white px-3 py-2">
-                <div class="flex items-start gap-2">
-                  <div class="flex flex-col gap-1 pt-0.5">
-                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                      <input type="radio" name="replayConfigAiPrimary" :value="item.id" :checked="replayConfigPrimaryAiProfileSelected() === item.id" @change="setReplayConfigPrimaryAiProfile(item.id)" class="h-3 w-3 border-slate-300 text-violet-500 focus:ring-violet-100">
-                      <span>primary</span>
-                    </label>
-                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                      <input type="checkbox" :disabled="replayConfigPrimaryAiProfileSelected() === item.id" :checked="isReplayConfigFallbackAiProfile(item.id)" @change="toggleReplayConfigFallbackAiProfile(item.id, $event.target.checked)" class="h-3 w-3 rounded border-slate-300 text-violet-600 focus:ring-violet-100 disabled:opacity-30">
-                      <span>fallback</span>
-                    </label>
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                    <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
-                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
-                  </div>
+          <div class="space-y-3 max-h-72 overflow-y-auto pr-1">
+            <template x-for="task in aiProfileTaskTypes()" :key="task.key">
+              <div class="rounded-2xl border border-violet-100 bg-violet-50/40 p-2">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-500 mb-2" x-text="task.label"></div>
+                <div class="space-y-2">
+                  <template x-for="item in replayConfigAiProfileItems()" :key="`${task.key}:${item.id}`">
+                    <div class="rounded-xl border border-violet-100 bg-white px-3 py-2">
+                      <div class="flex items-start gap-2">
+                        <div class="flex flex-col gap-1 pt-0.5">
+                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                            <input type="radio" :name="`replayConfigAiPrimary-${task.key}`" :value="item.id" :checked="replayConfigPrimaryAiProfileSelected(task.key) === item.id" @change="setReplayConfigPrimaryAiProfile(item.id, task.key)" class="h-3 w-3 border-slate-300 text-violet-500 focus:ring-violet-100">
+                            <span>primary</span>
+                          </label>
+                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                            <input type="checkbox" :disabled="replayConfigPrimaryAiProfileSelected(task.key) === item.id" :checked="isReplayConfigFallbackAiProfile(item.id, task.key)" @change="toggleReplayConfigFallbackAiProfile(item.id, $event.target.checked, task.key)" class="h-3 w-3 rounded border-slate-300 text-violet-600 focus:ring-violet-100 disabled:opacity-30">
+                            <span>fallback</span>
+                          </label>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
+                          <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </div>
             </template>
           </div>
-          <p class="text-[11px] text-violet-500/80 mt-2">Primary is used first; if it's busy or unhealthy the dispatcher walks the fallback list. Defaults to the source project's chain when the underlying profiles are still available.</p>
+          <p class="text-[11px] text-violet-500/80 mt-2">Replay can override source AI chains per task type. Empty chains use the default worker pool.</p>
         </div>
 
       <div>
@@ -1941,6 +1955,11 @@ function cairnApp() {
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
       ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+      ai_profile_selections: {
+        bootstrap: { primary_profile_id: '', fallback_profile_ids: [] },
+        explore: { primary_profile_id: '', fallback_profile_ids: [] },
+        reason: { primary_profile_id: '', fallback_profile_ids: [] },
+      },
     },
     intentForm: { description: '' },
     concludeForm: { description: '', intentId: '' },
@@ -1958,6 +1977,11 @@ function cairnApp() {
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
       ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+      ai_profile_selections: {
+        bootstrap: { primary_profile_id: '', fallback_profile_ids: [] },
+        explore: { primary_profile_id: '', fallback_profile_ids: [] },
+        reason: { primary_profile_id: '', fallback_profile_ids: [] },
+      },
       catalog: { capabilities: [], roles: [], ai_profiles: [] },
     },
     isCreatingReplayRun: false,
@@ -2654,10 +2678,12 @@ function cairnApp() {
         if (this.newProject && this.newProject.ai_profiles) {
           if (this.newProject.ai_profiles.primary_profile_id === profileId) this.newProject.ai_profiles.primary_profile_id = '';
           this.newProject.ai_profiles.fallback_profile_ids = (this.newProject.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
+          this.removeProfileFromTaskAiSelections(this.newProject.ai_profile_selections, profileId);
         }
         if (this.replayConfig && this.replayConfig.ai_profiles) {
           if (this.replayConfig.ai_profiles.primary_profile_id === profileId) this.replayConfig.ai_profiles.primary_profile_id = '';
           this.replayConfig.ai_profiles.fallback_profile_ids = (this.replayConfig.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
+          this.removeProfileFromTaskAiSelections(this.replayConfig.ai_profile_selections, profileId);
         }
       } catch (e) {
         this.showToast(e.message, 'error');
@@ -2793,6 +2819,7 @@ function cairnApp() {
         proxy_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
         ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+        ai_profile_selections: this.defaultTaskAiProfileSelections(),
       };
     },
 
@@ -2885,39 +2912,105 @@ function cairnApp() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
 
-    newProjectPrimaryAiProfileSelected() {
-      return this.newProject.ai_profiles?.primary_profile_id || '';
+    aiProfileTaskTypes() {
+      return [
+        { key: 'bootstrap', label: 'Bootstrap' },
+        { key: 'explore', label: 'Intent' },
+        { key: 'reason', label: 'Reason' },
+      ];
     },
 
-    setNewProjectPrimaryAiProfile(profileId) {
-      if (!this.newProject.ai_profiles) {
-        this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+    defaultAiProfileSelection() {
+      return { primary_profile_id: '', fallback_profile_ids: [] };
+    },
+
+    defaultTaskAiProfileSelections() {
+      return {
+        bootstrap: this.defaultAiProfileSelection(),
+        explore: this.defaultAiProfileSelection(),
+        reason: this.defaultAiProfileSelection(),
+      };
+    },
+
+    ensureTaskAiProfileSelections(target) {
+      if (!target.ai_profile_selections) {
+        const legacy = target.ai_profiles || this.defaultAiProfileSelection();
+        target.ai_profile_selections = {
+          bootstrap: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
+          explore: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
+          reason: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
+        };
       }
-      this.newProject.ai_profiles.primary_profile_id = profileId || '';
+      for (const task of ['bootstrap', 'explore', 'reason']) {
+        if (!target.ai_profile_selections[task]) target.ai_profile_selections[task] = this.defaultAiProfileSelection();
+      }
+      return target.ai_profile_selections;
+    },
+
+    aiProfileSelectionHasValue(selection) {
+      return !!(selection && (selection.primary_profile_id || (selection.fallback_profile_ids || []).length > 0));
+    },
+
+    taskAiProfileSelectionsHasValue(selections) {
+      return Object.values(selections || {}).some(selection => this.aiProfileSelectionHasValue(selection));
+    },
+
+    removeProfileFromTaskAiSelections(selections, profileId) {
+      for (const selection of Object.values(selections || {})) {
+        if (!selection) continue;
+        if (selection.primary_profile_id === profileId) selection.primary_profile_id = '';
+        selection.fallback_profile_ids = (selection.fallback_profile_ids || []).filter(id => id !== profileId);
+      }
+    },
+
+    compactTaskAiProfileSelections(selections) {
+      const current = selections || {};
+      return {
+        bootstrap: {
+          primary_profile_id: current.bootstrap?.primary_profile_id || null,
+          fallback_profile_ids: current.bootstrap?.fallback_profile_ids || [],
+        },
+        explore: {
+          primary_profile_id: current.explore?.primary_profile_id || null,
+          fallback_profile_ids: current.explore?.fallback_profile_ids || [],
+        },
+        reason: {
+          primary_profile_id: current.reason?.primary_profile_id || null,
+          fallback_profile_ids: current.reason?.fallback_profile_ids || [],
+        },
+      };
+    },
+
+    newProjectPrimaryAiProfileSelected(taskType = 'explore') {
+      return this.ensureTaskAiProfileSelections(this.newProject)[taskType]?.primary_profile_id || '';
+    },
+
+    setNewProjectPrimaryAiProfile(profileId, taskType = 'explore') {
+      const selection = this.ensureTaskAiProfileSelections(this.newProject)[taskType];
+      selection.primary_profile_id = profileId || '';
       // Primary must not also appear in fallback
-      const current = new Set(this.newProject.ai_profiles.fallback_profile_ids || []);
+      const current = new Set(selection.fallback_profile_ids || []);
       if (profileId) current.delete(profileId);
-      this.newProject.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+      selection.fallback_profile_ids = Array.from(current).sort();
     },
 
-    isNewProjectFallbackAiProfile(profileId) {
-      return (this.newProject.ai_profiles?.fallback_profile_ids || []).includes(profileId);
+    isNewProjectFallbackAiProfile(profileId, taskType = 'explore') {
+      return (this.ensureTaskAiProfileSelections(this.newProject)[taskType]?.fallback_profile_ids || []).includes(profileId);
     },
 
-    toggleNewProjectFallbackAiProfile(profileId, checked) {
-      if (!this.newProject.ai_profiles) {
-        this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
-      }
-      const current = new Set(this.newProject.ai_profiles.fallback_profile_ids || []);
+    toggleNewProjectFallbackAiProfile(profileId, checked, taskType = 'explore') {
+      const selection = this.ensureTaskAiProfileSelections(this.newProject)[taskType];
+      const current = new Set(selection.fallback_profile_ids || []);
       if (checked) current.add(profileId);
       else current.delete(profileId);
       // Fallback must not include the primary
-      if (this.newProject.ai_profiles.primary_profile_id) current.delete(this.newProject.ai_profiles.primary_profile_id);
-      this.newProject.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+      if (selection.primary_profile_id) current.delete(selection.primary_profile_id);
+      selection.fallback_profile_ids = Array.from(current).sort();
     },
 
     clearNewProjectAiProfiles() {
       this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      this.newProject.ai_profile_selections = this.defaultTaskAiProfileSelections();
     },
 
     resetReplayConfig() {
@@ -2931,6 +3024,7 @@ function cairnApp() {
         role_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
         ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+        ai_profile_selections: this.defaultTaskAiProfileSelections(),
         catalog: { capabilities: [], roles: [], ai_profiles: [] },
       };
     },
@@ -2965,37 +3059,34 @@ function cairnApp() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
 
-    replayConfigPrimaryAiProfileSelected() {
-      return this.replayConfig.ai_profiles?.primary_profile_id || '';
+    replayConfigPrimaryAiProfileSelected(taskType = 'explore') {
+      return this.ensureTaskAiProfileSelections(this.replayConfig)[taskType]?.primary_profile_id || '';
     },
 
-    setReplayConfigPrimaryAiProfile(profileId) {
-      if (!this.replayConfig.ai_profiles) {
-        this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
-      }
-      this.replayConfig.ai_profiles.primary_profile_id = profileId || '';
-      const current = new Set(this.replayConfig.ai_profiles.fallback_profile_ids || []);
+    setReplayConfigPrimaryAiProfile(profileId, taskType = 'explore') {
+      const selection = this.ensureTaskAiProfileSelections(this.replayConfig)[taskType];
+      selection.primary_profile_id = profileId || '';
+      const current = new Set(selection.fallback_profile_ids || []);
       if (profileId) current.delete(profileId);
-      this.replayConfig.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+      selection.fallback_profile_ids = Array.from(current).sort();
     },
 
-    isReplayConfigFallbackAiProfile(profileId) {
-      return (this.replayConfig.ai_profiles?.fallback_profile_ids || []).includes(profileId);
+    isReplayConfigFallbackAiProfile(profileId, taskType = 'explore') {
+      return (this.ensureTaskAiProfileSelections(this.replayConfig)[taskType]?.fallback_profile_ids || []).includes(profileId);
     },
 
-    toggleReplayConfigFallbackAiProfile(profileId, checked) {
-      if (!this.replayConfig.ai_profiles) {
-        this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
-      }
-      const current = new Set(this.replayConfig.ai_profiles.fallback_profile_ids || []);
+    toggleReplayConfigFallbackAiProfile(profileId, checked, taskType = 'explore') {
+      const selection = this.ensureTaskAiProfileSelections(this.replayConfig)[taskType];
+      const current = new Set(selection.fallback_profile_ids || []);
       if (checked) current.add(profileId);
       else current.delete(profileId);
-      if (this.replayConfig.ai_profiles.primary_profile_id) current.delete(this.replayConfig.ai_profiles.primary_profile_id);
-      this.replayConfig.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+      if (selection.primary_profile_id) current.delete(selection.primary_profile_id);
+      selection.fallback_profile_ids = Array.from(current).sort();
     },
 
     clearReplayConfigAiProfiles() {
       this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      this.replayConfig.ai_profile_selections = this.defaultTaskAiProfileSelections();
     },
 
 
@@ -3157,7 +3248,78 @@ function cairnApp() {
       const events = this.llmSelectedExecutionId
         ? this.llmEvents.filter(event => event.execution_id === this.llmSelectedExecutionId)
         : this.llmEvents;
-      return events.filter(event => this.matchesLlmEventKindFilter(event)).slice(-500);
+      return this.mergeLlmCommandEvents(events.filter(event => this.isVisibleLlmEvent(event)))
+        .filter(event => this.matchesLlmEventKindFilter(event))
+        .slice(-500);
+    },
+
+    isVisibleLlmEvent(event) {
+      if (event.event_kind !== 'system_event') return true;
+      const payload = this.tryParseLlmJsonObject(event.content);
+      if (!payload || typeof payload.type !== 'string') return true;
+      if (payload.type.startsWith('turn.')) return payload.type === 'turn.completed';
+      return true;
+    },
+
+    mergeLlmCommandEvents(events) {
+      const merged = [];
+      const pending = new Map();
+      for (const event of events) {
+        if (!['command_start', 'command_end'].includes(event.event_kind)) {
+          merged.push(event);
+          continue;
+        }
+        const payload = this.tryParseLlmJsonObject(event.content) || {};
+        const key = this.llmCommandEventKey(event, payload);
+        if (!key) {
+          merged.push(event);
+          continue;
+        }
+        if (event.event_kind === 'command_start') {
+          const commandEvent = this.buildMergedLlmCommandEvent(event, payload, null, null);
+          pending.set(key, { index: merged.length, event, payload });
+          merged.push(commandEvent);
+          continue;
+        }
+        const start = pending.get(key);
+        if (start) {
+          merged[start.index] = this.buildMergedLlmCommandEvent(start.event, start.payload, event, payload);
+          pending.delete(key);
+        } else {
+          merged.push(this.buildMergedLlmCommandEvent(null, null, event, payload));
+        }
+      }
+      return merged;
+    },
+
+    llmCommandEventKey(event, payload) {
+      const scope = `${event.execution_id || ''}:${event.phase || ''}`;
+      if (payload.item_id) return `${scope}:item:${payload.item_id}`;
+      if (payload.call_id) return `${scope}:call:${payload.call_id}`;
+      const command = this.llmFieldText('command', payload.command || payload.summary || event.content || '').trim();
+      return command ? `${scope}:command:${command}` : '';
+    },
+
+    buildMergedLlmCommandEvent(startEvent, startPayload, endEvent, endPayload) {
+      const source = endEvent || startEvent;
+      const payload = {
+        ...(startPayload || {}),
+        ...(endPayload || {}),
+      };
+      payload.command = payload.command || startPayload?.command || endPayload?.command || payload.summary;
+      payload.status = payload.status || (endEvent ? 'completed' : 'in_progress');
+      payload.started_sequence = startEvent?.sequence || null;
+      payload.ended_sequence = endEvent?.sequence || null;
+      const summary = this.llmFieldText('command', payload.command || payload.summary || source?.content || '').trim();
+      payload.summary = summary || payload.summary || 'command';
+      return {
+        ...source,
+        sequence: endEvent?.sequence || startEvent?.sequence,
+        event_kind: 'command_end',
+        stream: endEvent?.stream || startEvent?.stream || 'system',
+        content: JSON.stringify(payload, null, 2),
+        _merged_command: true,
+      };
     },
 
     matchesLlmEventKindFilter(event) {
@@ -3307,7 +3469,7 @@ function cairnApp() {
         addBlock('output', 'Output', payload.output);
         addBlock('duration', 'Duration', payload.duration);
       } else if (event.event_kind === 'usage') {
-        for (const key of ['type', 'subtype', 'input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'service_tier', 'model']) {
+        for (const key of ['type', 'subtype', 'input_tokens', 'output_tokens', 'thinking_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'service_tier', 'model']) {
           if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
         }
       } else if (event.event_kind === 'session_init') {
@@ -3372,6 +3534,7 @@ function cairnApp() {
         stderr: 'Stderr',
         input_tokens: 'Input Tokens',
         output_tokens: 'Output Tokens',
+        thinking_tokens: 'Thinking Tokens',
         cache_creation_input_tokens: 'Cache Creation Input Tokens',
         cache_read_input_tokens: 'Cache Read Input Tokens',
         exit_code: 'Exit Code',
@@ -3402,6 +3565,7 @@ function cairnApp() {
     },
 
     llmEventLabel(event) {
+      if (event._merged_command) return 'Command';
       const labels = {
         prompt: 'Prompt',
         stdout: 'Stdout',
@@ -3862,10 +4026,18 @@ function cairnApp() {
         const replayRoleId = (catalogRoles || []).some(role => role.available !== false && role.id === currentRoleId) ? currentRoleId : '';
         this.aiProfiles = aiProfiles || [];
         const availableIds = new Set(this.aiProfiles.filter(p => p.available !== false).map(p => p.id));
-        const sourceSelection = projectAiProfiles?.selection || { primary_profile_id: '', fallback_profile_ids: [] };
-        const replayPrimary = sourceSelection.primary_profile_id && availableIds.has(sourceSelection.primary_profile_id)
-          ? sourceSelection.primary_profile_id : '';
-        const replayFallback = (sourceSelection.fallback_profile_ids || []).filter(id => availableIds.has(id));
+        const sourceSelections = projectAiProfiles?.selections || {
+          bootstrap: projectAiProfiles?.selection || { primary_profile_id: '', fallback_profile_ids: [] },
+          explore: projectAiProfiles?.selection || { primary_profile_id: '', fallback_profile_ids: [] },
+          reason: projectAiProfiles?.selection || { primary_profile_id: '', fallback_profile_ids: [] },
+        };
+        const replaySelections = this.compactTaskAiProfileSelections(sourceSelections);
+        for (const taskType of ['bootstrap', 'explore', 'reason']) {
+          const selection = replaySelections[taskType];
+          selection.primary_profile_id = selection.primary_profile_id && availableIds.has(selection.primary_profile_id)
+            ? selection.primary_profile_id : '';
+          selection.fallback_profile_ids = (selection.fallback_profile_ids || []).filter(id => availableIds.has(id));
+        }
         this.replayConfig = {
           sourceProjectId: this.selectedProjectId,
           sourceProjectTitle: sourceProject.project.title,
@@ -3879,9 +4051,10 @@ function cairnApp() {
             skill_ids: projectCapabilities?.selection?.skill_ids || [],
           },
           ai_profiles: {
-            primary_profile_id: replayPrimary,
-            fallback_profile_ids: replayFallback,
+            primary_profile_id: replaySelections.explore.primary_profile_id || '',
+            fallback_profile_ids: replaySelections.explore.fallback_profile_ids || [],
           },
+          ai_profile_selections: replaySelections,
           catalog: {
             capabilities: catalogCapabilities || [],
             roles: catalogRoles || [],
@@ -3913,11 +4086,11 @@ function cairnApp() {
             mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
             skill_ids: this.replayConfig.capabilities?.skill_ids || [],
           },
-          ai_profiles: {
-            primary_profile_id: this.replayConfig.ai_profiles?.primary_profile_id || null,
-            fallback_profile_ids: this.replayConfig.ai_profiles?.fallback_profile_ids || [],
-          },
         };
+        const aiSelections = this.ensureTaskAiProfileSelections(this.replayConfig);
+        if (this.taskAiProfileSelectionsHasValue(aiSelections)) {
+          body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
+        }
         const data = await this.api('POST', `/projects/${this.replayConfig.sourceProjectId}/replay-runs`, body);
         const replayProjectId = data.project?.project?.id;
         this.showReplayConfigModal = false;
@@ -5544,11 +5717,9 @@ function cairnApp() {
         if (this.newProject.proxy_id) {
           body.proxy_id = this.newProject.proxy_id;
         }
-        if (this.newProject.ai_profiles && (this.newProject.ai_profiles.primary_profile_id || (this.newProject.ai_profiles.fallback_profile_ids || []).length > 0)) {
-          body.ai_profiles = {
-            primary_profile_id: this.newProject.ai_profiles.primary_profile_id || null,
-            fallback_profile_ids: this.newProject.ai_profiles.fallback_profile_ids || [],
-          };
+        const aiSelections = this.ensureTaskAiProfileSelections(this.newProject);
+        if (this.taskAiProfileSelectionsHasValue(aiSelections)) {
+          body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
         }
         const data = await this.api('POST', '/projects', body);
         createdProjectId = data.project.id;

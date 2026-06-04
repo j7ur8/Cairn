@@ -26,11 +26,11 @@ class DbMigrationTests(unittest.TestCase):
 
     def test_schema_migrations_records_core_indexes(self) -> None:
         with self.db.get_conn() as conn:
-            row = conn.execute(
-                "SELECT version FROM schema_migrations WHERE version = ?",
-                ("20260604_001_core_indexes",),
-            ).fetchone()
-            self.assertIsNotNone(row)
+            rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+        versions = {row["version"] for row in rows}
+        self.assertIn("20260604_001_core_indexes", versions)
+        self.assertIn("20260604_004_reason_state", versions)
+        self.assertIn("20260604_005_reason_run_id", versions)
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -41,6 +41,7 @@ class DbMigrationTests(unittest.TestCase):
             "idx_intent_sources_project_fact",
             "idx_project_capabilities_project_kind",
             "idx_replay_steps_run_status",
+            "idx_project_reason_state_retry",
         }
         with self.db.get_conn() as conn:
             rows = conn.execute(

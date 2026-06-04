@@ -20,10 +20,12 @@ from cairn.server.models import (
     ReopenRequest,
     ReopenResponse,
     ReasonClaimRequest,
+    ReasonFinishRequest,
+    ReasonState,
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
-from cairn.server.routers.ai_profiles import persist_project_ai_selection
+from cairn.server.routers.ai_profiles import persist_project_ai_selection, persist_project_ai_selections
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -32,8 +34,10 @@ from cairn.server.services import (
     clear_project_reason,
     expire_reason_leases,
     expire_workers,
+    finish_project_reason_or_409,
     get_completion_intent_or_409,
     get_project_or_404,
+    get_project_reason_state,
     heartbeat_project_reason_or_409,
     intent_to_model,
     next_fact_id,
@@ -42,6 +46,7 @@ from cairn.server.services import (
     next_project_id,
     project_meta_from_row,
     project_reason_from_row,
+    reason_trigger_hash,
     release_project_reason_or_409,
     utcnow,
     validate_facts_exist,
@@ -177,7 +182,9 @@ def create_project(body: CreateProjectRequest):
                 """,
                 (pid, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
             )
-        if body.ai_profiles is not None:
+        if body.ai_profile_selections is not None:
+            persist_project_ai_selections(conn, pid, body.ai_profile_selections, now)
+        elif body.ai_profiles is not None:
             persist_project_ai_selection(conn, pid, body.ai_profiles, now)
 
 
@@ -278,7 +285,18 @@ def update_project_status(project_id: str, body: UpdateProjectStatusRequest):
 def claim_project_reason(project_id: str, body: ReasonClaimRequest):
     with get_conn() as conn:
         now = utcnow()
-        updated = claim_project_reason_or_409(conn, project_id, body.worker, body.trigger, now)
+        updated = claim_project_reason_or_409(
+            conn,
+            project_id,
+            body.worker,
+            body.trigger,
+            now,
+            run_id=body.run_id,
+            trigger_hash=body.trigger_hash or reason_trigger_hash(body.trigger),
+            fact_count=body.fact_count,
+            hint_count=body.hint_count,
+            open_intent_count=body.open_intent_count,
+        )
         return project_meta_from_row(updated)
 
 
@@ -286,14 +304,42 @@ def claim_project_reason(project_id: str, body: ReasonClaimRequest):
 def heartbeat_project_reason(project_id: str, body: HeartbeatRequest):
     with get_conn() as conn:
         now = utcnow()
-        updated = heartbeat_project_reason_or_409(conn, project_id, body.worker, now)
+        updated = heartbeat_project_reason_or_409(conn, project_id, body.worker, now, body.run_id)
         return project_meta_from_row(updated)
 
 
 @router.post("/projects/{project_id}/reason/release", response_model=ProjectMeta)
 def release_project_reason(project_id: str, body: HeartbeatRequest):
     with get_conn() as conn:
-        updated = release_project_reason_or_409(conn, project_id, body.worker)
+        updated = release_project_reason_or_409(conn, project_id, body.worker, body.run_id)
+        return project_meta_from_row(updated)
+
+
+@router.get("/projects/{project_id}/reason/state", response_model=ReasonState | None)
+def get_reason_state(project_id: str):
+    with get_conn() as conn:
+        get_project_or_404(conn, project_id)
+        return get_project_reason_state(conn, project_id)
+
+
+@router.post("/projects/{project_id}/reason/finish", response_model=ProjectMeta)
+def finish_project_reason(project_id: str, body: ReasonFinishRequest):
+    with get_conn() as conn:
+        now = utcnow()
+        updated = finish_project_reason_or_409(
+            conn,
+            project_id,
+            body.worker,
+            body.trigger,
+            now,
+            run_id=body.run_id,
+            trigger_hash=body.trigger_hash or reason_trigger_hash(body.trigger),
+            fact_count=body.fact_count,
+            hint_count=body.hint_count,
+            open_intent_count=body.open_intent_count,
+            outcome=body.outcome,
+            error=body.error,
+        )
         return project_meta_from_row(updated)
 
 
@@ -322,6 +368,7 @@ def complete_project(project_id: str, body: CompleteRequest):
             UPDATE projects
             SET status = 'completed',
                 reason_worker = NULL,
+                reason_run_id = NULL,
                 reason_trigger = NULL,
                 reason_started_at = NULL,
                 reason_last_heartbeat_at = NULL

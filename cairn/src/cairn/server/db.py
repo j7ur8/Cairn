@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS projects (
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     reason_worker TEXT,
+    reason_run_id TEXT,
     reason_trigger TEXT,
     reason_started_at TEXT,
     reason_last_heartbeat_at TEXT
@@ -164,6 +165,20 @@ CREATE TABLE IF NOT EXISTS proxies (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS project_reason_state (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    trigger TEXT NOT NULL DEFAULT '',
+    trigger_hash TEXT NOT NULL DEFAULT '',
+    fact_count INTEGER NOT NULL DEFAULT 0,
+    hint_count INTEGER NOT NULL DEFAULT 0,
+    open_intent_count INTEGER NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL DEFAULT 'initial',
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    next_retry_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
@@ -234,6 +249,73 @@ MIGRATIONS: list[tuple[str, str]] = [
             WHERE seeded_from_worker IS NOT NULL;
         """,
     ),
+    (
+        "20260604_003_task_ai_profiles",
+        """
+        ALTER TABLE project_ai_profiles ADD COLUMN task_type TEXT NOT NULL DEFAULT 'legacy';
+
+        CREATE TABLE project_ai_profiles_v2 (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            profile_id TEXT NOT NULL,
+            task_type TEXT NOT NULL DEFAULT 'legacy',
+            role TEXT NOT NULL CHECK(role IN ('primary','fallback')),
+            position INTEGER NOT NULL,
+            snapshot_name TEXT NOT NULL,
+            snapshot_worker_type TEXT NOT NULL,
+            snapshot_provider TEXT NOT NULL DEFAULT '',
+            snapshot_base_url TEXT NOT NULL DEFAULT '',
+            snapshot_model TEXT NOT NULL,
+            snapshot_api_key_env TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, task_type, profile_id, role)
+        );
+
+        INSERT INTO project_ai_profiles_v2 (
+            project_id, profile_id, task_type, role, position,
+            snapshot_name, snapshot_worker_type, snapshot_provider,
+            snapshot_base_url, snapshot_model, snapshot_api_key_env, created_at
+        )
+        SELECT
+            project_id, profile_id, task_type, role, position,
+            snapshot_name, snapshot_worker_type, snapshot_provider,
+            snapshot_base_url, snapshot_model, snapshot_api_key_env, created_at
+        FROM project_ai_profiles;
+
+        DROP TABLE project_ai_profiles;
+        ALTER TABLE project_ai_profiles_v2 RENAME TO project_ai_profiles;
+
+        CREATE INDEX IF NOT EXISTS idx_project_ai_profiles_project_task_role_position
+            ON project_ai_profiles(project_id, task_type, role, position);
+        """,
+    ),
+    (
+        "20260604_004_reason_state",
+        """
+        CREATE TABLE IF NOT EXISTS project_reason_state (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            trigger TEXT NOT NULL DEFAULT '',
+            trigger_hash TEXT NOT NULL DEFAULT '',
+            fact_count INTEGER NOT NULL DEFAULT 0,
+            hint_count INTEGER NOT NULL DEFAULT 0,
+            open_intent_count INTEGER NOT NULL DEFAULT 0,
+            outcome TEXT NOT NULL DEFAULT 'initial',
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT '',
+            next_retry_at TEXT,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_project_reason_state_retry
+            ON project_reason_state(next_retry_at)
+            WHERE next_retry_at IS NOT NULL;
+        """,
+    ),
+    (
+        "20260604_005_reason_run_id",
+        """
+        ALTER TABLE projects ADD COLUMN reason_run_id TEXT;
+        """,
+    ),
 ]
 
 
@@ -257,6 +339,8 @@ def configure(path: Path) -> None:
                 "ALTER TABLE projects ADD COLUMN proxy_id TEXT "
                 "REFERENCES proxies(id) ON DELETE SET NULL"
             )
+        if "reason_run_id" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN reason_run_id TEXT")
         _apply_migrations(conn)
 
 
@@ -276,6 +360,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ).fetchone()
         if applied is not None:
             continue
+        if version == "20260604_005_reason_run_id":
+            project_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(projects)").fetchall()
+            }
+            if "reason_run_id" in project_cols:
+                conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+                continue
         conn.executescript(sql)
         conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
 

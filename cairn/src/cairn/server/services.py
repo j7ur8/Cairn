@@ -1,14 +1,38 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 
 from fastapi import HTTPException
 
-from cairn.server.models import Intent, ProjectMeta, ProjectReason
+from cairn.server.models import Intent, ProjectMeta, ProjectReason, ReasonState
+
+
+REASON_FAILURE_BACKOFF_BASE_SECONDS = 30
+REASON_FAILURE_BACKOFF_MAX_SECONDS = 300
+REASON_FAILURE_BLOCK_THRESHOLD = 3
+REASON_SUCCESS_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
+REASON_FAILURE_OUTCOMES = {"failed", "timeout", "rejected", "unhealthy", "cancelled"}
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def reason_trigger_hash(trigger: str) -> str:
+    return sha256(trigger.encode("utf-8")).hexdigest()
+
+
+def _parse_utc(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def _reason_backoff_until(now: str, failure_count: int) -> str:
+    delay = min(
+        REASON_FAILURE_BACKOFF_MAX_SECONDS,
+        REASON_FAILURE_BACKOFF_BASE_SECONDS * (2 ** max(0, failure_count - 1)),
+    )
+    return (_parse_utc(now) + timedelta(seconds=delay)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def next_project_id(conn: sqlite3.Connection) -> str:
@@ -276,6 +300,7 @@ def project_reason_from_row(row: sqlite3.Row) -> ProjectReason | None:
         return None
     return ProjectReason(
         worker=row["reason_worker"],
+        run_id=row["reason_run_id"] if "reason_run_id" in row.keys() else None,
         trigger=row["reason_trigger"],
         started_at=row["reason_started_at"],
         last_heartbeat_at=row["reason_last_heartbeat_at"],
@@ -292,11 +317,79 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
     )
 
 
+def reason_state_from_row(row: sqlite3.Row) -> ReasonState:
+    return ReasonState(
+        project_id=row["project_id"],
+        trigger=row["trigger"],
+        trigger_hash=row["trigger_hash"],
+        fact_count=row["fact_count"],
+        hint_count=row["hint_count"],
+        open_intent_count=row["open_intent_count"],
+        outcome=row["outcome"],
+        failure_count=row["failure_count"],
+        last_error=row["last_error"],
+        next_retry_at=row["next_retry_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def get_project_reason_state(conn: sqlite3.Connection, project_id: str) -> ReasonState | None:
+    row = conn.execute(
+        "SELECT * FROM project_reason_state WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return reason_state_from_row(row)
+
+
+def _same_reason_trigger_state(
+    row: sqlite3.Row | None,
+    trigger_hash: str,
+    fact_count: int,
+    hint_count: int,
+    open_intent_count: int,
+) -> bool:
+    if row is None:
+        return False
+    return (
+        row["trigger_hash"] == trigger_hash
+        and row["fact_count"] == fact_count
+        and row["hint_count"] == hint_count
+        and row["open_intent_count"] == open_intent_count
+    )
+
+
+def reason_trigger_dispatch_blocker(
+    conn: sqlite3.Connection,
+    project_id: str,
+    trigger_hash: str,
+    fact_count: int,
+    hint_count: int,
+    open_intent_count: int,
+    now: str | None = None,
+) -> str | None:
+    row = conn.execute(
+        "SELECT * FROM project_reason_state WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    if not _same_reason_trigger_state(row, trigger_hash, fact_count, hint_count, open_intent_count):
+        return None
+    assert row is not None
+    if row["outcome"] in REASON_SUCCESS_OUTCOMES:
+        return f"reason trigger already consumed outcome={row['outcome']}"
+    next_retry_at = row["next_retry_at"]
+    if next_retry_at is not None and next_retry_at > (now or utcnow()):
+        return f"reason trigger backoff until {next_retry_at}"
+    return None
+
+
 def clear_project_reason(conn: sqlite3.Connection, project_id: str) -> None:
     conn.execute(
         """
         UPDATE projects
         SET reason_worker = NULL,
+            reason_run_id = NULL,
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL
@@ -307,12 +400,34 @@ def clear_project_reason(conn: sqlite3.Connection, project_id: str) -> None:
 
 
 def claim_project_reason_or_409(
-    conn: sqlite3.Connection, project_id: str, worker: str, trigger: str, now: str
+    conn: sqlite3.Connection,
+    project_id: str,
+    worker: str,
+    trigger: str,
+    now: str,
+    *,
+    run_id: str | None = None,
+    trigger_hash: str | None = None,
+    fact_count: int = 0,
+    hint_count: int = 0,
+    open_intent_count: int = 0,
 ) -> sqlite3.Row:
     expire_reason_leases(conn, project_id)
     row = get_project_or_404(conn, project_id)
     if row["status"] != "active":
         raise HTTPException(403, f"Project is {row['status']}")
+    trigger_hash = trigger_hash or reason_trigger_hash(trigger)
+    blocker = reason_trigger_dispatch_blocker(
+        conn,
+        project_id,
+        trigger_hash,
+        fact_count,
+        hint_count,
+        open_intent_count,
+        now,
+    )
+    if blocker is not None:
+        raise HTTPException(409, blocker)
     current_worker = row["reason_worker"]
     if current_worker is not None and current_worker != worker:
         raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
@@ -323,6 +438,7 @@ def claim_project_reason_or_409(
         """
         UPDATE projects
         SET reason_worker = ?,
+            reason_run_id = ?,
             reason_trigger = ?,
             reason_started_at = ?,
             reason_last_heartbeat_at = ?
@@ -330,7 +446,7 @@ def claim_project_reason_or_409(
           AND status = 'active'
           AND reason_worker IS NULL
         """,
-        (worker, trigger, now, now, project_id),
+        (worker, run_id, trigger, now, now, project_id),
     )
     if cursor.rowcount != 1:
         row = get_project_or_404(conn, project_id)
@@ -343,8 +459,98 @@ def claim_project_reason_or_409(
     return get_project_or_404(conn, project_id)
 
 
+def finish_project_reason_or_409(
+    conn: sqlite3.Connection,
+    project_id: str,
+    worker: str,
+    trigger: str,
+    now: str,
+    *,
+    run_id: str | None = None,
+    trigger_hash: str | None,
+    fact_count: int,
+    hint_count: int,
+    open_intent_count: int,
+    outcome: str,
+    error: str | None,
+) -> sqlite3.Row:
+    row = get_project_or_404(conn, project_id)
+    if row["status"] not in ("active", "completed", "stopped"):
+        raise HTTPException(403, f"Project is {row['status']}")
+    current_worker = row["reason_worker"]
+    if row["status"] == "active" and current_worker is not None and current_worker != worker:
+        raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+    current_run_id = row["reason_run_id"] if "reason_run_id" in row.keys() else None
+    if row["status"] == "active" and run_id is not None and current_run_id is not None and current_run_id != run_id:
+        raise HTTPException(409, "Project reason run has been superseded")
+
+    trigger_hash = trigger_hash or reason_trigger_hash(trigger)
+    previous = conn.execute(
+        "SELECT * FROM project_reason_state WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    same_trigger = _same_reason_trigger_state(
+        previous,
+        trigger_hash,
+        fact_count,
+        hint_count,
+        open_intent_count,
+    )
+    previous_failures = previous["failure_count"] if same_trigger and previous is not None else 0
+    last_error = (error or "")[:4000]
+    next_retry_at: str | None = None
+    stored_outcome = outcome
+    failure_count = 0
+    if outcome in REASON_FAILURE_OUTCOMES:
+        failure_count = previous_failures + 1
+        if failure_count >= REASON_FAILURE_BLOCK_THRESHOLD:
+            stored_outcome = "blocked"
+            next_retry_at = None
+        else:
+            next_retry_at = _reason_backoff_until(now, failure_count)
+    elif outcome not in REASON_SUCCESS_OUTCOMES:
+        raise HTTPException(400, f"invalid reason outcome: {outcome}")
+
+    conn.execute(
+        """
+        INSERT INTO project_reason_state (
+            project_id, trigger, trigger_hash, fact_count, hint_count,
+            open_intent_count, outcome, failure_count, last_error,
+            next_retry_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+            trigger = excluded.trigger,
+            trigger_hash = excluded.trigger_hash,
+            fact_count = excluded.fact_count,
+            hint_count = excluded.hint_count,
+            open_intent_count = excluded.open_intent_count,
+            outcome = excluded.outcome,
+            failure_count = excluded.failure_count,
+            last_error = excluded.last_error,
+            next_retry_at = excluded.next_retry_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            project_id,
+            trigger,
+            trigger_hash,
+            fact_count,
+            hint_count,
+            open_intent_count,
+            stored_outcome,
+            failure_count,
+            last_error,
+            next_retry_at,
+            now,
+        ),
+    )
+    if row["status"] == "active" and (current_worker is None or current_worker == worker):
+        clear_project_reason(conn, project_id)
+    return get_project_or_404(conn, project_id)
+
+
 def heartbeat_project_reason_or_409(
-    conn: sqlite3.Connection, project_id: str, worker: str, now: str
+    conn: sqlite3.Connection, project_id: str, worker: str, now: str, run_id: str | None = None
 ) -> sqlite3.Row:
     expire_reason_leases(conn, project_id)
     row = get_project_or_404(conn, project_id)
@@ -355,6 +561,9 @@ def heartbeat_project_reason_or_409(
         raise HTTPException(409, "Project reason is not currently claimed")
     if current_worker != worker:
         raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+    current_run_id = row["reason_run_id"] if "reason_run_id" in row.keys() else None
+    if run_id is not None and current_run_id is not None and current_run_id != run_id:
+        raise HTTPException(409, "Project reason run has been superseded")
 
     cursor = conn.execute(
         """
@@ -380,7 +589,7 @@ def heartbeat_project_reason_or_409(
 
 
 def release_project_reason_or_409(
-    conn: sqlite3.Connection, project_id: str, worker: str
+    conn: sqlite3.Connection, project_id: str, worker: str, run_id: str | None = None
 ) -> sqlite3.Row:
     expire_reason_leases(conn, project_id)
     row = get_project_or_404(conn, project_id)
@@ -391,11 +600,15 @@ def release_project_reason_or_409(
         return row
     if current_worker != worker:
         raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
+    current_run_id = row["reason_run_id"] if "reason_run_id" in row.keys() else None
+    if run_id is not None and current_run_id is not None and current_run_id != run_id:
+        raise HTTPException(409, "Project reason run has been superseded")
 
     cursor = conn.execute(
         """
         UPDATE projects
         SET reason_worker = NULL,
+            reason_run_id = NULL,
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL
@@ -442,6 +655,7 @@ def expire_reason_leases(conn: sqlite3.Connection, project_id: str | None = None
     query = """
         UPDATE projects
         SET reason_worker = NULL,
+            reason_run_id = NULL,
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL

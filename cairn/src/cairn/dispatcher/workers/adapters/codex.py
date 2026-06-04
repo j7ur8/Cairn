@@ -7,17 +7,32 @@ from cairn.dispatcher.config import WorkerConfig
 from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
 
 
+CODEX_ENV_PREFIX = [
+    "env",
+    "CODEX_NON_INTERACTIVE=1",
+]
+
+CODEX_EXEC_GUARDRAILS = [
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--skip-git-repo-check",
+]
+
+
 class CodexDriver(RegexSessionDriver):
     type_name = "codex"
 
     def trace_format(self) -> str | None:
         return "codex_jsonl"
 
+    def requires_tty(self) -> bool:
+        return True
+
     def build_healthcheck(self, worker: WorkerConfig) -> list[str]:
-        return self._build_exec(worker, "Reply with exactly pong.")
+        return self._build_exec(worker, "Reply with exactly pong.", ephemeral=True)
 
     def build_startup_healthcheck(self, worker: WorkerConfig) -> list[str]:
-        return self._build_exec(worker, "Reply with exactly pong.")
+        return self._build_exec(worker, "Reply with exactly pong.", ephemeral=True)
 
     def describe_startup_healthcheck(self, worker: WorkerConfig) -> str:
         return "codex exec healthcheck via official client"
@@ -40,9 +55,11 @@ class CodexDriver(RegexSessionDriver):
     ) -> list[str]:
         env = worker.env
         return [
+            *CODEX_ENV_PREFIX,
             "codex",
             "exec",
             "resume",
+            *CODEX_EXEC_GUARDRAILS,
             session,
             "--dangerously-bypass-approvals-and-sandbox",
             "--json",
@@ -60,17 +77,26 @@ class CodexDriver(RegexSessionDriver):
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
             'model_providers.cairn.env_key="OPENAI_API_KEY"',
-            *self._capability_args(context),
+            *self._resume_capability_args(context),
             "--",
             prompt,
         ]
 
     @staticmethod
-    def _build_exec(worker: WorkerConfig, prompt: str, context: WorkerExecutionContext | None = None) -> list[str]:
+    def _build_exec(
+        worker: WorkerConfig,
+        prompt: str,
+        context: WorkerExecutionContext | None = None,
+        *,
+        ephemeral: bool = False,
+    ) -> list[str]:
         env = worker.env
         return [
+            *CODEX_ENV_PREFIX,
             "codex",
             "exec",
+            *(["--ephemeral"] if ephemeral else []),
+            *CODEX_EXEC_GUARDRAILS,
             "--dangerously-bypass-approvals-and-sandbox",
             "--json",
             "--model",
@@ -94,10 +120,18 @@ class CodexDriver(RegexSessionDriver):
 
     @staticmethod
     def _capability_args(context: WorkerExecutionContext | None) -> list[str]:
+        return CodexDriver._capability_args_for(context, include_skill_root=True)
+
+    @staticmethod
+    def _resume_capability_args(context: WorkerExecutionContext | None) -> list[str]:
+        return CodexDriver._capability_args_for(context, include_skill_root=False)
+
+    @staticmethod
+    def _capability_args_for(context: WorkerExecutionContext | None, *, include_skill_root: bool) -> list[str]:
         if context is None:
             return []
         args: list[str] = []
-        if context.skill_root:
+        if include_skill_root and context.skill_root:
             args.extend(["--add-dir", context.skill_root])
         for server in context.mcp_servers or []:
             server_id = server.get("id")
@@ -136,6 +170,10 @@ class CodexDriver(RegexSessionDriver):
         if session:
             return session
         for payload in _iter_jsonl(stdout):
+            if payload.get("type") == "thread.started":
+                session_id = payload.get("thread_id")
+                if isinstance(session_id, str) and session_id:
+                    return session_id
             if payload.get("type") == "session_meta" and isinstance(payload.get("payload"), dict):
                 session_id = payload["payload"].get("id")
                 if isinstance(session_id, str) and session_id:
@@ -147,6 +185,11 @@ class CodexDriver(RegexSessionDriver):
         for payload in _iter_jsonl(stdout):
             top_type = payload.get("type")
             body = payload.get("payload")
+            item = payload.get("item")
+            if top_type == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+                message = item.get("text") or item.get("message")
+                if isinstance(message, str) and message:
+                    messages.append(message)
             if top_type == "event_msg" and isinstance(body, dict) and body.get("type") == "agent_message":
                 message = body.get("message")
                 if isinstance(message, str) and message:

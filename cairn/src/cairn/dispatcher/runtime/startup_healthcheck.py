@@ -129,6 +129,7 @@ def _run_worker_healthcheck(
         worker,
         driver.build_startup_healthcheck(worker),
         timeout_seconds=timeout_seconds,
+        tty=driver.requires_tty(),
     )
     result = healthcheck.result
     http_status, response_text = _parse_stdout(result.stdout)

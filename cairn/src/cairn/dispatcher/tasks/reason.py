@@ -42,6 +42,12 @@ def run_reason_task(
     project: ProjectDetail,
     export_yaml: str,
     worker: WorkerConfig,
+    reason_run_id: str,
+    reason_trigger: str,
+    reason_trigger_hash: str,
+    fact_count: int,
+    hint_count: int,
+    open_intent_count: int,
     cancellation: TaskCancellation,
 ) -> str:
     driver = get_driver(worker.type)
@@ -55,9 +61,11 @@ def run_reason_task(
     ) if config.observability.enabled else ExecutionReporter.disabled()
     reporter.start()
     outcome = "failed"
+    reason_finish_outcome = "failed"
+    reason_finish_error: str | None = None
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
-    lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, config.runtime.interval)
+    lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, config.runtime.interval, reason_run_id)
     lease.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
@@ -74,6 +82,7 @@ def run_reason_task(
             worker,
             driver.build_healthcheck(worker),
             timeout_seconds=healthcheck_timeout,
+            tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
         )
@@ -86,6 +95,8 @@ def run_reason_task(
                 cancelled,
             )
             outcome = "cancelled"
+            reason_finish_outcome = "cancelled"
+            reason_finish_error = cancelled
             reporter.emit_error("reason_healthcheck", "cancelled", cancelled)
             return outcome
         if lease.failure is not None:
@@ -96,6 +107,8 @@ def run_reason_task(
                 lease.failure.status_code,
             )
             outcome = "failed"
+            reason_finish_outcome = "failed"
+            reason_finish_error = f"heartbeat lost status={lease.failure.status_code}"
             reporter.emit_error("reason_healthcheck", "error", f"heartbeat lost status={lease.failure.status_code}")
             return outcome
         if healthcheck.result.returncode != 0:
@@ -107,6 +120,8 @@ def run_reason_task(
                 preview(healthcheck.result.stderr),
             )
             outcome = "unhealthy"
+            reason_finish_outcome = "unhealthy"
+            reason_finish_error = preview(healthcheck.result.stderr)
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
         capabilities = inject_project_capabilities(
@@ -179,6 +194,7 @@ def run_reason_task(
             command.argv,
             phase="reason_execute",
             timeout_seconds=config.tasks.reason.timeout,
+            tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
@@ -197,6 +213,8 @@ def run_reason_task(
                 execute_ms,
             )
             outcome = "cancelled"
+            reason_finish_outcome = "cancelled"
+            reason_finish_error = cancelled
             reporter.emit_error("reason_execute", "cancelled", cancelled)
             return outcome
         if lease.failure is not None:
@@ -208,6 +226,8 @@ def run_reason_task(
                 execute_ms,
             )
             outcome = "failed"
+            reason_finish_outcome = "failed"
+            reason_finish_error = f"heartbeat lost status={lease.failure.status_code}"
             reporter.emit_error("reason_execute", "error", f"heartbeat lost status={lease.failure.status_code}")
             return outcome
         if did_timeout(result):
@@ -221,6 +241,8 @@ def run_reason_task(
                 preview(result.stderr),
             )
             outcome = "timeout"
+            reason_finish_outcome = "timeout"
+            reason_finish_error = preview(result.stderr or result.stdout)
             reporter.emit_error("reason_execute", "timeout", preview(result.stderr or result.stdout))
             return outcome
         if result.returncode != 0:
@@ -235,6 +257,8 @@ def run_reason_task(
                 preview(result.stderr),
             )
             outcome = "failed"
+            reason_finish_outcome = "failed"
+            reason_finish_error = f"command failed returncode={result.returncode}"
             reporter.emit_error("reason_execute", "error", f"command failed returncode={result.returncode}\n{result.stderr}")
             return outcome
         try:
@@ -256,6 +280,8 @@ def run_reason_task(
                 preview(result.stderr),
             )
             outcome = "failed"
+            reason_finish_outcome = "failed"
+            reason_finish_error = str(exc)
             reporter.emit_error("reason_execute", "parse_error", str(exc))
             return outcome
         if kind == "rejected":
@@ -268,6 +294,8 @@ def run_reason_task(
                 preview(result.stdout),
             )
             outcome = "rejected"
+            reason_finish_outcome = "rejected"
+            reason_finish_error = "model rejected task"
             reporter.emit_error("reason_execute", "error", "model rejected task")
             return outcome
         if kind == "complete":
@@ -275,6 +303,7 @@ def run_reason_task(
             if response.status_code == 403:
                 LOG.info("project became inactive during reason complete project=%s worker=%s", project.project.id, worker.name)
                 outcome = "success"
+                reason_finish_outcome = "complete"
                 return outcome
             if not response.ok:
                 LOG.warning(
@@ -285,6 +314,8 @@ def run_reason_task(
                     response.text,
                 )
                 outcome = "failed"
+                reason_finish_outcome = "failed"
+                reason_finish_error = f"complete write failed status={response.status_code}"
                 reporter.emit_error("reason_execute", "error", f"complete write failed status={response.status_code} body={response.text}")
                 return outcome
             LOG.info(
@@ -296,7 +327,23 @@ def run_reason_task(
                 total_ms,
             )
             outcome = "success"
+            reason_finish_outcome = "complete"
             reporter.emit_result("reason_write", data["description"], produced_fact_id="goal")
+            return outcome
+        if kind == "blocked":
+            assert isinstance(data, dict)
+            LOG.info(
+                "reason blocked project=%s worker=%s from=%s execute_ms=%s total_ms=%s description=%s",
+                project.project.id,
+                worker.name,
+                data.get("from"),
+                execute_ms,
+                total_ms,
+                data.get("description"),
+            )
+            outcome = "success"
+            reason_finish_outcome = "blocked"
+            reporter.emit_result("reason_write", data.get("description", "blocked"))
             return outcome
         if kind == "intents":
             created = 0
@@ -306,6 +353,7 @@ def run_reason_task(
                 if response.status_code == 403:
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
                     outcome = "success"
+                    reason_finish_outcome = "intents" if created else "noop"
                     return outcome
                 if response.status_code == 409:
                     LOG.info("reason intent lost race project=%s worker=%s from=%s", project.project.id, worker.name, intent_data["from"])
@@ -348,9 +396,12 @@ def run_reason_task(
                     total_ms,
                 )
                 outcome = "failed"
+                reason_finish_outcome = "failed"
+                reason_finish_error = f"created no intents attempted={len(data)}"
                 reporter.emit_error("reason_write", "error", f"created no intents attempted={len(data)}")
                 return outcome
             outcome = "success"
+            reason_finish_outcome = "intents"
             reporter.emit_result("reason_write", f"created {created} intents", created_intent_ids=created_ids)
             return outcome
         LOG.info(
@@ -361,11 +412,32 @@ def run_reason_task(
             total_ms,
         )
         outcome = "success"
+        reason_finish_outcome = "noop"
         return outcome
     finally:
+        finish = client.finish_reason(
+            project.project.id,
+            worker.name,
+            run_id=reason_run_id,
+            trigger=reason_trigger,
+            trigger_hash=reason_trigger_hash,
+            fact_count=fact_count,
+            hint_count=hint_count,
+            open_intent_count=open_intent_count,
+            outcome=reason_finish_outcome,
+            error=reason_finish_error,
+        )
+        if not finish.ok and finish.status_code not in (403, 409):
+            LOG.warning(
+                "reason finish state write failed project=%s worker=%s status=%s body=%s",
+                project.project.id,
+                worker.name,
+                finish.status_code,
+                finish.text,
+            )
         reporter.finish(process_state_for_task_outcome(outcome), error_kind=None if outcome == "success" else outcome)
         lease.stop()
-        best_effort_release_reason(client, project.project.id, worker.name)
+        best_effort_release_reason(client, project.project.id, worker.name, reason_run_id)
 
 
 def _project_capability_data(

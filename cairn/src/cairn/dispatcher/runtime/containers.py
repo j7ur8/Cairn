@@ -91,13 +91,13 @@ class ContainerManager:
         if state is not None:
             self.log_mount_mismatches(name, project_id)
             LOG.info("starting existing container project=%s container=%s state=%s", project_id, name, state)
-            self._start_existing(name)
+            self._start_existing(name, project_id=project_id)
             return name
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
         try:
             volumes = self._docker_volumes(project_id)
             env = self._bearer_token_environment() or None
-            self._client.containers.run(
+            container = self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
                 detach=True,
@@ -109,6 +109,7 @@ class ContainerManager:
                 user=self._config.user,
                 labels=self._container_labels(project_id),
             )
+            self._ensure_container_bind_mount_permissions(name, project_id, container=container)
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
         except APIError as exc:
@@ -122,7 +123,7 @@ class ContainerManager:
         if state is not None:
             self.log_mount_mismatches(name, project_id)
             LOG.info("starting conflicted existing container project=%s container=%s state=%s", project_id, name, state)
-            self._start_existing(name)
+            self._start_existing(name, project_id=project_id)
             return name
         raise RuntimeError(f"failed to create container {name}")
 
@@ -349,6 +350,7 @@ class ContainerManager:
         command: list[str],
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
+        tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess:
         container = self._require_container(container_name)
@@ -363,7 +365,7 @@ class ContainerManager:
                 ]
             )
         argv.extend(command)
-        return ManagedProcess(container, argv, env, user=self._config.exec_user, on_output=on_output)
+        return ManagedProcess(container, argv, env, user=self._config.exec_user, tty=tty, on_output=on_output)
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
         archive_path, archive = self._text_file_archive(path, content)
@@ -396,16 +398,60 @@ class ContainerManager:
         except DockerException as exc:
             LOG.warning("failed to remove container=%s error=%s", name, exc)
 
-    def _start_existing(self, name: str) -> None:
+    def _start_existing(self, name: str, *, project_id: str | None = None) -> None:
         LOG.debug("starting container=%s", name)
         container = self._require_container(name)
         try:
             container.start()
+            if project_id is not None:
+                self._ensure_container_bind_mount_permissions(name, project_id)
             return
         except DockerException as exc:
             if self.inspect_state(name) == "running":
+                if project_id is not None:
+                    self._ensure_container_bind_mount_permissions(name, project_id)
                 return
             raise RuntimeError(f"failed to start container {name}: {exc}") from exc
+
+    def _ensure_container_bind_mount_permissions(
+        self,
+        container_name: str,
+        project_id: str,
+        *,
+        container: Container | None = None,
+    ) -> None:
+        """Best-effort chmod inside the container so exec_user can write bind mounts."""
+        writable_paths = [
+            str(mount["container_path"])
+            for mount in self._render_bind_mounts(project_id)
+            if not mount["read_only"]
+        ]
+        if not writable_paths:
+            return
+        container = container or self._require_container(container_name)
+        for path in writable_paths:
+            try:
+                result = container.exec_run(["chmod", "0777", path], user="0:0", stdout=True, stderr=True)
+            except DockerException as exc:
+                LOG.warning(
+                    "failed to chmod writable bind mount in container project=%s container=%s path=%s error=%s",
+                    project_id,
+                    container_name,
+                    path,
+                    exc,
+                )
+                continue
+            exit_code = result.exit_code if hasattr(result, "exit_code") else 1
+            if exit_code != 0:
+                output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
+                LOG.warning(
+                    "chmod writable bind mount failed project=%s container=%s path=%s code=%s output=%s",
+                    project_id,
+                    container_name,
+                    path,
+                    exit_code,
+                    output.strip(),
+                )
 
     def _get_container(self, name: str) -> Container | None:
         try:

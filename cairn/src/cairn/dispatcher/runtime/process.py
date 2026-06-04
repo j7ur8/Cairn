@@ -31,11 +31,13 @@ class ManagedProcess:
         command: list[str],
         env: dict[str, str],
         user: str | None = None,
+        tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ):
         self.command = command
         self.env = env
         self.user = user
+        self.tty = tty
         self.on_output = on_output
         self._container = container
         self._api = container.client.api
@@ -56,7 +58,7 @@ class ManagedProcess:
             stdout=True,
             stderr=True,
             stdin=False,
-            tty=False,
+            tty=self.tty,
             environment=self.env,
             user=self.user,
         )
@@ -115,9 +117,9 @@ class ManagedProcess:
             stream = self._api.exec_start(
                 self._exec_id,
                 detach=False,
-                tty=False,
+                tty=self.tty,
                 stream=True,
-                demux=True,
+                demux=not self.tty,
             )
             for chunk in stream:
                 stdout, stderr = self._split_chunk(chunk)

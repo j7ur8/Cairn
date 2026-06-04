@@ -109,7 +109,9 @@ class _DockerMock:
         self.containers = MagicMock()
         self.client.containers = self.containers
         self.containers.get.side_effect = NotFound("not found")
-        self.containers.run.return_value = MagicMock()
+        container = MagicMock()
+        container.exec_run.return_value = type("R", (), {"exit_code": 0, "output": b""})()
+        self.containers.run.return_value = container
 
     def install(self):
         return patch("docker.from_env", return_value=self.client)
@@ -180,6 +182,22 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         self.assertEqual(kwargs["labels"]["cairn.project_id"], "proj-1")
         self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "false")
 
+    def test_created_container_chmods_writable_bind_mount_as_root(self):
+        dm = _DockerMock()
+        container = MagicMock()
+        container.exec_run.return_value = type("R", (), {"exit_code": 0, "output": b""})()
+        dm.containers.run.return_value = container
+        with dm.install():
+            mgr = self._make_manager(user="0:0", exec_user="kali", dispatcher_id="d1")
+            mgr.ensure_running("proj-1")
+
+        container.exec_run.assert_called_once_with(
+            ["chmod", "0777", "/mnt/project"],
+            user="0:0",
+            stdout=True,
+            stderr=True,
+        )
+
     def test_startup_container_also_receives_user(self):
         dm = _DockerMock()
         with dm.install():
@@ -231,6 +249,17 @@ class ContainerUserRuntimeTests(unittest.TestCase):
                 process = mgr.build_exec_process("c", {}, ["echo", "ok"])
 
         self.assertEqual(process.user, "kali")
+
+    def test_tty_is_passed_to_managed_process(self):
+        dm = _DockerMock()
+        container = MagicMock()
+        container.client.api = MagicMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            with patch.object(mgr, "_require_container", return_value=container):
+                process = mgr.build_exec_process("c", {}, ["echo", "ok"], tty=True)
+
+        self.assertTrue(process.tty)
 
 
 # ---------------------------------------------------------------------------

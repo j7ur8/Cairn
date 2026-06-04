@@ -72,6 +72,7 @@ def run_explore_task(
             worker,
             driver.build_healthcheck(worker),
             timeout_seconds=healthcheck_timeout,
+            tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
         )
@@ -170,6 +171,7 @@ def run_explore_task(
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
+            tty=driver.requires_tty(),
             trace_format=driver.trace_format(),
         )
         execute_ms = int((time.perf_counter() - execute_started) * 1000)
@@ -398,6 +400,7 @@ def _try_conclude_fallback(
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
+        tty=driver.requires_tty(),
         trace_format=driver.trace_format(),
     )
     conclude_ms = int((time.perf_counter() - conclude_started) * 1000)
@@ -489,6 +492,7 @@ def _run_process(
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
     reporter: ExecutionReporter,
+    tty: bool = False,
     trace_format: str | None = None,
 ):
     return run_worker_process(
@@ -498,6 +502,7 @@ def _run_process(
         argv,
         phase=phase,
         timeout_seconds=timeout,
+        tty=tty,
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,

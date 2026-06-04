@@ -9,6 +9,43 @@
 
 # Cairn 更新记录
 
+## 2026-06-04 · Worker CLI 非交互协议收敛（Claude `--print` + Codex stdin notice）（已完成）
+
+### 背景
+
+项目运行时出现 `Reading additional input from stdin...`，表面看像 dispatcher / worker 卡死。实际排查后确认：
+
+- 该行来自 `codex exec` CLI 0.118.0，自身会在启动时提示它扫描 stdin 是否有追加输入。
+- Dispatcher 容器 exec 已是 `stdin=False, tty=False`，不是 Cairn 主动把 stdin 挂进去了。
+- Claude Code 2.1.98 的帮助已明确把非交互模式定义为 `--print`；仓库旧代码仍在用 `-p`。
+
+### 已完成变更
+
+- `cairn/src/cairn/dispatcher/workers/adapters/claudecode.py`
+  - `build_execute()` / `build_conclude()` 从旧的 `-p` 切到显式 `--print`
+  - 保留 `--output-format stream-json`、`--verbose`、`--dangerously-skip-permissions`
+- `cairn/src/cairn/dispatcher/observability/trace.py`
+  - `CodexTraceParser` 新增对非 JSON 行 `Reading additional input from stdin...` 的识别
+  - 不再把它记成 `trace_parse_error`，而是降级为 `system_event`
+  - metadata 带 `notice_type=stdin_scan`
+- 新增回归测试 `cairn/tests/test_worker_cli_adapters.py`
+  - 校验 Claude adapter 命令行必须包含 `--print`
+  - 校验 Codex stdin notice 被当成 `system_event`
+  - 校验该 notice 后跟随 JSONL 事件时，trace 解析不中断
+
+### 验证结果
+
+已通过：
+
+- `PYTHONPATH=cairn/src cairn/.venv/bin/python -m compileall -q cairn/src/cairn`
+- `PYTHONPATH=cairn/src cairn/.venv/bin/python -m unittest discover -s cairn/tests -p 'test_worker_cli_adapters.py' -v`
+- `PYTHONPATH=cairn/src cairn/.venv/bin/python -m unittest discover -s cairn/tests -p 'test_ai_profile_bridge.py' -v`
+
+### 未完成事项/风险
+
+- `Reading additional input from stdin...` 现在只被视为 Codex CLI 提示语，不单独构成阻塞或失败证据。真实 timeout / API 重试仍按原有 `communicate()` / returncode / structured trace 规则判定。
+- 若后续要彻底消除这行提示，可继续研究 `codex exec` 是否存在明确禁止 stdin 扫描的官方参数；当前版本 `codex exec -h` 未暴露该开关。
+
 ## 2026-06-04 · Compose build graph 纳入 dispatcher 依赖的 worker image（已完成）
 
 ### 背景

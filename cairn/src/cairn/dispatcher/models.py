@@ -15,6 +15,8 @@ class RunningTask:
     fact_count: int | None = None
     hint_count: int | None = None
     open_intent_count: int | None = None
+    reason_trigger: str | None = None
+    reason_trigger_hash: str | None = None
 
 
 @dataclass(slots=True)

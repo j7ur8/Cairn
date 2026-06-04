@@ -29,6 +29,7 @@ from cairn.server.models import (
     HealthCheckResult,
     ProjectAiProfileSnapshot,
     ProjectAiProfilesResponse,
+    TaskAiProfileSelections,
     auth_env_warning,
 )
 
@@ -323,18 +324,19 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
 def _load_snapshots(conn: sqlite3.Connection, project_id: str) -> list[ProjectAiProfileSnapshot]:
     rows = conn.execute(
         """
-        SELECT profile_id, role, position,
+        SELECT profile_id, task_type, role, position,
                snapshot_name, snapshot_worker_type, snapshot_provider,
                snapshot_base_url, snapshot_model, snapshot_api_key_env
         FROM project_ai_profiles
         WHERE project_id = ?
-        ORDER BY role, position
+        ORDER BY task_type, role, position
         """,
         (project_id,),
     ).fetchall()
     return [
         ProjectAiProfileSnapshot(
             profile_id=row["profile_id"],
+            task_type=row["task_type"],
             role=row["role"],
             position=row["position"],
             snapshot_name=row["snapshot_name"],
@@ -359,6 +361,19 @@ def _selection_from_snapshots(snapshots: Iterable[ProjectAiProfileSnapshot]) -> 
     return AiProfileSelection(primary_profile_id=primary, fallback_profile_ids=fallback)
 
 
+def _task_selections_from_snapshots(snapshots: list[ProjectAiProfileSnapshot]) -> TaskAiProfileSelections:
+    by_task = {
+        task_type: [snap for snap in snapshots if snap.task_type == task_type]
+        for task_type in ("bootstrap", "explore", "reason")
+    }
+    legacy = [snap for snap in snapshots if snap.task_type == "legacy"]
+    return TaskAiProfileSelections(
+        bootstrap=_selection_from_snapshots(by_task["bootstrap"] or legacy),
+        explore=_selection_from_snapshots(by_task["explore"] or legacy),
+        reason=_selection_from_snapshots(by_task["reason"] or legacy),
+    )
+
+
 @router.get("/projects/{project_id}/ai-profiles", response_model=ProjectAiProfilesResponse)
 def get_project_ai_profiles(project_id: str):
     with get_conn() as conn:
@@ -369,7 +384,8 @@ def get_project_ai_profiles(project_id: str):
             for row in conn.execute("SELECT * FROM ai_profiles ORDER BY id").fetchall()
         ]
         snapshots = _load_snapshots(conn, project_id)
-        selection = _selection_from_snapshots(snapshots)
+        selections = _task_selections_from_snapshots(snapshots)
+        selection = selections.explore
         available_ids = {item.id for item in catalog if item.available}
         unavailable = sorted({
             snap.profile_id for snap in snapshots
@@ -378,6 +394,7 @@ def get_project_ai_profiles(project_id: str):
         return ProjectAiProfilesResponse(
             catalog=catalog,
             selection=selection,
+            selections=selections,
             snapshots=snapshots,
             unavailable_profile_ids=unavailable,
         )
@@ -395,10 +412,41 @@ def persist_project_ai_selection(
     referenced profile is missing, the request is rejected with 400 by the
     caller before we reach this function.
     """
+    persist_project_ai_selections(
+        conn,
+        project_id,
+        TaskAiProfileSelections(
+            bootstrap=selection,
+            explore=selection,
+            reason=selection,
+        ),
+        now,
+        task_types=("legacy",),
+    )
+
+
+def persist_project_ai_selections(
+    conn: sqlite3.Connection,
+    project_id: str,
+    selections: TaskAiProfileSelections,
+    now: str,
+    *,
+    task_types: tuple[str, ...] = ("bootstrap", "explore", "reason"),
+) -> None:
+    """Store task-specific AI profile snapshots for a project."""
+    selection_by_task = {
+        "bootstrap": selections.bootstrap,
+        "explore": selections.explore,
+        "reason": selections.reason,
+        "legacy": selections.explore,
+    }
     referenced: list[str] = []
-    if selection.primary_profile_id:
-        referenced.append(selection.primary_profile_id)
-    referenced.extend(selection.fallback_profile_ids)
+    for task_type in task_types:
+        selection = selection_by_task[task_type]
+        if selection.primary_profile_id:
+            referenced.append(selection.primary_profile_id)
+        referenced.extend(selection.fallback_profile_ids)
+    referenced = list(dict.fromkeys(referenced))
     rows = conn.execute(
         f"SELECT * FROM ai_profiles WHERE id IN ({','.join('?' * len(referenced))})",
         referenced,
@@ -412,39 +460,41 @@ def persist_project_ai_selection(
         raise HTTPException(400, f"ai profile ids unavailable: {', '.join(unavailable)}")
 
     conn.execute("DELETE FROM project_ai_profiles WHERE project_id = ?", (project_id,))
-    if selection.primary_profile_id:
-        profile = by_id[selection.primary_profile_id]
-        conn.execute(
-            """
-            INSERT INTO project_ai_profiles (
-                project_id, profile_id, role, position,
-                snapshot_name, snapshot_worker_type, snapshot_provider,
-                snapshot_base_url, snapshot_model, snapshot_api_key_env,
-                created_at
-            ) VALUES (?, ?, 'primary', 0, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                project_id, selection.primary_profile_id,
-                profile["name"], profile["worker_type"], profile["provider"],
-                profile["base_url"], profile["model"], profile["api_key_env"], now,
-            ),
-        )
-    for position, profile_id in enumerate(selection.fallback_profile_ids):
-        if profile_id == selection.primary_profile_id:
-            continue
-        profile = by_id[profile_id]
-        conn.execute(
-            """
-            INSERT INTO project_ai_profiles (
-                project_id, profile_id, role, position,
-                snapshot_name, snapshot_worker_type, snapshot_provider,
-                snapshot_base_url, snapshot_model, snapshot_api_key_env,
-                created_at
-            ) VALUES (?, ?, 'fallback', ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                project_id, profile_id, position,
-                profile["name"], profile["worker_type"], profile["provider"],
-                profile["base_url"], profile["model"], profile["api_key_env"], now,
-            ),
-        )
+    for task_type in task_types:
+        selection = selection_by_task[task_type]
+        if selection.primary_profile_id:
+            profile = by_id[selection.primary_profile_id]
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO project_ai_profiles (
+                    project_id, profile_id, task_type, role, position,
+                    snapshot_name, snapshot_worker_type, snapshot_provider,
+                    snapshot_base_url, snapshot_model, snapshot_api_key_env,
+                    created_at
+                ) VALUES (?, ?, ?, 'primary', 0, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id, selection.primary_profile_id, task_type,
+                    profile["name"], profile["worker_type"], profile["provider"],
+                    profile["base_url"], profile["model"], profile["api_key_env"], now,
+                ),
+            )
+        for position, profile_id in enumerate(selection.fallback_profile_ids):
+            if profile_id == selection.primary_profile_id:
+                continue
+            profile = by_id[profile_id]
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO project_ai_profiles (
+                    project_id, profile_id, task_type, role, position,
+                    snapshot_name, snapshot_worker_type, snapshot_provider,
+                    snapshot_base_url, snapshot_model, snapshot_api_key_env,
+                    created_at
+                ) VALUES (?, ?, ?, 'fallback', ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id, profile_id, task_type, position,
+                    profile["name"], profile["worker_type"], profile["provider"],
+                    profile["base_url"], profile["model"], profile["api_key_env"], now,
+                ),
+            )

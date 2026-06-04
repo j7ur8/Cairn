@@ -101,13 +101,56 @@ class AiProfileFlowTests(unittest.TestCase):
         result = get_project_ai_profiles(pid)
         self.assertEqual(result.selection.primary_profile_id, a.id)
         self.assertEqual(result.selection.fallback_profile_ids, [b.id, c.id])
+        self.assertEqual(result.selections.bootstrap.primary_profile_id, a.id)
+        self.assertEqual(result.selections.explore.primary_profile_id, a.id)
+        self.assertEqual(result.selections.reason.primary_profile_id, a.id)
         self.assertEqual(len(result.snapshots), 3)
         self.assertEqual(result.unavailable_profile_ids, [])
 
         primary_snapshot = next(s for s in result.snapshots if s.role == "primary")
+        self.assertEqual(primary_snapshot.task_type, "legacy")
         self.assertEqual(primary_snapshot.snapshot_model, "m1")
         self.assertEqual(primary_snapshot.snapshot_worker_type, "codex")
         self.assertEqual(primary_snapshot.snapshot_api_key_env, "K1")
+
+    def test_persist_task_specific_project_selections_round_trip(self) -> None:
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile, persist_project_ai_selections,
+            get_project_ai_profiles,
+        )
+        from cairn.server.models import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
+
+        boot = create_ai_profile(AiProfileCreate(
+            name="boot", worker_type="codex", model="m1", api_key_env="K1",
+        ))
+        explore = create_ai_profile(AiProfileCreate(
+            name="explore", worker_type="codex", model="m2", api_key_env="K2",
+        ))
+        reason = create_ai_profile(AiProfileCreate(
+            name="reason", worker_type="claudecode", model="m3", api_key_env="K3",
+        ))
+
+        pid = self._create_project(title="P-task-ai")
+        with self.db.get_conn() as conn:
+            persist_project_ai_selections(
+                conn,
+                pid,
+                TaskAiProfileSelections(
+                    bootstrap=AiProfileSelection(primary_profile_id=boot.id, fallback_profile_ids=[]),
+                    explore=AiProfileSelection(primary_profile_id=explore.id, fallback_profile_ids=[]),
+                    reason=AiProfileSelection(primary_profile_id=reason.id, fallback_profile_ids=[boot.id]),
+                ),
+                "2026-06-04T00:00:00Z",
+            )
+            conn.commit()
+
+        result = get_project_ai_profiles(pid)
+        self.assertEqual(result.selection.primary_profile_id, explore.id)
+        self.assertEqual(result.selections.bootstrap.primary_profile_id, boot.id)
+        self.assertEqual(result.selections.explore.primary_profile_id, explore.id)
+        self.assertEqual(result.selections.reason.primary_profile_id, reason.id)
+        self.assertEqual(result.selections.reason.fallback_profile_ids, [boot.id])
+        self.assertEqual({snap.task_type for snap in result.snapshots}, {"bootstrap", "explore", "reason"})
 
     def test_missing_profile_rejected(self) -> None:
         from cairn.server.routers.ai_profiles import persist_project_ai_selection

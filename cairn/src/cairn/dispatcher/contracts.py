@@ -37,6 +37,11 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     if keys == {"intent"}:
         intent = payload["intent"]
         return isinstance(intent, dict) and "from" in intent and "description" in intent
+    if keys == {"blocked"}:
+        blocked = payload["blocked"]
+        return isinstance(blocked, dict) and "from" in blocked and "description" in blocked
+    if not keys:
+        return True
     return False
 
 
@@ -72,6 +77,7 @@ def validate_reason_payload(
     if not isinstance(data, dict):
         raise ValueError("accepted must be true or false")
     complete = data.get("complete")
+    blocked = data.get("blocked")
     intents = data.get("intents")
     # backward compat: accept singular "intent" key from LLMs
     if intents is None:
@@ -79,25 +85,35 @@ def validate_reason_payload(
         if isinstance(singular, dict):
             intents = [singular]
     if complete is not None:
-        if intents is not None:
-            raise ValueError("complete and intents cannot coexist")
+        if intents is not None or blocked is not None:
+            raise ValueError("complete, blocked, and intents cannot coexist")
         if not isinstance(complete, dict) or "from" not in complete or "description" not in complete:
             raise ValueError("invalid complete payload")
         return "complete", complete
+    if blocked is not None:
+        if intents is not None:
+            raise ValueError("blocked and intents cannot coexist")
+        if not isinstance(blocked, dict) or "from" not in blocked or "description" not in blocked:
+            raise ValueError("invalid blocked payload")
+        return "blocked", blocked
     if intents is not None:
         if not isinstance(intents, list):
             raise ValueError("intents must be an array")
         for i, intent in enumerate(intents):
             if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
                 raise ValueError(f"invalid intent at index {i}")
-        if not intents and open_intents_empty:
-            raise ValueError("intents must not be empty when open_intents is empty")
         intents = intents[:max_intents]
         if not intents:
-            return "noop", None
+            return "blocked" if open_intents_empty else "noop", {
+                "from": [],
+                "description": "No open intents and no new high-value intents were proposed.",
+            } if open_intents_empty else None
         return "intents", intents
     if open_intents_empty:
-        raise ValueError("intents is required when open_intents is empty")
+        return "blocked", {
+            "from": [],
+            "description": "No open intents and no new high-value intents were proposed.",
+        }
     return "noop", None
 
 

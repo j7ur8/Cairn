@@ -16,7 +16,7 @@ from cairn.server.models import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
-from cairn.server.routers.ai_profiles import persist_project_ai_selection
+from cairn.server.routers.ai_profiles import persist_project_ai_selection, persist_project_ai_selections
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -127,7 +127,9 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
         if body.role_id:
             _insert_role_snapshot(conn, replay_project_id, body.role_id, now)
 
-        if body.ai_profiles is not None:
+        if body.ai_profile_selections is not None:
+            persist_project_ai_selections(conn, replay_project_id, body.ai_profile_selections, now)
+        elif body.ai_profiles is not None:
             persist_project_ai_selection(conn, replay_project_id, body.ai_profiles, now)
 
     try:
@@ -519,6 +521,7 @@ def _complete_replay_project(conn, run):
         UPDATE projects
         SET status = 'completed',
             reason_worker = NULL,
+            reason_run_id = NULL,
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL

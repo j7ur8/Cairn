@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,6 +61,9 @@ class JsonLineTraceParser:
         return self._parse_line(line)
 
     def _parse_line(self, line: str) -> list[TraceEvent]:
+        notice = self._parse_non_json_line(line)
+        if notice is not None:
+            return [notice]
         try:
             payload = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -79,13 +83,56 @@ class JsonLineTraceParser:
     def _parse_payload(self, payload: dict[str, Any]) -> list[TraceEvent]:
         return []
 
+    def _parse_non_json_line(self, line: str) -> TraceEvent | None:
+        return None
+
 
 class CodexTraceParser(JsonLineTraceParser):
     trace_format = "codex_jsonl"
 
+    def _parse_non_json_line(self, line: str) -> TraceEvent | None:
+        plain = _strip_ansi(line).strip()
+        if line == "Reading additional input from stdin...":
+            return TraceEvent(
+                "system_event",
+                self.phase,
+                "system",
+                "codex cli scanned stdin for appended input",
+                {"line": line, "notice_type": "stdin_scan"},
+            )
+        if _is_codex_cli_diagnostic(plain):
+            return TraceEvent(
+                "error",
+                self.phase,
+                "error",
+                plain,
+                {"line": line, "notice_type": "codex_cli_diagnostic"},
+            )
+        return None
+
     def _parse_payload(self, payload: dict[str, Any]) -> list[TraceEvent]:
         top_type = payload.get("type")
         body = payload.get("payload")
+        if top_type == "thread.started":
+            session_id = payload.get("thread_id")
+            if isinstance(session_id, str) and session_id:
+                self._session_id = session_id
+            return [
+                TraceEvent(
+                    "session_init",
+                    self.phase,
+                    "system",
+                    "codex thread started",
+                    {"session_id": session_id},
+                )
+            ]
+        if top_type in ("turn.started", "turn.completed"):
+            content = "codex turn started" if top_type == "turn.started" else "codex turn completed"
+            return [TraceEvent("system_event", self.phase, "system", content, payload)]
+        if top_type in ("item.started", "item.completed", "item.updated"):
+            item = payload.get("item")
+            if isinstance(item, dict):
+                return self._parse_current_item(top_type, item)
         if top_type == "session_meta" and isinstance(body, dict):
             session_id = body.get("id")
             if isinstance(session_id, str) and session_id:
@@ -95,6 +142,37 @@ class CodexTraceParser(JsonLineTraceParser):
             return self._parse_response_item(body)
         if top_type == "event_msg" and isinstance(body, dict):
             return self._parse_event_msg(body)
+        return []
+
+    def _parse_current_item(self, event_type: str, item: dict[str, Any]) -> list[TraceEvent]:
+        item_type = item.get("type")
+        if item_type == "agent_message":
+            text = str(item.get("text") or item.get("message") or "")
+            if event_type == "item.completed" and text:
+                self._final_messages.append(text)
+                return [TraceEvent("agent_message", self.phase, "result", text, {"item_id": item.get("id")})]
+            return []
+        if item_type == "command_execution":
+            command = item.get("command")
+            command_text = " ".join(str(part) for part in command) if isinstance(command, list) else str(command or "")
+            metadata = {
+                "item_id": item.get("id"),
+                "command": command,
+                "exit_code": item.get("exit_code"),
+                "status": item.get("status"),
+                "stdout": item.get("stdout"),
+                "stderr": item.get("stderr"),
+                "output": item.get("aggregated_output"),
+            }
+            if event_type == "item.started" or item.get("status") == "in_progress":
+                return [TraceEvent("command_start", self.phase, "system", command_text, metadata)]
+            status = str(item.get("status") or "")
+            stream = "result" if status in ("completed", "success", "") and item.get("exit_code") in (None, 0) else "error"
+            return [TraceEvent("command_end", self.phase, stream, command_text or _compact(str(item.get("aggregated_output") or "")), metadata)]
+        if item_type == "reasoning":
+            summary = item.get("summary")
+            if isinstance(summary, list) and summary:
+                return [TraceEvent("thinking", self.phase, "system", "\n".join(str(part) for part in summary), {"item_id": item.get("id")})]
         return []
 
     def _parse_response_item(self, item: dict[str, Any]) -> list[TraceEvent]:
@@ -211,6 +289,8 @@ class ClaudeTraceParser(JsonLineTraceParser):
         if subtype_text == "init":
             kind = "session_init"
             content = "session init"
+        elif subtype_text == "thinking_tokens":
+            return TraceEvent("usage", self.phase, "system", "token usage", payload)
         elif subtype_text == "api_retry":
             kind = "api_retry"
             attempt = payload.get("attempt")
@@ -357,3 +437,19 @@ def _compact(text: str, limit: int = 1200) -> str:
     if len(compact) <= limit:
         return compact
     return compact[:limit] + "..."
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _is_codex_cli_diagnostic(line: str) -> bool:
+    return (
+        line.startswith("error:")
+        or line.startswith("tip:")
+        or line.startswith("Usage: codex ")
+        or line.startswith("For more information, try ")
+    )

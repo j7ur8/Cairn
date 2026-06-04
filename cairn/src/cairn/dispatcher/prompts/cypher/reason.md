@@ -26,9 +26,14 @@ If Goal is not satisfied and new intents are needed:
 {"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}]}}
 ```
 
-If no new intent is currently needed:
+If open intents already cover all useful work:
 ```json
 {"accepted": true, "data": {}}
+```
+
+If Goal is not satisfied, Open Intents is empty, and all high-value paths are exhausted:
+```json
+{"accepted": true, "data": {"blocked": {"from": ["f001"], "description": "Goal is not satisfied, but current facts exhaust the reachable high-value paths: ...", "retryable": false}}}
 ```
 
 # Completion rules
@@ -52,7 +57,10 @@ First judge completion. Complete only when facts already prove the Goal.
 If Goal is not satisfied:
 
 - If `Open Intents` is empty, propose new intents.
+- If `Open Intents` is empty and no high-value intent remains, return `blocked`.
 - If open intents already cover all high-value directions, return `{}`.
+- Do not run exploratory commands, network scans, brute force loops, or long shell loops in reason.
+- Read the graph and output the decision JSON; exploration belongs in explore intents.
 - Propose at most `{max_intents}` intents.
 - Each intent must be independent, parallelizable, and non-overlapping.
 - Do not generate generic “continue testing” intents.

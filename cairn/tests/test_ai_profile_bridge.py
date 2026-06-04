@@ -118,6 +118,8 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         snap = self._snap(snapshot_api_key_env="OPENAI_API_KEY")
         result = probe_snapshot(snap, config=cfg)
         self.assertFalse(result.ok)
+
+
         auth = next(c for c in result.checks if c.name == "api_key_env_present")
         self.assertIn("define OPENAI_API_KEY directly", auth.message)
 
@@ -192,6 +194,44 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         finally:
             httpd.shutdown()
             thread.join(timeout=2)
+
+
+class DispatcherTaskAiSelectionTests(unittest.TestCase):
+    def test_project_ai_snapshots_are_task_specific(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+        from cairn.server.models import ProjectAiProfileSnapshot
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop._project_ai_cache = {
+            "proj": {
+                "bootstrap": [
+                    ProjectAiProfileSnapshot(
+                        profile_id="boot", task_type="bootstrap", role="primary", position=0,
+                        snapshot_name="boot", snapshot_worker_type="codex",
+                        snapshot_model="m1", snapshot_api_key_env="K1",
+                    )
+                ],
+                "explore": [
+                    ProjectAiProfileSnapshot(
+                        profile_id="intent", task_type="explore", role="primary", position=0,
+                        snapshot_name="intent", snapshot_worker_type="codex",
+                        snapshot_model="m2", snapshot_api_key_env="K2",
+                    )
+                ],
+                "reason": [
+                    ProjectAiProfileSnapshot(
+                        profile_id="reason", task_type="reason", role="primary", position=0,
+                        snapshot_name="reason", snapshot_worker_type="claudecode",
+                        snapshot_model="m3", snapshot_api_key_env="K3",
+                    )
+                ],
+            }
+        }
+
+        self.assertEqual(loop._project_ai_snapshots("proj", "bootstrap")[0].profile_id, "boot")
+        self.assertEqual(loop._project_ai_snapshots("proj", "explore")[0].profile_id, "intent")
+        self.assertEqual(loop._project_ai_snapshots("proj", "reason")[0].profile_id, "reason")
+        self.assertEqual(loop._project_ai_snapshots("proj", "unknown"), [])
 
 
 class ProfileWarningsTests(unittest.TestCase):

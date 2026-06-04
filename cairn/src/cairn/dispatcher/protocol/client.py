@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
 
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, Settings
+from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, ReasonState, Settings
 
 LOG = logging.getLogger(__name__)
 
@@ -93,25 +93,89 @@ class CairnClient:
             json={"worker": worker},
         )
 
-    def claim_reason(self, project_id: str, worker: str, trigger: str) -> ApiResult:
+    def claim_reason(
+        self,
+        project_id: str,
+        worker: str,
+        trigger: str,
+        *,
+        run_id: str,
+        trigger_hash: str,
+        fact_count: int,
+        hint_count: int,
+        open_intent_count: int,
+    ) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/claim",
-            json={"worker": worker, "trigger": trigger},
+            json={
+                "worker": worker,
+                "run_id": run_id,
+                "trigger": trigger,
+                "trigger_hash": trigger_hash,
+                "fact_count": fact_count,
+                "hint_count": hint_count,
+                "open_intent_count": open_intent_count,
+            },
         )
 
-    def reason_heartbeat(self, project_id: str, worker: str) -> ApiResult:
+    def get_reason_state(self, project_id: str) -> ApiResult:
+        try:
+            response = self._session().get(
+                self._url(f"/projects/{project_id}/reason/state"),
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=GET path=/projects/%s/reason/state error=%s", project_id, exc)
+            return ApiResult(status_code=0, text=str(exc))
+        data: Any | None = None
+        if response.headers.get("content-type", "").startswith("application/json"):
+            raw = response.json()
+            data = ReasonState.model_validate(raw) if raw is not None else None
+        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+
+    def finish_reason(
+        self,
+        project_id: str,
+        worker: str,
+        *,
+        run_id: str,
+        trigger: str,
+        trigger_hash: str,
+        fact_count: int,
+        hint_count: int,
+        open_intent_count: int,
+        outcome: str,
+        error: str | None = None,
+    ) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/reason/finish",
+            json={
+                "worker": worker,
+                "run_id": run_id,
+                "trigger": trigger,
+                "trigger_hash": trigger_hash,
+                "fact_count": fact_count,
+                "hint_count": hint_count,
+                "open_intent_count": open_intent_count,
+                "outcome": outcome,
+                "error": error,
+            },
+        )
+
+    def reason_heartbeat(self, project_id: str, worker: str, run_id: str | None = None) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/heartbeat",
-            json={"worker": worker},
+            json={"worker": worker, "run_id": run_id},
         )
 
-    def release_reason(self, project_id: str, worker: str) -> ApiResult:
+    def release_reason(self, project_id: str, worker: str, run_id: str | None = None) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/release",
-            json={"worker": worker},
+            json={"worker": worker, "run_id": run_id},
         )
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:

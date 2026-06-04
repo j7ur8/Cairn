@@ -80,6 +80,7 @@ def run_healthcheck(
     command: list[str],
     *,
     timeout_seconds: int,
+    tty: bool = False,
     lease: HeartbeatLease | None = None,
     cancellation: TaskCancellation | None = None,
 ) -> HealthcheckRun:
@@ -88,6 +89,7 @@ def run_healthcheck(
         dict(worker.env),
         command,
         timeout_seconds=timeout_seconds,
+        tty=tty,
     )
     process.start()
     if lease is not None:
@@ -114,6 +116,7 @@ def run_worker_process(
     *,
     phase: str,
     timeout_seconds: int,
+    tty: bool = False,
     lease: HeartbeatLease | None = None,
     cancellation: TaskCancellation | None = None,
     reporter: ExecutionReporter | DisabledExecutionReporter | None = None,
@@ -151,6 +154,7 @@ def run_worker_process(
         dict(worker.env),
         argv,
         timeout_seconds=timeout_seconds,
+        tty=tty,
         on_output=on_output if reporter is not None else None,
     )
     process.start()
@@ -193,8 +197,13 @@ def project_allows_conclude_fallback(client: CairnClient, project_id: str, *, wo
     return False
 
 
-def best_effort_release_reason(client: CairnClient, project_id: str, worker_name: str) -> None:
-    response = client.release_reason(project_id, worker_name)
+def best_effort_release_reason(
+    client: CairnClient,
+    project_id: str,
+    worker_name: str,
+    run_id: str | None = None,
+) -> None:
+    response = client.release_reason(project_id, worker_name, run_id)
     if not response.ok and response.status_code not in (403, 409):
         LOG.warning(
             "reason release failed project=%s worker=%s status=%s",

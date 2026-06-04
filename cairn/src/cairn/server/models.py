@@ -66,6 +66,7 @@ class ProjectFilesResponse(BaseModel):
 
 class ProjectReason(BaseModel):
     worker: str
+    run_id: str | None = None
     trigger: str
     started_at: str
     last_heartbeat_at: str
@@ -150,6 +151,7 @@ class CreateProjectRequest(BaseModel):
     role_id: str | None = None
     proxy_id: str | None = None
     ai_profiles: AiProfileSelection | None = None
+    ai_profile_selections: TaskAiProfileSelections | None = None
 
     @field_validator("title", "origin", "goal", "role_id")
     @classmethod
@@ -207,10 +209,13 @@ class CreateIntentRequest(BaseModel):
 
 class HeartbeatRequest(BaseModel):
     worker: str
+    run_id: str | None = None
 
-    @field_validator("worker")
+    @field_validator("worker", "run_id")
     @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
+    def validate_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         text = value.strip()
         if not text:
             raise ValueError("must not be empty")
@@ -220,14 +225,75 @@ class HeartbeatRequest(BaseModel):
 class ReasonClaimRequest(BaseModel):
     worker: str
     trigger: str
+    run_id: str | None = None
+    trigger_hash: str | None = None
+    fact_count: int = Field(ge=0)
+    hint_count: int = Field(ge=0)
+    open_intent_count: int = Field(ge=0)
 
-    @field_validator("worker", "trigger")
+    @field_validator("worker", "trigger", "run_id", "trigger_hash")
     @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
+    def validate_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         text = value.strip()
         if not text:
             raise ValueError("must not be empty")
         return text
+
+
+class ReasonFinishRequest(BaseModel):
+    worker: str
+    run_id: str | None = None
+    trigger: str
+    trigger_hash: str | None = None
+    fact_count: int = Field(ge=0)
+    hint_count: int = Field(ge=0)
+    open_intent_count: int = Field(ge=0)
+    outcome: Literal[
+        "success",
+        "complete",
+        "intents",
+        "noop",
+        "blocked",
+        "failed",
+        "timeout",
+        "rejected",
+        "unhealthy",
+        "cancelled",
+    ]
+    error: str | None = None
+
+    @field_validator("worker", "trigger", "run_id", "trigger_hash")
+    @classmethod
+    def validate_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("error")
+    @classmethod
+    def validate_error(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+
+class ReasonState(BaseModel):
+    project_id: str
+    trigger: str
+    trigger_hash: str
+    fact_count: int
+    hint_count: int
+    open_intent_count: int
+    outcome: str
+    failure_count: int
+    last_error: str
+    next_retry_at: str | None = None
+    updated_at: str
 
 
 class ConcludeRequest(BaseModel):
@@ -318,6 +384,7 @@ class ReplayRunCreateRequest(BaseModel):
     capabilities: CapabilitySelection | None = None
     role_id: str | None = None
     ai_profiles: AiProfileSelection | None = None
+    ai_profile_selections: TaskAiProfileSelections | None = None
 
     @field_validator("title", "origin", "goal", "role_id")
     @classmethod
@@ -637,8 +704,15 @@ class AiProfileSelection(BaseModel):
         return cleaned
 
 
+class TaskAiProfileSelections(BaseModel):
+    bootstrap: AiProfileSelection = Field(default_factory=AiProfileSelection)
+    explore: AiProfileSelection = Field(default_factory=AiProfileSelection)
+    reason: AiProfileSelection = Field(default_factory=AiProfileSelection)
+
+
 class ProjectAiProfileSnapshot(BaseModel):
     profile_id: str
+    task_type: Literal["bootstrap", "explore", "reason", "legacy"] = "legacy"
     role: Literal["primary", "fallback"]
     position: int
     snapshot_name: str
@@ -652,6 +726,7 @@ class ProjectAiProfileSnapshot(BaseModel):
 class ProjectAiProfilesResponse(BaseModel):
     catalog: list[AiProfile]
     selection: AiProfileSelection
+    selections: TaskAiProfileSelections = Field(default_factory=TaskAiProfileSelections)
     snapshots: list[ProjectAiProfileSnapshot] = Field(default_factory=list)
     unavailable_profile_ids: list[str] = Field(default_factory=list)
 

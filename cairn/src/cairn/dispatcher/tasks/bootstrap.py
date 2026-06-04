@@ -81,6 +81,7 @@ def run_bootstrap_task(
             worker,
             driver.build_healthcheck(worker),
             timeout_seconds=healthcheck_timeout,
+            tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
         )
@@ -169,6 +170,7 @@ def run_bootstrap_task(
             execute.argv,
             phase="bootstrap",
             timeout_seconds=config.tasks.bootstrap.timeout,
+            tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
@@ -394,6 +396,7 @@ def _try_conclude_fallback(
         conclude_argv,
         phase="bootstrap_conclude",
         timeout_seconds=config.tasks.bootstrap.conclude_timeout,
+        tty=driver.requires_tty(),
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
