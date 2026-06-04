@@ -16,6 +16,7 @@ from cairn.server.models import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
+from cairn.server.routers.ai_profiles import persist_project_ai_selection
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -125,6 +126,9 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
 
         if body.role_id:
             _insert_role_snapshot(conn, replay_project_id, body.role_id, now)
+
+        if body.ai_profiles is not None:
+            persist_project_ai_selection(conn, replay_project_id, body.ai_profiles, now)
 
     try:
         _copy_project_attachments(project_id, replay_project_id)

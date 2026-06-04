@@ -116,12 +116,13 @@ class _DockerMock:
 
 
 class ContainerUserRuntimeTests(unittest.TestCase):
-    def _make_manager(self, user, exec_user=None):
+    def _make_manager(self, user, exec_user=None, dispatcher_id="default"):
         from cairn.dispatcher.config import BindMountConfig, ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(
             image="cairn/test:latest",
+            dispatcher_id=dispatcher_id,
             user=user,
             exec_user=exec_user,
             network_mode="cairn",
@@ -160,6 +161,25 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         kwargs = dm.containers.run.call_args.kwargs
         self.assertEqual(kwargs.get("user"), "501:20")
 
+    def test_container_name_includes_dispatcher_id(self):
+        dm = _DockerMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+
+        self.assertEqual(mgr.container_name("proj-1"), "cairn-dispatch-d1-proj-1")
+
+    def test_created_container_receives_owner_labels(self):
+        dm = _DockerMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr.ensure_running("proj-1")
+
+        kwargs = dm.containers.run.call_args.kwargs
+        self.assertEqual(kwargs["labels"]["cairn.managed"], "true")
+        self.assertEqual(kwargs["labels"]["cairn.dispatcher_id"], "d1")
+        self.assertEqual(kwargs["labels"]["cairn.project_id"], "proj-1")
+        self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "false")
+
     def test_startup_container_also_receives_user(self):
         dm = _DockerMock()
         with dm.install():
@@ -169,6 +189,37 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         self.assertEqual(dm.containers.run.call_count, 1)
         kwargs = dm.containers.run.call_args.kwargs
         self.assertEqual(kwargs.get("user"), "501:20")
+
+    def test_startup_container_receives_owner_labels(self):
+        dm = _DockerMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr.create_startup_container()
+
+        kwargs = dm.containers.run.call_args.kwargs
+        self.assertEqual(kwargs["labels"]["cairn.dispatcher_id"], "d1")
+        self.assertEqual(kwargs["labels"]["cairn.project_id"], "startup-healthcheck")
+        self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "true")
+
+    def test_managed_container_names_filters_by_dispatcher_label(self):
+        dm = _DockerMock()
+        dm.containers.list.return_value = [
+            type("C", (), {"name": "cairn-dispatch-d1-proj-1"})(),
+        ]
+        with dm.install():
+            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            names = mgr.managed_container_names()
+
+        self.assertEqual(names, ["cairn-dispatch-d1-proj-1"])
+        dm.containers.list.assert_called_once_with(
+            all=True,
+            filters={
+                "label": [
+                    "cairn.managed=true",
+                    "cairn.dispatcher_id=d1",
+                ],
+            },
+        )
 
     def test_exec_user_is_passed_to_managed_process(self):
         dm = _DockerMock()

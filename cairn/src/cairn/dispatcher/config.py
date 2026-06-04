@@ -502,6 +502,7 @@ class ContainerConfig(BaseModel):
     """
 
     image: str
+    dispatcher_id: str = "default"
     user: str | None = None
     exec_user: str | None = None
     network_mode: str
@@ -510,15 +511,17 @@ class ContainerConfig(BaseModel):
     cap_add: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMountConfig] = Field(default_factory=list)
 
-    @field_validator("user", "exec_user")
+    @field_validator("dispatcher_id", "user", "exec_user")
     @classmethod
     def validate_user(cls, value: str | None) -> str | None:
         if value is None:
             return None
         stripped = value.strip()
         if not stripped:
-            raise ValueError("user must not be empty or whitespace")
-        return value
+            raise ValueError("must not be empty or whitespace")
+        if any(ch.isspace() for ch in stripped) or "/" in stripped or "\\" in stripped:
+            raise ValueError("must not contain whitespace, '/', or '\\'")
+        return stripped
 
     @model_validator(mode="after")
     def validate_bind_mounts(self) -> "ContainerConfig":

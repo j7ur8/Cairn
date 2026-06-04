@@ -23,6 +23,7 @@ from cairn.server.models import (
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
+from cairn.server.routers.ai_profiles import persist_project_ai_selection
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -176,6 +177,9 @@ def create_project(body: CreateProjectRequest):
                 """,
                 (pid, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
             )
+        if body.ai_profiles is not None:
+            persist_project_ai_selection(conn, pid, body.ai_profiles, now)
+
 
         return ProjectDetail(
             project=ProjectMeta(id=pid, title=body.title, status="active", created_at=now, reason=None),

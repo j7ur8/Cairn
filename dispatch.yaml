@@ -76,7 +76,7 @@ capabilities:
       args: []
       env:
         KALI_MCP_TIMEOUT: "300"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "metasploit-mcp"
       name: "Metasploit MCP"
       description: "Metasploit Framework MCP server for module search, session handling, and RPC-backed framework operations."
@@ -87,7 +87,7 @@ capabilities:
         MSF_AUTO_START_RPC: "true"
         MSF_API_TYPE: "messagepack"
         MSF_API_SSL: "true"
-      task_types: ["explore", "reason"]
+      task_types: ["explore"]
     - id: "camoufox-reverse"
       name: "Camoufox Reverse MCP"
       description: "Browser automation MCP backed by Camoufox, preconfigured with a per-project persistent profile directory and headless mode for JS reverse-engineering workflows."
@@ -97,7 +97,7 @@ capabilities:
         CAMOUFOX_PROFILE_DIR: "/mnt/project/.browser-profile"
         CAMOUFOX_HEADLESS: "1"
         PLAYWRIGHT_MCP_BROWSER: "chromium"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
   # 示例 MCP（需要时取消注释，并把文件放入 capabilities/mcp/<id>/）：
   # mcp_servers:
   #   - id: "example-mcp"
@@ -113,136 +113,136 @@ capabilities:
       name: "Cypher CTF"
       description: "CTF orchestration — triages challenge types and delegates to specialist sub-skills (pwn, reverse, crypto, forensics, web)."
       source_path: "./capabilities/skills/cypher-ctf"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-pentest"
       name: "Cypher Pentest"
       description: "Pentest orchestration — scope enforcement, vulnerability triage, sub-skill delegation, evidence and reporting."
       source_path: "./capabilities/skills/cypher-pentest"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-vuln-research"
       name: "Cypher Vulnerability Research"
       description: "Vuln research orchestration — source audit, CVE reproduction, PoC adaptation, fuzzing and root-cause analysis, sub-skill delegation."
       source_path: "./capabilities/skills/cypher-vuln-research"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     # -- Web vulnerability specialist skills --
     - id: "cypher-sqli"
       name: "Cypher SQL Injection"
       description: "SQL injection testing: error-based, union, boolean blind, time-based, stacked, second-order, OOB across MySQL, PostgreSQL, MSSQL, Oracle, SQLite."
       source_path: "./capabilities/skills/cypher-sqli"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-xss"
       name: "Cypher XSS"
       description: "XSS testing: reflected, stored, DOM, mXSS, CSP bypass, postMessage, with context-aware payload selection and WAF bypass."
       source_path: "./capabilities/skills/cypher-xss"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-ssrf"
       name: "Cypher SSRF"
       description: "SSRF testing: internal port scanning, cloud metadata exfiltration (AWS/GCP/Azure), protocol smuggling, DNS rebinding, blind SSRF via OOB."
       source_path: "./capabilities/skills/cypher-ssrf"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-command-injection"
       name: "Cypher Command Injection"
       description: "OS command injection: blind/echo/OOB detection, filter bypass, parameter injection, Linux and Windows target coverage."
       source_path: "./capabilities/skills/cypher-command-injection"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-file-upload"
       name: "Cypher File Upload"
       description: "File upload exploitation: extension bypass, content-type, magic bytes, polyglots, race conditions, image processing, ZIP slip, webshell deployment."
       source_path: "./capabilities/skills/cypher-file-upload"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-idor"
       name: "Cypher IDOR"
       description: "IDOR and authorization bypass: sequential IDs, UUID prediction, hash traversal, mass assignment, multi-tenant isolation testing."
       source_path: "./capabilities/skills/cypher-idor"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-deserialization"
       name: "Cypher Deserialization"
       description: "Insecure deserialization: PHP/Java/.NET/Python/Ruby/Node.js gadget chains, ysoserial/phpggc, blind detection via OOB callbacks."
       source_path: "./capabilities/skills/cypher-deserialization"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-xxe"
       name: "Cypher XXE"
       description: "XML External Entity injection: in-band, OOB, parameter entities, XInclude, SVG, SOAP, Office Open XML, CDATA exfiltration."
       source_path: "./capabilities/skills/cypher-xxe"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-jwt"
       name: "Cypher JWT Attacks"
       description: "JWT attacks: alg confusion, key confusion (RS256→HS256), kid/jku/x5u injection, weak HMAC secret cracking, JWKS spoofing, token replay."
       source_path: "./capabilities/skills/cypher-jwt"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-auth-bypass"
       name: "Cypher Auth Bypass"
       description: "Authentication bypass: OAuth/OIDC misconfigurations, SAML flaws, 2FA/MFA bypass, password reset poisoning, session fixation, registration attacks."
       source_path: "./capabilities/skills/cypher-auth-bypass"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-ssti"
       name: "Cypher SSTI"
       description: "Server-Side Template Injection: Jinja2, Twig, Freemarker, Velocity, ERB, Pug, Smarty, Mako detection and sandbox escape to RCE."
       source_path: "./capabilities/skills/cypher-ssti"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     # -- CTF specialist skills --
     - id: "cypher-pwn"
       name: "Cypher Pwn / Binary Exploitation"
       description: "Binary exploitation: stack/heap overflow, ROP/JOP, ret2libc, format strings, integer attacks, heap feng shui, tcache/fastbin poisoning."
       source_path: "./capabilities/skills/cypher-pwn"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-reverse"
       name: "Cypher Reverse Engineering"
       description: "Reverse engineering: static analysis (Ghidra/IDA/radare2), dynamic debugging (gdb/lldb), deobfuscation, unpacking, anti-debug bypass."
       source_path: "./capabilities/skills/cypher-reverse"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-crypto"
       name: "Cypher Cryptography"
       description: "Cryptography attacks: classical ciphers, RSA (small e, Wiener, Coppersmith), ECC, padding oracle, hash length extension, PRNG prediction."
       source_path: "./capabilities/skills/cypher-crypto"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-forensics"
       name: "Cypher Forensics"
       description: "Digital forensics: memory analysis (Volatility3), disk forensics (sleuthkit), file carving, steganography, PCAP analysis, log analysis."
       source_path: "./capabilities/skills/cypher-forensics"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-blockchain"
       name: "Cypher Blockchain / Smart Contracts"
       description: "Blockchain exploitation: reentrancy, overflow/underflow, access control, flash loans, oracle manipulation, delegatecall, Solidity/Vyper audit."
       source_path: "./capabilities/skills/cypher-blockchain"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     # -- Infrastructure and post-exploitation skills --
     - id: "cypher-ad"
       name: "Cypher Active Directory"
       description: "Active Directory attacks: BloodHound, Kerberoasting, AS-REP, DCSync, delegation abuse, NTLM relay, ADCS, lateral movement, cross-trust."
       source_path: "./capabilities/skills/cypher-ad"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-privesc-linux"
       name: "Cypher Linux Privilege Escalation"
       description: "Linux privilege escalation: SUID/SGID, capabilities, sudo, cron, NFS, Docker breakout, LD_PRELOAD, kernel exploits, systemd, PATH hijacking."
       source_path: "./capabilities/skills/cypher-privesc-linux"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-privesc-windows"
       name: "Cypher Windows Privilege Escalation"
       description: "Windows privilege escalation: services, AlwaysInstallElevated, UAC bypass, token theft, Potato family, DLL hijacking, unattended installs."
       source_path: "./capabilities/skills/cypher-privesc-windows"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-cloud"
       name: "Cypher Cloud Security"
       description: "Cloud security: AWS/Azure/GCP metadata, IAM privilege escalation, storage enumeration, serverless exploitation, cross-account attacks."
       source_path: "./capabilities/skills/cypher-cloud"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-container"
       name: "Cypher Container & Kubernetes"
       description: "Container security: Docker socket abuse, privileged breakout, capabilities, K8s RBAC escalation, pod escape, service account attacks, ETCD."
       source_path: "./capabilities/skills/cypher-container"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     - id: "cypher-post-exploit"
       name: "Cypher Post-Exploitation"
       description: "Post-exploitation: shell stabilization, file transfer, tunneling (chisel/ligolo/SSH), credential harvesting, lateral movement, persistence, cleanup."
       source_path: "./capabilities/skills/cypher-post-exploit"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
     # -- Specialized frontend skill --
     - id: "hello-js-reverse"
       name: "Hello JS Reverse"
       description: "Frontend JavaScript reverse-engineering workflows that pair the camoufox-reverse-mcp browser MCP with the hello_js_reverse_skill reference material."
       source_path: "./capabilities/skills/hello-js-reverse"
-      task_types: ["bootstrap", "explore", "reason"]
+      task_types: ["explore"]
 
 roles:
   # 角色 catalog 真相源。Dispatcher 启动时会全量 POST 到 Server 的 /roles/catalog。
@@ -267,6 +267,9 @@ container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
   # image: "ghcr.io/oritera/cairn-worker-container:latest"
   image: "cairn-worker-container:mcp-camoufox"
+  # Distinguishes worker containers owned by this dispatcher. Use a unique
+  # value per dispatcher when multiple dispatchers share one Docker host.
+  dispatcher_id: "default"
   # Worker process UID:GID, passed straight through to docker.containers.run(user=...).
   # Container user controls bind-mount write behavior for Docker Desktop.
   # Exec user controls worker commands. Keep the long-lived container root on
@@ -312,17 +315,16 @@ workers:
     env:
       ANTHROPIC_MODEL: "deepseek-v4-pro"
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
-      ANTHROPIC_AUTH_TOKEN: "${DEEPSEEK_AUTH_TOKEN}"
-
-#  - name: "codex"
-#    type: "codex"
-#    task_types: [bootstrap,reason,explore]
-#    max_running: 4
-#    priority: 0
-#    env:
-#      CODEX_MODEL: "gpt-5.4"
-#      CODEX_BASE_URL: "https://seuapi.20250731.xyz"
-#      OPENAI_API_KEY: "${CODEX_OPENAI_API_KEY}"
+      ANTHROPIC_AUTH_TOKEN: "${ANTHROPIC_AUTH_TOKEN}"
+  - name: "codex"
+    type: "codex"
+    task_types: [bootstrap,reason,explore]
+    max_running: 2
+    priority: 0
+    env:
+      CODEX_MODEL: "gpt-5.4-mini"
+      CODEX_BASE_URL: "https://seuapi.20250731.xyz"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
 
 #  - name: "pi_qwen3.6-plus"
 #    type: "pi"

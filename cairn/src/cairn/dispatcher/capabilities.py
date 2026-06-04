@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import socket
@@ -13,6 +14,7 @@ from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 
 CAPABILITY_ROOT = "/tmp/cairn-capabilities"
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)

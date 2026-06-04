@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -20,7 +21,13 @@ from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig
+from cairn.server.models import (
+    Intent,
+    ProjectAiProfileSnapshot,
+    ProjectDetail,
+    ProjectSummary,
+    ProxyConfig,
+)
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -105,10 +112,16 @@ class DispatcherLoop:
         self._capability_catalog_registered = False
         self._role_catalog_registered = False
         self._startup_healthchecks_checked = False
+        self._ai_catalog_synced = False
         # Per-project proxy cache: project_id -> resolved ProxyConfig (or None
         # when the project has no proxy). Refreshed from Server on each
         # dispatch pass before a worker container may be created.
         self._project_proxy_cache: dict[str, ProxyConfig | None] = {}
+        # Per-project AI selection (primary + ordered fallback). Refreshed
+        # alongside the proxy cache before worker selection. ``None`` when
+        # the project has not opted into AI profile selection, in which
+        # case the dispatcher falls back to the global worker pool.
+        self._project_ai_cache: dict[str, list[ProjectAiProfileSnapshot] | None] = {}
 
     def close(self) -> None:
         if self.futures:
@@ -136,6 +149,9 @@ class DispatcherLoop:
                     if not self._role_catalog_registered:
                         self._register_role_catalog()
                         self._role_catalog_registered = True
+                    if not self._ai_catalog_synced:
+                        self._sync_ai_catalog_from_dispatch_yaml()
+                        self._ai_catalog_synced = True
                     self._reap_futures()
                     self._reap_cleanup_futures()
                     summaries = self.client.list_projects()
@@ -283,6 +299,85 @@ class DispatcherLoop:
             )
             self._project_proxy_cache[project_id] = None
 
+    def _resolve_project_ai_selection(self, project: ProjectDetail) -> None:
+        """Refresh the per-project AI selection cache.
+
+        Caches ``None`` when the project has not opted into AI profiles.
+        Otherwise caches the ordered list of snapshots (primary first, then
+        fallback by position). API or parse failures are tolerated and
+        cached as ``None`` so dispatch can keep going.
+        """
+        project_id = project.project.id
+        try:
+            response = self.client.get_project_ai_profiles(project_id)
+        except Exception as exc:  # noqa: BLE001 - tolerate any client glitch
+            LOG.warning(
+                "project=%s ai profile fetch raised error=%s; falling back to default worker pool",
+                project_id,
+                exc,
+            )
+            self._project_ai_cache[project_id] = None
+            return
+        if not response.ok or not isinstance(response.data, dict):
+            self._project_ai_cache[project_id] = None
+            return
+        data = response.data
+        try:
+            snapshots = [ProjectAiProfileSnapshot.model_validate(item) for item in data.get("snapshots", [])]
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning(
+                "project=%s ai profile snapshot parse failed error=%s; falling back to default worker pool",
+                project_id,
+                exc,
+            )
+            self._project_ai_cache[project_id] = None
+            return
+        ordered = sorted(
+            snapshots,
+            key=lambda snap: (0 if snap.role == "primary" else 1, snap.position),
+        )
+        if not ordered:
+            self._project_ai_cache[project_id] = None
+            return
+        self._project_ai_cache[project_id] = ordered
+        LOG.info(
+            "project=%s ai selection primary=%s fallback=%s",
+            project_id,
+            next((snap.profile_id for snap in ordered if snap.role == "primary"), None),
+            [snap.profile_id for snap in ordered if snap.role == "fallback"],
+        )
+
+    def _project_ai_snapshots(self, project_id: str) -> list[ProjectAiProfileSnapshot]:
+        return self._project_ai_cache.get(project_id) or []
+
+    @staticmethod
+    def _ai_worker_env_overlay(snapshot: ProjectAiProfileSnapshot) -> dict[str, str]:
+        """Translate a snapshot into the env-var overlay for the matching worker.
+
+        Resolves ``snapshot_api_key_env`` (the env-var *name*, never the
+        token value) at task-launch time so the worker container only ever
+        receives the value, not the name.
+        """
+        if not snapshot.snapshot_api_key_env:
+            return {}
+        token = os.environ.get(snapshot.snapshot_api_key_env)
+        if token is None:
+            return {}
+        overlay: dict[str, str] = {snapshot.snapshot_api_key_env: token}
+        if snapshot.snapshot_worker_type == "codex":
+            overlay["CODEX_MODEL"] = snapshot.snapshot_model
+            if snapshot.snapshot_base_url:
+                overlay["CODEX_BASE_URL"] = snapshot.snapshot_base_url
+            if snapshot.snapshot_provider:
+                overlay["CODEX_PROVIDER"] = snapshot.snapshot_provider
+        elif snapshot.snapshot_worker_type == "claudecode":
+            overlay["ANTHROPIC_MODEL"] = snapshot.snapshot_model
+            if snapshot.snapshot_base_url:
+                overlay["ANTHROPIC_BASE_URL"] = snapshot.snapshot_base_url
+            if snapshot.snapshot_provider:
+                overlay["ANTHROPIC_PROVIDER"] = snapshot.snapshot_provider
+        return overlay
+
     def _resolve_proxy_env(self, project_id: str) -> dict[str, str] | None:
         """Resolver passed to :class:`ContainerManager`.
 
@@ -322,6 +417,10 @@ class DispatcherLoop:
             return False
 
         project = self.client.get_project(summary.id)
+        # Populate the per-project AI selection cache alongside the proxy
+        # cache. The first dispatch pass queries the server; later passes
+        # reuse the cache so dispatch stays cheap.
+        self._resolve_project_ai_selection(project)
         # Populate the per-project proxy cache *before* any skip checks so
         # that even short-circuit returns (status != active, etc.) keep the
         # cache consistent. Resolver failures are tolerated: a project
@@ -644,6 +743,12 @@ class DispatcherLoop:
         return True
 
     def _select_worker(self, project_id: str, task_type: str) -> WorkerSelection:
+        snapshots = self._project_ai_snapshots(project_id)
+        if snapshots:
+            return self._select_worker_for_ai_chain(project_id, task_type, snapshots)
+        return self._select_worker_default(project_id, task_type)
+
+    def _select_worker_default(self, project_id: str, task_type: str) -> WorkerSelection:
         now = time.time()
         candidates: list[WorkerConfig] = []
         blocked_busy: list[str] = []
@@ -703,6 +808,148 @@ class DispatcherLoop:
             blocked_unhealthy=blocked_unhealthy,
             blocked_rejected=blocked_rejected,
             blocked_task_type=blocked_task_type,
+        )
+
+    def _select_worker_for_ai_chain(
+        self,
+        project_id: str,
+        task_type: str,
+        snapshots: list[ProjectAiProfileSnapshot],
+    ) -> WorkerSelection:
+        """Select a worker constrained by the project AI profile chain.
+
+        Walks the chain in order (primary, fallback[0], fallback[1], ...).
+        For each snapshot:
+          * resolve the env overlay; if the referenced api_key_env is
+            missing locally, mark the snapshot unavailable and continue;
+          * filter workers by snapshot.snapshot_worker_type and the
+            worker's required env keys, then apply the existing
+            busy/unhealthy/rejected filters via the shared helper.
+        The first snapshot that yields an available worker wins; the
+        returned worker is a *copy* of the WorkerConfig with the env
+        overlay merged in so the container sees the chosen AI config.
+        """
+        now = time.time()
+        running_counts = self._worker_counts()
+        last_unavailable_reasons: list[str] = []
+        for snap in snapshots:
+            # Run the per-task health probe (api_key_env present, base_url
+            # reachable, worker_type declared) before consulting workers.
+            # We do not mutate the catalog here — only this dispatch pass
+            # sees the failure. The catalog's ``available`` flag is updated
+            # by the periodic health-report pass at startup.
+            try:
+                health = probe_snapshot(snap, config=self.config)
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning(
+                    "ai profile probe raised project=%s profile=%s error=%s",
+                    project_id, snap.profile_id, exc,
+                )
+                continue
+            if not health.ok:
+                bad = [item for item in health.checks if not item.ok]
+                reason = (
+                    f"{snap.profile_id}({snap.snapshot_worker_type}) "
+                    f"health checks failed: " + "; ".join(
+                        f"{item.name}={item.message or 'fail'}" for item in bad
+                    )
+                )
+                last_unavailable_reasons.append(reason)
+                LOG.info(
+                    "ai profile unavailable project=%s profile=%s reason=%s",
+                    project_id, snap.profile_id, reason,
+                )
+                continue
+            overlay = self._ai_worker_env_overlay(snap)
+            if not overlay and snap.snapshot_api_key_env:
+                reason = (
+                    f"{snap.profile_id}({snap.snapshot_worker_type}) env "
+                    f"{snap.snapshot_api_key_env} not set on dispatcher"
+                )
+                last_unavailable_reasons.append(reason)
+                LOG.info(
+                    "ai profile unavailable project=%s profile=%s reason=%s",
+                    project_id, snap.profile_id, reason,
+                )
+                continue
+            if not overlay:
+                # No api_key_env at all: still allow the snapshot, but log it.
+                LOG.info(
+                    "ai profile has no api_key_env project=%s profile=%s",
+                    project_id, snap.profile_id,
+                )
+            matching_workers = [
+                worker for worker in self.config.workers
+                if worker.type == snap.snapshot_worker_type
+            ]
+            if not matching_workers:
+                reason = (
+                    f"{snap.profile_id}({snap.snapshot_worker_type}) no matching worker in dispatch.yaml"
+                )
+                last_unavailable_reasons.append(reason)
+                LOG.info(
+                    "ai profile unavailable project=%s profile=%s reason=%s",
+                    project_id, snap.profile_id, reason,
+                )
+                continue
+            blocked_busy: list[str] = []
+            blocked_unhealthy: list[str] = []
+            blocked_rejected: list[str] = []
+            blocked_task_type: list[str] = []
+            candidates: list[WorkerConfig] = []
+            for worker in matching_workers:
+                if task_type not in worker.task_types:
+                    blocked_task_type.append(worker.name)
+                    continue
+                running = running_counts.get(worker.name, 0)
+                if running >= worker.max_running:
+                    blocked_busy.append(f"{worker.name}({running}/{worker.max_running})")
+                    continue
+                unhealthy_until = self.worker_unhealthy_until.get(worker.name, 0)
+                if unhealthy_until > now:
+                    blocked_unhealthy.append(f"{worker.name}({unhealthy_until - now:.1f}s)")
+                    continue
+                rejected_until = self.worker_rejected_until.get((project_id, task_type, worker.name), 0)
+                if rejected_until > now:
+                    blocked_rejected.append(f"{worker.name}({rejected_until - now:.1f}s)")
+                    continue
+                candidates.append(worker)
+            if not candidates:
+                reason = (
+                    f"{snap.profile_id}({snap.snapshot_worker_type}) no healthy candidate "
+                    f"task_type={task_type} busy={blocked_busy} unhealthy={blocked_unhealthy} "
+                    f"rejected={blocked_rejected} task_type_blocked={blocked_task_type}"
+                )
+                last_unavailable_reasons.append(reason)
+                LOG.info(
+                    "ai profile fallthrough project=%s profile=%s reason=%s",
+                    project_id, snap.profile_id, reason,
+                )
+                continue
+            ordered = choose_worker(candidates, running_counts)
+            base = ordered[0]
+            chosen = base.model_copy(update={"env": {**base.env, **overlay}})
+            LOG.info(
+                "ai profile selected project=%s profile=%s worker=%s task_type=%s",
+                project_id, snap.profile_id, chosen.name, task_type,
+            )
+            return WorkerSelection(
+                worker=chosen,
+                blocked_busy=blocked_busy,
+                blocked_unhealthy=blocked_unhealthy,
+                blocked_rejected=blocked_rejected,
+                blocked_task_type=blocked_task_type,
+            )
+        LOG.warning(
+            "ai selection exhausted project=%s task_type=%s reasons=%s",
+            project_id, task_type, last_unavailable_reasons,
+        )
+        return WorkerSelection(
+            worker=None,
+            blocked_busy=[],
+            blocked_unhealthy=[],
+            blocked_rejected=[],
+            blocked_task_type=[],
         )
 
     def _worker_counts(self) -> dict[str, int]:
@@ -1008,6 +1255,134 @@ class DispatcherLoop:
         for scope in list(self._log_state):
             if scope.startswith(prefix):
                 self._log_state.pop(scope, None)
+
+    def _sync_ai_catalog_from_dispatch_yaml(self) -> None:
+        """Idempotently mirror ``dispatch.yaml`` workers into ``ai_profiles``.
+
+        * Reads the current server-side catalog.
+        * If empty, builds a seed payload from the dispatcher's
+          ``self.config.workers`` (skipping ``pi`` and ``mock``) and
+          POSTs it to ``/ai-profiles/sync``.
+        * Otherwise (catalog is non-empty) skips the seed; user-defined
+          profiles are preserved across dispatcher restarts.
+        * After the seed, runs the local health probe and POSTs results
+          to ``/ai-profiles/health-report`` so the server's
+          ``available`` flag reflects dispatcher-side reality.
+        """
+        try:
+            response = self.client.list_ai_profiles()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("ai catalog sync: list_ai_profiles failed error=%s", exc)
+            return
+        if not response.ok or not isinstance(response.data, list):
+            LOG.info(
+                "ai catalog sync: list_ai_profiles unavailable status=%s; skipping",
+                response.status_code,
+            )
+            return
+        existing_ids = {item.get("id") for item in response.data if isinstance(item, dict)}
+        if not existing_ids:
+            payload = {"workers": self._build_ai_sync_payload()}
+            if not payload["workers"]:
+                LOG.info("ai catalog sync: no supported workers in dispatch.yaml; skipping")
+                return
+            try:
+                sync = self.client.sync_ai_profiles(payload)
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("ai catalog sync: sync_ai_profiles failed error=%s", exc)
+                return
+            if not sync.ok:
+                LOG.warning(
+                    "ai catalog sync: server returned status=%s body=%s",
+                    sync.status_code, sync.text[:200],
+                )
+                return
+            LOG.info(
+                "ai catalog synced from dispatch.yaml workers=%s",
+                [w["name"] for w in payload["workers"]],
+            )
+            profiles = sync.data if isinstance(sync.data, list) else []
+        else:
+            profiles = response.data
+        # Run the local probe and report results.
+        reports = []
+        for prof in profiles:
+            if not isinstance(prof, dict):
+                continue
+            profile_id = prof.get("id")
+            api_key_env = prof.get("api_key_env")
+            base_url = prof.get("base_url")
+            worker_type = prof.get("worker_type")
+            timeout = float(prof.get("healthcheck_timeout") or 1.0)
+            from cairn.dispatcher.ai_health import _check_auth_env, _check_base_url, _check_worker_type
+            auth_item = _check_auth_env(api_key_env or "")
+            url_item = _check_base_url(base_url or "", timeout)
+            type_item = _check_worker_type(worker_type or "", self.config.workers)
+            ok = all(item.ok for item in (auth_item, url_item, type_item))
+            message_bits = [
+                item.message for item in (auth_item, url_item, type_item) if not item.ok
+            ]
+            message = "; ".join(message_bits) if message_bits else "ok"
+            reports.append({
+                "profile_id": profile_id,
+                "ok": ok,
+                "message": message,
+            })
+        if not reports:
+            return
+        try:
+            self.client.post_ai_health_report({"reports": reports})
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("ai catalog sync: health_report failed error=%s", exc)
+
+    def _build_ai_sync_payload(self) -> list[dict[str, object]]:
+        """Translate ``dispatch.yaml`` workers into the sync payload.
+
+        Only ``codex`` and ``claudecode`` are sent; ``pi`` and ``mock``
+        workers are skipped (no first-class AI profile support yet).
+        """
+        from cairn.dispatcher.config import WORKER_ENV_KEYS
+        supported = {"codex", "claudecode"}
+        result: list[dict[str, object]] = []
+        for worker in self.config.workers:
+            if worker.type not in supported:
+                continue
+            env = worker.env
+            # The dispatcher must declare at least the model env key for
+            # sync to make sense; without it the profile would be empty.
+            model_key = next((k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_MODEL")), None)
+            base_url_key = next((k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_BASE_URL")), None)
+            auth_token_key = next(
+                (k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_API_KEY") or k.endswith("_AUTH_TOKEN")),
+                None,
+            )
+            if model_key is None or auth_token_key is None:
+                continue
+            model_value = env.get(model_key, "").strip()
+            auth_value = env.get(auth_token_key, "").strip()
+            if not model_value or not auth_value:
+                # Skip workers that are not yet AI-shaped.
+                continue
+            base_url_value = env.get(base_url_key, "").strip() if base_url_key else ""
+            # ``auth_value`` may be a ${VAR} reference; the dispatch.yaml
+            # loader has already resolved it via the env, but we only want
+            # to record the *name*. If the resolved value is non-empty, we
+            # treat the env-var name as the canonical key. (Operators who
+            # put a literal token here are doing it wrong; we do not
+            # paper over that — they will see it in the UI.)
+            api_key_env_name = auth_token_key
+            # The protocol model expects ``api_key_env`` to be a *name*,
+            # not a value; for dispatch.yaml-seeded profiles the canonical
+            # name for the worker type is the env-var key itself.
+            result.append({
+                "name": worker.name,
+                "worker_type": worker.type,
+                "model": model_value,
+                "base_url": base_url_value,
+                "api_key_env": api_key_env_name,
+                "provider": "",
+            })
+        return result
 
     def _validate_server_settings(self) -> None:
         settings = self.client.get_settings()

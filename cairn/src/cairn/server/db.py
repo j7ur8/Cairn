@@ -163,7 +163,78 @@ CREATE TABLE IF NOT EXISTS proxies (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
 """
+
+MIGRATIONS: list[tuple[str, str]] = [
+    (
+        "20260604_001_core_indexes",
+        """
+        CREATE INDEX IF NOT EXISTS idx_facts_project_id ON facts(project_id);
+        CREATE INDEX IF NOT EXISTS idx_hints_project_id ON hints(project_id);
+        CREATE INDEX IF NOT EXISTS idx_intents_project_open_worker ON intents(project_id, concluded_at, worker);
+        CREATE INDEX IF NOT EXISTS idx_intents_project_to_fact ON intents(project_id, to_fact_id);
+        CREATE INDEX IF NOT EXISTS idx_intent_sources_project_fact ON intent_sources(project_id, fact_id);
+        CREATE INDEX IF NOT EXISTS idx_project_capabilities_project_kind ON project_capabilities(project_id, kind);
+        CREATE INDEX IF NOT EXISTS idx_replay_steps_run_status ON replay_steps(run_id, status);
+        """,
+    ),
+    (
+        "20260604_002_ai_profiles",
+        """
+        CREATE TABLE IF NOT EXISTS ai_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            worker_type TEXT NOT NULL CHECK(worker_type IN ('codex','claudecode')),
+            provider TEXT NOT NULL DEFAULT '',
+            base_url TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL,
+            api_key_env TEXT NOT NULL,
+            available INTEGER NOT NULL DEFAULT 1,
+            detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_ai_profiles (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            profile_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('primary','fallback')),
+            position INTEGER NOT NULL,
+            snapshot_name TEXT NOT NULL,
+            snapshot_worker_type TEXT NOT NULL,
+            snapshot_provider TEXT NOT NULL DEFAULT '',
+            snapshot_base_url TEXT NOT NULL DEFAULT '',
+            snapshot_model TEXT NOT NULL,
+            snapshot_api_key_env TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, profile_id, role)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_project_ai_profiles_project_role_position ON project_ai_profiles(project_id, role, position);
+        """,
+    ),
+
+    (
+        "20260604_002b_ai_profile_seed",
+        """
+        ALTER TABLE ai_profiles ADD COLUMN seeded_from_worker TEXT;
+        ALTER TABLE ai_profiles ADD COLUMN healthcheck_timeout REAL NOT NULL DEFAULT 1.0;
+        ALTER TABLE ai_profiles ADD COLUMN last_health_ok INTEGER;
+        ALTER TABLE ai_profiles ADD COLUMN last_health_message TEXT NOT NULL DEFAULT '';
+        ALTER TABLE ai_profiles ADD COLUMN last_health_at TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_ai_profiles_seeded_from_worker
+            ON ai_profiles(seeded_from_worker)
+            WHERE seeded_from_worker IS NOT NULL;
+        """,
+    ),
+]
 
 
 def configure(path: Path) -> None:
@@ -186,6 +257,27 @@ def configure(path: Path) -> None:
                 "ALTER TABLE projects ADD COLUMN proxy_id TEXT "
                 "REFERENCES proxies(id) ON DELETE SET NULL"
             )
+        _apply_migrations(conn)
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        )
+        """
+    )
+    for version, sql in MIGRATIONS:
+        applied = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (version,),
+        ).fetchone()
+        if applied is not None:
+            continue
+        conn.executescript(sql)
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
 
 
 @contextmanager

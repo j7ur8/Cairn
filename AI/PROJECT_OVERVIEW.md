@@ -254,6 +254,8 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 docker compose up --build
 ```
 
+`docker compose up --build` 现同时构建 `cairn-app` 与 `cairn-worker-container:mcp-camoufox`。后者通过 `docker-compose.yaml` 中的一次性 helper service `cairn-worker-image` 纳入 compose build graph；`cairn-dispatcher` 仅在该 helper build 完成后启动，随后仍通过宿主 Docker socket 创建真正的项目 worker 容器。
+
 ## 关键文件速查
 
 | 文件 | 作用 |
@@ -288,11 +290,12 @@ docker compose up --build
 | `cairn/src/cairn/dispatcher/prompts/cypher/` | Cypher Agent 专用 bootstrap/explore/reason/conclude prompt；强制最终交付物写盘 |
 | `cairn/src/cairn/dispatcher/observability/trace.py` | 解析 Codex/Claude 结构化执行轨迹 |
 | `dispatch.yaml` | 真实运行 Dispatcher 配置；密钥全部用 `${ENV_VAR}` 引用 |
+| `docker-compose.yaml` | Compose 启动图；同时构建 server/dispatcher 镜像与 worker image helper |
 | `.env.example` | 密钥模板，提交到 git；真实 `.env` 由本机 `cp` 出来使用 |
 | `dispatch_mock.yaml` | mock 运行配置 |
 | `container/Dockerfile` | Worker 容器镜像（Kali + Claude/Codex/Pi + MCP stdio 桥） |
 | `container/AGENTS.md` | Worker 容器内 Agent 操作约定 |
-| `container/README.md` | Worker 容器构建与 smoke test 步骤 |
+| `container/README.md` | Worker 容器构建、Compose 自动构建说明与 smoke test 步骤 |
 | `container/bin/kali-mcp-stdio` | Kali MCP stdio 桥，对应 dispatch.yaml `kali-server-mcp` |
 | `container/bin/metasploit-mcp-stdio` | Metasploit MCP stdio 桥，对应 dispatch.yaml `metasploit-mcp` |
 
@@ -315,7 +318,7 @@ ${CAIRN_REMOTE_SSH_PASSWORD}
 | `${VAR:-default}` | 未设或为空时使用 default（等同 bash `:-` 语义） |
 | `${VAR-default}` | 仅未设时使用 default；显式空串保留为空（等同 bash `-` 语义） |
 
-`dispatch.yaml` 中 SSH 字段用 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；LLM token 用 `${DEEPSEEK_AUTH_TOKEN}` 这种无默认形式，强制要求。
+`dispatch.yaml` 中 SSH 字段用 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；LLM token 用 `${ANTHROPIC_AUTH_TOKEN}` / `${OPENAI_API_KEY}` 这种无默认形式，强制要求。
 
 **MCP HTTP transport**（`McpServerCapabilityConfig.transport: "http"`）— token 走 `${MCP_AUTH_TOKEN}` 形式注入:
 
@@ -334,7 +337,7 @@ HTTP MCP server 与 worker 容器的网络连通由部署者负责(可改 `conta
 ```bash
 brew install direnv
 # ~/.zshrc: eval "$(direnv hook zsh)"
-echo 'export DEEPSEEK_AUTH_TOKEN=sk-...' > Cairn/.envrc
+echo 'export ANTHROPIC_AUTH_TOKEN=sk-...' > Cairn/.envrc
 cd Cairn && direnv allow
 ```
 
@@ -345,6 +348,8 @@ cp .env.example .env
 # 编辑 .env 填入真实密钥
 docker compose up --build cairn-dispatcher
 ```
+
+其中 `docker compose up --build` / `docker compose up --build cairn-dispatcher` 会先通过 `cairn-worker-image` 构建本地 tag `cairn-worker-container:mcp-camoufox`，再启动 dispatcher；不再需要单独手工 `docker build ./container -t ...`。
 
 这样 `dispatch.yaml` 和 `docker-compose.yaml` 都可以提交到公开仓库而不会泄露密钥。
 

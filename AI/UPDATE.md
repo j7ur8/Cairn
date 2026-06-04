@@ -9,6 +9,44 @@
 
 # Cairn 更新记录
 
+## 2026-06-04 · Compose build graph 纳入 dispatcher 依赖的 worker image（已完成）
+
+### 背景
+
+`dispatch.yaml` 的 `container.image` 已切到本地 tag `cairn-worker-container:mcp-camoufox`，但此前 `docker compose up --build` 只会构建 `cairn-app`，不会构建 dispatcher 真正依赖的 worker image，导致首次启动前仍需手工执行 `docker build ./container -t cairn-worker-container:mcp-camoufox`。
+
+### 已完成变更
+
+- `docker-compose.yaml` 新增 one-shot helper service `cairn-worker-image`：
+  - `build.context: ./container`
+  - `image: cairn-worker-container:mcp-camoufox`
+  - `command: ["true"]`
+  - `restart: "no"`
+  - `network_mode: "none"`
+- `cairn-dispatcher.depends_on` 追加 `cairn-worker-image: { condition: service_completed_successfully }`，使 `docker compose up --build cairn-dispatcher` 与全量 `docker compose up --build` 都先把 worker image 纳入 build graph，再启动 dispatcher。
+- `README.md` 更新 compose/manual 启动说明：
+  - Compose 路径改为“自动构建 `cairn-worker-container:mcp-camoufox`”
+  - Manual 路径显式保留 `docker build ./container -t cairn-worker-container:mcp-camoufox`
+- `container/README.md` 增补说明：compose 现在会自动构建同名 tag，手工 build 仅用于单独调试 / smoke test。
+- `AI/PROJECT_OVERVIEW.md` 同步更新 compose 构建图、关键文件说明和部署路径。
+
+### 验证结果
+
+已通过：
+
+- `docker compose config`
+  - 展开结果包含 `cairn-worker-image`
+  - `cairn-dispatcher.depends_on` 同时包含 `cairn-server` 与 `cairn-worker-image`
+- `docker compose build cairn-worker-image`
+  - 成功构建并产出 `cairn-worker-container:mcp-camoufox`
+- `docker inspect docker.io/library/cairn-worker-container:mcp-camoufox --format '{{.Id}} {{json .RepoTags}}'`
+  - 确认本地 tag 存在
+
+### 未完成事项/风险
+
+- `cairn-worker-image` 是一次性 helper service，职责仅是把 worker image 纳入 compose build graph；真正项目 worker 仍由 dispatcher 通过宿主 Docker socket 动态创建。这保持了现有调度与黑板架构边界，不引入新的常驻控制面进程。
+- `docker compose config` 会把 `.env` 中的真实密钥展开到 stdout；排查时应避免把原始输出复制到日志、issue 或聊天记录。
+
 ## 2026-06-02 · Cypher Agent capabilities / roles 全链路实现与 AI 文档同步（已完成）
 
 ### 背景
@@ -258,7 +296,7 @@ MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kal
 
 - `compileall -q cairn/src/cairn` 0 错误
 - `unittest tests.test_mcp_http_transport` 24/24 通过
-- `DispatchConfig.load(dispatch.yaml)` 在 `DEEPSEEK_AUTH_TOKEN / CAIRN_REMOTE_SSH_HOST / USERNAME / PASSWORD` 4 个 env 设上后成功加载
+- `DispatchConfig.load(dispatch.yaml)` 在 `ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY / CAIRN_REMOTE_SSH_HOST / USERNAME / PASSWORD` 这些 env 设上后成功加载
 
 ### 未完成事项 / 风险
 
@@ -286,8 +324,8 @@ MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kal
   - 不动 `{project_id}` 等 dispatcher 模板占位符，仍由 `prepare_*_data` 解析。
 - `dispatch.yaml`：
   - 真实 SSH 主机/用户名/密码 → `${CAIRN_REMOTE_SSH_HOST}` / `${CAIRN_REMOTE_SSH_USERNAME}` / `${CAIRN_REMOTE_SSH_PASSWORD}`。
-  - 真实 deepseek token → `${DEEPSEEK_AUTH_TOKEN}`。
-  - 注释里的 codex 真 key → `${CODEX_OPENAI_API_KEY}`。
+  - claudecode token → `${ANTHROPIC_AUTH_TOKEN}`。
+  - codex token → `${OPENAI_API_KEY}`。
   - `bind_mounts.host_path` 从机器绝对路径改为相对路径 `./datas/attachments` 与 `./datas/project-files/{project_id}`，由 `_resolve_bind_mount_host_path()` 相对 `dispatch.yaml` 解析。
 - 增量同步 AI 文档：
   - `AI/ARCHITECTURE.md`：§1 目录树补 `attachments.py / files.py / replay.py`；§5 Cypher 表移除 `cypher-flag-oob`；§8 API 概览补 Attachments / Files / Replay 三组端点；§9 dispatch.yaml 示例用 `${...}` 形式与新增 MCP；§10 密钥风险更新为"已迁移"。
@@ -308,7 +346,7 @@ MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kal
 - `DispatchConfig.load(Path('dispatch_mock.yaml'))` 通过。
 - `DispatchConfig.load(Path('dispatch.yaml'))`：
   - 未设环境变量时抛 `ValueError: dispatch.yaml.remote_support.ssh.host references ${CAIRN_REMOTE_SSH_HOST} but environment variable is not set`。
-  - 设 `CAIRN_REMOTE_SSH_HOST / CAIRN_REMOTE_SSH_USERNAME / CAIRN_REMOTE_SSH_PASSWORD / DEEPSEEK_AUTH_TOKEN` 后加载成功，`remote_support.ssh.password` 与 `workers[0].env.ANTHROPIC_AUTH_TOKEN` 都正确替换。
+  - 设 `CAIRN_REMOTE_SSH_HOST / CAIRN_REMOTE_SSH_USERNAME / CAIRN_REMOTE_SSH_PASSWORD / ANTHROPIC_AUTH_TOKEN` 后加载成功，`remote_support.ssh.password` 与 `workers[0].env.ANTHROPIC_AUTH_TOKEN` 都正确替换。
 
 ### 未完成事项/风险
 
@@ -330,11 +368,11 @@ MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kal
   - 正则升级为 `\${(?P<name>[A-Z_][A-Z0-9_]*)(?:(?P<colon>:)?-(?P<default>[^}]*))?\}`，支持 `${VAR}` / `${VAR:-default}` / `${VAR-default}` 三种语法。
   - 替换函数对应三种分支：`${VAR}` 未设报错；`${VAR:-default}` 在 unset 或空时取 default；`${VAR-default}` 仅在 unset 时取 default。
   - 19 个边界用例测试全部通过（覆盖 unset/空/已设、字符串拼接、未知前缀 `$NOT_REPLACED`、默认含空格等）。
-- `dispatch.yaml`：`remote_support.ssh.{host,username,password}` 改为 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；`RemoteSupportConfig.ssh.is_complete` 在三个字段为空时返回 `False`，SSH 支持自动禁用，`CAIRN_REMOTE_SSH_*` 不会被注入 worker env。`DEEPSEEK_AUTH_TOKEN` 与 `CODEX_OPENAI_API_KEY` 仍是无默认形式（强制设置）。
+- `dispatch.yaml`：`remote_support.ssh.{host,username,password}` 改为 `${CAIRN_REMOTE_SSH_*:-}` 形式，允许不设；`RemoteSupportConfig.ssh.is_complete` 在三个字段为空时返回 `False`，SSH 支持自动禁用，`CAIRN_REMOTE_SSH_*` 不会被注入 worker env。`ANTHROPIC_AUTH_TOKEN` 与 `OPENAI_API_KEY` 仍是无默认形式（强制设置）。
 - `docker-compose.yaml`：`cairn-dispatcher` 服务加 `env_file: - .env`，从项目根 `.env` 注入密钥。`cairn-server` 的现有 `environment:` 块不动（它本身不需要密钥）。
 - `.gitignore`：新增 `.env`。
 - `.dockerignore`：新增 `.env`（避免 `.env` 进入镜像构建上下文）。
-- 新建 `.env.example`：已提交到 git 的密钥模板，标注 `DEEPSEEK_AUTH_TOKEN` / `CODEX_OPENAI_API_KEY` / SSH 三个变量。
+- 新建 `.env.example`：已提交到 git 的密钥模板，标注 `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / SSH 三个变量。
 - 增量同步 `AI/PROJECT_OVERVIEW.md` §敏感信息处理（新增语法表 + direnv 流程 + docker compose 流程），`AI/PROJECT_OVERVIEW.md` §关键文件速查（补 `.env.example`），`AI/CODEBASE_ANALYSIS.md` §4 `${ENV_VAR}` 插值（升级为 bash 风格说明）。
 - 本文件追加本条记录。
 
@@ -350,10 +388,10 @@ MCP catalog 之前只支持 `stdio` (容器内 spawn 子进程),与既有的 Kal
 - `PYTHONPATH=cairn/src python3 -m compileall -q cairn/src/cairn` 通过。
 - `_interpolate_env_string` 19 个用例全过（覆盖 unset / 空 / 已设 / 字符串拼接 / 前缀 `$` / 默认值含空格等）。
 - `DispatchConfig.load(Path('dispatch.yaml'))`:
-  - 不设任何 env → 抛 `ValueError: dispatch.yaml.workers[0].env.ANTHROPIC_AUTH_TOKEN references ${DEEPSEEK_AUTH_TOKEN} but environment variable is not set`（DEEPSEEK 必设；SSH 三个空默认后不再报错）。
-  - 仅设 `DEEPSEEK_AUTH_TOKEN` → 加载成功，`remote_support.ssh.is_complete=False`，SSH 自动禁用。
-  - 设齐 `CAIRN_REMOTE_SSH_*` 与 `DEEPSEEK_AUTH_TOKEN` → 加载成功，`remote_support.ssh.is_complete=True`，SSH 启用。
-- `docker compose config` 在 `.env` 存在时正确 merge：`cairn-dispatcher.environment.DEEPSEEK_AUTH_TOKEN=sk-REPLACE-ME`。
+  - 不设任何 env → 抛 `ValueError: dispatch.yaml.workers[0].env.ANTHROPIC_AUTH_TOKEN references ${ANTHROPIC_AUTH_TOKEN} but environment variable is not set`（LLM token 必设；SSH 三个空默认后不再报错）。
+  - 仅设 `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` → 加载成功，`remote_support.ssh.is_complete=False`，SSH 自动禁用。
+  - 设齐 `CAIRN_REMOTE_SSH_*` 与 `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` → 加载成功，`remote_support.ssh.is_complete=True`，SSH 启用。
+- `docker compose config` 在 `.env` 存在时正确 merge：`cairn-dispatcher.environment.ANTHROPIC_AUTH_TOKEN=sk-REPLACE-ME`、`cairn-dispatcher.environment.OPENAI_API_KEY=sk-REPLACE-ME`。
 - `git check-ignore -v .env.example` 不返回任何规则，确认 `.env.example` 不被 `.env` 规则误忽略。
 
 ### 未完成事项/风险

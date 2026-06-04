@@ -9,7 +9,7 @@ from cairn import __version__
 from cairn.server import db
 from cairn.server.observability import db as observability_db
 from cairn.server.observability import routers as observability_routers
-from cairn.server.routers import attachments, capabilities, export, files, hints, intents, projects, proxies, replay, settings
+from cairn.server.routers import attachments, capabilities, export, files, hints, intents, projects, proxies, replay, settings, ai_profiles
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -29,6 +29,7 @@ app = FastAPI(
 )
 
 app.include_router(settings.router)
+app.include_router(ai_profiles.router)
 app.include_router(proxies.router)
 app.include_router(projects.router)
 app.include_router(hints.router)

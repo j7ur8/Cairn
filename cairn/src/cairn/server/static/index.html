@@ -760,33 +760,53 @@
             <template x-for="fact in selectedFactRecords()" :key="fact.id">
               <article class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="flex items-center gap-2 min-w-0">
-                      <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0"
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm font-mono font-bold break-all"
                         :class="{
-                          'bg-teal-50 text-teal-700': fact.id === 'origin',
-                          'bg-rose-50 text-rose-600': fact.id === 'goal',
-                          'bg-brand-50 text-brand-700': fact.id !== 'origin' && fact.id !== 'goal'
-                        }" x-text="fact.id"></span>
-                      <span class="text-[11px] text-slate-400 uppercase tracking-wider">Fact</span>
+                          'text-teal-700': fact.id === 'origin',
+                          'text-rose-600': fact.id === 'goal',
+                          'text-brand-700': fact.id !== 'origin' && fact.id !== 'goal'
+                        }" x-text="factDisplayTitle(fact)"></div>
+                      <div class="mt-1 text-[11px] break-all"
+                        :class="{
+                          'text-teal-600': fact.id === 'origin',
+                          'text-rose-500': fact.id === 'goal',
+                          'text-brand-600': fact.id !== 'origin' && fact.id !== 'goal'
+                        }" x-text="factDisplaySubtitle(fact)"></div>
                     </div>
                     <button type="button" @click="removeFactSelection(fact.id)"
                       class="text-[11px] text-slate-400 hover:text-slate-600 transition">Remove</button>
                   </div>
                 </div>
-                <div class="p-4 space-y-3">
-                  <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="fact.description"></p>
-                  <div class="text-xs text-slate-400 space-y-1.5">
-                    <template x-if="fact.id === 'origin'">
-                      <p>Project starting point</p>
+                <div class="p-4 space-y-4">
+                  <div class="space-y-2">
+                    <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                    <template x-if="summaryHeadline(summaryView(fact.description, 'fact'))">
+                      <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(fact.description, 'fact'))"></p>
                     </template>
-                    <template x-if="fact.id === 'goal'">
-                      <p>Project target fact</p>
+                    <template x-if="summaryHasMeta(summaryView(fact.description, 'fact'))">
+                      <div class="flex flex-wrap gap-1.5">
+                        <template x-for="item in summaryMetaItems(summaryView(fact.description, 'fact'))" :key="`${fact.id}-${item.key}-${item.value}`">
+                          <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                            <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                            <span class="break-all" x-text="item.value"></span>
+                          </span>
+                        </template>
+                      </div>
                     </template>
-                    <template x-if="fact.id !== 'origin' && fact.id !== 'goal' && getProducingIntent(fact.id)">
-                      <p x-text="`Produced by ${getProducingIntent(fact.id).id} from ${getProducingIntent(fact.id).from.join(', ')}`"></p>
+                    <template x-if="summaryBody(summaryView(fact.description, 'fact'))">
+                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(fact.description, 'fact'))"></p>
                     </template>
                   </div>
+                  <template x-if="factRelationSummary(fact)">
+                    <div class="pt-4 border-t border-slate-100">
+                      <div class="flex items-start justify-between gap-3 text-xs">
+                        <span class="text-slate-400 shrink-0">Relation</span>
+                        <span class="text-slate-600 text-right break-words" x-text="factRelationSummary(fact)"></span>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </article>
             </template>
@@ -795,33 +815,55 @@
         <template x-if="selectedNode && selectedNode.type === 'fact' && selectedFactRecord() && selectedFacts.length <= 1">
           <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
-              <div class="flex items-center gap-2">
-                <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold"
+              <div class="min-w-0">
+                <div class="text-sm font-mono font-bold break-all"
                   :class="{
-                    'bg-teal-50 text-teal-700': selectedFactId() === 'origin',
-                    'bg-rose-50 text-rose-600': selectedFactId() === 'goal',
-                    'bg-brand-50 text-brand-700': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
-                  }" x-text="selectedFactId()"></span>
-                <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Fact</span>
+                    'text-teal-700': selectedFactId() === 'origin',
+                    'text-rose-600': selectedFactId() === 'goal',
+                    'text-brand-700': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
+                  }" x-text="factDisplayTitle(selectedFactRecord())"></div>
+                <div class="mt-1 text-[11px] break-all"
+                  :class="{
+                    'text-teal-600': selectedFactId() === 'origin',
+                    'text-rose-500': selectedFactId() === 'goal',
+                    'text-brand-600': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
+                  }" x-text="factDisplaySubtitle(selectedFactRecord())"></div>
               </div>
             </div>
             <div class="p-4 space-y-4">
-              <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
+              <div class="space-y-2">
+                <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                <template x-if="summaryHeadline(summaryView(selectedFactRecord().description, 'fact'))">
+                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(selectedFactRecord().description, 'fact'))"></p>
+                </template>
+                <template x-if="summaryHasMeta(summaryView(selectedFactRecord().description, 'fact'))">
+                  <div class="flex flex-wrap gap-1.5">
+                    <template x-for="item in summaryMetaItems(summaryView(selectedFactRecord().description, 'fact'))" :key="`${selectedFactId()}-${item.key}-${item.value}`">
+                      <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                        <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                        <span class="break-all" x-text="item.value"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="summaryBody(summaryView(selectedFactRecord().description, 'fact'))">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(selectedFactRecord().description, 'fact'))"></p>
+                </template>
+              </div>
               <template x-if="hasProjectFileRefs(selectedFactRecord().description)">
                 <button type="button" @click="viewProjectFiles()" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700 transition">
                   View referenced files
                 </button>
               </template>
-              <div class="space-y-3 text-xs">
+              <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
                 <template x-if="selectedFactId() === 'origin'">
-                  <div class="pt-4 border-t border-slate-100">
-                    <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Origin</p>
+                  <div class="space-y-3">
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project starting point</span></div>
                   </div>
                 </template>
                 <template x-if="selectedFactId() === 'goal'">
-                  <div class="pt-4 border-t border-slate-100 space-y-3">
-                    <p class="text-[10px] font-semibold text-rose-500 uppercase tracking-widest">Goal</p>
+                  <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Relation</span><span class="text-slate-600 text-right break-words">Project target fact</span></div>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project target fact</span></div>
                     <template x-if="selectedFactProducingIntent()">
                       <div class="pt-1 space-y-3">
@@ -833,10 +875,9 @@
                   </div>
                 </template>
                 <template x-if="selectedFactId() !== 'origin' && selectedFactId() !== 'goal' && selectedFactProducingIntent()">
-                  <div class="pt-4 border-t border-slate-100 space-y-3">
-                    <p class="text-[10px] font-semibold text-brand-500 uppercase tracking-widest">Produced By</p>
+                  <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Relation</span><span class="text-slate-600 text-right break-words" x-text="factRelationSummary(selectedFactRecord())"></span></div>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Intent</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().from.join(', ')"></span></div>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().creator"></span></div>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().worker || '—'"></span></div>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactProducingIntent().concluded_at || selectedFactProducingIntent().created_at)"></span></div>
@@ -849,15 +890,36 @@
         <template x-if="selectedNode && selectedNode.type === 'intent' && selectedIntentRecord()">
           <section class="rounded-2xl border border-violet-200/80 bg-white shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b border-violet-100 bg-violet-50/70">
-              <div class="flex items-center gap-2">
-                <span class="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-[10px] font-mono font-bold" x-text="selectedIntentId()"></span>
-                <span class="text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-sm font-mono font-bold text-violet-700 break-all" x-text="selectedIntentId()"></div>
+                  <div class="mt-1 text-[11px] text-violet-600 break-all" x-text="intentDisplaySubtitle(selectedIntentRecord())"></div>
+                </div>
+                <span class="shrink-0 text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
               </div>
             </div>
             <div class="p-4 space-y-4">
-              <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedIntentRecord().description"></p>
+              <div class="space-y-2">
+                <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                <template x-if="summaryHeadline(summaryView(selectedIntentRecord().description, 'intent'))">
+                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(selectedIntentRecord().description, 'intent'))"></p>
+                </template>
+                <template x-if="summaryHasMeta(summaryView(selectedIntentRecord().description, 'intent'))">
+                  <div class="flex flex-wrap gap-1.5">
+                    <template x-for="item in summaryMetaItems(summaryView(selectedIntentRecord().description, 'intent'))" :key="`${selectedIntentId()}-${item.key}-${item.value}`">
+                      <span class="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">
+                        <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                        <span class="break-all" x-text="item.value"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="summaryBody(summaryView(selectedIntentRecord().description, 'intent'))">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(selectedIntentRecord().description, 'intent'))"></p>
+                </template>
+              </div>
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
-                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(', ')"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(' ')"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().creator"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || '—'"></span></div>
@@ -1008,6 +1070,39 @@
             </div>
           </div>
         </section>
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold text-slate-700">AI Worker Chain</div>
+              <div class="text-[10px] text-slate-400">Read-only snapshot set when the project was created. Replays inherit this chain when profiles are still available.</div>
+            </div>
+          </div>
+          <div class="p-4 space-y-3">
+            <template x-if="capabilities.projectAiProfiles.unavailable_profile_ids && capabilities.projectAiProfiles.unavailable_profile_ids.length > 0">
+              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700" x-text="`Some referenced profiles are unavailable: ${capabilities.projectAiProfiles.unavailable_profile_ids.join(', ')}`"></div>
+            </template>
+            <template x-if="!capabilities.projectAiProfiles || (capabilities.projectAiProfiles.snapshots || []).length === 0">
+              <p class="text-xs text-slate-300">No AI chain configured — workers are selected from the global pool.</p>
+            </template>
+            <div class="space-y-2">
+              <template x-for="(snap, idx) in (capabilities.projectAiProfiles?.snapshots || [])" :key="`${snap.profile_id}-${idx}`">
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded" :class="snap.role === 'primary' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'" x-text="snap.role"></span>
+                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="snap.snapshot_name"></div>
+                        <span class="text-[10px] font-mono text-slate-400" x-text="snap.snapshot_worker_type"></span>
+                      </div>
+                      <div class="text-[10px] font-mono text-slate-400 mt-0.5" x-text="`${snap.snapshot_model}${snap.snapshot_base_url ? ' @ ' + snap.snapshot_base_url : ''}`"></div>
+                      <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${snap.snapshot_api_key_env}${snap.snapshot_provider ? ' · provider: ' + snap.snapshot_provider : ''}`"></div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Log -->
@@ -1056,6 +1151,29 @@
               </div>
               <template x-if="entry.title">
                 <p class="text-sm text-slate-700 leading-relaxed break-words mt-1" x-text="entry.title"></p>
+              </template>
+              <template x-if="entry.subtitle">
+                <p class="text-[11px] text-slate-500 break-words mt-1" x-text="entry.subtitle"></p>
+              </template>
+              <template x-if="entry.summary">
+                <div class="mt-2 space-y-1">
+                  <template x-if="summaryHeadline(summaryView(entry.summary, timelineSummaryKind(entry)))">
+                    <p class="text-sm font-medium text-slate-600 leading-relaxed break-words" x-text="summaryHeadline(summaryView(entry.summary, timelineSummaryKind(entry)))"></p>
+                  </template>
+                  <template x-if="summaryHasMeta(summaryView(entry.summary, timelineSummaryKind(entry)))">
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="item in summaryMetaItems(summaryView(entry.summary, timelineSummaryKind(entry)))" :key="`${entry.id}-${item.key}-${item.value}`">
+                        <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                          <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                          <span class="break-all" x-text="item.value"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="summaryBody(summaryView(entry.summary, timelineSummaryKind(entry)))">
+                    <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="summaryBody(summaryView(entry.summary, timelineSummaryKind(entry)))"></p>
+                  </template>
+                </div>
               </template>
               <template x-if="entry.actor || entry.meta.length > 0">
                 <p class="text-[11px] text-slate-400 mt-1 break-words" x-text="[entry.actor, ...entry.meta].filter(Boolean).join(' · ')"></p>
@@ -1156,6 +1274,40 @@
         </div>
         <p class="text-[11px] text-slate-400">Selected capabilities are snapshotted on the project and injected into each worker task container execution.</p>
       </div>
+
+        <div class="mt-3 pt-3 border-t border-slate-200/80">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">AI Worker Chain</span>
+            <button type="button" x-show="newProject.ai_profiles.primary_profile_id || (newProject.ai_profiles.fallback_profile_ids || []).length > 0" @click="clearNewProjectAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+          </div>
+          <template x-if="newProjectAiProfileItems().length === 0">
+            <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
+          </template>
+          <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
+            <template x-for="item in newProjectAiProfileItems()" :key="item.id">
+              <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <div class="flex items-start gap-2">
+                  <div class="flex flex-col gap-1 pt-0.5">
+                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                      <input type="radio" name="newProjectAiPrimary" :value="item.id" :checked="newProjectPrimaryAiProfileSelected() === item.id" @change="setNewProjectPrimaryAiProfile(item.id)" class="h-3 w-3 border-slate-300 text-brand-500 focus:ring-brand-100">
+                      <span>primary</span>
+                    </label>
+                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                      <input type="checkbox" :disabled="newProjectPrimaryAiProfileSelected() === item.id" :checked="isNewProjectFallbackAiProfile(item.id)" @change="toggleNewProjectFallbackAiProfile(item.id, $event.target.checked)" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100 disabled:opacity-30">
+                      <span>fallback</span>
+                    </label>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                    <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
+                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">Primary is used first; if it's busy or unhealthy the dispatcher walks the fallback list. API keys live in <span class="font-mono">api_key_env</span> on the dispatcher host and are injected at task launch.</p>
+        </div>
 
       <div>
         <div class="flex items-center justify-between mb-2">
@@ -1275,6 +1427,40 @@
         </div>
         <p class="text-[11px] text-violet-500/80">Replay creates a new active project, copies original attachments, and strictly reruns the successful route with workers.</p>
       </div>
+
+        <div class="mt-3 pt-3 border-t border-violet-100">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">AI Worker Chain</span>
+            <button type="button" x-show="replayConfig.ai_profiles.primary_profile_id || (replayConfig.ai_profiles.fallback_profile_ids || []).length > 0" @click="clearReplayConfigAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+          </div>
+          <template x-if="replayConfigAiProfileItems().length === 0">
+            <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
+          </template>
+          <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
+            <template x-for="item in replayConfigAiProfileItems()" :key="item.id">
+              <div class="rounded-xl border border-violet-100 bg-white px-3 py-2">
+                <div class="flex items-start gap-2">
+                  <div class="flex flex-col gap-1 pt-0.5">
+                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                      <input type="radio" name="replayConfigAiPrimary" :value="item.id" :checked="replayConfigPrimaryAiProfileSelected() === item.id" @change="setReplayConfigPrimaryAiProfile(item.id)" class="h-3 w-3 border-slate-300 text-violet-500 focus:ring-violet-100">
+                      <span>primary</span>
+                    </label>
+                    <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                      <input type="checkbox" :disabled="replayConfigPrimaryAiProfileSelected() === item.id" :checked="isReplayConfigFallbackAiProfile(item.id)" @change="toggleReplayConfigFallbackAiProfile(item.id, $event.target.checked)" class="h-3 w-3 rounded border-slate-300 text-violet-600 focus:ring-violet-100 disabled:opacity-30">
+                      <span>fallback</span>
+                    </label>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                    <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
+                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <p class="text-[11px] text-violet-500/80 mt-2">Primary is used first; if it's busy or unhealthy the dispatcher walks the fallback list. Defaults to the source project's chain when the underlying profiles are still available.</p>
+        </div>
 
       <div>
         <div class="flex items-center justify-between mb-2">
@@ -1529,6 +1715,82 @@
       </div>
     </div>
 
+    <div class="mt-6 pt-5 border-t border-slate-200/80">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">AI Profiles</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Shared AI worker profiles that new projects (and replays) can attach to as primary or fallback. The dispatcher constrains workers to the selected chain, in order. Tokens live in <span class="font-mono">api_key_env</span>; only the env-var name is stored here.</p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button @click="refreshAiProfiles()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition" title="Reload the catalog from the server. dispatch.yaml workers are mirrored at dispatcher startup.">Refresh</button>
+          <button @click="openCreateAiProfile()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add</button>
+        </div>
+      </div>
+
+      <div x-show="aiProfileForm.id || aiProfileFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
+          <input x-model="aiProfileForm.name" placeholder="Name (e.g. gpt-deepseek-v4)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <select x-model="aiProfileForm.worker_type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="codex">codex</option>
+            <option value="claudecode">claudecode</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input x-model="aiProfileForm.provider" placeholder="provider (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="aiProfileForm.base_url" placeholder="base URL (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input x-model="aiProfileForm.model" placeholder="model id" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="aiProfileForm.api_key_env" placeholder="api_key_env (env var name)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center">
+          <input x-model="aiProfileForm.description" placeholder="description (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input type="number" min="0.1" max="30" step="0.1" x-model.number="aiProfileForm.healthcheck_timeout" placeholder="probe timeout (s)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" title="Base URL / api env var probe timeout, in seconds (0.1-30)">
+          <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
+            <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="aiProfileForm.available">
+            available
+          </label>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button @click="cancelAiProfileEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+          <button @click="saveAiProfile()" :disabled="!aiProfileForm.name.trim() || !aiProfileForm.model.trim() || !aiProfileForm.api_key_env.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="aiProfileForm.id ? 'Save' : 'Create'"></button>
+        </div>
+      </div>
+
+      <template x-if="aiProfiles.length === 0">
+        <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No AI profiles configured.</p>
+      </template>
+      <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+        <template x-for="p in aiProfiles" :key="p.id">
+          <div class="rounded-xl border bg-white px-3 py-2" :class="p.available ? 'border-slate-200' : 'border-amber-200'">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="inline-block h-2 w-2 rounded-full" :class="aiProfileHealthDotClass(p)" :title="aiProfileHealthTitle(p)"></span>
+                  <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.name"></div>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="p.worker_type"></span>
+                  <span x-show="p.seeded_from_worker" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700" :title="`Seeded from dispatch.yaml worker: ${p.seeded_from_worker}`">seeded</span>
+                  <span x-show="!p.available" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">unavailable</span>
+                </div>
+                <div class="text-[10px] font-mono text-slate-400" x-text="`${p.model}${p.base_url ? ' @ ' + p.base_url : ''}`"></div>
+                <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${p.api_key_env}${p.provider ? ' · provider: ' + p.provider : ''}`"></div>
+                <template x-if="p.last_health_at">
+                  <div class="text-[10px] mt-0.5" :class="p.last_health_ok ? 'text-emerald-600' : 'text-rose-600'" x-text="`health @ ${p.last_health_at}: ${p.last_health_ok ? 'ok' : (p.last_health_message || 'failed')}`"></div>
+                </template>
+                <template x-if="(p.warnings || []).length > 0">
+                  <div class="text-[10px] mt-0.5 text-amber-700" x-text="p.warnings[0]"></div>
+                </template>
+              </div>
+              <div class="flex gap-1 shrink-0">
+                <button @click="openEditAiProfile(p.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                <button @click="deleteAiProfile(p.id, p.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showSettings = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Close</button>
       <button @click="saveServerSettings()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Server</button>
@@ -1645,12 +1907,14 @@ function cairnApp() {
       selection: { mcp_server_ids: [], skill_ids: [] },
       unavailable_mcp_server_ids: [],
       unavailable_skill_ids: [],
+      projectAiProfiles: { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
     },
     capabilitiesSaving: false,
     isCreatingProject: false,
     newProjectCatalog: {
       capabilities: [],
       roles: [],
+      ai_profiles: [],
     },
 
     showNewProject: false,
@@ -1676,6 +1940,7 @@ function cairnApp() {
       attachments: [],
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
+      ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
     },
     intentForm: { description: '' },
     concludeForm: { description: '', intentId: '' },
@@ -1692,7 +1957,8 @@ function cairnApp() {
       hints: [],
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
-      catalog: { capabilities: [], roles: [] },
+      ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+      catalog: { capabilities: [], roles: [], ai_profiles: [] },
     },
     isCreatingReplayRun: false,
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
@@ -1700,6 +1966,22 @@ function cairnApp() {
     proxies: [],
     proxyForm: { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' },
     proxyFormOpen: false,
+    aiProfiles: [],
+    aiProfileForm: {
+      id: '',
+      name: '',
+      description: '',
+      worker_type: 'codex',
+      provider: '',
+      base_url: '',
+      model: '',
+      api_key_env: '',
+      available: true,
+      healthcheck_timeout: 1.0,
+    },
+    aiProfileFormOpen: false,
+    isSyncingAiProfiles: false,
+
     deleteConfirm: { id: '', title: '' },
     isDeletingProject: false,
     projectFiles: [],
@@ -1913,12 +2195,11 @@ function cairnApp() {
     },
 
     openIntentNodeLabel(intent) {
-      return this.isBootstrapIntent(intent) ? 'Bootstrap' : '?';
+      return intent.id;
     },
 
     openIntentNodeSize(intent) {
-      if (this.isBootstrapIntent(intent)) return { width: 82, height: 30 };
-      return { width: 22, height: 22 };
+      return { width: 52, height: 28 };
     },
 
     projectIsActive() {
@@ -2277,6 +2558,136 @@ function cairnApp() {
       }
     },
 
+    async loadAiProfiles() {
+      try {
+        this.aiProfiles = await this.api('GET', '/ai-profiles') || [];
+      } catch (e) {
+        console.error(e);
+        this.aiProfiles = [];
+      }
+    },
+
+    resetAiProfileForm() {
+      this.aiProfileForm = {
+        id: '',
+        name: '',
+        description: '',
+        worker_type: 'codex',
+        provider: '',
+        base_url: '',
+        model: '',
+        api_key_env: '',
+        available: true,
+        detail: '',
+        healthcheck_timeout: 1.0,
+      };
+      this.aiProfileFormOpen = false;
+    },
+
+    openCreateAiProfile() {
+      this.resetAiProfileForm();
+      this.aiProfileFormOpen = true;
+    },
+
+    async openEditAiProfile(profileId) {
+      try {
+        const p = await this.api('GET', `/ai-profiles/${encodeURIComponent(profileId)}`);
+        this.aiProfileForm = {
+          id: p.id,
+          name: p.name || '',
+          description: p.description || '',
+          worker_type: p.worker_type || 'codex',
+          provider: p.provider || '',
+          base_url: p.base_url || '',
+          model: p.model || '',
+          api_key_env: p.api_key_env || '',
+          available: p.available !== false,
+          detail: p.detail || '',
+          healthcheck_timeout: Number(p.healthcheck_timeout) || 1.0,
+        };
+        this.aiProfileFormOpen = true;
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    cancelAiProfileEdit() {
+      this.resetAiProfileForm();
+    },
+
+    async saveAiProfile() {
+      const body = {
+        name: this.aiProfileForm.name.trim(),
+        description: this.aiProfileForm.description || '',
+        worker_type: this.aiProfileForm.worker_type,
+        provider: this.aiProfileForm.provider || '',
+        base_url: this.aiProfileForm.base_url || '',
+        model: this.aiProfileForm.model.trim(),
+        api_key_env: this.aiProfileForm.api_key_env.trim(),
+        available: this.aiProfileForm.available,
+        detail: this.aiProfileForm.detail || '',
+        healthcheck_timeout: Number(this.aiProfileForm.healthcheck_timeout) || 1.0,
+      };
+      try {
+        if (this.aiProfileForm.id) {
+          await this.api('PUT', `/ai-profiles/${encodeURIComponent(this.aiProfileForm.id)}`, body);
+          this.showToast('AI profile saved');
+        } else {
+          await this.api('POST', '/ai-profiles', body);
+          this.showToast('AI profile created');
+        }
+        this.resetAiProfileForm();
+        await this.loadAiProfiles();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async deleteAiProfile(profileId, profileName) {
+      const ok = window.confirm(`Delete AI profile "${profileName}"? Existing project snapshots are preserved, but the profile can no longer be selected for new projects.`);
+      if (!ok) return;
+      try {
+        await this.api('DELETE', `/ai-profiles/${encodeURIComponent(profileId)}`);
+        this.showToast('AI profile deleted');
+        if (this.aiProfileForm.id === profileId) this.resetAiProfileForm();
+        await this.loadAiProfiles();
+        if (this.newProject && this.newProject.ai_profiles) {
+          if (this.newProject.ai_profiles.primary_profile_id === profileId) this.newProject.ai_profiles.primary_profile_id = '';
+          this.newProject.ai_profiles.fallback_profile_ids = (this.newProject.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
+        }
+        if (this.replayConfig && this.replayConfig.ai_profiles) {
+          if (this.replayConfig.ai_profiles.primary_profile_id === profileId) this.replayConfig.ai_profiles.primary_profile_id = '';
+          this.replayConfig.ai_profiles.fallback_profile_ids = (this.replayConfig.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
+        }
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async refreshAiProfiles() {
+      await this.loadAiProfiles();
+    },
+
+    // Note: the actual sync from dispatch.yaml runs at dispatcher startup
+    // (see _sync_ai_catalog_from_dispatch_yaml in scheduler/loop.py). The
+    // server-side POST /ai-profiles/sync endpoint exists for the
+    // dispatcher to call; the UI does not call it directly.
+
+    aiProfileHealthDotClass(p) {
+      if (!p.available) return 'bg-rose-500';
+      if ((p.warnings || []).length > 0) return 'bg-amber-400';
+      if (p.last_health_at && p.last_health_ok === false) return 'bg-rose-500';
+      if (p.last_health_at && p.last_health_ok === true) return 'bg-emerald-500';
+      return 'bg-slate-300';
+    },
+
+    aiProfileHealthTitle(p) {
+      if (!p.available) return `Unavailable: ${p.last_health_message || 'health check failed'}`;
+      if (p.last_health_ok === false) return `Last health check failed: ${p.last_health_message || ''}`;
+      if (p.last_health_at) return `Last health check @ ${p.last_health_at}: ok`;
+      return 'No health check yet';
+    },
+
     async loadProject(id) {
       try {
         this.project = await this.api('GET', `/projects/${id}`);
@@ -2287,12 +2698,16 @@ function cairnApp() {
     async loadCapabilities() {
       if (!this.selectedProjectId) return;
       try {
-        const data = await this.api('GET', `/projects/${this.selectedProjectId}/capabilities`);
+        const [data, aiData] = await Promise.all([
+          this.api('GET', `/projects/${this.selectedProjectId}/capabilities`),
+          this.api('GET', `/projects/${this.selectedProjectId}/ai-profiles`).catch(() => null),
+        ]);
         this.capabilities = {
           catalog: data.catalog || [],
           selection: data.selection || { mcp_server_ids: [], skill_ids: [] },
           unavailable_mcp_server_ids: data.unavailable_mcp_server_ids || [],
           unavailable_skill_ids: data.unavailable_skill_ids || [],
+          projectAiProfiles: aiData || { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
         };
       } catch (e) {
         console.error(e);
@@ -2301,6 +2716,7 @@ function cairnApp() {
           selection: { mcp_server_ids: [], skill_ids: [] },
           unavailable_mcp_server_ids: [],
           unavailable_skill_ids: [],
+          projectAiProfiles: { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
         };
       }
     },
@@ -2376,6 +2792,7 @@ function cairnApp() {
         role_id: '',
         proxy_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
+        ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
       };
     },
 
@@ -2416,22 +2833,25 @@ function cairnApp() {
     async openNewProject() {
       this.resetNewProject();
       this.showNewProject = true;
-      await Promise.all([this.loadNewProjectCatalog(), this.loadProxies()]);
+      await Promise.all([this.loadNewProjectCatalog(), this.loadProxies(), this.loadAiProfiles()]);
     },
 
     async loadNewProjectCatalog() {
       try {
-        const [capabilities, roles] = await Promise.all([
+        const [capabilities, roles, aiProfiles] = await Promise.all([
           this.api('GET', '/capabilities/catalog'),
           this.api('GET', '/roles/catalog'),
+          this.api('GET', '/ai-profiles'),
         ]);
+        this.aiProfiles = aiProfiles || [];
         this.newProjectCatalog = {
           capabilities: capabilities || [],
           roles: roles || [],
+          ai_profiles: this.aiProfiles,
         };
       } catch (e) {
         console.error(e);
-        this.newProjectCatalog = { capabilities: [], roles: [] };
+        this.newProjectCatalog = { capabilities: [], roles: [], ai_profiles: [] };
         this.showToast(`Catalog load failed: ${e.message}`, 'error');
       }
     },
@@ -2461,6 +2881,45 @@ function cairnApp() {
       };
     },
 
+    newProjectAiProfileItems() {
+      return (this.aiProfiles || []).filter(item => item.available !== false);
+    },
+
+    newProjectPrimaryAiProfileSelected() {
+      return this.newProject.ai_profiles?.primary_profile_id || '';
+    },
+
+    setNewProjectPrimaryAiProfile(profileId) {
+      if (!this.newProject.ai_profiles) {
+        this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      }
+      this.newProject.ai_profiles.primary_profile_id = profileId || '';
+      // Primary must not also appear in fallback
+      const current = new Set(this.newProject.ai_profiles.fallback_profile_ids || []);
+      if (profileId) current.delete(profileId);
+      this.newProject.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+    },
+
+    isNewProjectFallbackAiProfile(profileId) {
+      return (this.newProject.ai_profiles?.fallback_profile_ids || []).includes(profileId);
+    },
+
+    toggleNewProjectFallbackAiProfile(profileId, checked) {
+      if (!this.newProject.ai_profiles) {
+        this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      }
+      const current = new Set(this.newProject.ai_profiles.fallback_profile_ids || []);
+      if (checked) current.add(profileId);
+      else current.delete(profileId);
+      // Fallback must not include the primary
+      if (this.newProject.ai_profiles.primary_profile_id) current.delete(this.newProject.ai_profiles.primary_profile_id);
+      this.newProject.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+    },
+
+    clearNewProjectAiProfiles() {
+      this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+    },
+
     resetReplayConfig() {
       this.replayConfig = {
         sourceProjectId: '',
@@ -2471,7 +2930,8 @@ function cairnApp() {
         hints: [],
         role_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
-        catalog: { capabilities: [], roles: [] },
+        ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
+        catalog: { capabilities: [], roles: [], ai_profiles: [] },
       };
     },
 
@@ -2499,6 +2959,45 @@ function cairnApp() {
         [key]: Array.from(current).sort(),
       };
     },
+
+
+    replayConfigAiProfileItems() {
+      return (this.aiProfiles || []).filter(item => item.available !== false);
+    },
+
+    replayConfigPrimaryAiProfileSelected() {
+      return this.replayConfig.ai_profiles?.primary_profile_id || '';
+    },
+
+    setReplayConfigPrimaryAiProfile(profileId) {
+      if (!this.replayConfig.ai_profiles) {
+        this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      }
+      this.replayConfig.ai_profiles.primary_profile_id = profileId || '';
+      const current = new Set(this.replayConfig.ai_profiles.fallback_profile_ids || []);
+      if (profileId) current.delete(profileId);
+      this.replayConfig.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+    },
+
+    isReplayConfigFallbackAiProfile(profileId) {
+      return (this.replayConfig.ai_profiles?.fallback_profile_ids || []).includes(profileId);
+    },
+
+    toggleReplayConfigFallbackAiProfile(profileId, checked) {
+      if (!this.replayConfig.ai_profiles) {
+        this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+      }
+      const current = new Set(this.replayConfig.ai_profiles.fallback_profile_ids || []);
+      if (checked) current.add(profileId);
+      else current.delete(profileId);
+      if (this.replayConfig.ai_profiles.primary_profile_id) current.delete(this.replayConfig.ai_profiles.primary_profile_id);
+      this.replayConfig.ai_profiles.fallback_profile_ids = Array.from(current).sort();
+    },
+
+    clearReplayConfigAiProfiles() {
+      this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
+    },
+
 
     capabilityItems(kind) {
       return (this.capabilities.catalog || []).filter(item => item.kind === kind && item.available !== false);
@@ -3171,11 +3670,14 @@ function cairnApp() {
           type: 'reason_started',
           timestamp: sourceIntent?.created_at || event.timestamp,
           actor: sourceIntent?.creator || event.actor || 'reasoner',
-          title: sourceIntent?.description || event.title,
-          meta: [
-            sourceIntent?.id || event.intentId,
-            `from ${(sourceIntent?.from || event.sourceFactIds || []).join(', ')}`,
-          ],
+          title: sourceIntent?.id || event.intentId,
+          subtitle: this.intentDisplaySubtitle(sourceIntent || {
+            id: event.intentId,
+            from: event.sourceFactIds || [],
+            to: null,
+          }),
+          summary: sourceIntent?.description || event.summary || '',
+          meta: [],
           targetType: 'reason',
           targetId: sourceIntent?.id || event.intentId,
           order: `${event.order}.reason`,
@@ -3190,8 +3692,10 @@ function cairnApp() {
           type: 'intent_running',
           timestamp: sourceIntent.last_heartbeat_at || sourceIntent.created_at,
           actor: sourceIntent.worker,
-          title: sourceIntent.description,
-          meta: [sourceIntent.id, `worker ${sourceIntent.worker}`],
+          title: this.intentDisplayTitle(sourceIntent),
+          subtitle: this.intentDisplaySubtitle(sourceIntent),
+          summary: sourceIntent.description,
+          meta: [],
           targetType: 'intent',
           targetId: sourceIntent.id,
           order: `${event.order}.run`,
@@ -3344,16 +3848,24 @@ function cairnApp() {
       if (!this.project || !this.selectedProjectId || this.project.project.status !== 'completed') return;
       try {
         const sourceProject = await this.api('GET', `/projects/${this.selectedProjectId}`);
-        const [catalogCapabilities, catalogRoles, projectCapabilities, projectRole] = await Promise.all([
+        const [catalogCapabilities, catalogRoles, projectCapabilities, projectRole, aiProfiles, projectAiProfiles] = await Promise.all([
           this.api('GET', '/capabilities/catalog'),
           this.api('GET', '/roles/catalog'),
           this.api('GET', `/projects/${this.selectedProjectId}/capabilities`),
           this.api('GET', `/projects/${this.selectedProjectId}/role`),
+          this.api('GET', '/ai-profiles'),
+          this.api('GET', `/projects/${this.selectedProjectId}/ai-profiles`),
         ]);
         const origin = sourceProject.facts.find(f => f.id === 'origin')?.description || '';
         const goal = sourceProject.facts.find(f => f.id === 'goal')?.description || '';
         const currentRoleId = projectRole?.role?.role_id || '';
         const replayRoleId = (catalogRoles || []).some(role => role.available !== false && role.id === currentRoleId) ? currentRoleId : '';
+        this.aiProfiles = aiProfiles || [];
+        const availableIds = new Set(this.aiProfiles.filter(p => p.available !== false).map(p => p.id));
+        const sourceSelection = projectAiProfiles?.selection || { primary_profile_id: '', fallback_profile_ids: [] };
+        const replayPrimary = sourceSelection.primary_profile_id && availableIds.has(sourceSelection.primary_profile_id)
+          ? sourceSelection.primary_profile_id : '';
+        const replayFallback = (sourceSelection.fallback_profile_ids || []).filter(id => availableIds.has(id));
         this.replayConfig = {
           sourceProjectId: this.selectedProjectId,
           sourceProjectTitle: sourceProject.project.title,
@@ -3366,9 +3878,14 @@ function cairnApp() {
             mcp_server_ids: projectCapabilities?.selection?.mcp_server_ids || [],
             skill_ids: projectCapabilities?.selection?.skill_ids || [],
           },
+          ai_profiles: {
+            primary_profile_id: replayPrimary,
+            fallback_profile_ids: replayFallback,
+          },
           catalog: {
             capabilities: catalogCapabilities || [],
             roles: catalogRoles || [],
+            ai_profiles: this.aiProfiles,
           },
         };
         if (this.replayConfig.hints.length === 0) this.replayConfig.hints = [{ content: '' }];
@@ -3395,6 +3912,10 @@ function cairnApp() {
           capabilities: {
             mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
             skill_ids: this.replayConfig.capabilities?.skill_ids || [],
+          },
+          ai_profiles: {
+            primary_profile_id: this.replayConfig.ai_profiles?.primary_profile_id || null,
+            fallback_profile_ids: this.replayConfig.ai_profiles?.fallback_profile_ids || [],
           },
         };
         const data = await this.api('POST', `/projects/${this.replayConfig.sourceProjectId}/replay-runs`, body);
@@ -3698,8 +4219,8 @@ function cairnApp() {
         { selector: 'node[nodeType="origin"]', style: { ...common, shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="goal"]', style: { ...common, shape:'round-rectangle','background-color':'#f43f5e',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'?',color:'#fff','font-size':'11px','font-weight':'bold',width:22,height:22,'border-width':2,'border-color':'#d97706' }},
-        { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'?',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:20,height:20,'border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
+        { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'round-rectangle','background-color':'#f59e0b','background-opacity':0.8,label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#d97706' }},
+        { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'round-rectangle','background-color':'#cbd5e1','background-opacity':0.5,label:'data(label)',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
         { selector: 'node[nodeType="bootstrap_pending"]', style: { ...common, shape:'round-rectangle','background-color':'#fff7ed','background-opacity':0.96,label:'data(label)',color:'#c2410c','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#fdba74','border-style':'dashed','text-wrap':'wrap','text-max-width':'70px' }},
         { selector: 'node[nodeType="bootstrap_running"]', style: { ...common, shape:'round-rectangle','background-color':'#fb923c','background-opacity':0.96,label:'data(label)',color:'#fff7ed','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#ea580c','text-wrap':'wrap','text-max-width':'70px' }},
 
@@ -3958,12 +4479,7 @@ function cairnApp() {
     },
 
     summarizeFactLabel(fact) {
-      if (fact.id === 'origin') return 'Origin';
-      if (fact.id === 'goal') return 'Goal';
-      const normalized = fact.description.replace(/\s+/g, ' ').trim();
-      const chars = Array.from(normalized);
-      if (chars.length <= 24) return normalized || fact.id;
-      return `${chars.slice(0, 24).join('')}…`;
+      return fact.id;
     },
 
     factNodeSize(label, nodeType) {
@@ -4360,6 +4876,204 @@ function cairnApp() {
       return this.project.intents.find(i => i.id === intentId) || null;
     },
 
+    factDisplayTitle(fact) {
+      return fact?.id || '';
+    },
+
+    factDisplaySubtitle(fact) {
+      if (!fact) return '';
+      if (fact.id === 'origin') return 'Project starting point';
+      if (fact.id === 'goal') return 'Project target fact';
+      const producingIntent = this.getProducingIntent(fact.id);
+      return producingIntent ? `From: ${producingIntent.id}` : 'From: —';
+    },
+
+    factRelationSummary(fact) {
+      if (!fact) return '';
+      if (fact.id === 'origin') return '';
+      if (fact.id === 'goal') return 'Project target fact';
+      const producingIntent = this.getProducingIntent(fact.id);
+      return producingIntent ? `Produced by ${producingIntent.id}` : '';
+    },
+
+    parseBracketMeta(metaText) {
+      const tokens = [];
+      const text = (metaText || '').trim();
+      let current = '';
+      let quote = null;
+      for (const ch of text) {
+        if (quote) {
+          current += ch;
+          if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === '\'') {
+          current += ch;
+          quote = ch;
+          continue;
+        }
+        if (/\s/.test(ch)) {
+          if (current) {
+            tokens.push(current);
+            current = '';
+          }
+          continue;
+        }
+        current += ch;
+      }
+      if (current) tokens.push(current);
+
+      const result = {};
+      for (const token of tokens) {
+        const idx = token.indexOf('=');
+        if (idx <= 0) continue;
+        const key = token.slice(0, idx);
+        let value = token.slice(idx + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+          value = value.slice(1, -1);
+        }
+        result[key] = value;
+      }
+      return result;
+    },
+
+    parseCypherSummary(text, expectedPrefix, mode) {
+      const trimmed = (text || '').trim();
+      if (!trimmed.startsWith(expectedPrefix)) return null;
+      const closing = trimmed.indexOf(']');
+      if (closing < 0) return null;
+      const header = trimmed.slice(expectedPrefix.length, closing).trim();
+      const rest = trimmed.slice(closing + 1).trim();
+      return {
+        mode,
+        headline: rest.split(/\n+/)[0]?.trim() || '',
+        body: rest,
+        meta: this.parseBracketMeta(header),
+        raw: trimmed,
+      };
+    },
+
+    parseReplaySummary(text) {
+      const trimmed = (text || '').trim();
+      if (!trimmed || !trimmed.includes('Original task:')) return null;
+      const lines = trimmed.split('\n');
+      const sections = {};
+      let current = 'headline';
+      sections[current] = [];
+      for (const line of lines) {
+        if (/^Original task:\s*$/.test(line)) {
+          current = 'original_task';
+          sections[current] = [];
+          continue;
+        }
+        if (/^Expected source fact:\s*/.test(line)) {
+          current = 'expected_source_fact';
+          sections[current] = [line.replace(/^Expected source fact:\s*/, '').trim()];
+          continue;
+        }
+        if (/^Expected result to reproduce:\s*$/.test(line)) {
+          current = 'expected_result';
+          sections[current] = [];
+          continue;
+        }
+        if (/^Do not simply restate the expected result;/.test(line)) {
+          current = 'instruction';
+          sections[current] = [line.trim()];
+          continue;
+        }
+        if (!sections[current]) sections[current] = [];
+        sections[current].push(line);
+      }
+
+      const headline = (sections.headline || []).join(' ').trim();
+      const meta = {};
+      if (sections.expected_source_fact?.[0]) meta.expected_source_fact = sections.expected_source_fact[0];
+      const bodyParts = [];
+      if ((sections.original_task || []).join('\n').trim()) {
+        bodyParts.push(`Original task:\n${sections.original_task.join('\n').trim()}`);
+      }
+      if ((sections.expected_result || []).join('\n').trim()) {
+        bodyParts.push(`Expected result to reproduce:\n${sections.expected_result.join('\n').trim()}`);
+      }
+      if ((sections.instruction || []).join('\n').trim()) {
+        bodyParts.push(`Replay instruction:\n${sections.instruction.join('\n').trim()}`);
+      }
+      return {
+        mode: 'replay',
+        headline,
+        body: bodyParts.join('\n\n').trim(),
+        meta,
+        raw: trimmed,
+      };
+    },
+
+    summaryView(text, kind = 'plain') {
+      const trimmed = (text || '').trim();
+      if (!trimmed) return { mode: 'plain', headline: '', body: '', meta: {}, raw: '' };
+      if (kind === 'fact') {
+        const finding = this.parseCypherSummary(trimmed, '[cypher:finding', 'cypher_finding');
+        if (finding) return finding;
+      }
+      if (kind === 'intent' || kind === 'reason') {
+        const intent = this.parseCypherSummary(trimmed, '[cypher:intent', 'cypher_intent');
+        if (intent) return intent;
+      }
+      const replay = this.parseReplaySummary(trimmed);
+      if (replay) return replay;
+      return {
+        mode: 'plain',
+        headline: trimmed.split(/\n+/)[0]?.trim() || '',
+        body: trimmed,
+        meta: {},
+        raw: trimmed,
+      };
+    },
+
+    summaryHeadline(view) {
+      return view?.headline || '';
+    },
+
+    summaryBody(view) {
+      if (!view) return '';
+      if (view.mode === 'plain') return view.body || '';
+      const headline = view.headline || '';
+      const body = view.body || '';
+      if (!body) return '';
+      return body === headline ? '' : body;
+    },
+
+    summaryMetaItems(view) {
+      if (!view?.meta) return [];
+      const entries = Object.entries(view.meta).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
+      const preferredOrder = ['type', 'confidence', 'severity', 'lane', 'priority', 'expected', 'cost', 'destructiveness', 'triggers', 'tags', 'artifacts', 'cleanup', 'expected_source_fact'];
+      entries.sort((a, b) => {
+        const aIdx = preferredOrder.indexOf(a[0]);
+        const bIdx = preferredOrder.indexOf(b[0]);
+        if (aIdx === -1 && bIdx === -1) return a[0].localeCompare(b[0]);
+        if (aIdx === -1) return 1;
+        if (bIdx === -1) return -1;
+        return aIdx - bIdx;
+      });
+      return entries.map(([key, value]) => ({ key: key.replaceAll('_', ' '), value: String(value) }));
+    },
+
+    summaryHasMeta(view) {
+      return this.summaryMetaItems(view).length > 0;
+    },
+
+    intentDisplayTitle(intent) {
+      return intent?.id || '';
+    },
+
+    intentDisplaySubtitle(intent) {
+      if (!intent) return 'From: — · To: —';
+      const fromLabel = Array.isArray(intent.from) && intent.from.length > 0
+        ? intent.from.join(' ')
+        : '—';
+      const toLabel = intent.to || '—';
+      return `From: ${fromLabel} · To: ${toLabel}`;
+    },
+
     selectedOpenIntentRecord() {
       const intent = this.selectedIntentRecord();
       if (!intent || intent.to || !this.projectIsActive()) return null;
@@ -4404,6 +5118,14 @@ function cairnApp() {
       if (i.to) return 'Concluded';
       if (this.isBootstrapIntent(i)) return i.worker ? 'Bootstrap Running' : 'Bootstrap Pending';
       return i.worker ? 'In Progress' : 'Unclaimed';
+    },
+
+    timelineSummaryKind(entry) {
+      if (!entry) return 'plain';
+      if (entry.type === 'intent_declared' || entry.type === 'intent_running') return 'intent';
+      if (entry.type === 'reason_started') return 'reason';
+      if (entry.type === 'intent_concluded' || entry.type === 'project_completed') return 'fact';
+      return 'plain';
     },
 
     timelineEvents() {
@@ -4454,8 +5176,10 @@ function cairnApp() {
           type: 'intent_declared',
           timestamp: intent.created_at,
           actor: intent.creator,
-          title: intent.description,
-          meta: [intent.id, `from ${intent.from.join(', ')}`],
+          title: this.intentDisplayTitle(intent),
+          subtitle: this.intentDisplaySubtitle(intent),
+          summary: intent.description,
+          meta: [],
           targetType: 'intent',
           targetId: intent.id,
           order: order++,
@@ -4467,13 +5191,16 @@ function cairnApp() {
         if (!intent.concluded_at || !intent.to) continue;
 
         if (intent.to === 'goal') {
+          const goalFact = this.getFactRecord('goal') || { id: 'goal' };
           events.push({
             id: `project-completed-${intent.id}`,
             type: 'project_completed',
             timestamp: intent.concluded_at,
             actor: intent.worker || intent.creator,
-            title: intent.description,
-            meta: [intent.id, `from ${intent.from.join(', ')}`],
+            title: this.factDisplayTitle(goalFact),
+            subtitle: `From: ${intent.id}`,
+            summary: goalFact.description || intent.description,
+            meta: [],
             targetType: 'fact',
             targetId: 'goal',
             order: order++,
@@ -4490,8 +5217,10 @@ function cairnApp() {
           type: 'intent_concluded',
           timestamp: intent.concluded_at,
           actor: intent.worker || intent.creator,
-          title: fact ? fact.description : intent.description,
-          meta: [intent.id, `produced ${intent.to}`, `from ${intent.from.join(', ')}`],
+          title: this.factDisplayTitle(fact || { id: intent.to }),
+          subtitle: `From: ${intent.id}`,
+          summary: fact?.description || intent.description,
+          meta: [],
           targetType: 'fact',
           targetId: intent.to,
           order: order++,
@@ -4814,6 +5543,12 @@ function cairnApp() {
         }
         if (this.newProject.proxy_id) {
           body.proxy_id = this.newProject.proxy_id;
+        }
+        if (this.newProject.ai_profiles && (this.newProject.ai_profiles.primary_profile_id || (this.newProject.ai_profiles.fallback_profile_ids || []).length > 0)) {
+          body.ai_profiles = {
+            primary_profile_id: this.newProject.ai_profiles.primary_profile_id || null,
+            fallback_profile_ids: this.newProject.ai_profiles.fallback_profile_ids || [],
+          };
         }
         const data = await this.api('POST', '/projects', body);
         createdProjectId = data.project.id;

@@ -132,14 +132,6 @@ Supported worker backends: **Claude Code**, **Codex**, and **Pi**.
 - Docker
 
 
-### Pull required images
- 
-Both setup methods require the worker container image:
- 
-```bash
-docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest
-```
- 
 ### Docker Compose (recommended)
  
 Pull the base image used to build Cairn:
@@ -154,13 +146,16 @@ Edit `dispatch.yaml` and fill in your LLM endpoints and API keys, then start bot
 docker compose up --build
 ```
  
-This starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check. The dispatcher mounts `dispatch.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
+This builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher mounts `dispatch.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
  
 ### Manual
  
 Edit `dispatch.yaml` and fill in your LLM endpoints and API keys, then:
  
 ```bash
+# Build the worker image referenced by dispatch.yaml
+docker build ./container -t cairn-worker-container:mcp-camoufox
+
 # Create the shared Docker network used by Cairn service containers and
 # dispatcher-managed project containers (skip if it already exists)
 docker network create cairn

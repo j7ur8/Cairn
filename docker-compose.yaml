@@ -1,4 +1,13 @@
 services:
+  cairn-worker-image:
+    build:
+      context: ./container
+      dockerfile: Dockerfile
+    image: cairn-worker-container:mcp-camoufox
+    container_name: cairn-worker-image
+    command: ["true"]
+    restart: "no"
+    network_mode: "none"
   cairn-server:
     build:
       context: .
@@ -48,6 +57,8 @@ services:
     depends_on:
       cairn-server:
         condition: service_healthy
+      cairn-worker-image:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - cairn

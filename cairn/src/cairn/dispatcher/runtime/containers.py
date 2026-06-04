@@ -24,6 +24,10 @@ class ContainerManager:
     _PREFIX = "cairn-dispatch-"
     _STARTUP_PREFIX = "cairn-startup-healthcheck-"
     _STARTUP_PROJECT_ID = "startup-healthcheck"
+    _LABEL_MANAGED = "cairn.managed"
+    _LABEL_DISPATCHER_ID = "cairn.dispatcher_id"
+    _LABEL_PROJECT_ID = "cairn.project_id"
+    _LABEL_STARTUP = "cairn.startup_healthcheck"
 
     def __init__(
         self,
@@ -70,7 +74,8 @@ class ContainerManager:
 
     def container_name(self, project_id: str) -> str:
         sanitized = project_id.replace("/", "-")
-        return f"{self._PREFIX}{sanitized}"
+        dispatcher = self._config.dispatcher_id.replace("/", "-")
+        return f"{self._PREFIX}{dispatcher}-{sanitized}"
 
     def ensure_running(self, project_id: str) -> str:
         name = self.container_name(project_id)
@@ -102,6 +107,7 @@ class ContainerManager:
                 volumes=volumes or None,
                 environment={**(env or {}), **self._proxy_environment(project_id)} or None,
                 user=self._config.user,
+                labels=self._container_labels(project_id),
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -144,6 +150,7 @@ class ContainerManager:
                 volumes=volumes or None,
                 environment={**(env or {}), **self._proxy_environment(self._STARTUP_PROJECT_ID)} or None,
                 user=self._config.user,
+                labels=self._container_labels(self._STARTUP_PROJECT_ID, startup=True),
             )
         except DockerException as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
@@ -301,7 +308,15 @@ class ContainerManager:
 
     def managed_container_names(self) -> list[str]:
         try:
-            containers = self._client.containers.list(all=True)
+            containers = self._client.containers.list(
+                all=True,
+                filters={
+                    "label": [
+                        f"{self._LABEL_MANAGED}=true",
+                        f"{self._LABEL_DISPATCHER_ID}={self._config.dispatcher_id}",
+                    ],
+                },
+            )
         except DockerException as exc:
             LOG.warning("failed to list managed containers error=%s", exc)
             return []
@@ -420,6 +435,14 @@ class ContainerManager:
                 "mode": "ro" if mount["read_only"] else "rw",
             }
         return volumes
+
+    def _container_labels(self, project_id: str, *, startup: bool = False) -> dict[str, str]:
+        return {
+            self._LABEL_MANAGED: "true",
+            self._LABEL_DISPATCHER_ID: self._config.dispatcher_id,
+            self._LABEL_PROJECT_ID: project_id,
+            self._LABEL_STARTUP: "true" if startup else "false",
+        }
 
     def _render_bind_mounts(self, project_id: str) -> list[dict[str, object]]:
         rendered: list[dict[str, object]] = []
