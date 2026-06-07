@@ -44,6 +44,7 @@ from cairn.server.models import (
     ProjectSummary,
     ProxyConfig,
 )
+from cairn.server.sqlite_diagnostics import database_error_detail
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -97,6 +98,7 @@ class DispatcherLoop:
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
         server_db.configure(server_db.DEFAULT_DB)
+        self._validate_sqlite_startup()
         self.client = CairnClient(self.config.server)
         self.leader = DispatcherLeader(
             ttl_seconds=float(os.environ.get("CAIRN_LEADER_TTL_SECONDS", "15")),
@@ -144,6 +146,21 @@ class DispatcherLoop:
         # invalidation contract.
         self.project_caches = ProjectCaches()
         self._ai_overlay_cache = AIOverlayCache()
+
+    def _validate_sqlite_startup(self) -> None:
+        try:
+            quick = server_db.quick_check()
+        except Exception as exc:  # noqa: BLE001 - startup diagnostic boundary
+            detail = database_error_detail(server_db.configured_path(), exc)
+            raise RuntimeError(
+                "SQLite startup quick_check could not run: "
+                f"{detail}. Run `cairn db diagnose` and do not delete -wal/-shm files while Cairn is running."
+            ) from exc
+        if quick != ["ok"]:
+            raise RuntimeError(
+                "SQLite startup quick_check failed: "
+                f"{quick}; status={server_db.sqlite_status()}. Run `cairn db diagnose` before starting dispatcher."
+            )
 
     def close(self) -> None:
         if self.futures:

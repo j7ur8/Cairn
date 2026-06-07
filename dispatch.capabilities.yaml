@@ -59,7 +59,6 @@ capabilities:
     task_types:
     - bootstrap
     - explore
-    - reason
   skills:
   - id: cypher-ctf
     name: Cypher CTF
@@ -67,21 +66,27 @@ capabilities:
       sub-skills (pwn, reverse, crypto, forensics, web).
     source_path: ./capabilities/skills/cypher-ctf
     task_types:
+    - bootstrap
     - explore
+    - reason
   - id: cypher-pentest
     name: Cypher Pentest
     description: Pentest orchestration — scope enforcement, vulnerability triage,
       sub-skill delegation, evidence and reporting.
     source_path: ./capabilities/skills/cypher-pentest
     task_types:
+    - bootstrap
     - explore
+    - reason
   - id: cypher-vuln-research
     name: Cypher Vulnerability Research
     description: Vuln research orchestration — source audit, CVE reproduction, PoC
       adaptation, fuzzing and root-cause analysis, sub-skill delegation.
     source_path: ./capabilities/skills/cypher-vuln-research
     task_types:
+    - bootstrap
     - explore
+    - reason
   - id: cypher-sqli
     name: Cypher SQL Injection
     description: 'SQL injection testing: error-based, union, boolean blind, time-based,

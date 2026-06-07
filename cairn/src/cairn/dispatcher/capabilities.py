@@ -137,6 +137,17 @@ def inject_project_capabilities(
     if not mcp_servers and not skills:
         return CapabilityInjection("", _summary([], [], errors), [], [], errors, WorkerExecutionContext())
 
+    if task_type == "reason":
+        instructions = _reason_instructions(mcp_servers, skills)
+        return CapabilityInjection(
+            instructions=instructions,
+            summary=_summary([item.id for item in mcp_servers], [item.id for item in skills], errors),
+            mcp_servers=[item.id for item in mcp_servers],
+            skills=[item.id for item in skills],
+            errors=errors,
+            context=WorkerExecutionContext(),
+        )
+
     capability_root = f"{CAPABILITY_ROOT}/{_safe_path_segment(project_id)}/{_safe_path_segment(task_instance_id)}"
     mcp_root = f"{capability_root}/mcp"
     mcp_path = f"{capability_root}/mcp.json"
@@ -421,6 +432,41 @@ def _instructions(
             "Use these capabilities only for the current Cairn project/challenge.",
             "Do not treat capability availability as a solved fact.",
             "Only report findings that are verified against the challenge target.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _reason_instructions(
+    mcp_servers: list[McpServerCapabilityConfig],
+    skills: list[SkillCapabilityConfig],
+) -> str:
+    lines = [
+        "# Project Capabilities",
+        "Selected capability metadata is available for reason-stage intent design only.",
+        "Do not execute tools, open MCP sessions, read skill directories, or treat capability availability as a solved fact.",
+        "",
+    ]
+    if mcp_servers:
+        lines.extend(
+            [
+                "- MCP server metadata:",
+                *[f"  - {item.id}: {item.name} - {item.description or 'no description'}" for item in mcp_servers],
+                "",
+            ]
+        )
+    if skills:
+        lines.extend(
+            [
+                "- Skill metadata:",
+                *[f"  - {item.id}: {item.name} - {item.description or 'no description'}" for item in skills],
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Use this metadata only to choose focused, non-overlapping next intents.",
+            "Exploration and capability execution belong in explore tasks.",
         ]
     )
     return "\n".join(lines)

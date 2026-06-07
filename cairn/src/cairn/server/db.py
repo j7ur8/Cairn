@@ -8,6 +8,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator
 
+from cairn.server.sqlite_diagnostics import (
+    database_error_detail,
+    file_state,
+    passive_checkpoint,
+    quick_check as run_quick_check,
+    truncate_checkpoint,
+)
+
 DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
 SQLITE_TIMEOUT_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_MS = 5000
@@ -635,24 +643,28 @@ def sqlite_status() -> dict[str, Any]:
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
         foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        quick = run_quick_check(conn)
+        checkpoint = passive_checkpoint(conn)
         migration_error = conn.execute(
             "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
         ).fetchone()
         applied_count = conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"]
-    wal_path = Path(f"{path}-wal")
-    shm_path = Path(f"{path}-shm")
-    return {
-        "path": str(path),
-        "exists": path.exists(),
-        "size_bytes": path.stat().st_size if path.exists() else 0,
-        "wal_size_bytes": wal_path.stat().st_size if wal_path.exists() else 0,
-        "shm_size_bytes": shm_path.stat().st_size if shm_path.exists() else 0,
+    status = {
         "journal_mode": journal_mode,
         "busy_timeout_ms": busy_timeout,
         "foreign_keys": bool(foreign_keys),
+        "quick_check": quick,
+        "wal_checkpoint": checkpoint,
         "applied_migrations": applied_count,
         "migration_error": dict(migration_error) if migration_error is not None else None,
     }
+    return {**file_state(path), **status}
+
+
+def quick_check() -> list[str]:
+    """Run SQLite PRAGMA quick_check and return every result row."""
+    with get_conn() as conn:
+        return run_quick_check(conn)
 
 
 def integrity_check() -> list[str]:
@@ -660,6 +672,21 @@ def integrity_check() -> list[str]:
     with get_conn() as conn:
         rows = conn.execute("PRAGMA integrity_check").fetchall()
     return [str(row[0]) for row in rows]
+
+
+def checkpoint_truncate() -> dict[str, Any]:
+    """Run PRAGMA wal_checkpoint(TRUNCATE) and return before/after file state."""
+    path = configured_path()
+    before = file_state(path)
+    with get_conn() as conn:
+        result = truncate_checkpoint(conn)
+    after = file_state(path)
+    return {"path": str(path), "before": before, "checkpoint": result, "after": after}
+
+
+def diagnostic_error(exc: BaseException) -> str:
+    """Render a DB error with the configured SQLite file state."""
+    return database_error_detail(configured_path(), exc)
 
 
 def backup_to(destination: Path) -> Path:

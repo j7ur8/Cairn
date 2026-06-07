@@ -268,6 +268,125 @@ class McpInjectionTests(unittest.TestCase):
         )
 
 
+class CapabilityProjectInjectionTests(unittest.TestCase):
+    class FakeContainerManager:
+        def __init__(self):
+            self.directories = []
+            self.files = []
+
+        def write_directory(self, container_name, target_path, source_path):
+            self.directories.append((container_name, target_path, source_path))
+
+        def write_text_file(self, container_name, target_path, content):
+            self.files.append((container_name, target_path, content))
+
+    def _config(self, task_types):
+        from types import SimpleNamespace
+        from cairn.dispatcher.config import McpServerCapabilityConfig, SkillCapabilityConfig
+
+        return SimpleNamespace(
+            capabilities=SimpleNamespace(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="m",
+                        name="MCP",
+                        description="metadata mcp",
+                        transport="stdio",
+                        command="/bin/true",
+                        task_types=task_types,
+                    )
+                ],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="s",
+                        name="Skill",
+                        description="metadata skill",
+                        source_path="/tmp/skill",
+                        task_types=task_types,
+                    )
+                ],
+            )
+        )
+
+    def _selection(self):
+        return {
+            "per_task": {
+                "bootstrap": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
+                "explore": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
+                "reason": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
+            }
+        }
+
+    def test_explore_injection_writes_runtime_capability_resources(self):
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            self._config(["explore", "reason"]),
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            self._selection(),
+        )
+
+        self.assertEqual(result.mcp_servers, ["m"])
+        self.assertEqual(result.skills, ["s"])
+        self.assertIn("MCP server config file", result.instructions)
+        self.assertIn("Skill directory root", result.instructions)
+        self.assertEqual(len(manager.files), 1)
+        self.assertEqual(len(manager.directories), 1)
+        self.assertEqual(result.context.mcp_config_path, "/tmp/cairn-capabilities/proj/task/mcp.json")
+        self.assertEqual(result.context.skill_root, "/tmp/cairn-capabilities/proj/task/skills")
+
+    def test_reason_injection_uses_metadata_only_without_runtime_resources(self):
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            self._config(["explore", "reason"]),
+            manager,
+            "worker",
+            "proj",
+            "reason",
+            "task",
+            self._selection(),
+        )
+
+        self.assertEqual(result.mcp_servers, ["m"])
+        self.assertEqual(result.skills, ["s"])
+        self.assertIn("intent design only", result.instructions)
+        self.assertIn("m: MCP - metadata mcp", result.instructions)
+        self.assertIn("s: Skill - metadata skill", result.instructions)
+        self.assertNotIn("mcp.json", result.instructions)
+        self.assertNotIn("Skill directory root", result.instructions)
+        self.assertEqual(manager.files, [])
+        self.assertEqual(manager.directories, [])
+        self.assertEqual(result.context.mcp_config_path, "")
+        self.assertEqual(result.context.skill_root, "")
+
+    def test_reason_skips_capabilities_not_enabled_for_reason(self):
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            self._config(["explore"]),
+            manager,
+            "worker",
+            "proj",
+            "reason",
+            "task",
+            self._selection(),
+        )
+
+        self.assertEqual(result.instructions, "")
+        self.assertEqual(result.mcp_servers, [])
+        self.assertEqual(result.skills, [])
+        self.assertEqual(manager.files, [])
+        self.assertEqual(manager.directories, [])
+
+
 class CodexAdapterHttpTests(unittest.TestCase):
     """Codex adapter emits -c mcp_servers.<id>.url and bearer_token_env_var."""
 

@@ -6,6 +6,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from contextlib import contextmanager
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -73,6 +75,46 @@ class DispatcherLeaderTests(unittest.TestCase):
         a.release()
         self.assertTrue(b.acquire())
         self.assertEqual(b.current_holder(), "b")
+
+    def test_acquire_retries_transient_sqlite_database_error(self) -> None:
+        import sqlite3
+        from cairn.dispatcher.leadership import DispatcherLeader
+
+        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        real_tx = self.db.with_immediate_tx
+        calls = {"count": 0}
+
+        @contextmanager
+        def flaky_tx():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            with real_tx() as conn:
+                yield conn
+
+        with patch("cairn.dispatcher.leadership.with_immediate_tx", flaky_tx), patch("time.sleep"):
+            self.assertTrue(leader.acquire())
+        self.assertEqual(calls["count"], 2)
+        self.assertEqual(leader.current_holder(), "a")
+
+    def test_acquire_raises_diagnostic_after_retries_exhausted(self) -> None:
+        import sqlite3
+        from cairn.dispatcher.leadership import DispatcherLeader
+
+        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+
+        @contextmanager
+        def broken_tx():
+            raise sqlite3.DatabaseError("database disk image is malformed")
+            yield
+
+        with patch("cairn.dispatcher.leadership.with_immediate_tx", broken_tx), patch("time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                leader.acquire()
+        message = str(ctx.exception)
+        self.assertIn("database disk image is malformed", message)
+        self.assertIn("wal_exists=", message)
+        self.assertIn("cairn db diagnose", message)
 
 
 if __name__ == "__main__":

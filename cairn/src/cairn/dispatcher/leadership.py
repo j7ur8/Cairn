@@ -23,13 +23,16 @@ import os
 import socket
 import time
 import logging
+import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterator
 
+from cairn.server import db as server_db
 from cairn.server.db import get_conn, with_immediate_tx
+from cairn.server.sqlite_diagnostics import is_transient_database_error
 
 
 class LeadershipLost(RuntimeError):
@@ -46,6 +49,8 @@ DEFAULT_TTL_SECONDS = 15.0
 DEFAULT_HEARTBEAT_SECONDS = 3.0
 
 LOG = logging.getLogger(__name__)
+SQLITE_RETRY_ATTEMPTS = 3
+SQLITE_RETRY_DELAY_SECONDS = 0.25
 
 
 def _utcnow() -> str:
@@ -89,6 +94,9 @@ class DispatcherLeader:
         Returns ``True`` if this holder now owns the lock; ``False``
         if another non-expired holder owns it.
         """
+        return self._with_sqlite_retry("acquire", self._acquire_once)
+
+    def _acquire_once(self) -> bool:
         now = _utcnow()
         with with_immediate_tx() as conn:
             row = conn.execute(
@@ -122,6 +130,9 @@ class DispatcherLeader:
 
     def heartbeat(self) -> bool:
         """Renew the lock if this holder owns it."""
+        return self._with_sqlite_retry("heartbeat", self._heartbeat_once)
+
+    def _heartbeat_once(self) -> bool:
         now = _utcnow()
         with with_immediate_tx() as conn:
             cur = conn.execute(
@@ -136,12 +147,16 @@ class DispatcherLeader:
 
     def release(self) -> None:
         """Best-effort unlock on graceful shutdown."""
+        self._with_sqlite_retry("release", self._release_once)
+
+    def _release_once(self) -> bool:
         with with_immediate_tx() as conn:
             conn.execute(
                 "DELETE FROM dispatcher_locks WHERE name = ? AND holder = ?",
                 (self.name, self.holder),
             )
         self._is_leader = False
+        return True
 
     def current_holder(self) -> str | None:
         with get_conn() as conn:
@@ -174,11 +189,7 @@ class DispatcherLeader:
         cleanly, rather than silently continuing to dispatch as a
         follower. ``heartbeat_at`` drift is the primary signal.
         """
-        with get_conn() as conn:
-            row = conn.execute(
-                "SELECT heartbeat_at FROM dispatcher_locks WHERE name = ? AND holder = ?",
-                (self.name, self.holder),
-            ).fetchone()
+        row = self._with_sqlite_retry("check_health", self._check_health_row)
         if row is None:
             self._is_leader = False
             raise LeadershipLost(
@@ -189,6 +200,39 @@ class DispatcherLeader:
             raise LeadershipLost(
                 f"dispatcher lock {self.name!r} heartbeat stale for holder {self.holder!r}"
             )
+
+    def _check_health_row(self):
+        with get_conn() as conn:
+            return conn.execute(
+                "SELECT heartbeat_at FROM dispatcher_locks WHERE name = ? AND holder = ?",
+                (self.name, self.holder),
+            ).fetchone()
+
+    def _with_sqlite_retry(self, operation: str, func):
+        last_exc: sqlite3.DatabaseError | None = None
+        for attempt in range(1, SQLITE_RETRY_ATTEMPTS + 1):
+            try:
+                return func()
+            except sqlite3.DatabaseError as exc:
+                last_exc = exc
+                if not is_transient_database_error(exc) or attempt >= SQLITE_RETRY_ATTEMPTS:
+                    break
+                detail = server_db.diagnostic_error(exc)
+                LOG.warning(
+                    "dispatcher sqlite transient error operation=%s attempt=%s/%s detail=%s",
+                    operation,
+                    attempt,
+                    SQLITE_RETRY_ATTEMPTS,
+                    detail,
+                )
+                server_db.close_thread_conn()
+                time.sleep(SQLITE_RETRY_DELAY_SECONDS * attempt)
+        assert last_exc is not None
+        detail = server_db.diagnostic_error(last_exc)
+        raise RuntimeError(
+            f"dispatcher sqlite {operation} failed after {SQLITE_RETRY_ATTEMPTS} attempts: {detail}. "
+            "Run `cairn db diagnose` and do not delete -wal/-shm files while Cairn is running."
+        ) from last_exc
 
     @contextmanager
     def acquired(self, *, retry_interval: float = 1.0) -> Iterator[None]:

@@ -152,6 +152,17 @@ class ObservabilityDbTests(unittest.TestCase):
             conn.close()
         self.assertEqual(count, 2)
 
+    def test_status_and_checkpoint_include_sqlite_diagnostics(self) -> None:
+        status = self.db.sqlite_status()
+        self.assertEqual(status["quick_check"], ["ok"])
+        self.assertIn("wal_checkpoint", status)
+        self.assertIn("wal_size_bytes", status)
+        self.assertIn("shm_size_bytes", status)
+        result = self.db.checkpoint_truncate()
+        self.assertIn("before", result)
+        self.assertIn("checkpoint", result)
+        self.assertIn("after", result)
+
 
 class RequestIdMiddlewareTests(unittest.TestCase):
     def _build(self):

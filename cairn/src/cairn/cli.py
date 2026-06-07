@@ -141,6 +141,101 @@ def db_integrity_check(db_path: str, observability_db_path: str):
         raise click.ClickException("SQLite integrity check failed")
 
 
+@db_commands.command("diagnose")
+@click.option(
+    "--db-path",
+    type=click.Path(),
+    default=str(db.DEFAULT_DB),
+    show_default=True,
+    help="SQLite database path",
+)
+@click.option(
+    "--observability-db-path",
+    type=click.Path(),
+    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
+    show_default=True,
+    help="LLM execution observability SQLite database path",
+)
+def db_diagnose(db_path: str, observability_db_path: str):
+    """Print SQLite status, checks, and dispatcher lock diagnostics."""
+    db.configure(Path(db_path))
+    observability_db.configure(Path(observability_db_path))
+    with db.get_conn() as conn:
+        lock_rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT name, holder, acquired_at, heartbeat_at FROM dispatcher_locks ORDER BY name"
+            ).fetchall()
+        ]
+    result = {
+        "main": {
+            "status": db.sqlite_status(),
+            "integrity_check": db.integrity_check(),
+            "dispatcher_locks": lock_rows,
+        },
+        "observability": {
+            "status": observability_db.sqlite_status(),
+            "integrity_check": observability_db.integrity_check(),
+        },
+        "note": "Do not delete -wal or -shm files while Cairn server or dispatcher is running.",
+    }
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["main"]["integrity_check"] != ["ok"] or result["observability"]["integrity_check"] != ["ok"]:
+        raise click.ClickException("SQLite diagnose found integrity errors")
+
+
+@db_commands.command("checkpoint")
+@click.option(
+    "--db-path",
+    type=click.Path(),
+    default=str(db.DEFAULT_DB),
+    show_default=True,
+    help="SQLite database path",
+)
+@click.option(
+    "--observability-db-path",
+    type=click.Path(),
+    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
+    show_default=True,
+    help="LLM execution observability SQLite database path",
+)
+def db_checkpoint(db_path: str, observability_db_path: str):
+    """Run WAL TRUNCATE checkpoint for both SQLite databases."""
+    db.configure(Path(db_path))
+    observability_db.configure(Path(observability_db_path))
+    result = {
+        "main": db.checkpoint_truncate(),
+        "observability": observability_db.checkpoint_truncate(),
+    }
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@db_commands.command("recover-plan")
+@click.option(
+    "--db-path",
+    type=click.Path(),
+    default=str(db.DEFAULT_DB),
+    show_default=True,
+    help="SQLite database path",
+)
+def db_recover_plan(db_path: str):
+    """Print the manual SQLite recovery runbook; does not modify files."""
+    path = Path(db_path).expanduser()
+    result = {
+        "database": str(path),
+        "warning": "This command is informational only and does not modify files.",
+        "steps": [
+            "Stop cairn-dispatcher and cairn-server.",
+            f"Copy {path}, {path}-wal, and {path}-shm to a timestamped backup location if they exist.",
+            "Run `cairn db diagnose --db-path <path>` while services are stopped.",
+            "If integrity_check is ok, run `cairn db checkpoint --db-path <path>` before restarting services.",
+            "Only if services are stopped and the main database integrity_check is ok, stale -wal/-shm files may be moved aside for recovery.",
+            "Restart cairn-server first, then cairn-dispatcher.",
+        ],
+    }
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @db_commands.command("backup")
 @click.argument("destination", type=click.Path(path_type=Path))
 @click.option(

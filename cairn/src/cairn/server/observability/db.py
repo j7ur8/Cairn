@@ -7,6 +7,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator
 
+from cairn.server.sqlite_diagnostics import (
+    database_error_detail,
+    file_state,
+    passive_checkpoint,
+    quick_check as run_quick_check,
+    truncate_checkpoint,
+)
+
 DEFAULT_OBSERVABILITY_DB = Path.home() / ".local" / "share" / "cairn" / "cairn_observability.db"
 
 _db_path: Path | None = None
@@ -77,27 +85,43 @@ def sqlite_status() -> dict[str, Any]:
     with get_conn() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        quick = run_quick_check(conn)
+        checkpoint = passive_checkpoint(conn)
         execution_count = conn.execute("SELECT COUNT(*) AS count FROM llm_executions").fetchone()["count"]
         event_count = conn.execute("SELECT COUNT(*) AS count FROM llm_execution_events").fetchone()["count"]
-    wal_path = Path(f"{path}-wal")
-    shm_path = Path(f"{path}-shm")
-    return {
-        "path": str(path),
-        "exists": path.exists(),
-        "size_bytes": path.stat().st_size if path.exists() else 0,
-        "wal_size_bytes": wal_path.stat().st_size if wal_path.exists() else 0,
-        "shm_size_bytes": shm_path.stat().st_size if shm_path.exists() else 0,
+    status = {
         "journal_mode": journal_mode,
         "busy_timeout_ms": busy_timeout,
+        "quick_check": quick,
+        "wal_checkpoint": checkpoint,
         "execution_count": execution_count,
         "event_count": event_count,
     }
+    return {**file_state(path), **status}
+
+
+def quick_check() -> list[str]:
+    with get_conn() as conn:
+        return run_quick_check(conn)
 
 
 def integrity_check() -> list[str]:
     with get_conn() as conn:
         rows = conn.execute("PRAGMA integrity_check").fetchall()
     return [str(row[0]) for row in rows]
+
+
+def checkpoint_truncate() -> dict[str, Any]:
+    path = configured_path()
+    before = file_state(path)
+    with get_conn() as conn:
+        result = truncate_checkpoint(conn)
+    after = file_state(path)
+    return {"path": str(path), "before": before, "checkpoint": result, "after": after}
+
+
+def diagnostic_error(exc: BaseException) -> str:
+    return database_error_detail(configured_path(), exc)
 
 
 def backup_to(destination: Path) -> Path:

@@ -273,6 +273,73 @@ class DbHardeningTests(unittest.TestCase):
             server_db.sqlite3.connect = original_connect  # type: ignore[assignment]
             server_db.close_thread_conn()
 
+    def test_sqlite_status_includes_quick_check_and_file_state(self) -> None:
+        status = self.db.sqlite_status()
+        self.assertEqual(status["quick_check"], ["ok"])
+        self.assertIn("wal_checkpoint", status)
+        self.assertIn("wal_size_bytes", status)
+        self.assertIn("shm_size_bytes", status)
+        self.assertIn("mtime", status)
+
+    def test_checkpoint_truncate_reports_before_and_after(self) -> None:
+        result = self.db.checkpoint_truncate()
+        self.assertEqual(result["path"], self.tmp.name)
+        self.assertIn("before", result)
+        self.assertIn("checkpoint", result)
+        self.assertIn("after", result)
+        self.assertEqual(self.db.quick_check(), ["ok"])
+
+    def test_diagnostic_error_includes_sqlite_file_state(self) -> None:
+        detail = self.db.diagnostic_error(sqlite3.DatabaseError("database disk image is malformed"))
+        self.assertIn("database disk image is malformed", detail)
+        self.assertIn("path=", detail)
+        self.assertIn("wal_exists=", detail)
+        self.assertIn("shm_exists=", detail)
+
+    def test_cli_diagnose_checkpoint_and_recover_plan(self) -> None:
+        import json
+        from click.testing import CliRunner
+        from cairn.cli import main
+
+        obs_path = Path(self.tmp.name).with_name("obs.sqlite")
+        runner = CliRunner()
+
+        diagnose = runner.invoke(
+            main,
+            [
+                "db",
+                "diagnose",
+                "--db-path",
+                self.tmp.name,
+                "--observability-db-path",
+                str(obs_path),
+            ],
+        )
+        self.assertEqual(diagnose.exit_code, 0, diagnose.output)
+        diagnose_payload = json.loads(diagnose.output)
+        self.assertEqual(diagnose_payload["main"]["integrity_check"], ["ok"])
+        self.assertIn("dispatcher_locks", diagnose_payload["main"])
+
+        checkpoint = runner.invoke(
+            main,
+            [
+                "db",
+                "checkpoint",
+                "--db-path",
+                self.tmp.name,
+                "--observability-db-path",
+                str(obs_path),
+            ],
+        )
+        self.assertEqual(checkpoint.exit_code, 0, checkpoint.output)
+        checkpoint_payload = json.loads(checkpoint.output)
+        self.assertIn("checkpoint", checkpoint_payload["main"])
+
+        recover = runner.invoke(main, ["db", "recover-plan", "--db-path", self.tmp.name])
+        self.assertEqual(recover.exit_code, 0, recover.output)
+        recover_payload = json.loads(recover.output)
+        self.assertIn("Stop cairn-dispatcher", recover_payload["steps"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
