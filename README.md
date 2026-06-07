@@ -147,6 +147,17 @@ docker compose up --build
 ```
  
 This builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher mounts `dispatch.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
+
+Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP capability. On macOS / Docker Desktop, start Chrome on the host before running a project:
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=0.0.0.0 \
+  --user-data-dir=/tmp/cairn-chrome-profile
+```
+
+The worker container connects through Docker's host alias. Cairn resolves `host.docker.internal` to the current container-visible IP before handing the URL to Chrome DevTools, because Chrome may reject `Host: host.docker.internal:9222`. Select `chrome-devtools-host` for the task stage that will use the browser; if the project can complete in Bootstrap, select it under Bootstrap.
  
 ### Manual
  

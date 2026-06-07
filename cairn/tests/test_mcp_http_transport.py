@@ -241,6 +241,32 @@ class McpInjectionTests(unittest.TestCase):
         # headers only, populated at injection time)
         self.assertNotIn("headers", d)
 
+    def test_chrome_devtools_stdio_args_resolve_host_alias(self):
+        from cairn.dispatcher.capabilities import _mcp_config_detail, _mcp_detail
+        m = self.McpServerCapabilityConfig(
+            id="chrome-devtools-host",
+            name="Host Chrome",
+            transport="stdio",
+            command="chrome-devtools-mcp",
+            args=["--browserUrl=http://host.docker.internal:9222"],
+            probe_config={
+                "type": "chrome_devtools_http",
+                "url": "http://host.docker.internal:9222/json/version",
+            },
+            task_types=["bootstrap"],
+        )
+        with patch("socket.gethostbyname", return_value="0.250.250.254"):
+            mcp_json_detail = _mcp_config_detail(m, "/cap")
+            adapter_detail = _mcp_detail(m, "/cap")
+        self.assertEqual(
+            mcp_json_detail["args"],
+            ["--browserUrl=http://0.250.250.254:9222"],
+        )
+        self.assertEqual(
+            adapter_detail["args"],
+            ["--browserUrl=http://0.250.250.254:9222"],
+        )
+
 
 class CodexAdapterHttpTests(unittest.TestCase):
     """Codex adapter emits -c mcp_servers.<id>.url and bearer_token_env_var."""
@@ -343,6 +369,56 @@ class HttpProbeTests(unittest.TestCase):
         ok, reason = _probe_http_url("http:///nopath", 0.2)
         self.assertFalse(ok)
         self.assertEqual(reason, "url has no host")
+
+    def test_validate_selected_mcp_uses_chrome_devtools_probe(self):
+        from cairn.dispatcher.capabilities import _validate_selected_mcp
+        from cairn.dispatcher.config import McpServerCapabilityConfig
+        mcp = McpServerCapabilityConfig(
+            id="chrome-devtools-host",
+            name="Host Chrome",
+            transport="stdio",
+            command="chrome-devtools-mcp",
+            probe_config={
+                "type": "chrome_devtools_http",
+                "url": "http://host.docker.internal:9222/json/version",
+            },
+            task_types=["bootstrap"],
+        )
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/browser/abc"}'
+        with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            self.assertIsNone(_validate_selected_mcp(mcp, "bootstrap"))
+        self.assertEqual(
+            mock_urlopen.call_args.args[0],
+            "http://0.250.250.254:9222/json/version",
+        )
+
+    def test_validate_selected_mcp_reports_missing_devtools_key(self):
+        from cairn.dispatcher.capabilities import _validate_selected_mcp
+        from cairn.dispatcher.config import McpServerCapabilityConfig
+        mcp = McpServerCapabilityConfig(
+            id="chrome-devtools-host",
+            name="Host Chrome",
+            transport="stdio",
+            command="chrome-devtools-mcp",
+            probe_config={
+                "type": "chrome_devtools_http",
+                "url": "http://host.docker.internal:9222/json/version",
+            },
+            task_types=["bootstrap"],
+        )
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"Browser":"Chrome"}'
+        with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            error = _validate_selected_mcp(mcp, "bootstrap")
+        self.assertEqual(
+            error,
+            "mcp_server:chrome-devtools-host: chrome devtools probe failed: missing json key: webSocketDebuggerUrl",
+        )
 
 
 if __name__ == "__main__":

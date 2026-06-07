@@ -332,6 +332,7 @@ class McpServerCapabilityConfig(BaseModel):
     bearer_token_env: str | None = None
     healthcheck_timeout: float = Field(default=1.0, gt=0, le=30)
     source_path: str | None = None
+    probe_config: dict[str, Any] = Field(default_factory=dict)
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
     description: str = ""
 

@@ -45,6 +45,21 @@ capabilities:
       PLAYWRIGHT_MCP_BROWSER: chromium
     task_types:
     - explore
+  - id: chrome-devtools-host
+    name: Host Chrome DevTools MCP
+    description: Connects to a host-managed Google Chrome instance started with remote
+      debugging enabled on port 9222. Requires the host browser to be running before
+      Cairn task execution.
+    command: chrome-devtools-mcp
+    args:
+    - --browserUrl=http://host.docker.internal:9222
+    probe_config:
+      type: chrome_devtools_http
+      url: http://host.docker.internal:9222/json/version
+    task_types:
+    - bootstrap
+    - explore
+    - reason
   skills:
   - id: cypher-ctf
     name: Cypher CTF

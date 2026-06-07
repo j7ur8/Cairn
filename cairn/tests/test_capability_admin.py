@@ -274,6 +274,10 @@ class CapabilityAdminTests(unittest.TestCase):
                     "command": "/usr/local/bin/builtin-mcp",
                     "args": ["--stdio"],
                     "source_path": "/opt/capabilities/mcp",
+                    "probe_config": {
+                        "type": "chrome_devtools_http",
+                        "url": "http://host.docker.internal:9222/json/version",
+                    },
                 },
                 {
                     "kind": "skill",
@@ -292,8 +296,50 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(mcp.command, "/usr/local/bin/builtin-mcp")
         self.assertEqual(mcp.args, ["--stdio"])
         self.assertEqual(mcp.source_path, "/opt/capabilities/mcp")
+        self.assertEqual(
+            mcp.probe_config,
+            {"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
+        )
         skill = catalog[("skill", "builtin-skill")].item
         self.assertEqual(skill.source_path, "/opt/capabilities/skills/builtin-skill")
+
+    def test_probe_chrome_devtools_http_reports_reachable(self) -> None:
+        from cairn.server.capabilities_service import (
+            probe_capability, register_builtin_catalog,
+        )
+        from unittest.mock import MagicMock, patch
+        with self.db.get_conn() as conn:
+            register_builtin_catalog(conn, [
+                {
+                    "kind": "mcp_server",
+                    "id": "chrome-devtools-host",
+                    "name": "Host Chrome",
+                    "description": "desc",
+                    "task_types": ["bootstrap"],
+                    "available": True,
+                    "detail": "stdio",
+                    "transport": "stdio",
+                    "command": "chrome-devtools-mcp",
+                    "args": ["--browserUrl=http://host.docker.internal:9222"],
+                    "probe_config": {
+                        "type": "chrome_devtools_http",
+                        "url": "http://host.docker.internal:9222/json/version",
+                    },
+                },
+            ])
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/browser/abc"}'
+        with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            with self.db.get_conn() as conn:
+                entry = probe_capability(conn, "mcp_server", "chrome-devtools-host")
+        self.assertEqual(entry.status, "ok")
+        self.assertEqual(entry.message, "chrome devtools endpoint reachable")
+        self.assertEqual(
+            mock_urlopen.call_args.args[0],
+            "http://0.250.250.254:9222/json/version",
+        )
 
 
     def test_admin_catalog_includes_admin_fields(self) -> None:

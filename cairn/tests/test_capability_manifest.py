@@ -93,6 +93,7 @@ class CapabilityManifestTests(unittest.TestCase):
                         name="Kali",
                         command="/usr/local/bin/kali-mcp-stdio",
                         args=["--stdio"],
+                        probe_config={"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
                         task_types=["explore"],
                     )
                 ],
@@ -113,6 +114,10 @@ class CapabilityManifestTests(unittest.TestCase):
         self.assertEqual(mcp["transport"], "stdio")
         self.assertEqual(mcp["command"], "/usr/local/bin/kali-mcp-stdio")
         self.assertEqual(mcp["args"], ["--stdio"])
+        self.assertEqual(
+            mcp["probe_config"],
+            {"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
+        )
         self.assertIn("source_path", mcp)
         self.assertEqual(skill["source_path"], "/cairn/capabilities/skills/cypher-ctf")
 

@@ -9,8 +9,10 @@ read what the server has decided to inject for a given task.
 from __future__ import annotations
 
 import json
+import socket
 import sqlite3
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -32,6 +34,8 @@ from cairn.server.services import utcnow
 TASK_TYPES: tuple[str, ...] = ("bootstrap", "explore", "reason")
 
 PROBE_TIMEOUT_SECONDS = 1.5
+CHROME_DEVTOOLS_PROBE_TYPE = "chrome_devtools_http"
+HOST_DOCKER_INTERNAL = "host.docker.internal"
 
 
 @dataclass
@@ -246,7 +250,7 @@ def register_builtin_catalog(
                 kind, id, name, description, task_types, available, detail,
                 source, requires_ids, probe_config, updated_at,
                 source_path, transport, command, args, url, bearer_token_env, headers
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 kind, cid,
@@ -256,6 +260,7 @@ def register_builtin_catalog(
                 1 if item.get("available", True) else 0,
                 item.get("detail", ""),
                 json.dumps(item.get("requires_ids", []), ensure_ascii=False),
+                json.dumps(item.get("probe_config", {}), ensure_ascii=False),
                 now,
                 item.get("source_path"),
                 item.get("transport"),
@@ -490,7 +495,80 @@ def load_project_capabilities_per_task(
 # ---------------------------------------------------------------------------
 
 
+def _probe_http_json_key(url: str, required_key: str) -> CapabilityHealthEntry | None:
+    try:
+        with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_SECONDS) as resp:
+            ok = 200 <= resp.status < 400
+            if not ok:
+                return CapabilityHealthEntry(
+                    capability_id="",
+                    status="warn",
+                    message=f"http {resp.status}",
+                )
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = f"http {exc.code}: {exc.reason}"
+        if exc.code == 500:
+            message += " (Chrome DevTools may reject the Host header or require --remote-debugging-address=0.0.0.0)"
+        return CapabilityHealthEntry(
+            capability_id="",
+            status="error",
+            message=message,
+        )
+    except Exception as exc:  # noqa: BLE001 - probe best-effort
+        return CapabilityHealthEntry(
+            capability_id="",
+            status="error",
+            message=str(exc),
+        )
+    value = payload.get(required_key) if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        return CapabilityHealthEntry(
+            capability_id="",
+            status="error",
+            message=f"missing json key: {required_key}",
+        )
+    return None
+
+
+def _host_netloc(host: str, port: int | None) -> str:
+    netloc_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"{netloc_host}:{port}" if port is not None else netloc_host
+
+
+def _resolve_host_alias_url(url: str) -> tuple[str, str | None]:
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    if not host or host.lower() != HOST_DOCKER_INTERNAL:
+        return url, None
+    try:
+        resolved = socket.gethostbyname(host)
+    except OSError as exc:
+        return url, f"resolve {host} failed: {type(exc).__name__}: {exc}"
+    netloc = _host_netloc(resolved, parsed.port)
+    return urllib.parse.urlunparse(parsed._replace(netloc=netloc)), None
+
+
 def _probe_mcp(entry: _CatalogEntry) -> CapabilityHealthEntry:
+    probe_type = str(entry.item.probe_config.get("type") or "").strip()
+    if probe_type == CHROME_DEVTOOLS_PROBE_TYPE:
+        url = str(entry.item.probe_config.get("url") or "").strip()
+        if not url:
+            return CapabilityHealthEntry(
+                capability_id=entry.item.id, status="warn", message="chrome devtools probe missing url",
+            )
+        url, resolve_error = _resolve_host_alias_url(url)
+        if resolve_error:
+            return CapabilityHealthEntry(
+                capability_id=entry.item.id, status="error", message=resolve_error,
+            )
+        result = _probe_http_json_key(url, "webSocketDebuggerUrl")
+        if result is None:
+            return CapabilityHealthEntry(
+                capability_id=entry.item.id, status="ok", message="chrome devtools endpoint reachable",
+            )
+        result.capability_id = entry.item.id
+        return result
     if entry.transport == "http" and entry.url:
         try:
             parsed = urllib.parse.urlparse(entry.url)

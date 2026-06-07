@@ -5,6 +5,9 @@ import logging
 import os
 import re
 import socket
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +19,8 @@ if TYPE_CHECKING:
     from cairn.dispatcher.runtime.containers import ContainerManager
 
 CAPABILITY_ROOT = "/tmp/cairn-capabilities"
+CHROME_DEVTOOLS_PROBE_TYPE = "chrome_devtools_http"
+HOST_DOCKER_INTERNAL = "host.docker.internal"
 LOG = logging.getLogger(__name__)
 
 
@@ -44,10 +49,11 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "source_path": item.source_path,
                 "transport": item.transport,
                 "command": item.command,
-                "args": list(item.args),
+                "args": _runtime_mcp_args(item, ""),
                 "url": item.url,
                 "bearer_token_env": item.bearer_token_env,
                 "headers": {},
+                "probe_config": dict(item.probe_config),
             }
         )
     for item in config.capabilities.skills:
@@ -209,7 +215,7 @@ def _mcp_config_detail(item: McpServerCapabilityConfig, capability_root: str) ->
         return detail
     return {
         "command": _render_capability_path(item.command, capability_root),
-        "args": [_render_capability_path(arg, capability_root) for arg in item.args],
+        "args": _runtime_mcp_args(item, capability_root),
         "env": {key: _render_capability_path(value, capability_root) for key, value in item.env.items()},
     }
 
@@ -235,7 +241,7 @@ def _mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[s
     else:
         detail["command"] = _render_capability_path(item.command, capability_root)
         if item.args:
-            detail["args"] = [_render_capability_path(arg, capability_root) for arg in item.args]
+            detail["args"] = _runtime_mcp_args(item, capability_root)
         if item.env:
             detail["env"] = {
                 key: _render_capability_path(value, capability_root)
@@ -246,6 +252,67 @@ def _mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[s
 
 def _render_capability_path(value: str, capability_root: str) -> str:
     return value.replace("{capability_root}", capability_root)
+
+
+def _is_chrome_devtools_probe(probe_config: dict[str, Any] | None) -> bool:
+    if not isinstance(probe_config, dict):
+        return False
+    return str(probe_config.get("type") or "").strip() == CHROME_DEVTOOLS_PROBE_TYPE
+
+
+def _host_netloc(host: str, port: int | None) -> str:
+    netloc_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"{netloc_host}:{port}" if port is not None else netloc_host
+
+
+def _resolve_host_alias_url(url: str) -> tuple[str, str | None]:
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    if not host or host.lower() != HOST_DOCKER_INTERNAL:
+        return url, None
+    try:
+        resolved = socket.gethostbyname(host)
+    except OSError as exc:
+        return url, f"resolve {host} failed: {type(exc).__name__}: {exc}"
+    netloc = _host_netloc(resolved, parsed.port)
+    return urllib.parse.urlunparse(parsed._replace(netloc=netloc)), None
+
+
+def _chrome_devtools_probe_url(probe_config: dict[str, Any]) -> tuple[str, str | None]:
+    url = str(probe_config.get("url") or "").strip()
+    if not url:
+        return "", "chrome devtools probe missing url"
+    return _resolve_host_alias_url(url)
+
+
+def _runtime_mcp_args(item: McpServerCapabilityConfig, capability_root: str) -> list[str]:
+    args = [_render_capability_path(arg, capability_root) for arg in item.args]
+    if not _is_chrome_devtools_probe(item.probe_config):
+        return args
+    return _rewrite_chrome_devtools_browser_args(args)
+
+
+def _rewrite_chrome_devtools_browser_args(args: list[str]) -> list[str]:
+    out: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("--browserUrl", "--browser-url", "-u") and index + 1 < len(args):
+            resolved, _ = _resolve_host_alias_url(args[index + 1])
+            out.append("--browserUrl" if arg == "--browser-url" else arg)
+            out.append(resolved)
+            index += 2
+            continue
+        if arg.startswith("--browserUrl=") or arg.startswith("--browser-url="):
+            prefix = "--browserUrl="
+            value = arg.split("=", 1)[1]
+            resolved, _ = _resolve_host_alias_url(value)
+            out.append(f"{prefix}{resolved}")
+            index += 1
+            continue
+        out.append(arg)
+        index += 1
+    return out
 
 
 def _probe_http_url(url: str, timeout: float) -> tuple[bool, str]:
@@ -272,17 +339,55 @@ def _probe_http_url(url: str, timeout: float) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
+def _probe_http_json_key(url: str, timeout: float, required_key: str) -> tuple[bool, str]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            if not 200 <= status < 400:
+                return False, f"http {status}"
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        reason = f"http {exc.code}: {exc.reason}"
+        if exc.code == 500:
+            reason += " (Chrome DevTools may reject the Host header or require --remote-debugging-address=0.0.0.0)"
+        return False, reason
+    except Exception as exc:  # noqa: BLE001 - best-effort validation
+        return False, f"{type(exc).__name__}: {exc}"
+    value = payload.get(required_key) if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        return False, f"missing json key: {required_key}"
+    return True, ""
+
+
+def _probe_config_error(mcp: McpServerCapabilityConfig) -> str | None:
+    if not _is_chrome_devtools_probe(mcp.probe_config):
+        return None
+    url, resolve_error = _chrome_devtools_probe_url(mcp.probe_config)
+    if resolve_error:
+        return f"mcp_server:{mcp.id}: {resolve_error}"
+    ok, reason = _probe_http_json_key(
+        url,
+        mcp.healthcheck_timeout,
+        "webSocketDebuggerUrl",
+    )
+    if not ok:
+        return f"mcp_server:{mcp.id}: chrome devtools probe failed: {reason}"
+    return None
+
+
 
 def _validate_selected_mcp(
     mcp: McpServerCapabilityConfig,
     task_type: TaskType,
 ) -> str | None:
     """Per-task healthcheck for a selected MCP. Returns an error string or None."""
-    if mcp.transport != "http" or not mcp.url:
-        return None
-    ok, reason = _probe_http_url(mcp.url, mcp.healthcheck_timeout)
-    if not ok:
-        return f"mcp_server:{mcp.id}: http probe failed: {reason}"
+    probe_error = _probe_config_error(mcp)
+    if probe_error:
+        return probe_error
+    if mcp.transport == "http" and mcp.url:
+        ok, reason = _probe_http_url(mcp.url, mcp.healthcheck_timeout)
+        if not ok:
+            return f"mcp_server:{mcp.id}: http probe failed: {reason}"
     return None
 
 

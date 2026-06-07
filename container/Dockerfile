@@ -7,6 +7,7 @@ RUN apt update
 RUN rm /home/kali/workspace/*.md
 RUN npm install -g @openai/codex
 RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g chrome-devtools-mcp@1.1.1
 
 USER kali
 COPY ./bin/kali-mcp-stdio /usr/local/bin/kali-mcp-stdio

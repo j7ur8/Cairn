@@ -1902,7 +1902,7 @@
             <input x-model="capabilityForm.args" @change="capabilityForm.args = ($event.target.value || '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean)" placeholder="args (space/comma separated)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
           <div x-show="capabilityForm.transport === 'http'" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-            <input x-model="capabilityForm.url" placeholder="https://mcp.example.com/sse" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+            <input x-model="capabilityForm.url" placeholder="https://mcp.example.com/mcp" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
             <input x-model="capabilityForm.bearer_token_env" placeholder="bearer token env var (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
         </div>
