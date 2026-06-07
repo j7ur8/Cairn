@@ -1862,7 +1862,7 @@
         </div>
       </div>
 
-      <div x-show="capabilityEditId || (capabilityForm && (capabilityForm.id || capabilityForm.name))" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+      <div x-show="capabilityFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
         <div class="grid grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)] gap-2">
           <select x-model="capabilityForm.kind" :disabled="!!capabilityEditId" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition disabled:opacity-60 disabled:cursor-not-allowed">
             <option value="mcp_server">MCP server</option>
@@ -1915,7 +1915,7 @@
             available
           </label>
           <div class="flex gap-2">
-            <button @click="openCreateCapability()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+            <button @click="cancelCapabilityEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
             <button @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
           </div>
         </div>
@@ -2337,6 +2337,7 @@ function cairnApp() {
     },
     capabilityAdmin: { catalog: [], health: {} },
     capabilityForm: defaultCapabilityForm(),
+    capabilityFormOpen: false,
     capabilityEditId: '',
     capabilitiesSaving: false,
     isCreatingProject: false,
@@ -3667,6 +3668,13 @@ function cairnApp() {
     openCreateCapability() {
       this.capabilityEditId = '';
       this.capabilityForm = this.defaultCapabilityForm();
+      this.capabilityFormOpen = true;
+    },
+
+    cancelCapabilityEdit() {
+      this.capabilityEditId = '';
+      this.capabilityForm = this.defaultCapabilityForm();
+      this.capabilityFormOpen = false;
     },
 
     openEditCapability(item) {
@@ -3689,6 +3697,7 @@ function cairnApp() {
         detail: item.detail || '',
         available: item.available !== false,
       };
+      this.capabilityFormOpen = true;
     },
 
     async saveCapability() {
@@ -3716,7 +3725,7 @@ function cairnApp() {
       try {
         await this.api('PUT', `/capabilities/admin/${payload.kind}/${encodeURIComponent(payload.id)}`, payload);
         this.showToast('Capability saved');
-        this.openCreateCapability();
+        this.cancelCapabilityEdit();
         await this.loadCapabilityAdmin();
         await this.loadNewProjectCatalog();
         await this.loadCapabilities();
