@@ -53,14 +53,22 @@ from cairn.server.models_pkg.intents import (  # noqa: F401
     UpdateProjectTitleRequest,
 )
 from cairn.server.models_pkg.capabilities import (  # noqa: F401
+    CapabilityAdminRequest,
+    CapabilityAdminResponse,
     CapabilityCatalogItem,
+    CapabilityHealthEntry,
+    CapabilitySource,
     ProjectCapabilitiesResponse,
+    ProjectCapabilitiesUpdateRequest,
     ProjectRole,
     ProjectRoleResponse,
     RegisterCapabilityCatalogRequest,
     RegisterRoleCatalogItem,
     RegisterRoleCatalogRequest,
     RoleCatalogItem,
+    TaskCapabilities,
+    TaskCapabilitiesMap,
+    task_capabilities_map,
 )
 from cairn.server.models_pkg.proxies import (  # noqa: F401
     ProxyConfig,

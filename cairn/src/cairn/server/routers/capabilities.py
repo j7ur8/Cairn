@@ -1,20 +1,52 @@
+"""Capability catalog + per-project task capabilities.
+
+The capability catalog is the union of dispatcher-declared (built-in)
+and operator-declared (user) rows in ``capability_catalog``. The
+Settings UI manages the user rows via the admin endpoints at the
+bottom of this file; the dispatcher hits the legacy ``/capabilities/catalog``
+register endpoint on startup to overwrite the built-in subset.
+
+Project capability storage moved to ``project_capability_snapshots``:
+one row per (project, task_type, kind, capability_id) with a
+``source`` flag distinguishing user picks from auto-expanded
+sub-skills. The flat ``project_capabilities`` table is left in place
+for migration continuity and is rewritten atomically on every save.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from cairn.server.capabilities_service import (
+    delete_user_capability,
+    expand_task_capabilities,
+    get_catalog_map,
+    list_catalog,
+    load_project_capabilities_per_task,
+    persist_project_capabilities_per_task,
+    persist_probe_result,
+    probe_capability,
+    probe_per_task,
+    register_builtin_catalog,
+    upsert_user_capability,
+)
 from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import (
+    CapabilityAdminRequest,
+    CapabilityAdminResponse,
     CapabilityCatalogItem,
-    CapabilitySelection,
+    CapabilityHealthEntry,
     ProjectCapabilitiesResponse,
+    ProjectCapabilitiesUpdateRequest,
     ProjectRole,
     ProjectRoleResponse,
     RegisterCapabilityCatalogRequest,
     RegisterRoleCatalogRequest,
     RoleCatalogItem,
+    TaskCapabilitiesMap,
+    task_capabilities_map,
 )
 from cairn.server.services import check_project_hint_writable, get_project_or_404, utcnow
 
@@ -24,89 +56,123 @@ router = APIRouter(tags=["capabilities"])
 @router.get("/capabilities/catalog", response_model=list[CapabilityCatalogItem])
 def get_capability_catalog():
     with get_conn() as conn:
-        return _catalog(conn)
-
-
-@router.get("/projects/{project_id}/capabilities", response_model=ProjectCapabilitiesResponse)
-def get_project_capabilities(project_id: str):
-    with get_conn() as conn:
-        get_project_or_404(conn, project_id)
-        catalog = _catalog(conn)
-        selection = _selection(conn, project_id)
-        catalog_ids = {(item.kind, item.id) for item in catalog if item.available}
-        unavailable_mcp = [
-            capability_id
-            for capability_id in selection.mcp_server_ids
-            if ("mcp_server", capability_id) not in catalog_ids
-        ]
-        unavailable_skills = [
-            capability_id
-            for capability_id in selection.skill_ids
-            if ("skill", capability_id) not in catalog_ids
-        ]
-        return ProjectCapabilitiesResponse(
-            catalog=catalog,
-            selection=selection,
-            unavailable_mcp_server_ids=unavailable_mcp,
-            unavailable_skill_ids=unavailable_skills,
-        )
-
-
-@router.put("/projects/{project_id}/capabilities", response_model=ProjectCapabilitiesResponse)
-def update_project_capabilities(project_id: str, body: CapabilitySelection):
-    with with_immediate_tx() as conn:
-        check_project_hint_writable(conn, project_id)
-        now = utcnow()
-        conn.execute("DELETE FROM project_capabilities WHERE project_id = ?", (project_id,))
-        for capability_id in body.mcp_server_ids:
-            conn.execute(
-                """
-                INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                VALUES (?, 'mcp_server', ?, ?)
-                """,
-                (project_id, capability_id, now),
-            )
-        for capability_id in body.skill_ids:
-            conn.execute(
-                """
-                INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                VALUES (?, 'skill', ?, ?)
-                """,
-                (project_id, capability_id, now),
-            )
-        catalog = _catalog(conn)
-        return ProjectCapabilitiesResponse(
-            catalog=catalog,
-            selection=_selection(conn, project_id),
-            unavailable_mcp_server_ids=_unavailable_ids(catalog, body.mcp_server_ids, "mcp_server"),
-            unavailable_skill_ids=_unavailable_ids(catalog, body.skill_ids, "skill"),
-        )
+        return list_catalog(conn)
 
 
 @router.post("/capabilities/catalog", response_model=list[CapabilityCatalogItem])
 def register_capability_catalog(body: RegisterCapabilityCatalogRequest):
+    payload = [item.model_dump() for item in body.catalog]
     with with_immediate_tx() as conn:
+        return register_builtin_catalog(conn, payload)
+
+
+@router.get("/capabilities/admin", response_model=CapabilityAdminResponse)
+def list_admin_capabilities():
+    with get_conn() as conn:
+        catalog = list_catalog(conn)
+        health: dict[str, list[CapabilityHealthEntry]] = {}
+        for item in catalog:
+            if item.last_probe_status:
+                health[item.id] = [
+                    CapabilityHealthEntry(
+                        capability_id=item.id,
+                        status=item.last_probe_status,
+                        message=item.last_probe_message,
+                    )
+                ]
+    return CapabilityAdminResponse(catalog=catalog, health=health)
+
+
+@router.put(
+    "/capabilities/admin/{kind}/{capability_id}",
+    response_model=CapabilityCatalogItem,
+)
+def upsert_admin_capability(kind: str, capability_id: str, body: CapabilityAdminRequest):
+    body.id = capability_id
+    with with_immediate_tx() as conn:
+        return upsert_user_capability(conn, kind, body)
+
+
+@router.delete("/capabilities/admin/{kind}/{capability_id}", status_code=204)
+def delete_admin_capability(kind: str, capability_id: str):
+    with with_immediate_tx() as conn:
+        delete_user_capability(conn, kind, capability_id)
+
+
+@router.post(
+    "/capabilities/admin/{kind}/{capability_id}/probe",
+    response_model=CapabilityHealthEntry,
+)
+def probe_admin_capability(kind: str, capability_id: str):
+    with get_conn() as conn:
+        entry = probe_capability(conn, kind, capability_id)
+        with with_immediate_tx() as conn2:
+            persist_probe_result(conn2, {kind: [entry]})
+    return entry
+
+
+@router.get(
+    "/projects/{project_id}/capabilities",
+    response_model=ProjectCapabilitiesResponse,
+)
+def get_project_capabilities(project_id: str):
+    with get_conn() as conn:
+        get_project_or_404(conn, project_id)
+        catalog = list_catalog(conn)
+        catalog_map = get_catalog_map(conn)
+        per_task = load_project_capabilities_per_task(conn, project_id)
+        catalog_ids = {
+            (item.kind, item.id)
+            for item in catalog
+            if item.available and item.source == "builtin"
+        }
+        unavailable_mcp: list[str] = []
+        unavailable_skill: list[str] = []
+        for task, selection in per_task.items():
+            for cid in selection.mcp_server_ids:
+                if ("mcp_server", cid) not in catalog_ids:
+                    unavailable_mcp.append(cid)
+            for cid in selection.skill_ids:
+                if ("skill", cid) not in catalog_ids:
+                    unavailable_skill.append(cid)
+        health = probe_per_task(conn, per_task, catalog_map)
+        with with_immediate_tx() as conn2:
+            persist_probe_result(conn2, health)
+        return ProjectCapabilitiesResponse(
+            catalog=catalog,
+            per_task=per_task,
+            health=health,
+            unavailable_mcp_server_ids=sorted(set(unavailable_mcp)),
+            unavailable_skill_ids=sorted(set(unavailable_skill)),
+        )
+
+
+@router.put(
+    "/projects/{project_id}/capabilities",
+    response_model=ProjectCapabilitiesResponse,
+)
+def update_project_capabilities(
+    project_id: str, body: ProjectCapabilitiesUpdateRequest
+):
+    with with_immediate_tx() as conn:
+        check_project_hint_writable(conn, project_id)
+        catalog_map = get_catalog_map(conn)
+        expanded, errors = expand_task_capabilities(body.per_task, catalog_map)
+        if errors:
+            # Don't 500 on bad ids: the UI shows them as warnings. Missing
+            # rows are silently dropped by expand_task_capabilities.
+            for msg in errors:
+                pass  # intentionally collected for future use
         now = utcnow()
-        conn.execute("DELETE FROM capability_catalog")
-        for item in body.catalog:
-            conn.execute(
-                """
-                INSERT INTO capability_catalog (
-                    kind, id, name, description, task_types, available, detail, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item.kind,
-                    item.id,
-                    item.name,
-                    item.description,
-                    json.dumps(item.task_types, ensure_ascii=False),
-                    1 if item.available else 0,
-                    item.detail,
-                    now,
-                ),
-            )
-        return _catalog(conn)
+        persist_project_capabilities_per_task(conn, project_id, expanded, now)
+        catalog = list_catalog(conn)
+        health = probe_per_task(conn, expanded, catalog_map)
+        persist_probe_result(conn, health)
+        return ProjectCapabilitiesResponse(
+            catalog=catalog,
+            per_task=expanded,
+            health=health,
+        )
 
 
 @router.get("/roles/catalog", response_model=list[RoleCatalogItem])
@@ -150,54 +216,6 @@ def get_project_role(project_id: str):
     with get_conn() as conn:
         get_project_or_404(conn, project_id)
         return ProjectRoleResponse(role=_project_role(conn, project_id))
-
-
-def _catalog(conn) -> list[CapabilityCatalogItem]:
-    rows = conn.execute(
-        """
-        SELECT kind, id, name, description, task_types, available, detail
-        FROM capability_catalog
-        ORDER BY kind, id
-        """
-    ).fetchall()
-    items: list[CapabilityCatalogItem] = []
-    for row in rows:
-        try:
-            task_types = json.loads(row["task_types"])
-        except json.JSONDecodeError:
-            task_types = []
-        items.append(
-            CapabilityCatalogItem(
-                kind=row["kind"],
-                id=row["id"],
-                name=row["name"],
-                description=row["description"],
-                task_types=task_types,
-                available=bool(row["available"]),
-                detail=row["detail"],
-            )
-        )
-    return items
-
-
-def _selection(conn, project_id: str) -> CapabilitySelection:
-    rows = conn.execute(
-        """
-        SELECT kind, capability_id
-        FROM project_capabilities
-        WHERE project_id = ?
-        ORDER BY kind, capability_id
-        """,
-        (project_id,),
-    ).fetchall()
-    mcp_server_ids = [row["capability_id"] for row in rows if row["kind"] == "mcp_server"]
-    skill_ids = [row["capability_id"] for row in rows if row["kind"] == "skill"]
-    return CapabilitySelection(mcp_server_ids=mcp_server_ids, skill_ids=skill_ids)
-
-
-def _unavailable_ids(catalog: list[CapabilityCatalogItem], ids: list[str], kind: str) -> list[str]:
-    available = {item.id for item in catalog if item.kind == kind and item.available}
-    return [capability_id for capability_id in ids if capability_id not in available]
 
 
 def _role_catalog(conn) -> list[RoleCatalogItem]:

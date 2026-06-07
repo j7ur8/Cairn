@@ -530,7 +530,11 @@ def _capability_manifest_payload(
             "unavailable_skill_ids": [],
         }
 
-    selection = capability_data.get("selection") if isinstance(capability_data.get("selection"), dict) else {}
+    per_task = capability_data.get("per_task") if isinstance(capability_data.get("per_task"), dict) else None
+    if per_task and isinstance(per_task.get(task_type), dict):
+        selection = per_task[task_type]
+    else:
+        selection = capability_data.get("selection") if isinstance(capability_data.get("selection"), dict) else {}
     catalog = capability_data.get("catalog") if isinstance(capability_data.get("catalog"), list) else []
     mcp_ids = _string_list(selection.get("mcp_server_ids"))
     skill_ids = _string_list(selection.get("skill_ids"))

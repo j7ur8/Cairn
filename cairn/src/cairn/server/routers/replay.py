@@ -16,6 +16,15 @@ from cairn.server.models import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
+from cairn.server.capabilities_service import (
+    expand_task_capabilities,
+    get_catalog_map,
+    load_project_capabilities_per_task,
+    persist_project_capabilities_per_task,
+    persist_probe_result,
+    probe_per_task,
+    task_capabilities_map,
+)
 from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
 from cairn.server.services import (
     build_intents,
@@ -106,23 +115,51 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
                 (hid, replay_project_id, content, hint.creator, now),
             )
 
-        if body.capabilities is not None:
-            for capability_id in body.capabilities.mcp_server_ids:
-                conn.execute(
-                    """
-                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                    VALUES (?, 'mcp_server', ?, ?)
-                    """,
-                    (replay_project_id, capability_id, now),
-                )
-            for capability_id in body.capabilities.skill_ids:
-                conn.execute(
-                    """
-                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                    VALUES (?, 'skill', ?, ?)
-                    """,
-                    (replay_project_id, capability_id, now),
-                )
+        # Per-task capability selection. The replay must keep the
+        # same capabilities as the source project when the operator
+        # does not pass an explicit per_task map, so we hydrate from
+        # the source project's existing snapshots first.
+        per_task = body.capabilities_per_task
+        if per_task is None:
+            per_task = load_project_capabilities_per_task(conn, project_id)
+            # Treat any pre-per-task 'legacy' rows as the explore stage
+            # so the replay doesn't lose the original selection.
+            has_legacy = any(
+                row["task_type"] == "legacy"
+                for row in conn.execute(
+                    "SELECT task_type FROM project_capability_snapshots "
+                    "WHERE project_id = ? AND task_type = 'legacy' LIMIT 1",
+                    (project_id,),
+                ).fetchall()
+            )
+            if has_legacy and body.capabilities is None:
+                per_task = task_capabilities_map(None)
+                legacy_rows = conn.execute(
+                    "SELECT kind, capability_id FROM project_capability_snapshots "
+                    "WHERE project_id = ? AND task_type = 'legacy'",
+                    (project_id,),
+                ).fetchall()
+                explore = per_task["explore"]
+                for row in legacy_rows:
+                    if row["kind"] == "mcp_server" and row["capability_id"] not in explore.mcp_server_ids:
+                        explore.mcp_server_ids.append(row["capability_id"])
+                        explore.user_mcp_server_ids.append(row["capability_id"])
+                    elif row["kind"] == "skill" and row["capability_id"] not in explore.skill_ids:
+                        explore.skill_ids.append(row["capability_id"])
+                        explore.user_skill_ids.append(row["capability_id"])
+        elif body.capabilities is not None:
+            # Caller used the legacy flat payload; merge into explore.
+            legacy = task_capabilities_map({"explore": body.capabilities.model_dump()})
+            for task in ("bootstrap", "explore", "reason"):
+                per_task[task].mcp_server_ids = legacy["explore"].mcp_server_ids
+                per_task[task].skill_ids = legacy["explore"].skill_ids
+                per_task[task].user_mcp_server_ids = legacy["explore"].user_mcp_server_ids
+                per_task[task].user_skill_ids = legacy["explore"].user_skill_ids
+        catalog_map = get_catalog_map(conn)
+        expanded, _ = expand_task_capabilities(per_task, catalog_map)
+        persist_project_capabilities_per_task(conn, replay_project_id, expanded, now)
+        health_per_task = probe_per_task(conn, expanded, catalog_map)
+        persist_probe_result(conn, health_per_task)
 
         if body.role_id:
             _insert_role_snapshot(conn, replay_project_id, body.role_id, now)

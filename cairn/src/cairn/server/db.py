@@ -417,6 +417,84 @@ MIGRATIONS: list[tuple[str, str]] = [
         """,
     ),
     (
+        "20260608_001_capability_admin",
+        """
+        -- Capability catalog gains source/requires/probe state. ``builtin``
+        -- rows come from the dispatcher's catalog sync; ``user`` rows are
+        -- created/edited/deleted from the Settings UI.
+        ALTER TABLE capability_catalog ADD COLUMN source TEXT NOT NULL DEFAULT 'builtin';
+        ALTER TABLE capability_catalog ADD COLUMN requires_ids TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE capability_catalog ADD COLUMN probe_config TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE capability_catalog ADD COLUMN last_probe_status TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN last_probe_at TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN last_probe_message TEXT NOT NULL DEFAULT '';
+
+        -- Per-task project capability snapshots. The previous flat
+        -- ``project_capabilities`` table carried one row per
+        -- (project, kind, capability_id) and was used for every
+        -- task_type implicitly. The new table keys on task_type and
+        -- carries the auto-included sub-skill provenance so the UI
+        -- can distinguish "user picked" vs "expanded from requires".
+        CREATE TABLE IF NOT EXISTS project_capability_snapshots (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_type TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            capability_id TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'selected',
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, task_type, kind, capability_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_capability_snapshots_project_task
+            ON project_capability_snapshots(project_id, task_type);
+        """,
+    ),
+    (
+        "20260608_002_capability_legacy_migration",
+        """
+        -- Move pre-existing rows out of the flat table into per-task
+        -- snapshots tagged ``task_type='legacy'``. The UI surfaces a
+        -- "migrating" banner for those projects and rewrites the rows
+        -- on the next save. A no-op when the flat table is empty
+        -- (fresh installs), which keeps the migration idempotent.
+        INSERT INTO project_capability_snapshots (
+            project_id, task_type, kind, capability_id, source, position, created_at
+        )
+        SELECT
+            pc.project_id,
+            'legacy',
+            pc.kind,
+            pc.capability_id,
+            'selected',
+            0,
+            pc.created_at
+        FROM project_capabilities pc
+        WHERE NOT EXISTS (
+            SELECT 1 FROM project_capability_snapshots pcs
+            WHERE pcs.project_id = pc.project_id
+              AND pcs.task_type = 'legacy'
+              AND pcs.kind = pc.kind
+              AND pcs.capability_id = pc.capability_id
+        );
+        """,
+    ),
+    (
+        "20260608_003_capability_admin_columns",
+        """
+        -- Per-capability probe + transport columns. ``source_path``
+        -- holds the disk path of the skill directory or stdio MCP
+        -- entry; the http transport columns are nullable so the same
+        -- table can host both transports.
+        ALTER TABLE capability_catalog ADD COLUMN source_path TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN transport TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN command TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN args TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE capability_catalog ADD COLUMN url TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN bearer_token_env TEXT;
+        ALTER TABLE capability_catalog ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';
+        """,
+    ),
+    (
         "20260607_003_dispatcher_locks",
         """
         CREATE TABLE IF NOT EXISTS dispatcher_locks (

@@ -1039,51 +1039,75 @@
             <button @click="saveCapabilities()" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white text-[11px] font-medium hover:bg-slate-700 transition">Save</button>
           </div>
           <div class="p-4 space-y-5">
-            <template x-if="capabilitiesUnavailableText()">
-              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700" x-text="capabilitiesUnavailableText()"></div>
+            <template x-if="(capabilities.unavailable_mcp_server_ids || []).length || (capabilities.unavailable_skill_ids || []).length">
+              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <span x-text="`${(capabilities.unavailable_mcp_server_ids || []).length} MCP + ${(capabilities.unavailable_skill_ids || []).length} skill ids not in catalog`"></span>
+              </div>
             </template>
-            <div>
-              <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2">MCP Servers</div>
-              <template x-if="capabilityItems('mcp_server').length === 0">
-                <p class="text-xs text-slate-300">No MCP servers declared in dispatcher config</p>
-              </template>
-              <div class="space-y-2">
-                <template x-for="item in capabilityItems('mcp_server')" :key="item.id">
-                  <label class="block rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition">
-                    <div class="flex items-start gap-2">
-                      <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="capabilitySelected('mcp_server', item.id)" @change="toggleCapability('mcp_server', item.id, $event.target.checked)">
-                      <div class="min-w-0 flex-1">
-                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                        <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                        <div class="text-[11px] text-slate-500 mt-1 whitespace-pre-wrap" x-show="item.description" x-text="item.description"></div>
-                        <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                      </div>
+            <template x-for="task in capabilityTaskTypes()" :key="task.key">
+              <section class="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <div>
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-700" x-text="task.label"></div>
+                    <div class="text-[10px] text-slate-400" x-text="`task_type=${task.key}`"></div>
+                  </div>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full"
+                    :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                    x-text="capabilityTaskHealthStatus(task.key)"></span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1.5">MCP</div>
+                    <template x-if="capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'mcp_server').length === 0">
+                      <p class="text-[11px] text-slate-300">No MCP for this task</p>
+                    </template>
+                    <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'mcp_server')" :key="`${task.key}:mcp:${item.id}`">
+                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                          <div class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'mcp_server', item.id)" @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                            <div class="min-w-0 flex-1">
+                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                              <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                            </div>
+                          </div>
+                        </label>
+                      </template>
                     </div>
-                  </label>
-                </template>
-              </div>
-            </div>
-            <div>
-              <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2">Skills</div>
-              <template x-if="capabilityItems('skill').length === 0">
-                <p class="text-xs text-slate-300">No skills declared in dispatcher config</p>
-              </template>
-              <div class="space-y-2">
-                <template x-for="item in capabilityItems('skill')" :key="item.id">
-                  <label class="block rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition">
-                    <div class="flex items-start gap-2">
-                      <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="capabilitySelected('skill', item.id)" @change="toggleCapability('skill', item.id, $event.target.checked)">
-                      <div class="min-w-0 flex-1">
-                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                        <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                        <div class="text-[11px] text-slate-500 mt-1 whitespace-pre-wrap" x-show="item.description" x-text="item.description"></div>
-                        <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                      </div>
+                  </div>
+                  <div>
+                    <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1.5">Skills</div>
+                    <template x-if="capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'skill').length === 0">
+                      <p class="text-[11px] text-slate-300">No skills for this task</p>
+                    </template>
+                    <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'skill')" :key="`${task.key}:skill:${item.id}`">
+                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                          <div class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'skill', item.id)" @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                            <div class="min-w-0 flex-1">
+                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                              <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                              <div class="text-[10px] text-slate-400 mt-0.5" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
+                              <template x-if="(item.requires_ids || []).length > 0 && effectiveCapabilitySelected(task.key, 'skill', item.id) && !userCapabilitySelected(task.key, 'skill', item.id)">
+                                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">auto</span>
+                              </template>
+                            </div>
+                          </div>
+                        </label>
+                      </template>
                     </div>
-                  </label>
-                </template>
-              </div>
-            </div>
+                  </div>
+                </div>
+                <div class="mt-2 space-y-1">
+                  <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`${task.key}:health:${entry.capability_id}`">
+                    <div class="text-[10px]"
+                      :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                      x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
+                  </template>
+                </div>
+              </section>
+            </template>
           </div>
         </section>
         <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -1246,49 +1270,64 @@
           </p>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-2">MCP Servers</div>
-            <template x-if="newProjectCapabilityItems('mcp_server').length === 0">
-              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No MCP servers declared</p>
-            </template>
-            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
-              <template x-for="item in newProjectCapabilityItems('mcp_server')" :key="item.id">
-                <label class="block rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition">
-                  <div class="flex items-start gap-2">
-                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="newProjectCapabilitySelected('mcp_server', item.id)" @change="toggleNewProjectCapability('mcp_server', item.id, $event.target.checked)">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                    </div>
-                  </div>
-                </label>
+        <template x-for="task in capabilityTaskTypes()" :key="`new-cap:${task.key}`">
+          <section class="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-700" x-text="task.label"></div>
+                <div class="text-[10px] text-slate-400" x-text="`task_type=${task.key}`"></div>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full"
+                :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                x-text="capabilityTaskHealthStatus(task.key)"></span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1.5">MCP</div>
+                <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  <template x-for="item in capabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'mcp_server')" :key="`new:${task.key}:mcp:${item.id}`">
+                    <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                      <div class="flex items-start gap-2">
+                        <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="userCapabilitySelected(task.key, 'mcp_server', item.id)" @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                        </div>
+                      </div>
+                    </label>
+                  </template>
+                </div>
+              </div>
+              <div>
+                <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1.5">Skills</div>
+                <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  <template x-for="item in capabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'skill')" :key="`new:${task.key}:skill:${item.id}`">
+                    <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                      <div class="flex items-start gap-2">
+                        <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="userCapabilitySelected(task.key, 'skill', item.id)" @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                          <template x-if="effectiveCapabilitySelected(task.key, 'skill', item.id) && !userCapabilitySelected(task.key, 'skill', item.id)">
+                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">auto</span>
+                          </template>
+                        </div>
+                      </div>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2 space-y-1">
+              <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`new:${task.key}:health:${entry.capability_id}`">
+                <div class="text-[10px]"
+                  :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                  x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
               </template>
             </div>
-          </div>
-          <div>
-            <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-2">Skills</div>
-            <template x-if="newProjectCapabilityItems('skill').length === 0">
-              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No skills declared</p>
-            </template>
-            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
-              <template x-for="item in newProjectCapabilityItems('skill')" :key="item.id">
-                <label class="block rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition">
-                  <div class="flex items-start gap-2">
-                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="newProjectCapabilitySelected('skill', item.id)" @change="toggleNewProjectCapability('skill', item.id, $event.target.checked)">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                    </div>
-                  </div>
-                </label>
-              </template>
-            </div>
-          </div>
-        </div>
-        <p class="text-[11px] text-slate-400">Selected capabilities are snapshotted on the project and injected into each worker task container execution.</p>
+          </section>
+        </template>
+        <p class="text-[11px] text-slate-400">Capabilities are picked per task_type and snapshotted on the project. Skills with <code>requires_ids</code> auto-expand within the same task stage.</p>
       </div>
 
         <div class="mt-3 pt-3 border-t border-slate-200/80">
@@ -1405,48 +1444,63 @@
           </template>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-2">MCP Servers</div>
-            <template x-if="replayConfigCapabilityItems('mcp_server').length === 0">
-              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No MCP servers declared</p>
-            </template>
-            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
-              <template x-for="item in replayConfigCapabilityItems('mcp_server')" :key="item.id">
-                <label class="block rounded-xl border border-violet-100 bg-white px-3 py-2 hover:bg-violet-50/40 transition">
-                  <div class="flex items-start gap-2">
-                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="replayConfigCapabilitySelected('mcp_server', item.id)" @change="toggleReplayConfigCapability('mcp_server', item.id, $event.target.checked)">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                    </div>
-                  </div>
-                </label>
+        <template x-for="task in capabilityTaskTypes()" :key="`rep-cap:${task.key}`">
+          <section class="rounded-2xl border border-violet-100 bg-violet-50/40 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-700" x-text="task.label"></div>
+                <div class="text-[10px] text-violet-500/80" x-text="`task_type=${task.key}`"></div>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full"
+                :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                x-text="capabilityTaskHealthStatus(task.key)"></span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div class="text-[10px] font-semibold uppercase tracking-widest text-violet-500 mb-1.5">MCP</div>
+                <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  <template x-for="item in capabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'mcp_server')" :key="`rep:${task.key}:mcp:${item.id}`">
+                    <label class="block rounded-lg border border-violet-100 bg-white px-2 py-1.5 hover:bg-violet-50/40 transition">
+                      <div class="flex items-start gap-2">
+                        <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="userCapabilitySelected(task.key, 'mcp_server', item.id)" @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                        </div>
+                      </div>
+                    </label>
+                  </template>
+                </div>
+              </div>
+              <div>
+                <div class="text-[10px] font-semibold uppercase tracking-widest text-violet-500 mb-1.5">Skills</div>
+                <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  <template x-for="item in capabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'skill')" :key="`rep:${task.key}:skill:${item.id}`">
+                    <label class="block rounded-lg border border-violet-100 bg-white px-2 py-1.5 hover:bg-violet-50/40 transition">
+                      <div class="flex items-start gap-2">
+                        <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="userCapabilitySelected(task.key, 'skill', item.id)" @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                          <template x-if="effectiveCapabilitySelected(task.key, 'skill', item.id) && !userCapabilitySelected(task.key, 'skill', item.id)">
+                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">auto</span>
+                          </template>
+                        </div>
+                      </div>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2 space-y-1">
+              <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`rep:${task.key}:health:${entry.capability_id}`">
+                <div class="text-[10px]"
+                  :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                  x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
               </template>
             </div>
-          </div>
-          <div>
-            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-2">Skills</div>
-            <template x-if="replayConfigCapabilityItems('skill').length === 0">
-              <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No skills declared</p>
-            </template>
-            <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
-              <template x-for="item in replayConfigCapabilityItems('skill')" :key="item.id">
-                <label class="block rounded-xl border border-violet-100 bg-white px-3 py-2 hover:bg-violet-50/40 transition">
-                  <div class="flex items-start gap-2">
-                    <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100" :checked="replayConfigCapabilitySelected('skill', item.id)" @change="toggleReplayConfigCapability('skill', item.id, $event.target.checked)">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                      <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
-                      <div class="text-[10px] text-slate-400 mt-1" x-text="`Tasks: ${(item.task_types || []).join(', ')}`"></div>
-                    </div>
-                  </div>
-                </label>
-              </template>
-            </div>
-          </div>
-        </div>
+          </section>
+        </template>
         <p class="text-[11px] text-violet-500/80">Replay creates a new active project, copies original attachments, and strictly reruns the successful route with workers.</p>
       </div>
 
@@ -1736,6 +1790,121 @@
               <div class="flex gap-1 shrink-0">
                 <button @click="openEditProxy(p.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
                 <button @click="deleteProxy(p.id, p.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="mt-6 pt-5 border-t border-slate-200/80">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Capabilities</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">MCP servers and skills that projects can attach per task stage (bootstrap / explore / reason). Built-ins are mirrored from <span class="font-mono">dispatch.capabilities.yaml</span>; the ones you add here are project-scoped. Probe to confirm paths and URLs resolve.</p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button @click="loadCapabilityAdmin()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Refresh</button>
+          <button @click="openCreateCapability()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add</button>
+        </div>
+      </div>
+
+      <div x-show="capabilityEditId || (capabilityForm && (capabilityForm.id || capabilityForm.name))" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="grid grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+          <select x-model="capabilityForm.kind" :disabled="!!capabilityEditId" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition disabled:opacity-60 disabled:cursor-not-allowed">
+            <option value="mcp_server">MCP server</option>
+            <option value="skill">Skill</option>
+          </select>
+          <input x-model="capabilityForm.id" :disabled="!!capabilityEditId" placeholder="id (e.g. fetch-mcp)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300 disabled:opacity-60 disabled:cursor-not-allowed">
+          <input x-model="capabilityForm.name" placeholder="Display name" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <input x-model="capabilityForm.description" placeholder="Description (optional)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <div class="space-y-1">
+          <div class="text-[10px] text-slate-400 font-medium">Enabled for task stages</div>
+          <div class="flex flex-wrap gap-1.5">
+            <template x-for="task in capabilityTaskTypes()" :key="`capability-task:${task.key}`">
+              <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-600 bg-white cursor-pointer hover:bg-slate-50 transition">
+                <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100"
+                       :checked="(capabilityForm.task_types || []).includes(task.key)"
+                       @change="(($event.target.checked) ? (capabilityForm.task_types = [...(capabilityForm.task_types || []), task.key]) : (capabilityForm.task_types = (capabilityForm.task_types || []).filter(t => t !== task.key)))">
+                <span x-text="task.label"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+        <div x-show="capabilityForm.kind === 'skill'" class="space-y-1">
+          <div class="text-[10px] text-slate-400 font-medium">Sub-skill requires_ids (auto-load within the same task stage)</div>
+          <input :value="(capabilityForm.requires_ids || []).join(', ')" @change="capabilityForm.requires_ids = ($event.target.value || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean)" placeholder="comma or space separated, e.g. child-skill-a child-skill-b" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div x-show="capabilityForm.kind === 'mcp_server'" class="space-y-2">
+          <div class="grid grid-cols-1 sm:grid-cols-[120px_minmax(0,1fr)] gap-2">
+            <select x-model="capabilityForm.transport" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              <option value="stdio">stdio</option>
+              <option value="http">http</option>
+            </select>
+            <input x-model="capabilityForm.source_path" placeholder="source path on disk (for stdio)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          </div>
+          <div x-show="capabilityForm.transport === 'stdio'" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <input x-model="capabilityForm.command" placeholder="command (e.g. python)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+            <input x-model="capabilityForm.args" @change="capabilityForm.args = ($event.target.value || '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean)" placeholder="args (space/comma separated)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          </div>
+          <div x-show="capabilityForm.transport === 'http'" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <input x-model="capabilityForm.url" placeholder="https://mcp.example.com/sse" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+            <input x-model="capabilityForm.bearer_token_env" placeholder="bearer token env var (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          </div>
+        </div>
+        <div x-show="capabilityForm.kind === 'skill'" class="grid grid-cols-1 gap-2">
+          <input x-model="capabilityForm.source_path" placeholder="skill source path (folder containing SKILL.md)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="flex items-center justify-end gap-3">
+          <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
+            <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="capabilityForm.available">
+            available
+          </label>
+          <div class="flex gap-2">
+            <button @click="openCreateCapability()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+            <button @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
+          </div>
+        </div>
+      </div>
+
+      <template x-if="(capabilityAdmin.catalog || []).length === 0">
+        <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No capabilities configured.</p>
+      </template>
+      <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+        <template x-for="item in (capabilityAdmin.catalog || [])" :key="`${item.kind}:${item.id}`">
+          <div class="rounded-xl border bg-white px-3 py-2" :class="item.available ? 'border-slate-200' : 'border-amber-200'">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-block h-2 w-2 rounded-full" :class="capabilityHealthDotClass(item)" :title="capabilityHealthTitle(item)"></span>
+                  <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="item.kind"></span>
+                  <span x-show="item.source === 'user'" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">user</span>
+                  <span x-show="item.source === 'builtin'" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">built-in</span>
+                  <span x-show="!item.available" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">unavailable</span>
+                </div>
+                <div class="text-[10px] font-mono text-slate-400" x-text="item.id"></div>
+                <div class="text-[10px] text-slate-400 mt-0.5 flex flex-wrap gap-1.5">
+                  <template x-for="task in (item.task_types || [])" :key="`${item.id}:${task}`">
+                    <span class="font-mono px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500" x-text="task"></span>
+                  </template>
+                </div>
+                <template x-if="(item.requires_ids || []).length > 0">
+                  <div class="text-[10px] text-slate-400 mt-0.5">
+                    requires: <span class="font-mono text-slate-500" x-text="(item.requires_ids || []).join(', ')"></span>
+                  </div>
+                </template>
+                <template x-if="item.last_probe_status">
+                  <div class="text-[10px] mt-0.5"
+                       :class="item.last_probe_status === 'ok' ? 'text-emerald-600' : (item.last_probe_status === 'warn' ? 'text-amber-600' : 'text-rose-600')"
+                       x-text="`probe @ ${item.last_probe_at || '-'}: ${item.last_probe_status}${item.last_probe_message ? ' — ' + item.last_probe_message : ''}`"></div>
+                </template>
+              </div>
+              <div class="flex gap-1 shrink-0">
+                <button @click="probeCapabilityAdmin(item.kind, item.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition" title="Run a best-effort health probe">Probe</button>
+                <button @click="openEditCapability(item)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                <button x-show="item.source === 'user'" @click="deleteCapabilityAdmin(item.kind, item.id, item.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
               </div>
             </div>
           </div>
@@ -2038,11 +2207,16 @@ function cairnApp() {
     llmRenderStep: 100,
     capabilities: {
       catalog: [],
+      per_task: null,
+      health: {},
       selection: { mcp_server_ids: [], skill_ids: [] },
       unavailable_mcp_server_ids: [],
       unavailable_skill_ids: [],
       projectAiProfiles: { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
     },
+    capabilityAdmin: { catalog: [], health: {} },
+    capabilityForm: this.defaultCapabilityForm(),
+    capabilityEditId: '',
     capabilitiesSaving: false,
     isCreatingProject: false,
     newProjectCatalog: {
@@ -2073,7 +2247,7 @@ function cairnApp() {
       hints: [{ content: '' }],
       attachments: [],
       role_id: '',
-      capabilities: { mcp_server_ids: [], skill_ids: [] },
+      capabilities_per_task: this.defaultTaskCapabilitiesMap(),
       ai_profile_selections: {
         bootstrap: { primary_profile_id: '', fallback_profile_ids: [] },
         explore: { primary_profile_id: '', fallback_profile_ids: [] },
@@ -2094,7 +2268,7 @@ function cairnApp() {
       goal: '',
       hints: [],
       role_id: '',
-      capabilities: { mcp_server_ids: [], skill_ids: [] },
+      capabilities_per_task: this.defaultTaskCapabilitiesMap(),
       ai_profile_selections: {
         bootstrap: { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] },
         explore: { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] },
@@ -2805,6 +2979,7 @@ function cairnApp() {
         this.settingsForm.intent_timeout = s.intent_timeout;
         this.settingsForm.reason_timeout = s.reason_timeout;
       } catch(e) { console.error(e); }
+      await this.loadCapabilityAdmin();
     },
 
     async loadProxies() {
@@ -3109,7 +3284,9 @@ function cairnApp() {
         ]);
         this.capabilities = {
           catalog: data.catalog || [],
-          selection: data.selection || { mcp_server_ids: [], skill_ids: [] },
+          per_task: data.per_task || this.defaultTaskCapabilitiesMap(),
+          health: data.health || {},
+          selection: data.per_task?.explore || { mcp_server_ids: [], skill_ids: [] },
           unavailable_mcp_server_ids: data.unavailable_mcp_server_ids || [],
           unavailable_skill_ids: data.unavailable_skill_ids || [],
           projectAiProfiles: aiData || { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
@@ -3118,11 +3295,31 @@ function cairnApp() {
         console.error(e);
         this.capabilities = {
           catalog: [],
+          per_task: this.defaultTaskCapabilitiesMap(),
+          health: {},
           selection: { mcp_server_ids: [], skill_ids: [] },
           unavailable_mcp_server_ids: [],
           unavailable_skill_ids: [],
           projectAiProfiles: { catalog: [], selection: { primary_profile_id: null, fallback_profile_ids: [] }, snapshots: [], unavailable_profile_ids: [] },
         };
+      }
+    },
+
+    async saveCapabilities() {
+      if (!this.selectedProjectId) return;
+      try {
+        if (!this.capabilities?.per_task) return;
+        const body = { per_task: this.capabilities.per_task };
+        const data = await this.api('PUT', `/projects/${this.selectedProjectId}/capabilities`, body);
+        this.capabilities = {
+          ...this.capabilities,
+          catalog: data.catalog || [],
+          per_task: data.per_task || this.capabilities.per_task,
+          health: data.health || {},
+        };
+        this.showToast('Capabilities saved');
+      } catch (e) {
+        this.showToast(e.message, 'error');
       }
     },
 
@@ -3304,27 +3501,6 @@ function cairnApp() {
       return (this.newProjectCatalog.roles || []).filter(item => item.available !== false);
     },
 
-    newProjectCapabilityItems(kind) {
-      return (this.newProjectCatalog.capabilities || []).filter(item => item.kind === kind && item.available !== false);
-    },
-
-    newProjectCapabilitySelected(kind, id) {
-      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
-      return (this.newProject.capabilities?.[key] || []).includes(id);
-    },
-
-    toggleNewProjectCapability(kind, id, checked) {
-      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
-      const current = new Set(this.newProject.capabilities?.[key] || []);
-      if (checked) current.add(id);
-      else current.delete(id);
-      this.newProject.capabilities = {
-        mcp_server_ids: this.newProject.capabilities?.mcp_server_ids || [],
-        skill_ids: this.newProject.capabilities?.skill_ids || [],
-        [key]: Array.from(current).sort(),
-      };
-    },
-
     newProjectAiProfileItems() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
@@ -3339,6 +3515,119 @@ function cairnApp() {
       return [...new Set(values)];
     },
 
+
+    defaultCapabilityForm() {
+      return {
+        kind: 'mcp_server',
+        id: '',
+        name: '',
+        description: '',
+        task_types: ['bootstrap', 'explore', 'reason'],
+        requires_ids: [],
+        transport: 'stdio',
+        command: '',
+        args: '',
+        url: '',
+        bearer_token_env: '',
+        source_path: '',
+        detail: '',
+        available: true,
+      };
+    },
+
+    openCreateCapability() {
+      this.capabilityEditId = '';
+      this.capabilityForm = this.defaultCapabilityForm();
+    },
+
+    openEditCapability(item) {
+      this.capabilityEditId = item.id;
+      this.capabilityForm = {
+        kind: item.kind,
+        id: item.id,
+        name: item.name,
+        description: item.description || '',
+        task_types: Array.isArray(item.task_types) ? [...item.task_types] : [],
+        requires_ids: Array.isArray(item.requires_ids) ? [...item.requires_ids] : [],
+        transport: item.detail || 'stdio',
+        command: item.command || '',
+        args: Array.isArray(item.args) ? item.args.join(' ') : (item.args || ''),
+        url: item.url || '',
+        bearer_token_env: item.bearer_token_env || '',
+        source_path: item.source_path || '',
+        headers: (item.headers && typeof item.headers === 'object') ? item.headers : {},
+        probe_config: (item.probe_config && typeof item.probe_config === 'object') ? item.probe_config : {},
+        detail: item.detail || '',
+        available: item.available !== false,
+      };
+    },
+
+    async saveCapability() {
+      if (!this.capabilityForm.id.trim() || !this.capabilityForm.name.trim()) {
+        this.showToast('id and name are required', 'error');
+        return;
+      }
+      const payload = { ...this.capabilityForm };
+      payload.task_types = (this.capabilityForm.task_types || []).filter(t => !!t);
+      payload.requires_ids = (this.capabilityForm.requires_ids || []).filter(t => !!t);
+      if (this.capabilityForm.kind === 'mcp_server') {
+        payload.args = (typeof this.capabilityForm.args === 'string')
+          ? this.capabilityForm.args.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+          : (this.capabilityForm.args || []);
+        payload.headers = (this.capabilityForm.headers && typeof this.capabilityForm.headers === 'object')
+          ? this.capabilityForm.headers : {};
+        payload.probe_config = (this.capabilityForm.probe_config && typeof this.capabilityForm.probe_config === 'object')
+          ? this.capabilityForm.probe_config : {};
+      } else {
+        delete payload.transport;
+        delete payload.command;
+        delete payload.url;
+        delete payload.bearer_token_env;
+      }
+      try {
+        await this.api('PUT', `/capabilities/admin/${payload.kind}/${encodeURIComponent(payload.id)}`, payload);
+        this.showToast('Capability saved');
+        this.openCreateCapability();
+        await this.loadCapabilityAdmin();
+        await this.loadNewProjectCatalog();
+        await this.loadCapabilities();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async deleteCapabilityAdmin(kind, id, name) {
+      const ok = window.confirm(`Delete ${kind} "${name}"? Existing project snapshots are preserved, but the capability can no longer be selected.`);
+      if (!ok) return;
+      try {
+        await this.api('DELETE', `/capabilities/admin/${kind}/${encodeURIComponent(id)}`);
+        this.showToast('Capability deleted');
+        await this.loadCapabilityAdmin();
+        await this.loadNewProjectCatalog();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async probeCapabilityAdmin(kind, id) {
+      try {
+        const entry = await this.api('POST', `/capabilities/admin/${kind}/${encodeURIComponent(id)}/probe`, {});
+        this.showToast(`Probe ${entry.status}: ${entry.message || 'ok'}`);
+        await this.loadCapabilityAdmin();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async loadCapabilityAdmin() {
+      try {
+        const data = await this.api('GET', '/capabilities/admin');
+        this.capabilityAdmin = { catalog: data.catalog || [], health: data.health || {} };
+      } catch (e) {
+        this.capabilityAdmin = { catalog: [], health: {} };
+      }
+    },
+
     aiProfileTaskTypes() {
       return [
         { key: 'bootstrap', label: 'Bootstrap' },
@@ -3346,6 +3635,264 @@ function cairnApp() {
         { key: 'reason', label: 'Reason' },
       ];
     },
+
+    capabilityTaskTypes() {
+      return [
+        { key: 'bootstrap', label: 'Bootstrap' },
+        { key: 'explore', label: 'Intent' },
+        { key: 'reason', label: 'Reason' },
+      ];
+    },
+
+    defaultTaskCapabilities() {
+      return { mcp_server_ids: [], skill_ids: [], user_mcp_server_ids: [], user_skill_ids: [] };
+    },
+
+    defaultTaskCapabilitiesMap() {
+      const out = {};
+      for (const task of this.capabilityTaskTypes()) {
+        out[task.key] = this.defaultTaskCapabilities();
+      }
+      return out;
+    },
+
+    ensureTaskCapabilitiesMap(target) {
+      if (!target.capabilities_per_task) {
+        target.capabilities_per_task = this.defaultTaskCapabilitiesMap();
+      }
+      for (const task of this.capabilityTaskTypes()) {
+        if (!target.capabilities_per_task[task.key]) {
+          target.capabilities_per_task[task.key] = this.defaultTaskCapabilities();
+        }
+        const entry = target.capabilities_per_task[task.key];
+        for (const field of ['mcp_server_ids', 'skill_ids', 'user_mcp_server_ids', 'user_skill_ids']) {
+          if (!Array.isArray(entry[field])) entry[field] = [];
+        }
+      }
+      return target.capabilities_per_task;
+    },
+
+    capabilitiesForTask(task, items) {
+      const catalog = items || this.capabilities?.catalog || [];
+      return catalog.filter(item => Array.isArray(item.task_types) && item.task_types.includes(task));
+    },
+
+    userCapabilitySelected(task, kind, id) {
+      const perTask = this.ensureTaskCapabilitiesMap(this._activeCapabilitiesTarget());
+      const field = kind === 'mcp_server' ? 'user_mcp_server_ids' : 'user_skill_ids';
+      return (perTask[task]?.[field] || []).includes(id);
+    },
+
+    effectiveCapabilitySelected(task, kind, id) {
+      const perTask = this.ensureTaskCapabilitiesMap(this._activeCapabilitiesTarget());
+      const field = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
+      return (perTask[task]?.[field] || []).includes(id);
+    },
+
+    toggleUserCapability(task, kind, id, checked) {
+      const perTask = this.ensureTaskCapabilitiesMap(this._activeCapabilitiesTarget());
+      const entry = perTask[task];
+      const userField = kind === 'mcp_server' ? 'user_mcp_server_ids' : 'user_skill_ids';
+      const userSet = new Set(entry[userField] || []);
+      if (checked) userSet.add(id);
+      else userSet.delete(id);
+      entry[userField] = Array.from(userSet);
+      this._expandRequiresForTask(task, kind, id, checked);
+      this._refreshEffectiveTask(task);
+    },
+
+    _expandRequiresForTask(task, kind, id, checked) {
+      // Sub-skill auto expansion: when a skill is selected, automatically
+      // add the requires_ids chain to the same task. When the user
+      // unchecks, only the explicit user picks stay; the auto-added
+      // chain is removed unless another parent still requires it.
+      if (kind !== 'skill') return;
+      const target = this._activeCapabilitiesTarget();
+      const perTask = this.ensureTaskCapabilitiesMap(target);
+      const entry = perTask[task];
+      const userSet = new Set(entry.user_skill_ids || []);
+      const skillsById = {};
+      for (const item of this.capabilities?.catalog || []) {
+        if (item.kind === 'skill') skillsById[item.id] = item;
+      }
+      const collected = new Set();
+      const queue = checked && userSet.has(id) ? [id] : [];
+      while (queue.length > 0) {
+        const sid = queue.shift();
+        if (collected.has(sid)) continue;
+        collected.add(sid);
+        const item = skillsById[sid];
+        if (!item) continue;
+        for (const child of (item.requires_ids || [])) {
+          if (!collected.has(child) && skillsById[child]?.task_types?.includes(task)) {
+            queue.push(child);
+          }
+        }
+      }
+      const union = new Set(checked ? collected : []);
+      if (!checked && userSet.has(id)) {
+        // Parent still user-picked: keep its sub-chain.
+        for (const parent of userSet) {
+          const item = skillsById[parent];
+          if (!item) continue;
+          const sub = [];
+          const subQueue = [parent];
+          const visited = new Set();
+          while (subQueue.length > 0) {
+            const cur = subQueue.shift();
+            if (visited.has(cur)) continue;
+            visited.add(cur);
+            const it = skillsById[cur];
+            if (!it) continue;
+            for (const child of (it.requires_ids || [])) {
+              if (!visited.has(child) && skillsById[child]?.task_types?.includes(task)) {
+                sub.push(child);
+                subQueue.push(child);
+              }
+            }
+          }
+          for (const child of sub) union.add(child);
+        }
+      }
+      const candidates = new Set(union);
+      const finalSet = new Set();
+      for (const candidate of candidates) {
+        const item = skillsById[candidate];
+        if (!item) continue;
+        if (!Array.isArray(item.task_types) || !item.task_types.includes(task)) continue;
+        finalSet.add(candidate);
+      }
+      entry.skill_ids = Array.from(finalSet);
+    },
+
+    _refreshEffectiveTask(task) {
+      const target = this._activeCapabilitiesTarget();
+      const perTask = this.ensureTaskCapabilitiesMap(target);
+      const entry = perTask[task];
+      const userMcp = new Set(entry.user_mcp_server_ids || []);
+      const userSkill = new Set(entry.user_skill_ids || []);
+      const skillsById = {};
+      for (const item of this.capabilities?.catalog || []) {
+        if (item.kind === 'skill') skillsById[item.id] = item;
+      }
+      const expanded = new Set(userSkill);
+      const queue = Array.from(userSkill);
+      while (queue.length > 0) {
+        const sid = queue.shift();
+        const item = skillsById[sid];
+        if (!item) continue;
+        for (const child of (item.requires_ids || [])) {
+          if (!expanded.has(child) && skillsById[child]?.task_types?.includes(task)) {
+            expanded.add(child);
+            queue.push(child);
+          }
+        }
+      }
+      entry.skill_ids = Array.from(expanded);
+      entry.mcp_server_ids = Array.from(userMcp);
+    },
+
+    _activeCapabilitiesTarget() {
+      // Replay modal reuses the same per-task helpers; create
+      // project keeps its data on ``this.newProject``. The new-
+      // project state is wired here to keep the helpers DRY.
+      if (this.showReplayConfigModal) return this.replayConfig;
+      return this.newProject;
+    },
+
+    capabilityTaskHealthStatus(task) {
+      const entries = (this.capabilities?.health || {})[task] || [];
+      if (entries.length === 0) return 'ok';
+      if (entries.some(entry => entry.status === 'error')) return 'error';
+      if (entries.some(entry => entry.status === 'warn')) return 'warn';
+      return 'ok';
+    },
+
+    capabilityHealthStatus(item) {
+      if (item.last_probe_status) return item.last_probe_status;
+      return item.available ? 'ok' : 'warn';
+    },
+
+    capabilityHealthDotClass(item) {
+      const status = this.capabilityHealthStatus(item);
+      if (status === 'error') return 'bg-rose-500';
+      if (status === 'warn') return 'bg-amber-500';
+      return 'bg-emerald-500';
+    },
+
+    capabilityHealthTitle(item) {
+      if (item.last_probe_status) {
+        return ;
+      }
+      return item.available ? 'available' : 'unavailable';
+    },
+
+    capabilitiesForNewProject() {
+      // Return per-task map for the create-project request body.
+      // The router normalizes empty stages to {mcp_server_ids:[]}.
+      if (!this.newProject.capabilities_per_task) {
+        this.newProject.capabilities_per_task = this.defaultTaskCapabilitiesMap();
+      }
+      const out = {};
+      for (const task of this.capabilityTaskTypes()) {
+        const entry = this.newProject.capabilities_per_task[task.key];
+        out[task.key] = {
+          mcp_server_ids: [...(entry.mcp_server_ids || [])],
+          skill_ids: [...(entry.skill_ids || [])],
+          user_mcp_server_ids: [...(entry.user_mcp_server_ids || [])],
+          user_skill_ids: [...(entry.user_skill_ids || [])],
+        };
+      }
+      return out;
+    },
+
+    capabilitiesForReplayRun() {
+      if (!this.replayConfig.capabilities_per_task) {
+        this.replayConfig.capabilities_per_task = this.defaultTaskCapabilitiesMap();
+      }
+      const out = {};
+      for (const task of this.capabilityTaskTypes()) {
+        const entry = this.replayConfig.capabilities_per_task[task.key];
+        out[task.key] = {
+          mcp_server_ids: [...(entry.mcp_server_ids || [])],
+          skill_ids: [...(entry.skill_ids || [])],
+          user_mcp_server_ids: [...(entry.user_mcp_server_ids || [])],
+          user_skill_ids: [...(entry.user_skill_ids || [])],
+        };
+      }
+      return out;
+    },
+
+    hydrateReplayCapabilitiesFromSource(projectCapabilities) {
+      // Pull the per-task map straight from the new server response.
+      // Fall back to the legacy flat selection block (older builds
+      // pre-date the per-task refactor) so the replay modal still
+      // opens against a fresh source project.
+      const out = this.defaultTaskCapabilitiesMap();
+      const perTask = projectCapabilities?.per_task;
+      if (perTask && typeof perTask === 'object') {
+        for (const task of this.capabilityTaskTypes()) {
+          const entry = perTask[task.key];
+          if (!entry) continue;
+          out[task.key] = {
+            mcp_server_ids: [...(entry.mcp_server_ids || [])],
+            skill_ids: [...(entry.skill_ids || [])],
+            user_mcp_server_ids: [...(entry.user_mcp_server_ids || entry.mcp_server_ids || [])],
+            user_skill_ids: [...(entry.user_skill_ids || entry.skill_ids || [])],
+          };
+        }
+        return out;
+      }
+      const legacy = projectCapabilities?.selection || {};
+      out.explore = {
+        mcp_server_ids: [...(legacy.mcp_server_ids || [])],
+        skill_ids: [...(legacy.skill_ids || [])],
+        user_mcp_server_ids: [...(legacy.mcp_server_ids || [])],
+        user_skill_ids: [...(legacy.skill_ids || [])],
+      };
+      return out;
+    },
+
 
     defaultAiProfileSelection() {
       return { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] };
@@ -3517,7 +4064,7 @@ function cairnApp() {
         goal: '',
         hints: [],
         role_id: '',
-        capabilities: { mcp_server_ids: [], skill_ids: [] },
+        capabilities_per_task: this.defaultTaskCapabilitiesMap(),
         ai_profile_selections: this.defaultTaskAiProfileSelections(),
         catalog: { capabilities: [], roles: [], ai_profiles: [] },
       };
@@ -3526,28 +4073,6 @@ function cairnApp() {
     replayConfigRoleItems() {
       return (this.replayConfig.catalog?.roles || []).filter(item => item.available !== false);
     },
-
-    replayConfigCapabilityItems(kind) {
-      return (this.replayConfig.catalog?.capabilities || []).filter(item => item.kind === kind && item.available !== false);
-    },
-
-    replayConfigCapabilitySelected(kind, id) {
-      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
-      return (this.replayConfig.capabilities?.[key] || []).includes(id);
-    },
-
-    toggleReplayConfigCapability(kind, id, checked) {
-      const key = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
-      const current = new Set(this.replayConfig.capabilities?.[key] || []);
-      if (checked) current.add(id);
-      else current.delete(id);
-      this.replayConfig.capabilities = {
-        mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
-        skill_ids: this.replayConfig.capabilities?.skill_ids || [],
-        [key]: Array.from(current).sort(),
-      };
-    },
-
 
     replayConfigAiProfileItems() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
@@ -5012,10 +5537,7 @@ function cairnApp() {
           goal,
           hints: (sourceProject.hints || []).map(h => ({ content: h.content })),
           role_id: replayRoleId,
-          capabilities: {
-            mcp_server_ids: projectCapabilities?.selection?.mcp_server_ids || [],
-            skill_ids: projectCapabilities?.selection?.skill_ids || [],
-          },
+          capabilities_per_task: this.hydrateReplayCapabilitiesFromSource(projectCapabilities),
           ai_profile_selections: replaySelections,
           catalog: {
             capabilities: catalogCapabilities || [],
@@ -5048,10 +5570,7 @@ function cairnApp() {
           goal: this.replayConfig.goal,
           hints,
           role_id: this.replayConfig.role_id || null,
-          capabilities: {
-            mcp_server_ids: this.replayConfig.capabilities?.mcp_server_ids || [],
-            skill_ids: this.replayConfig.capabilities?.skill_ids || [],
-          },
+          capabilities_per_task: this.capabilitiesForReplayRun(),
         };
         const aiSelections = this.ensureTaskAiProfileSelections(this.replayConfig);
         body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
@@ -6809,10 +7328,7 @@ function cairnApp() {
         const body = { title: this.newProject.title, origin: this.newProject.origin, goal: this.newProject.goal };
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
         if (hints.length > 0) body.hints = hints;
-        body.capabilities = {
-          mcp_server_ids: this.newProject.capabilities?.mcp_server_ids || [],
-          skill_ids: this.newProject.capabilities?.skill_ids || [],
-        };
+        body.capabilities_per_task = this.capabilitiesForNewProject();
         if (this.newProject.role_id) {
           body.role = { role_id: this.newProject.role_id };
         }

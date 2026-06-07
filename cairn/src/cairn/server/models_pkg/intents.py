@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from cairn.server.models_pkg.ai_profiles import AiProfileSelection, TaskAiProfileSelections
+from cairn.server.models_pkg.capabilities import (  # noqa: F401
+    CapabilitySelection,
+    TaskCapabilitiesMap,
+    task_capabilities_map,
+)
 from cairn.server.models_pkg.projects import (
     CreateHintInline,
     Fact,
@@ -50,11 +55,29 @@ class CreateProjectRequest(BaseModel):
     origin: str
     goal: str
     hints: list[CreateHintInline] | None = None
+    # Per-task capability selection. ``capabilities`` is retained as a
+    # backwards-compatible alias: the router treats the top-level
+    # mcp_server_ids / skill_ids as the ``explore`` stage so legacy
+    # callers and tests keep working.
+    capabilities_per_task: TaskCapabilitiesMap | None = None
     capabilities: CapabilitySelection | None = None
     role: ProjectRoleSelection | None = None
     role_id: str | None = None
     proxy_id: str | None = None
     ai_profile_selections: TaskAiProfileSelections | None = None
+
+    @model_validator(mode="after")
+    def _merge_capabilities(self) -> "CreateProjectRequest":
+        # Always normalize to a per-task map before the router reads
+        # the request. ``task_capabilities_map(None)`` returns empty
+        # defaults for every task type.
+        if self.capabilities_per_task is None and self.capabilities is not None:
+            self.capabilities_per_task = task_capabilities_map(
+                {"explore": self.capabilities.model_dump()}
+            )
+        if self.capabilities_per_task is None:
+            self.capabilities_per_task = task_capabilities_map(None)
+        return self
 
     @field_validator("title", "origin", "goal", "role_id")
     @classmethod
@@ -284,6 +307,10 @@ class ReplayRunCreateRequest(BaseModel):
     origin: str
     goal: str
     hints: list[CreateHintInline] | None = None
+    # Replay's per-task capability selection. When omitted the router
+    # reuses the source project's existing snapshot rows so the
+    # replay is functionally identical to the original run.
+    capabilities_per_task: TaskCapabilitiesMap | None = None
     capabilities: CapabilitySelection | None = None
     role_id: str | None = None
     ai_profile_selections: TaskAiProfileSelections | None = None

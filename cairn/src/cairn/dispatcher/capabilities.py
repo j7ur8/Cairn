@@ -68,7 +68,14 @@ def inject_project_capabilities(
     if not selection_data:
         return CapabilityInjection("", "no capability selection available", [], [], [], WorkerExecutionContext())
 
-    selection = selection_data.get("selection") if isinstance(selection_data.get("selection"), dict) else {}
+    # Newer server builds return a per-task map. Older clients still
+    # send a flat ``selection`` block; fall back to that so legacy
+    # replay data keeps working.
+    per_task = selection_data.get("per_task") if isinstance(selection_data.get("per_task"), dict) else None
+    if per_task and isinstance(per_task.get(task_type), dict):
+        selection = per_task[task_type]
+    else:
+        selection = selection_data.get("selection") if isinstance(selection_data.get("selection"), dict) else {}
     selected_mcp = _string_list(selection.get("mcp_server_ids"))
     selected_skills = _string_list(selection.get("skill_ids"))
     mcp_by_id = {item.id: item for item in config.capabilities.mcp_servers}

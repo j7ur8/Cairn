@@ -25,6 +25,13 @@ from cairn.server.models import (
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
+from cairn.server.capabilities_service import (
+    expand_task_capabilities,
+    get_catalog_map,
+    persist_project_capabilities_per_task,
+    persist_probe_result,
+    probe_per_task,
+)
 from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
 from cairn.server.services import (
     build_intents,
@@ -144,23 +151,18 @@ def create_project(body: CreateProjectRequest):
                 )
                 hints.append(Hint(id=hid, content=h.content, creator=h.creator, created_at=now))
 
-        if body.capabilities is not None:
-            for capability_id in body.capabilities.mcp_server_ids:
-                conn.execute(
-                    """
-                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                    VALUES (?, 'mcp_server', ?, ?)
-                    """,
-                    (pid, capability_id, now),
-                )
-            for capability_id in body.capabilities.skill_ids:
-                conn.execute(
-                    """
-                    INSERT INTO project_capabilities (project_id, kind, capability_id, created_at)
-                    VALUES (?, 'skill', ?, ?)
-                    """,
-                    (pid, capability_id, now),
-                )
+        catalog_map = get_catalog_map(conn)
+        expanded_per_task, _expand_warnings = expand_task_capabilities(
+            body.capabilities_per_task, catalog_map,
+        )
+        persist_project_capabilities_per_task(conn, pid, expanded_per_task, now)
+        # Probe every chosen capability right after the project is
+        # created so the operator can see red/yellow status before the
+        # dispatcher has a chance to fail at task-launch time. The
+        # probe never blocks project creation; results land in the
+        # catalog row for the UI.
+        health_per_task = probe_per_task(conn, expanded_per_task, catalog_map)
+        persist_probe_result(conn, health_per_task)
 
         role_id = body.role.role_id if body.role is not None else body.role_id
         if role_id:
