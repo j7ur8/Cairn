@@ -159,6 +159,9 @@ class DispatcherLeader:
         return True
 
     def current_holder(self) -> str | None:
+        return self._with_sqlite_retry("current_holder", self._current_holder_once)
+
+    def _current_holder_once(self) -> str | None:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT holder FROM dispatcher_locks WHERE name = ?",
@@ -167,6 +170,9 @@ class DispatcherLeader:
         return row["holder"] if row else None
 
     def is_expired(self) -> bool:
+        return self._with_sqlite_retry("is_expired", self._is_expired_once)
+
+    def _is_expired_once(self) -> bool:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT heartbeat_at FROM dispatcher_locks WHERE name = ? AND holder = ?",

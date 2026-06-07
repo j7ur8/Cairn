@@ -155,7 +155,7 @@ class ObservabilityDbTests(unittest.TestCase):
     def test_status_and_checkpoint_include_sqlite_diagnostics(self) -> None:
         status = self.db.sqlite_status()
         self.assertEqual(status["quick_check"], ["ok"])
-        self.assertIn("wal_checkpoint", status)
+        self.assertNotIn("wal_checkpoint", status)
         self.assertIn("wal_size_bytes", status)
         self.assertIn("shm_size_bytes", status)
         result = self.db.checkpoint_truncate()

@@ -152,10 +152,23 @@ erDiagram
 | `SCHEMA` | 初始化 settings/projects/facts/intents/intent_sources/hints/counters |
 | `configure(path)` | 设置数据库路径并执行 schema |
 | `get_conn()` | SQLite 连接上下文，开启 WAL 和 foreign keys |
+| `sqlite_status()` | 输出 DB/WAL/SHM 文件状态、journal mode、busy timeout、quick_check 与迁移状态，不执行 checkpoint |
+| `checkpoint_truncate()` | 显式执行 `PRAGMA wal_checkpoint(TRUNCATE)`，供 `cairn db checkpoint` 使用 |
+| `diagnostic_error()` | 将 SQLite DatabaseError 渲染为带 DB/WAL/SHM 状态的诊断文本 |
 
 重要细节：
 
 >>⚠️ 注意：`configure()` 一旦 `_db_path` 已设置就直接 return。测试或多实例场景中，如果同一 Python 进程想切换 DB path，需要额外处理。
+
+SQLite 运行补强：
+
+```text
+Dispatcher 启动前会对主库执行 quick_check；leader lock 相关 acquire/heartbeat/check_health/current_holder/is_expired 遇到 SQLite 瞬态错误会关闭 thread-local connection 并短退避重试。
+Server /health 捕获 sqlite3.DatabaseError，返回 503 degraded 和 diagnostic_error。
+Dispatcher /healthz 捕获 leader 状态回调异常，仍返回 HTTP 200，但 JSON status=degraded，避免 Docker healthcheck 因一次 DB 瞬态读失败重启 dispatcher。
+状态查询不再执行 wal_checkpoint；checkpoint 必须通过显式 `cairn db checkpoint` 触发。
+不要在 Server 或 Dispatcher 运行时手动删除 `cairn.db-wal` / `cairn.db-shm`。
+```
 
 ### `server/observability/*`
 

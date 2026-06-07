@@ -9,6 +9,32 @@
 
 # Cairn 更新记录
 
+## 2026-06-07 · SQLite health/status 降级与无副作用状态查询（已完成）
+
+### 背景
+
+在补强 SQLite 诊断后继续审查发现三条运行风险：Dispatcher `/healthz` 会直接调用 leader DB 查询，SQLite/WAL 瞬态异常可能让 Docker healthcheck 误判；Server `/health` 遇到 DB 异常会抛 500/连接失败而非可诊断 degraded；`db status` 内部执行 `wal_checkpoint(PASSIVE)`，状态查询存在副作用。
+
+### 已完成变更
+
+- `dispatcher.health_server.DispatcherHealthState.payload()` 对 `is_leader`、`current_holder`、`last_tick_at` 回调逐项捕获异常；异常时仍返回 HTTP 200 JSON，`status=degraded` 并附带 `errors`，避免一次 SQLite 瞬态读失败触发 dispatcher 容器重启。
+- `dispatcher.leadership.DispatcherLeader.current_holder()` 与 `is_expired()` 接入现有 SQLite transient retry，和 `acquire()`、`heartbeat()`、`check_health()` 保持一致。
+- Server `/health` 捕获 `sqlite3.DatabaseError`，返回 HTTP 503 `{"status":"degraded","database_error":"..."}`，错误信息带 DB/WAL/SHM 诊断状态。
+- `server.db.sqlite_status()` 与 `server.observability.db.sqlite_status()` 移除 `PRAGMA wal_checkpoint(PASSIVE)`；状态查询只保留文件状态、journal mode、busy timeout、quick_check 和业务计数/迁移信息。
+- 显式 checkpoint 仍由 `cairn db checkpoint` 执行 `PRAGMA wal_checkpoint(TRUNCATE)`，保持运维动作可控。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run --with pytest pytest tests/test_mcp_http_transport.py tests/test_capability_manifest.py tests/test_capability_admin.py tests/test_task_type_registry.py tests/test_reason_state.py tests/test_db_hardening.py tests/test_observability.py tests/test_dispatcher_leader.py tests/test_leader_step_down.py tests/test_dispatcher_health.py tests/test_static_cache.py`
+- `git diff --check`
+
+### 未完成事项/风险
+
+- `/healthz` 采用进程存活优先策略，SQLite 回调异常时仍返回 HTTP 200；外部监控如需区分退化状态，应读取 JSON 的 `status` 字段。
+- `reason` 阶段是否允许 MCP 仍由用户选择决定，本次未限制 reason MCP probe 或执行能力。
+
 ## 2026-06-05 · AI Profile 多模型下拉与 reasoning_type（已完成）
 
 ### 背景

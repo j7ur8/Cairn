@@ -1,5 +1,7 @@
 import asyncio
 import os
+import json
+import sqlite3
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -180,18 +182,31 @@ def metrics() -> Response:
 
 @app.get("/health", include_in_schema=False)
 def health() -> Response:
-    with db.get_conn() as conn:
-        row = conn.execute(
-            "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    if row is not None:
-        body = (
-            "{"
-            f"\"status\":\"degraded\","
-            f"\"migration_error\":{{\"version\":\"{row['version']}\",\"occurred_at\":\"{row['occurred_at']}\"}}"
-            "}"
+    try:
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.DatabaseError as exc:
+        body = {
+            "status": "degraded",
+            "database_error": db.diagnostic_error(exc),
+        }
+        return Response(
+            content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+            status_code=503,
+            media_type="application/json",
         )
-        return Response(content=body, status_code=503, media_type="application/json")
+    if row is not None:
+        body = {
+            "status": "degraded",
+            "migration_error": {"version": row["version"], "occurred_at": row["occurred_at"]},
+        }
+        return Response(
+            content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+            status_code=503,
+            media_type="application/json",
+        )
     return Response(content='{"status":"ok"}', media_type="application/json")
 
 app.include_router(auth.router)

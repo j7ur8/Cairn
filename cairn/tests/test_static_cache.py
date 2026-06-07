@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import contextmanager
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -64,6 +67,22 @@ class StaticCacheTests(unittest.TestCase):
         self.assertEqual(r.status_code, 503)
         self.assertEqual(r.json()["status"], "degraded")
         self.assertEqual(r.json()["migration_error"]["version"], "v_bad")
+
+    def test_health_reports_database_errors_as_degraded(self) -> None:
+        from fastapi.testclient import TestClient
+        from cairn.server.app import app
+
+        @contextmanager
+        def broken_get_conn():
+            raise sqlite3.DatabaseError("database disk image is malformed")
+            yield
+
+        with patch("cairn.server.app.db.get_conn", broken_get_conn), TestClient(app) as client:
+            r = client.get("/health")
+        self.assertEqual(r.status_code, 503)
+        body = r.json()
+        self.assertEqual(body["status"], "degraded")
+        self.assertIn("database disk image is malformed", body["database_error"])
 
 
 if __name__ == "__main__":

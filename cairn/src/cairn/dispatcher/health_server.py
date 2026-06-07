@@ -27,13 +27,31 @@ class DispatcherHealthState:
     last_tick_at: Callable[[], float | None]
 
     def payload(self) -> dict[str, object]:
-        last_tick = self.last_tick_at()
-        return {
-            "status": "ok",
-            "is_leader": self.is_leader(),
-            "current_holder": self.current_holder(),
+        errors: list[str] = []
+        try:
+            last_tick = self.last_tick_at()
+        except Exception as exc:  # noqa: BLE001 - health endpoint must not crash
+            last_tick = None
+            errors.append(f"last_tick_at: {type(exc).__name__}: {exc}")
+        try:
+            is_leader = self.is_leader()
+        except Exception as exc:  # noqa: BLE001 - health endpoint must not crash
+            is_leader = False
+            errors.append(f"is_leader: {type(exc).__name__}: {exc}")
+        try:
+            current_holder = self.current_holder()
+        except Exception as exc:  # noqa: BLE001 - health endpoint must not crash
+            current_holder = None
+            errors.append(f"current_holder: {type(exc).__name__}: {exc}")
+        payload: dict[str, object] = {
+            "status": "degraded" if errors else "ok",
+            "is_leader": is_leader,
+            "current_holder": current_holder,
             "last_tick_age": None if last_tick is None else max(0.0, time.time() - last_tick),
         }
+        if errors:
+            payload["errors"] = errors
+        return payload
 
 
 class DispatcherHealthServer:

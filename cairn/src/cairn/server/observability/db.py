@@ -10,7 +10,6 @@ from typing import Any, Generator
 from cairn.server.sqlite_diagnostics import (
     database_error_detail,
     file_state,
-    passive_checkpoint,
     quick_check as run_quick_check,
     truncate_checkpoint,
 )
@@ -86,14 +85,12 @@ def sqlite_status() -> dict[str, Any]:
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
         quick = run_quick_check(conn)
-        checkpoint = passive_checkpoint(conn)
         execution_count = conn.execute("SELECT COUNT(*) AS count FROM llm_executions").fetchone()["count"]
         event_count = conn.execute("SELECT COUNT(*) AS count FROM llm_execution_events").fetchone()["count"]
     status = {
         "journal_mode": journal_mode,
         "busy_timeout_ms": busy_timeout,
         "quick_check": quick,
-        "wal_checkpoint": checkpoint,
         "execution_count": execution_count,
         "event_count": event_count,
     }

@@ -116,6 +116,48 @@ class DispatcherLeaderTests(unittest.TestCase):
         self.assertIn("wal_exists=", message)
         self.assertIn("cairn db diagnose", message)
 
+    def test_current_holder_retries_transient_sqlite_database_error(self) -> None:
+        import sqlite3
+        from cairn.dispatcher.leadership import DispatcherLeader
+
+        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        self.assertTrue(leader.acquire())
+        real_get_conn = self.db.get_conn
+        calls = {"count": 0}
+
+        @contextmanager
+        def flaky_get_conn():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            with real_get_conn() as conn:
+                yield conn
+
+        with patch("cairn.dispatcher.leadership.get_conn", flaky_get_conn), patch("time.sleep"):
+            self.assertEqual(leader.current_holder(), "a")
+        self.assertEqual(calls["count"], 2)
+
+    def test_is_expired_retries_transient_sqlite_database_error(self) -> None:
+        import sqlite3
+        from cairn.dispatcher.leadership import DispatcherLeader
+
+        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        self.assertTrue(leader.acquire())
+        real_get_conn = self.db.get_conn
+        calls = {"count": 0}
+
+        @contextmanager
+        def flaky_get_conn():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            with real_get_conn() as conn:
+                yield conn
+
+        with patch("cairn.dispatcher.leadership.get_conn", flaky_get_conn), patch("time.sleep"):
+            self.assertFalse(leader.is_expired())
+        self.assertEqual(calls["count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

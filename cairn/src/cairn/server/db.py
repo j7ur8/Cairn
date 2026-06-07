@@ -11,7 +11,6 @@ from typing import Any, Generator
 from cairn.server.sqlite_diagnostics import (
     database_error_detail,
     file_state,
-    passive_checkpoint,
     quick_check as run_quick_check,
     truncate_checkpoint,
 )
@@ -644,7 +643,6 @@ def sqlite_status() -> dict[str, Any]:
         busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
         foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
         quick = run_quick_check(conn)
-        checkpoint = passive_checkpoint(conn)
         migration_error = conn.execute(
             "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -654,7 +652,6 @@ def sqlite_status() -> dict[str, Any]:
         "busy_timeout_ms": busy_timeout,
         "foreign_keys": bool(foreign_keys),
         "quick_check": quick,
-        "wal_checkpoint": checkpoint,
         "applied_migrations": applied_count,
         "migration_error": dict(migration_error) if migration_error is not None else None,
     }

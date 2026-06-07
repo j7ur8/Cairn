@@ -276,7 +276,7 @@ class DbHardeningTests(unittest.TestCase):
     def test_sqlite_status_includes_quick_check_and_file_state(self) -> None:
         status = self.db.sqlite_status()
         self.assertEqual(status["quick_check"], ["ok"])
-        self.assertIn("wal_checkpoint", status)
+        self.assertNotIn("wal_checkpoint", status)
         self.assertIn("wal_size_bytes", status)
         self.assertIn("shm_size_bytes", status)
         self.assertIn("mtime", status)
