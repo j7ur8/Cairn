@@ -244,8 +244,9 @@ def register_builtin_catalog(
             """
             INSERT OR REPLACE INTO capability_catalog (
                 kind, id, name, description, task_types, available, detail,
-                source, requires_ids, probe_config, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', '[]', '{}', ?)
+                source, requires_ids, probe_config, updated_at,
+                source_path, transport, command, args, url, bearer_token_env, headers
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 kind, cid,
@@ -254,7 +255,15 @@ def register_builtin_catalog(
                 json.dumps(item.get("task_types", []), ensure_ascii=False),
                 1 if item.get("available", True) else 0,
                 item.get("detail", ""),
+                json.dumps(item.get("requires_ids", []), ensure_ascii=False),
                 now,
+                item.get("source_path"),
+                item.get("transport"),
+                item.get("command"),
+                json.dumps(item.get("args", []), ensure_ascii=False),
+                item.get("url"),
+                item.get("bearer_token_env"),
+                json.dumps(item.get("headers", {}), ensure_ascii=False),
             ),
         )
     return list_catalog(conn)
@@ -498,15 +507,26 @@ def _probe_mcp(entry: _CatalogEntry) -> CapabilityHealthEntry:
             return CapabilityHealthEntry(
                 capability_id=entry.item.id, status="error", message=str(exc),
             )
-    if entry.transport == "stdio" and entry.source_path:
-        path = Path(entry.source_path)
-        if not path.exists():
+    if entry.transport == "stdio" or (
+        (entry.transport is None or entry.transport == "")
+        and (entry.source_path or entry.command)
+    ):
+        if entry.source_path:
+            path = Path(entry.source_path)
+            if not path.exists():
+                return CapabilityHealthEntry(
+                    capability_id=entry.item.id, status="error",
+                    message=f"stdio path missing: {path}",
+                )
             return CapabilityHealthEntry(
-                capability_id=entry.item.id, status="error",
-                message=f"stdio path missing: {path}",
+                capability_id=entry.item.id, status="ok", message="stdio path present",
+            )
+        if entry.command:
+            return CapabilityHealthEntry(
+                capability_id=entry.item.id, status="ok", message="stdio command configured",
             )
         return CapabilityHealthEntry(
-            capability_id=entry.item.id, status="ok", message="stdio path present",
+            capability_id=entry.item.id, status="warn", message="no probe config"
         )
     return CapabilityHealthEntry(
         capability_id=entry.item.id, status="warn", message="no probe config"

@@ -32,6 +32,7 @@ from cairn.server.models import (
     ProjectAiProfileSnapshot,
     ProjectAiProfilesResponse,
     TaskAiProfileSelections,
+    canonical_auth_env,
     auth_env_warning,
 )
 
@@ -71,6 +72,7 @@ def _profile_select_sql(where: str = "", order_by: str = "p.created_at DESC, p.i
 
 def _row_to_profile(row: sqlite3.Row) -> AiProfile:
     model_list = _parse_models(row["models"] if "models" in row.keys() else None, fallback=row["model"])
+    api_key_env = canonical_auth_env(row["worker_type"]) or row["api_key_env"]
     return AiProfile(
         id=row["id"],
         name=row["name"],
@@ -79,12 +81,12 @@ def _row_to_profile(row: sqlite3.Row) -> AiProfile:
         provider=row["provider"],
         base_url=row["base_url"],
         model=row["model"],
-        api_key_env=row["api_key_env"],
+        api_key_env=api_key_env,
         available=bool(row["available"]),
         detail=row["detail"],
         healthcheck_timeout=row["healthcheck_timeout"] or 1.0,
         model_reasoning_effort=row["model_reasoning_effort"] if "model_reasoning_effort" in row.keys() else None,
-        warnings=_compute_warnings(row["worker_type"], row["api_key_env"]),
+        warnings=_compute_warnings(row["worker_type"], api_key_env),
         seeded_from_worker=row["seeded_from_worker"],
         last_health_ok=bool(row["last_health_ok"]) if row["last_health_ok"] is not None else None,
         last_health_message=row["last_health_message"] or "",
@@ -123,6 +125,10 @@ def _resolve_sk_from_row(row: sqlite3.Row) -> str:
 def _compute_warnings(worker_type: str, api_key_env: str) -> list[str]:
     warning = auth_env_warning(worker_type, api_key_env)
     return [warning] if warning else []
+
+
+def _normalized_api_key_env(worker_type: str, api_key_env: str | None = None) -> str:
+    return canonical_auth_env(worker_type) or (api_key_env or "").strip()
 
 
 def _replace_profile_models(conn: sqlite3.Connection, profile_id: str, default_model: str, models: Iterable[str], now: str) -> None:
@@ -164,6 +170,7 @@ def list_ai_profiles():
 def create_ai_profile(body: AiProfileCreate):
     pid = _new_profile_id()
     now = _utcnow()
+    api_key_env = _normalized_api_key_env(body.worker_type, body.api_key_env)
     with get_conn() as conn:
         conn.execute(
             """
@@ -176,7 +183,7 @@ def create_ai_profile(body: AiProfileCreate):
             """,
             (
                 pid, body.name, body.description, body.worker_type,
-                body.provider, body.base_url, body.model, body.api_key_env,
+                body.provider, body.base_url, body.model, api_key_env,
                 1 if body.available else 0, body.detail,
                 body.healthcheck_timeout, body.model_reasoning_effort,
                 # Legacy plaintext column is left empty: read path
@@ -249,12 +256,14 @@ def update_ai_profile(profile_id: str, body: AiProfileUpdate):
         updates: dict[str, object] = {}
         for field in (
             "name", "description", "worker_type", "provider", "base_url",
-            "model", "api_key_env", "detail", "healthcheck_timeout",
+            "model", "detail", "healthcheck_timeout",
             "model_reasoning_effort",
         ):
             value = getattr(body, field)
             if value is not None:
                 updates[field] = value
+        next_worker_type = str(updates.get("worker_type", row["worker_type"]))
+        updates["api_key_env"] = _normalized_api_key_env(next_worker_type, body.api_key_env or row["api_key_env"])
         if body.available is not None:
             updates["available"] = 1 if body.available else 0
         if body.sk is not None:
@@ -331,7 +340,8 @@ def sync_ai_profiles(body: AiProfileSyncRequest):
                 "SELECT id, created_at FROM ai_profiles WHERE id = ? OR seeded_from_worker = ?",
                 (profile_id, worker.name),
             ).fetchone()
-            warnings = _compute_warnings(worker.worker_type, worker.api_key_env)
+            worker_api_key_env = _normalized_api_key_env(worker.worker_type, worker.api_key_env)
+            warnings = _compute_warnings(worker.worker_type, worker_api_key_env)
             # Dispatcher already resolved the token from its host env; we
             # capture it on insert. On update, only overwrite sk when the
             # payload carries a non-empty value, so a re-sync that ran
@@ -351,7 +361,7 @@ def sync_ai_profiles(body: AiProfileSyncRequest):
                     (
                         profile_id, worker.name, "",
                         worker.worker_type, worker.provider, worker.base_url,
-                        worker.model, worker.api_key_env, "",
+                        worker.model, worker_api_key_env, "",
                         worker.model_reasoning_effort, worker.name, "",
                         encrypt_secret(sk_value), now, now,
                     ),
@@ -370,7 +380,7 @@ def sync_ai_profiles(body: AiProfileSyncRequest):
                         """,
                         (
                             worker.name, worker.worker_type, worker.provider,
-                            worker.base_url, worker.model, worker.api_key_env,
+                            worker.base_url, worker.model, worker_api_key_env,
                             worker.model_reasoning_effort, worker.name,
                             "", encrypt_secret(sk_value), now, existing["id"],
                         ),
@@ -386,7 +396,7 @@ def sync_ai_profiles(body: AiProfileSyncRequest):
                         """,
                         (
                             worker.name, worker.worker_type, worker.provider,
-                            worker.base_url, worker.model, worker.api_key_env,
+                            worker.base_url, worker.model, worker_api_key_env,
                             worker.model_reasoning_effort, worker.name, now, existing["id"],
                         ),
                     )
@@ -765,7 +775,7 @@ def persist_project_ai_selections(
                     profile["base_url"],
                     _selected_model(conn, profile, selection),
                     selection.primary_reasoning_type or _selected_reasoning_type(profile),
-                    profile["api_key_env"], now,
+                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]), now,
                 ),
             )
         for position, profile_id in enumerate(selection.fallback_profile_ids):
@@ -787,7 +797,7 @@ def persist_project_ai_selections(
                     profile["name"], profile["worker_type"], profile["provider"],
                     profile["base_url"], profile["model"],
                     _selected_reasoning_type(profile),
-                    profile["api_key_env"], now,
+                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]), now,
                 ),
             )
 

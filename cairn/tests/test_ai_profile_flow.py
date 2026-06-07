@@ -56,6 +56,7 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertTrue(created.id.startswith("ai_"))
         self.assertEqual(created.worker_type, "codex")
         self.assertEqual(created.model, "deepseek-coder")
+        self.assertEqual(created.api_key_env, "OPENAI_API_KEY")
 
         self.assertEqual(len(list_ai_profiles()), 1)
 
@@ -124,7 +125,7 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertEqual(primary_snapshot.snapshot_model, "m1")
         self.assertEqual(primary_snapshot.snapshot_reasoning_type, "medium")
         self.assertEqual(primary_snapshot.snapshot_worker_type, "codex")
-        self.assertEqual(primary_snapshot.snapshot_api_key_env, "K1")
+        self.assertEqual(primary_snapshot.snapshot_api_key_env, "OPENAI_API_KEY")
 
     def test_persist_task_specific_project_selections_round_trip(self) -> None:
         from cairn.server.routers.ai_profiles import (
@@ -179,6 +180,10 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertEqual(result.selections.reason.primary_profile_id, reason.id)
         self.assertEqual(result.selections.reason.fallback_profile_ids, [boot.id])
         self.assertEqual({snap.task_type for snap in result.snapshots}, {"bootstrap", "explore", "reason"})
+        snapshot_envs = {snap.task_type: snap.snapshot_api_key_env for snap in result.snapshots if snap.role == "primary"}
+        self.assertEqual(snapshot_envs["bootstrap"], "OPENAI_API_KEY")
+        self.assertEqual(snapshot_envs["explore"], "OPENAI_API_KEY")
+        self.assertEqual(snapshot_envs["reason"], "ANTHROPIC_AUTH_TOKEN")
 
     def test_task_selection_uses_selected_model(self) -> None:
         from cairn.server.routers.ai_profiles import (

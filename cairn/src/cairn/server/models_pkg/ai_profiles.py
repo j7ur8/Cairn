@@ -31,8 +31,12 @@ CANONICAL_AUTH_ENV: dict[str, str] = {
 }
 
 
+def canonical_auth_env(worker_type: str) -> str:
+    return CANONICAL_AUTH_ENV.get(worker_type, "")
+
+
 def auth_env_warning(worker_type: str, api_key_env: str) -> str | None:
-    canonical = CANONICAL_AUTH_ENV.get(worker_type)
+    canonical = canonical_auth_env(worker_type)
     if canonical is None or not api_key_env:
         return None
     if api_key_env.strip() == canonical:
@@ -52,7 +56,7 @@ class AiProfileBase(BaseModel):
     provider: str = ""
     base_url: str = ""
     model: str
-    api_key_env: str
+    api_key_env: str = ""
     available: bool = True
     detail: str = ""
     healthcheck_timeout: float = 1.0
@@ -89,7 +93,7 @@ class AiProfileBase(BaseModel):
             return "***"
         return f"***{raw[-4:]}"
 
-    @field_validator("name", "model", "api_key_env")
+    @field_validator("name", "model")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         text = value.strip()
@@ -164,7 +168,7 @@ class AiProfileUpdate(BaseModel):
     # the PUT response never carries the raw value.
     sk: str | None = Field(default=None, exclude=True)
 
-    @field_validator("name", "model", "api_key_env")
+    @field_validator("name", "model")
     @classmethod
     def validate_required_text(cls, value: str | None) -> str | None:
         if value is None:

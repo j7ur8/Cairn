@@ -241,6 +241,60 @@ class CapabilityAdminTests(unittest.TestCase):
             entry = probe_capability(conn, "skill", "probe-skill")
         self.assertEqual(entry.status, "error")
 
+    def test_probe_stdio_command_without_source_path_is_not_false_warning(self) -> None:
+        from cairn.server.capabilities_service import (
+            probe_capability, upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="stdio-mcp", name="Stdio MCP", task_types=["explore"],
+                transport="stdio", command="/usr/local/bin/mcp-server",
+            ))
+        with self.db.get_conn() as conn:
+            entry = probe_capability(conn, "mcp_server", "stdio-mcp")
+        self.assertEqual(entry.status, "ok")
+        self.assertEqual(entry.message, "stdio command configured")
+
+    def test_register_builtin_catalog_persists_probe_fields(self) -> None:
+        from cairn.server.capabilities_service import (
+            get_catalog_map, register_builtin_catalog,
+        )
+        with self.db.get_conn() as conn:
+            register_builtin_catalog(conn, [
+                {
+                    "kind": "mcp_server",
+                    "id": "builtin-mcp",
+                    "name": "Builtin MCP",
+                    "description": "desc",
+                    "task_types": ["explore"],
+                    "available": True,
+                    "detail": "stdio",
+                    "transport": "stdio",
+                    "command": "/usr/local/bin/builtin-mcp",
+                    "args": ["--stdio"],
+                    "source_path": "/opt/capabilities/mcp",
+                },
+                {
+                    "kind": "skill",
+                    "id": "builtin-skill",
+                    "name": "Builtin Skill",
+                    "description": "desc",
+                    "task_types": ["explore"],
+                    "available": True,
+                    "detail": "directory",
+                    "source_path": "/opt/capabilities/skills/builtin-skill",
+                },
+            ])
+            catalog = get_catalog_map(conn)
+        mcp = catalog[("mcp_server", "builtin-mcp")].item
+        self.assertEqual(mcp.transport, "stdio")
+        self.assertEqual(mcp.command, "/usr/local/bin/builtin-mcp")
+        self.assertEqual(mcp.args, ["--stdio"])
+        self.assertEqual(mcp.source_path, "/opt/capabilities/mcp")
+        skill = catalog[("skill", "builtin-skill")].item
+        self.assertEqual(skill.source_path, "/opt/capabilities/skills/builtin-skill")
+
 
     def test_admin_catalog_includes_admin_fields(self) -> None:
         from cairn.server.capabilities_service import (

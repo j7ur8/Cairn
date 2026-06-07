@@ -7,6 +7,7 @@ os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-3
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -78,6 +79,42 @@ class CapabilityManifestTests(unittest.TestCase):
         self.assertEqual(payload["mcp_servers"], [])
         self.assertEqual(payload["skills"], [])
         self.assertIn("no capability selection available", payload["summary"])
+
+    def test_dispatcher_catalog_payload_carries_probe_fields(self) -> None:
+        from cairn.dispatcher.capabilities import catalog_payload
+        from cairn.dispatcher.config import (
+            McpServerCapabilityConfig, SkillCapabilityConfig,
+        )
+        config = SimpleNamespace(
+            capabilities=SimpleNamespace(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="kali-server-mcp",
+                        name="Kali",
+                        command="/usr/local/bin/kali-mcp-stdio",
+                        args=["--stdio"],
+                        task_types=["explore"],
+                    )
+                ],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="cypher-ctf",
+                        name="Cypher CTF",
+                        source_path="/cairn/capabilities/skills/cypher-ctf",
+                        task_types=["explore"],
+                    )
+                ],
+            )
+        )
+
+        payload = catalog_payload(config)
+        mcp = next(item for item in payload if item["kind"] == "mcp_server")
+        skill = next(item for item in payload if item["kind"] == "skill")
+        self.assertEqual(mcp["transport"], "stdio")
+        self.assertEqual(mcp["command"], "/usr/local/bin/kali-mcp-stdio")
+        self.assertEqual(mcp["args"], ["--stdio"])
+        self.assertIn("source_path", mcp)
+        self.assertEqual(skill["source_path"], "/cairn/capabilities/skills/cypher-ctf")
 
 
 if __name__ == "__main__":

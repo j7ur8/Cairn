@@ -7,11 +7,13 @@ import re
 import socket
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cairn.dispatcher.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+if TYPE_CHECKING:
+    from cairn.dispatcher.runtime.containers import ContainerManager
 
 CAPABILITY_ROOT = "/tmp/cairn-capabilities"
 LOG = logging.getLogger(__name__)
@@ -39,6 +41,13 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "task_types": item.task_types,
                 "available": True,
                 "detail": item.transport,
+                "source_path": item.source_path,
+                "transport": item.transport,
+                "command": item.command,
+                "args": list(item.args),
+                "url": item.url,
+                "bearer_token_env": item.bearer_token_env,
+                "headers": {},
             }
         )
     for item in config.capabilities.skills:
@@ -51,6 +60,7 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "task_types": item.task_types,
                 "available": True,
                 "detail": "directory",
+                "source_path": item.source_path,
             }
         )
     return payload

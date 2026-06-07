@@ -96,5 +96,6 @@ from cairn.server.models_pkg.ai_profiles import (  # noqa: F401
     ProjectAiProfileSnapshot,
     ProjectAiProfilesResponse,
     TaskAiProfileSelections,
+    canonical_auth_env,
     auth_env_warning,
 )

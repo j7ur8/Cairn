@@ -842,27 +842,27 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertTrue(row.available)
         self.assertTrue(row.last_health_ok)
 
-    def test_auth_var_warning_on_create(self) -> None:
+    def test_auth_var_is_canonicalized_on_create(self) -> None:
         from cairn.server.routers.ai_profiles import create_ai_profile
         from cairn.server.models import AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
         ))
-        self.assertEqual(len(created.warnings), 1)
-        self.assertIn("OPENAI_API_KEY", created.warnings[0])
+        self.assertEqual(created.api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(created.warnings, [])
 
-    def test_canonical_auth_clears_warning(self) -> None:
+    def test_update_keeps_canonical_auth_env(self) -> None:
         from cairn.server.routers.ai_profiles import create_ai_profile, update_ai_profile
         from cairn.server.models import AiProfileCreate, AiProfileUpdate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
         ))
-        self.assertEqual(len(created.warnings), 1)
         updated = update_ai_profile(
-            created.id, AiProfileUpdate(api_key_env="OPENAI_API_KEY"),
+            created.id, AiProfileUpdate(api_key_env="DEEPSEEK_KEY"),
         )
+        self.assertEqual(updated.api_key_env, "OPENAI_API_KEY")
         self.assertEqual(updated.warnings, [])
 
     def test_healthcheck_timeout_bounds(self) -> None:
