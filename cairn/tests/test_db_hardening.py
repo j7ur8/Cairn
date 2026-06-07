@@ -243,6 +243,36 @@ class DbHardeningTests(unittest.TestCase):
         self.assertEqual(row["version"], sentinel[0])
         self.assertIn("syntax", row["error"].lower())
 
+    def test_open_conn_falls_back_to_delete_when_wal_setup_fails(self) -> None:
+        from cairn.server import db as server_db
+
+        original_connect = server_db.sqlite3.connect
+
+        class ProxyConnection:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def execute(self, sql, *args):
+                if sql == "PRAGMA journal_mode=WAL":
+                    raise sqlite3.DatabaseError("disk I/O error")
+                return self._inner.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def fake_connect(*args, **kwargs):
+            return ProxyConnection(original_connect(*args, **kwargs))
+
+        server_db.close_thread_conn()
+        server_db.sqlite3.connect = fake_connect  # type: ignore[assignment]
+        try:
+            with self.db.get_conn() as conn:
+                mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+                self.assertEqual(mode.lower(), "delete")
+        finally:
+            server_db.sqlite3.connect = original_connect  # type: ignore[assignment]
+            server_db.close_thread_conn()
+
 
 if __name__ == "__main__":
     unittest.main()

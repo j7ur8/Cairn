@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -89,6 +90,42 @@ class LeaderStepDownTests(unittest.TestCase):
         # Lock must be released; b can grab it.
         with b.acquired(retry_interval=0.01):
             self.assertTrue(b.is_leader)
+
+    def test_startup_sequence_heartbeats_between_long_steps(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop._startup_healthchecks_checked = False
+        loop._settings_checked = False
+        loop._capability_catalog_registered = False
+        loop._role_catalog_registered = False
+        loop._ai_catalog_synced = False
+        loop.futures = {}
+        loop.cleanup_futures = {}
+        loop.client = MagicMock()
+        loop.client.list_projects.return_value = []
+        loop.reason_checkpoints = {}
+        loop.runtime_project_ids = set()
+        loop.worker_unhealthy_until = {}
+        loop.config = type("Cfg", (), {"runtime": type("Runtime", (), {"interval": 1})()})()
+        loop.leader = MagicMock()
+        loop._reap_futures = MagicMock()
+        loop._reap_cleanup_futures = MagicMock()
+        loop._initialize_reason_checkpoints = MagicMock()
+        loop._refresh_runtime_projects = MagicMock()
+        loop._cancel_inactive_tasks = MagicMock()
+        loop._queue_container_cleanups = MagicMock()
+        loop._dispatch_available = MagicMock()
+        loop._publish_tick_metrics = MagicMock()
+        loop.run_startup_healthchecks = MagicMock()
+        loop._validate_server_settings = MagicMock()
+        loop._register_capability_catalog = MagicMock()
+        loop._register_role_catalog = MagicMock()
+        loop._sync_ai_catalog_from_dispatch_yaml = MagicMock()
+
+        DispatcherLoop._run_leader_iteration(loop, once=True)
+
+        self.assertGreaterEqual(loop.leader.heartbeat.call_count, 5)
 
 
 if __name__ == "__main__":

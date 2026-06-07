@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -10,6 +11,8 @@ from typing import Any, Generator
 DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
 SQLITE_TIMEOUT_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_MS = 5000
+
+LOG = logging.getLogger(__name__)
 
 _db_path: Path | None = None
 _local = threading.local()
@@ -603,7 +606,23 @@ def _open_conn() -> sqlite3.Connection:
     assert _db_path is not None
     conn = sqlite3.connect(str(_db_path), timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.DatabaseError as exc:
+        lower = str(exc).lower()
+        if "file is not a database" not in lower and "disk i/o error" not in lower:
+            conn.close()
+            raise
+        wal_path = Path(f"{_db_path}-wal")
+        shm_path = Path(f"{_db_path}-shm")
+        LOG.warning(
+            "sqlite wal setup failed path=%s error=%s wal_exists=%s shm_exists=%s; falling back to DELETE journal mode",
+            _db_path,
+            exc,
+            wal_path.exists(),
+            shm_path.exists(),
+        )
+        conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn

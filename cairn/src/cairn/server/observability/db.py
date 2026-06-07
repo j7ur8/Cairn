@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -9,6 +10,7 @@ from typing import Any, Generator
 DEFAULT_OBSERVABILITY_DB = Path.home() / ".local" / "share" / "cairn" / "cairn_observability.db"
 
 _db_path: Path | None = None
+LOG = logging.getLogger(__name__)
 
 SCHEMA = """\
 CREATE TABLE IF NOT EXISTS llm_executions (
@@ -121,7 +123,23 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
     assert _db_path is not None
     conn = sqlite3.connect(str(_db_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.DatabaseError as exc:
+        lower = str(exc).lower()
+        if "file is not a database" not in lower and "disk i/o error" not in lower:
+            conn.close()
+            raise
+        wal_path = Path(f"{_db_path}-wal")
+        shm_path = Path(f"{_db_path}-shm")
+        LOG.warning(
+            "observability sqlite wal setup failed path=%s error=%s wal_exists=%s shm_exists=%s; falling back to DELETE journal mode",
+            _db_path,
+            exc,
+            wal_path.exists(),
+            shm_path.exists(),
+        )
+        conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn

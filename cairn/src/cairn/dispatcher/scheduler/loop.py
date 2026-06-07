@@ -200,18 +200,23 @@ class DispatcherLoop:
         """One tick of work performed under the leader lock."""
         if not self._startup_healthchecks_checked:
             self.run_startup_healthchecks()
+            self.leader.heartbeat()
         if not self._settings_checked:
             self._validate_server_settings()
             self._settings_checked = True
+            self.leader.heartbeat()
         if not self._capability_catalog_registered:
             self._register_capability_catalog()
             self._capability_catalog_registered = True
+            self.leader.heartbeat()
         if not self._role_catalog_registered:
             self._register_role_catalog()
             self._role_catalog_registered = True
+            self.leader.heartbeat()
         if not self._ai_catalog_synced:
             self._sync_ai_catalog_from_dispatch_yaml()
             self._ai_catalog_synced = True
+            self.leader.heartbeat()
         self._reap_futures()
         self._reap_cleanup_futures()
         summaries = self.client.list_projects()
