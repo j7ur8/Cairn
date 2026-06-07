@@ -21,6 +21,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from cairn.dispatcher.scheduler.project_cache import ProjectCaches
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -182,53 +183,58 @@ class ResolverCacheTests(unittest.TestCase):
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {}
+        loop.project_caches = ProjectCaches()
+        loop._ai_overlay_cache = MagicMock()
         project = self._make_project()
         # Bind the real method onto the spec'd instance
         DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIn("p1", loop._project_proxy_cache)
-        self.assertIsNone(loop._project_proxy_cache["p1"])
+        self.assertIn("p1", loop.project_caches.proxy)
+        self.assertIsNone(loop.project_caches.proxy["p1"])
 
     def test_resolve_fetches_proxy_when_proxy_summary_present(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {}
+        loop.project_caches = ProjectCaches()
+        loop._ai_overlay_cache = MagicMock()
         loop.client = MagicMock()
         loop.client.get_proxy.return_value = _make_proxy()
         project = self._make_project(proxy=self._make_proxy_summary("px1"))
         DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertEqual(loop._project_proxy_cache["p1"].id, "proxy_abc")
+        self.assertEqual(loop.project_caches.proxy["p1"].id, "proxy_abc")
         loop.client.get_proxy.assert_called_once_with("px1")
 
     def test_resolve_lookup_error_falls_back_to_none(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {}
+        loop.project_caches = ProjectCaches()
+        loop._ai_overlay_cache = MagicMock()
         loop.client = MagicMock()
         loop.client.get_proxy.side_effect = LookupError("not found")
         project = self._make_project(proxy=self._make_proxy_summary("px_missing"))
         DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIsNone(loop._project_proxy_cache["p1"])
+        self.assertIsNone(loop.project_caches.proxy["p1"])
 
     def test_resolve_request_exception_falls_back_to_none(self) -> None:
         import requests
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {}
+        loop.project_caches = ProjectCaches()
+        loop._ai_overlay_cache = MagicMock()
         loop.client = MagicMock()
         loop.client.get_proxy.side_effect = requests.RequestException("boom")
         project = self._make_project(proxy=self._make_proxy_summary("px_err"))
         DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIsNone(loop._project_proxy_cache["p1"])
+        self.assertIsNone(loop.project_caches.proxy["p1"])
 
     def test_resolve_refetches_on_every_call(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {}
+        loop.project_caches = ProjectCaches()
+        loop._ai_overlay_cache = MagicMock()
         loop.client = MagicMock()
         loop.client.get_proxy.return_value = _make_proxy()
         project = self._make_project(proxy=self._make_proxy_summary("px1"))
@@ -246,7 +252,8 @@ class ResolverCacheTests(unittest.TestCase):
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {"p1": _make_proxy()}
+        loop.project_caches = ProjectCaches()
+        loop.project_caches.proxy = {"p1": _make_proxy()}
         # Real method bound to the spec
         result = DispatcherLoop._resolve_proxy_env(loop, ContainerManager._STARTUP_PROJECT_ID)
         self.assertIsNone(result)
@@ -255,7 +262,8 @@ class ResolverCacheTests(unittest.TestCase):
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = MagicMock(spec=DispatcherLoop)
-        loop._project_proxy_cache = {"p1": _make_proxy()}
+        loop.project_caches = ProjectCaches()
+        loop.project_caches.proxy = {"p1": _make_proxy()}
         result = DispatcherLoop._resolve_proxy_env(loop, "p1")
         self.assertIsNotNone(result)
         self.assertIn("ALL_PROXY", result)

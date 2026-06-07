@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
 SQLITE_TIMEOUT_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 _db_path: Path | None = None
+_local = threading.local()
 
 SCHEMA = """\
 CREATE TABLE IF NOT EXISTS settings (
@@ -179,9 +182,24 @@ CREATE TABLE IF NOT EXISTS project_reason_state (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ai_profile_models (
+    profile_id TEXT NOT NULL REFERENCES ai_profiles(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, model)
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS migration_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version TEXT NOT NULL,
+    sql TEXT NOT NULL,
+    error TEXT NOT NULL,
+    occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 """
 
@@ -316,6 +334,114 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE projects ADD COLUMN reason_run_id TEXT;
         """,
     ),
+    (
+        "20260605_006_ai_profile_models",
+        """
+        CREATE TABLE IF NOT EXISTS ai_profile_models (
+            profile_id TEXT NOT NULL REFERENCES ai_profiles(id) ON DELETE CASCADE,
+            model TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (profile_id, model)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_profile_models_profile_id
+            ON ai_profile_models(profile_id);
+        """,
+    ),
+    (
+        "20260605_007_ai_profile_reasoning",
+        """
+        ALTER TABLE ai_profiles ADD COLUMN model_reasoning_effort TEXT;
+        ALTER TABLE project_ai_profiles ADD COLUMN snapshot_reasoning_type TEXT;
+        """,
+    ),
+    (
+        "20260605_008_prune_legacy_seeded_ai_profile",
+        """
+        -- One-time cleanup of the obsolete ``ai_seed_codex_gpt-5_4`` row
+        -- (seeded_from_worker = 'codex:gpt-5.4') left over from an older
+        -- dispatcher naming convention. ai_profile_models rows are removed
+        -- via ON DELETE CASCADE; the explicit DELETE is defensive.
+        DELETE FROM ai_profile_models
+        WHERE profile_id IN (
+            SELECT id FROM ai_profiles
+            WHERE id = 'ai_seed_codex_gpt-5_4'
+               OR seeded_from_worker = 'codex:gpt-5.4'
+        );
+
+        DELETE FROM ai_profiles
+        WHERE id = 'ai_seed_codex_gpt-5_4'
+           OR seeded_from_worker = 'codex:gpt-5.4';
+        """,
+    ),
+    (
+        "20260606_001_ai_profiles_sk",
+        """
+        -- Add a per-profile secret key column. The dispatcher stops
+        -- discarding the resolved token at sync time and pushes the value
+        -- here; manual profiles can be populated via the Add/Edit form.
+        -- The column is plaintext; the form helper text and the API
+        -- contract (write-only ``sk`` on create/update, masked on read)
+        -- are the only safeguards.
+        ALTER TABLE ai_profiles ADD COLUMN sk TEXT NOT NULL DEFAULT '';
+        """,
+    ),
+    (
+        "20260607_001_users",
+        """
+        -- JWT auth surface. Single-table users with bcrypt hashes; one
+        -- superuser is bootstrapped at server startup from env.
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            hashed_password TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            is_superuser INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """,
+    ),
+    (
+        "20260607_002_sk_ciphertext",
+        """
+        -- Encrypted sk storage. Adds a sibling column to the legacy
+        -- plaintext sk so the migration is reversible: we keep writing
+        -- sk (for backward compat with any tools that read it
+        -- directly), but the new column is what the read path uses.
+        --
+        -- The dispatcher secret endpoint decrypts on the way out. A
+        -- later migration can drop the plaintext column once all
+        -- existing deployments have re-synced with the new code path.
+        ALTER TABLE ai_profiles ADD COLUMN sk_ciphertext TEXT NOT NULL DEFAULT '';
+        """,
+    ),
+    (
+        "20260607_003_dispatcher_locks",
+        """
+        CREATE TABLE IF NOT EXISTS dispatcher_locks (
+            name TEXT PRIMARY KEY,
+            holder TEXT NOT NULL,
+            acquired_at TEXT NOT NULL,
+            heartbeat_at TEXT NOT NULL
+        );
+        """,
+    ),
+    (
+        "20260607_004_state_uniqueness",
+        """
+        -- State-machine invariants that used to live only in service
+        -- code. Partial unique indexes keep retries and racing writers
+        -- from producing duplicate completion/provenance edges.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_intents_project_goal_once
+            ON intents(project_id)
+            WHERE to_fact_id = 'goal';
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_intents_project_fact_once
+            ON intents(project_id, to_fact_id)
+            WHERE to_fact_id IS NOT NULL AND to_fact_id != 'goal';
+        """,
+    ),
 ]
 
 
@@ -344,12 +470,28 @@ def configure(path: Path) -> None:
         _apply_migrations(conn)
 
 
+def configured_path() -> Path:
+    assert _db_path is not None
+    return _db_path
+
+
 def _apply_migrations(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version TEXT PRIMARY KEY,
             applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS migration_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version TEXT NOT NULL,
+            sql TEXT NOT NULL,
+            error TEXT NOT NULL,
+            occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
         """
     )
@@ -368,23 +510,129 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             if "reason_run_id" in project_cols:
                 conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
                 continue
-        conn.executescript(sql)
-        conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+        try:
+            conn.executescript(sql)
+            conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+        except Exception as exc:
+            conn.execute(
+                "INSERT INTO migration_errors (version, sql, error) VALUES (?, ?, ?)",
+                (version, sql, str(exc)),
+            )
+            raise
 
 
-@contextmanager
-def get_conn() -> Generator[sqlite3.Connection, None, None]:
+def _open_conn() -> sqlite3.Connection:
     assert _db_path is not None
     conn = sqlite3.connect(str(_db_path), timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def sqlite_status() -> dict[str, Any]:
+    """Return operator-facing SQLite status for health/debug commands."""
+    path = configured_path()
+    with get_conn() as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        migration_error = conn.execute(
+            "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        applied_count = conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"]
+    wal_path = Path(f"{path}-wal")
+    shm_path = Path(f"{path}-shm")
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "size_bytes": path.stat().st_size if path.exists() else 0,
+        "wal_size_bytes": wal_path.stat().st_size if wal_path.exists() else 0,
+        "shm_size_bytes": shm_path.stat().st_size if shm_path.exists() else 0,
+        "journal_mode": journal_mode,
+        "busy_timeout_ms": busy_timeout,
+        "foreign_keys": bool(foreign_keys),
+        "applied_migrations": applied_count,
+        "migration_error": dict(migration_error) if migration_error is not None else None,
+    }
+
+
+def integrity_check() -> list[str]:
+    """Run SQLite PRAGMA integrity_check and return every result row."""
+    with get_conn() as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def backup_to(destination: Path) -> Path:
+    """Create a consistent online backup of the configured database."""
+    destination = destination.expanduser()
+    if destination.is_dir():
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        destination = destination / f"cairn-{stamp}.sqlite"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source = _thread_conn()
+    target = sqlite3.connect(str(destination))
+    try:
+        source.backup(target)
+        target.commit()
+    finally:
+        target.close()
+    return destination
+
+
+def _thread_conn() -> sqlite3.Connection:
+    assert _db_path is not None
+    cached = getattr(_local, "conn", None)
+    cached_path = getattr(_local, "path", None)
+    if cached is not None and cached_path == _db_path:
+        return cached
+    if cached is not None:
+        try:
+            cached.close()
+        except Exception:
+            pass
+    conn = _open_conn()
+    _local.conn = conn
+    _local.path = _db_path
+    return conn
+
+
+def close_thread_conn() -> None:
+    """Close the cached SQLite connection for the current thread."""
+    cached = getattr(_local, "conn", None)
+    if cached is not None:
+        cached.close()
+    _local.conn = None
+    _local.path = None
+
+
+@contextmanager
+def get_conn() -> Generator[sqlite3.Connection, None, None]:
+    conn = _thread_conn()
     try:
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
+
+
+@contextmanager
+def with_immediate_tx() -> Generator[sqlite3.Connection, None, None]:
+    """Open a connection and acquire a write lock up front.
+
+    SQLite's default deferred transactions acquire the write lock only
+    at the first write statement, which can make multi-step writes fail
+    late with SQLITE_BUSY. ``BEGIN IMMEDIATE`` grabs the reserved lock
+    before the caller runs any read-modify-write sequence.
+    """
+    conn = _thread_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise

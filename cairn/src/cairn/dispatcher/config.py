@@ -9,12 +9,30 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+from cairn.server.task_types import TASK_TYPE_REGISTRY, is_known_task_type
 
 
-TaskType = Literal["reason", "explore", "bootstrap"]
+def _check_known_task_types(value: list[str]) -> list[str]:
+    """Reject any ``task_type`` not present in :data:`TASK_TYPE_REGISTRY`.
+
+    Used by the per-model ``validate_task_types`` field validators so
+    the canonical set of valid task types lives in one place.
+    """
+    unknown = [item for item in value if not is_known_task_type(item)]
+    if unknown:
+        raise ValueError(
+            f"unknown task_types: {unknown!r}; "
+            f"known: {', '.join(TASK_TYPE_REGISTRY.names())}"
+        )
+    return value
+
+
+TaskType = str  # any name registered in TASK_TYPE_REGISTRY
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 ContainerInactiveAction = Literal["remove", "stop"]
+ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
 
 WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
     "claudecode": (
@@ -151,11 +169,26 @@ class TasksConfig(BaseModel):
 
 class ObservabilityConfig(BaseModel):
     enabled: bool = True
-    record_prompts: bool = True
-    record_stdout: bool = True
-    record_stderr: bool = True
+    # New authoritative field. Old ``record_*`` booleans are kept as
+    # computed properties so wire format and reporter.py keep working.
+    record: set[str] = Field(default_factory=lambda: {"prompts", "stdout", "stderr"})
     record_raw_worker_stream: bool = False
     max_event_bytes: int = Field(default=16384, gt=0)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_prompts(self) -> bool:
+        return "prompts" in self.record
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_stdout(self) -> bool:
+        return "stdout" in self.record
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_stderr(self) -> bool:
+        return "stderr" in self.record
     max_bytes_per_execution: int = Field(default=10485760, gt=0)
     flush_interval_ms: int = Field(default=250, ge=0)
     flush_max_bytes: int = Field(default=8192, gt=0)
@@ -370,6 +403,7 @@ class McpServerCapabilityConfig(BaseModel):
             raise ValueError("task_types must not be empty")
         if len(set(value)) != len(value):
             raise ValueError("task_types must be unique")
+        _check_known_task_types(value)
         return value
 
 
@@ -412,6 +446,7 @@ class SkillCapabilityConfig(BaseModel):
             raise ValueError("task_types must not be empty")
         if len(set(value)) != len(value):
             raise ValueError("task_types must be unique")
+        _check_known_task_types(value)
         return value
 
 
@@ -472,6 +507,7 @@ class RoleConfig(BaseModel):
             raise ValueError("task_types must not be empty")
         if len(set(value)) != len(value):
             raise ValueError("task_types must be unique")
+        _check_known_task_types(value)
         return value
 
     @model_validator(mode="after")
@@ -551,6 +587,8 @@ class WorkerConfig(BaseModel):
     task_types: list[TaskType]
     max_running: int = Field(gt=0)
     priority: int = Field(ge=0)
+    models: list[str] = Field(default_factory=list)
+    model_reasoning_effort: ReasoningEffort | None = None
     env: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("task_types")
@@ -560,7 +598,23 @@ class WorkerConfig(BaseModel):
             raise ValueError("task_types must not be empty")
         if len(set(value)) != len(value):
             raise ValueError("task_types must be unique")
+        _check_known_task_types(value)
         return value
+
+    @field_validator("models")
+    @classmethod
+    def validate_models(cls, value: list[str]) -> list[str]:
+        models: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            model = item.strip()
+            if not model:
+                raise ValueError("models must not contain empty values")
+            if model in seen:
+                continue
+            seen.add(model)
+            models.append(model)
+        return models
 
     @model_validator(mode="after")
     def validate_env(self) -> "WorkerConfig":
@@ -638,6 +692,21 @@ class DispatchConfig(BaseModel):
     @classmethod
     def load(cls, path: Path) -> "DispatchConfig":
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        sidecar = path.with_name(f"{path.stem}.capabilities{path.suffix}")
+        if sidecar.exists():
+            sidecar_data = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
+            if isinstance(sidecar_data, dict):
+                merged = dict(data)
+                # These sections are operational capability / role /
+                # remote-support catalog data, not worker runtime data.
+                # Keeping them in a sidecar lets dispatch.yaml stay
+                # focused on scheduler/runtime/worker definitions while
+                # preserving backwards compatibility with the historic
+                # single-file shape.
+                for key in ("remote_support", "capabilities", "roles"):
+                    if key in sidecar_data:
+                        merged[key] = sidecar_data[key]
+                data = merged
         data = _interpolate_env_data(data, str(path))
         data = prepare_bind_mount_data(data, path.parent)
         data = prepare_capability_data(data, path.parent)

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import json
+import time
 import uuid
+from typing import Any
 
 from cairn.dispatcher.config import ObservabilityConfig
 from cairn.dispatcher.observability.buffer import OutputBuffer
@@ -36,6 +39,8 @@ class ExecutionReporter:
         self.created_intent_ids: list[str] | None = None
         self._bytes_written = 0
         self._buffer = OutputBuffer(settings.flush_interval_ms, settings.flush_max_bytes)
+        self._pending_events: list[dict[str, str]] = []
+        self._last_event_flush_at = time.monotonic()
 
     @classmethod
     def disabled(cls) -> "DisabledExecutionReporter":
@@ -79,9 +84,19 @@ class ExecutionReporter:
         self.flush()
         self._emit(event.phase, event.kind, event.stream, event.formatted_content())
 
+    def emit_capability_manifest(self, phase: str, payload: dict[str, Any]) -> None:
+        self.flush()
+        self._emit(
+            phase,
+            "capability_manifest",
+            "system",
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+
     def flush(self) -> None:
         for item in self._buffer.flush():
             self._emit(item.phase, item.stream, item.stream, item.content, regular_output=True)
+        self._flush_pending_events()
 
     def emit_result(
         self,
@@ -156,20 +171,40 @@ class ExecutionReporter:
             )
             return
         self._bytes_written += byte_count
-        response = self.client.create_llm_event(
+        self._pending_events.append(
+            {
+                "phase": phase,
+                "event_kind": event_kind,
+                "stream": stream,
+                "content": content,
+            }
+        )
+        pending_bytes = sum(len(item["content"].encode("utf-8")) for item in self._pending_events)
+        elapsed_ms = (time.monotonic() - self._last_event_flush_at) * 1000
+        if (
+            len(self._pending_events) >= 50
+            or pending_bytes >= self.settings.flush_max_bytes
+            or elapsed_ms >= max(1, self.settings.flush_interval_ms)
+        ):
+            self._flush_pending_events()
+
+    def _flush_pending_events(self) -> None:
+        if not self._pending_events:
+            return
+        events = self._pending_events
+        self._pending_events = []
+        self._last_event_flush_at = time.monotonic()
+        response = self.client.create_llm_events(
             self.project_id,
             self.execution_id,
-            phase=phase,
-            event_kind=event_kind,
-            stream=stream,
-            content=content,
+            events,
         )
         if not response.ok:
             LOG.debug(
-                "observability event write failed project=%s execution=%s phase=%s status=%s",
+                "observability event batch write failed project=%s execution=%s count=%s status=%s",
                 self.project_id,
                 self.execution_id,
-                phase,
+                len(events),
                 response.status_code,
             )
 
@@ -187,6 +222,9 @@ class DisabledExecutionReporter:
         pass
 
     def emit_trace_event(self, event: TraceEvent) -> None:
+        pass
+
+    def emit_capability_manifest(self, phase: str, payload: dict[str, Any]) -> None:
         pass
 
     def emit_result(

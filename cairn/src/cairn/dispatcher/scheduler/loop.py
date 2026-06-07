@@ -15,15 +15,28 @@ from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import catalog_payload as capability_catalog_payload
 from cairn.dispatcher.roles import catalog_payload as role_catalog_payload
 from cairn.dispatcher.ai_health import probe_snapshot
+from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
+from cairn.dispatcher.leadership import DispatcherLeader, LeadershipLost
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
+from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache, compute_ai_overlay
+from cairn.dispatcher.scheduler.project_cache import ProjectCaches
 from cairn.dispatcher.scheduler.worker_select import choose_worker
+from cairn.dispatcher.scheduler.worker_selection import WorkerSelection, select_worker_default
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
+from cairn.observability.metrics import (
+    DISPATCHER_INFLIGHT,
+    DISPATCHER_OVERFLOW,
+    DISPATCHER_STEPDOWN,
+    DISPATCHER_TICKS,
+    WORKER_UNHEALTHY_SINCE,
+)
+from cairn.server import db as server_db
 from cairn.server.models import (
     Intent,
     ProjectAiProfileSnapshot,
@@ -40,13 +53,7 @@ BOOTSTRAP_INTENT_CREATOR = "dispatcher.bootstrap"
 REASON_CONSUMED_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
 
 
-@dataclass(slots=True)
-class WorkerSelection:
-    worker: WorkerConfig | None
-    blocked_busy: list[str]
-    blocked_unhealthy: list[str]
-    blocked_rejected: list[str]
-    blocked_task_type: list[str]
+# WorkerSelection dataclass moved to scheduler/worker_selection.py.
 
 
 def _proxy_config_to_env(cfg: ProxyConfig) -> dict[str, str]:
@@ -89,7 +96,21 @@ class DispatcherLoop:
     def __init__(self, config_path: Path):
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
+        server_db.configure(server_db.DEFAULT_DB)
         self.client = CairnClient(self.config.server)
+        self.leader = DispatcherLeader(
+            ttl_seconds=float(os.environ.get("CAIRN_LEADER_TTL_SECONDS", "15")),
+        )
+        self._last_tick_at: float | None = None
+        self.health_server = DispatcherHealthServer(
+            *self._health_addr(),
+            state=DispatcherHealthState(
+                is_leader=lambda: self.leader.is_leader,
+                current_holder=lambda: self.leader.current_holder(),
+                last_tick_at=lambda: self._last_tick_at,
+            ),
+        )
+        self.health_server.start()
         bearer_token_env_keys = tuple(
             mcp.bearer_token_env
             for mcp in self.config.capabilities.mcp_servers
@@ -117,15 +138,12 @@ class DispatcherLoop:
         self._role_catalog_registered = False
         self._startup_healthchecks_checked = False
         self._ai_catalog_synced = False
-        # Per-project proxy cache: project_id -> resolved ProxyConfig (or None
-        # when the project has no proxy). Refreshed from Server on each
-        # dispatch pass before a worker container may be created.
-        self._project_proxy_cache: dict[str, ProxyConfig | None] = {}
-        # Per-project AI selection (primary + ordered fallback). Refreshed
-        # alongside the proxy cache before worker selection. ``None`` when
-        # the project has not opted into AI profile selection, in which
-        # case the dispatcher falls back to the global worker pool.
-        self._project_ai_cache: dict[str, dict[str, list[ProjectAiProfileSnapshot]] | None] = {}
+        # Per-project caches: proxy, AI selection chains, and the
+        # fetched ``sk`` values for the profiles in those chains.
+        # See :mod:`cairn.dispatcher.scheduler.project_cache` for the
+        # invalidation contract.
+        self.project_caches = ProjectCaches()
+        self._ai_overlay_cache = AIOverlayCache()
 
     def close(self) -> None:
         if self.futures:
@@ -138,47 +156,101 @@ class DispatcherLoop:
         self.cleanup_executor.shutdown(wait=True)
         self.container_manager.close()
         self.client.close()
+        self.health_server.stop()
+        try:
+            if self.leader.is_leader:
+                self.leader.release()
+        except Exception:
+            LOG.exception("failed to release dispatcher leadership")
 
     def run(self, once: bool = False) -> None:
+        """Main dispatcher loop.
+
+        Acquires the leader lock (blocking while a sibling dispatcher
+        is leader) and runs ticks until either ``once=True`` finishes a
+        single tick, a :class:`LeadershipLost` surfaces from
+        :meth:`DispatcherLeader.check_health` mid-tick, or the process
+        is shut down.
+
+        On :class:`LeadershipLost` we drain the in-flight task
+        executors, increment ``DISPATCHER_STEPDOWN`` and re-acquire
+        so the next sibling does not have to wait a full
+        ``runtime.interval`` to take over.
+        """
         try:
-            self.run_startup_healthchecks()
             while True:
                 try:
-                    if not self._settings_checked:
-                        self._validate_server_settings()
-                        self._settings_checked = True
-                    if not self._capability_catalog_registered:
-                        self._register_capability_catalog()
-                        self._capability_catalog_registered = True
-                    if not self._role_catalog_registered:
-                        self._register_role_catalog()
-                        self._role_catalog_registered = True
-                    if not self._ai_catalog_synced:
-                        self._sync_ai_catalog_from_dispatch_yaml()
-                        self._ai_catalog_synced = True
-                    self._reap_futures()
-                    self._reap_cleanup_futures()
-                    summaries = self.client.list_projects()
-                    self._initialize_reason_checkpoints(summaries)
-                    self._refresh_runtime_projects(summaries)
-                    self._cancel_inactive_tasks(summaries)
-                    self._queue_container_cleanups(summaries)
-                    self._dispatch_available(summaries)
-                except requests.RequestException as exc:
+                    with self.leader.acquired(retry_interval=self.config.runtime.interval):
+                        self._run_leader_iteration(once=once)
                     if once:
-                        raise
-                    LOG.warning(
-                        "dispatcher server request failed error=%s retry_in=%ss",
-                        exc,
-                        self.config.runtime.interval,
-                    )
-                    time.sleep(self.config.runtime.interval)
+                        return
+                except LeadershipLost as exc:
+                    DISPATCHER_STEPDOWN.labels(reason="lock_lost").inc()
+                    LOG.warning("dispatcher stepping down after leadership loss error=%s", exc)
+                    self._step_down_executors()
+                    if once:
+                        return
+                    # Loop back: ``acquired()`` will block until the
+                    # sibling dispatcher is also done.
                     continue
-                if once:
-                    break
-                time.sleep(self.config.runtime.interval)
         finally:
             self.close()
+
+    def _run_leader_iteration(self, *, once: bool) -> None:
+        """One tick of work performed under the leader lock."""
+        if not self._startup_healthchecks_checked:
+            self.run_startup_healthchecks()
+        if not self._settings_checked:
+            self._validate_server_settings()
+            self._settings_checked = True
+        if not self._capability_catalog_registered:
+            self._register_capability_catalog()
+            self._capability_catalog_registered = True
+        if not self._role_catalog_registered:
+            self._register_role_catalog()
+            self._role_catalog_registered = True
+        if not self._ai_catalog_synced:
+            self._sync_ai_catalog_from_dispatch_yaml()
+            self._ai_catalog_synced = True
+        self._reap_futures()
+        self._reap_cleanup_futures()
+        summaries = self.client.list_projects()
+        self.leader.check_health()
+        self._initialize_reason_checkpoints(summaries)
+        self._refresh_runtime_projects(summaries)
+        self._cancel_inactive_tasks(summaries)
+        self._queue_container_cleanups(summaries)
+        self._dispatch_available(summaries)
+        self._publish_tick_metrics()
+        self.leader.heartbeat()
+        if once:
+            return
+        time.sleep(self.config.runtime.interval)
+
+    def _step_down_executors(self) -> None:
+        """Cancel in-flight tasks on the main executor so a sibling can
+        take over without us submitting duplicate work.
+
+        The cleanup executor is left running because orphan container
+        cleanup must keep happening regardless of leader status.
+        """
+        if not self.futures:
+            return
+        LOG.info(
+            "dispatcher step-down cancelling futures=%s",
+            len(self.futures),
+        )
+        # Best-effort cancellation signal: future.cancel() returns
+        # False once the task has already started running, which is
+        # fine - those tasks will finish naturally and the next
+        # leader will see the work has been claimed.
+        for fut in list(self.futures):
+            fut.cancel()
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.futures.clear()
+        # Recreate the executor so subsequent ticks (after we
+        # re-acquire) can submit new work.
+        self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
 
     def run_startup_healthchecks_only(self) -> None:
         try:
@@ -191,6 +263,16 @@ class DispatcherLoop:
             return
         self._run_startup_healthchecks(show_commands=show_commands)
         self._startup_healthchecks_checked = True
+
+    def _health_addr(self) -> tuple[str, int]:
+        value = os.environ.get("CAIRN_DISPATCHER_HEALTH_ADDR", "127.0.0.1:9100")
+        host, _, port_text = value.partition(":")
+        return host or "127.0.0.1", int(port_text or "9100")
+
+    def _publish_tick_metrics(self) -> None:
+        self._last_tick_at = time.time()
+        DISPATCHER_TICKS.inc()
+        DISPATCHER_INFLIGHT.set(len(self.futures))
 
     def _register_capability_catalog(self) -> None:
         response = self.client.register_capability_catalog(capability_catalog_payload(self.config))
@@ -210,6 +292,7 @@ class DispatcherLoop:
 
     def _dispatch_available(self, summaries: list[ProjectSummary]) -> None:
         if len(self.futures) >= self.config.runtime.max_workers:
+            DISPATCHER_OVERFLOW.labels(reason="max_workers").inc()
             self._log_changed(
                 "dispatch/global",
                 logging.INFO,
@@ -282,10 +365,14 @@ class DispatcherLoop:
         project_id = project.project.id
         proxy_id = project.proxy.id if project.proxy else None
         if not proxy_id:
-            self._project_proxy_cache[project_id] = None
+            self.project_caches.set_proxy(project_id, None)
+            self._ai_overlay_cache.invalidate(project_id)
             return
         try:
-            self._project_proxy_cache[project_id] = self.client.get_proxy(proxy_id)
+            self.project_caches.set_proxy(project_id, self.client.get_proxy(proxy_id))
+            # Proxy env is part of the AI overlay; invalidate so the
+            # next tick rebuilds overlays for this project.
+            self._ai_overlay_cache.invalidate(project_id)
             LOG.info("resolved proxy for project=%s proxy_id=%s", project_id, proxy_id)
         except LookupError:
             LOG.warning(
@@ -293,7 +380,8 @@ class DispatcherLoop:
                 project_id,
                 proxy_id,
             )
-            self._project_proxy_cache[project_id] = None
+            self.project_caches.set_proxy(project_id, None)
+            self._ai_overlay_cache.invalidate(project_id)
         except requests.RequestException as exc:
             LOG.warning(
                 "project=%s proxy lookup failed proxy_id=%s error=%s; worker will run direct",
@@ -301,7 +389,7 @@ class DispatcherLoop:
                 proxy_id,
                 exc,
             )
-            self._project_proxy_cache[project_id] = None
+            self.project_caches.set_proxy(project_id, None)
 
     def _resolve_project_ai_selection(self, project: ProjectDetail) -> None:
         """Refresh the per-project AI selection cache.
@@ -316,25 +404,25 @@ class DispatcherLoop:
             response = self.client.get_project_ai_profiles(project_id)
         except Exception as exc:  # noqa: BLE001 - tolerate any client glitch
             LOG.warning(
-                "project=%s ai profile fetch raised error=%s; falling back to default worker pool",
+                "project=%s ai profile fetch raised error=%s; missing AI profile selection",
                 project_id,
                 exc,
             )
-            self._project_ai_cache[project_id] = None
+            self.project_caches.set_ai_chains(project_id, None)
             return
         if not response.ok or not isinstance(response.data, dict):
-            self._project_ai_cache[project_id] = None
+            self.project_caches.set_ai_chains(project_id, None)
             return
         data = response.data
         try:
             snapshots = [ProjectAiProfileSnapshot.model_validate(item) for item in data.get("snapshots", [])]
         except Exception as exc:  # noqa: BLE001
             LOG.warning(
-                "project=%s ai profile snapshot parse failed error=%s; falling back to default worker pool",
+                "project=%s ai profile snapshot parse failed error=%s; missing AI profile selection",
                 project_id,
                 exc,
             )
-            self._project_ai_cache[project_id] = None
+            self.project_caches.set_ai_chains(project_id, None)
             return
         chains: dict[str, list[ProjectAiProfileSnapshot]] = {}
         legacy = [snap for snap in snapshots if snap.task_type == "legacy"]
@@ -347,9 +435,31 @@ class DispatcherLoop:
             if ordered:
                 chains[task_type] = ordered
         if not chains:
-            self._project_ai_cache[project_id] = None
+            self.project_caches.set_ai_chains(project_id, None)
             return
-        self._project_ai_cache[project_id] = chains
+        self.project_caches.set_ai_chains(project_id, chains)
+        # Fetch the raw ``sk`` value for every referenced profile. Failures
+        # are tolerated and cached as ``None`` so a transient server
+        # glitch does not take down dispatch.
+        secrets: dict[str, str | None] = {}
+        seen_profile_ids: set[str] = set()
+        for ordered in chains.values():
+            for snap in ordered:
+                if snap.profile_id in seen_profile_ids:
+                    continue
+                seen_profile_ids.add(snap.profile_id)
+                try:
+                    secrets[snap.profile_id] = self.client.get_ai_profile_secret(snap.profile_id)
+                except Exception as exc:  # noqa: BLE001
+                    LOG.warning(
+                        "project=%s ai profile secret fetch failed profile=%s error=%s",
+                        project_id, snap.profile_id, exc,
+                    )
+                    secrets[snap.profile_id] = None
+        self.project_caches.set_ai_secret(project_id, secrets)
+        # Secrets changed, so any cached overlay that referenced them
+        # is stale.
+        self._ai_overlay_cache.invalidate(project_id)
         for task_type, ordered in chains.items():
             LOG.info(
                 "project=%s ai selection task_type=%s primary=%s fallback=%s",
@@ -360,35 +470,31 @@ class DispatcherLoop:
             )
 
     def _project_ai_snapshots(self, project_id: str, task_type: str) -> list[ProjectAiProfileSnapshot]:
-        chains = self._project_ai_cache.get(project_id) or {}
+        chains = self.project_caches.get_ai_chains(project_id) or {}
         return chains.get(task_type) or []
 
-    @staticmethod
-    def _ai_worker_env_overlay(snapshot: ProjectAiProfileSnapshot) -> dict[str, str]:
+    def _ai_worker_env_overlay(self, project_id: str, snapshot: ProjectAiProfileSnapshot) -> dict[str, str]:
         """Translate a snapshot into the env-var overlay for the matching worker.
 
-        Resolves ``snapshot_api_key_env`` (the env-var *name*, never the
-        token value) at task-launch time so the worker container only ever
-        receives the value, not the name.
+        Delegates to :func:`cairn.dispatcher.scheduler.ai_overlay.compute_ai_overlay`
+        so the same code path is unit-testable in isolation. The TTL
+        cache here short-circuits the per-tick host env lookup and the
+        AI selection cache lookup, which together account for a
+        meaningful chunk of the dispatcher's per-tick HTTP traffic
+        (3s tick × N projects × chain length).
         """
-        if not snapshot.snapshot_api_key_env:
-            return {}
-        token = os.environ.get(snapshot.snapshot_api_key_env)
-        if token is None:
-            return {}
-        overlay: dict[str, str] = {snapshot.snapshot_api_key_env: token}
-        if snapshot.snapshot_worker_type == "codex":
-            overlay["CODEX_MODEL"] = snapshot.snapshot_model
-            if snapshot.snapshot_base_url:
-                overlay["CODEX_BASE_URL"] = snapshot.snapshot_base_url
-            if snapshot.snapshot_provider:
-                overlay["CODEX_PROVIDER"] = snapshot.snapshot_provider
-        elif snapshot.snapshot_worker_type == "claudecode":
-            overlay["ANTHROPIC_MODEL"] = snapshot.snapshot_model
-            if snapshot.snapshot_base_url:
-                overlay["ANTHROPIC_BASE_URL"] = snapshot.snapshot_base_url
-            if snapshot.snapshot_provider:
-                overlay["ANTHROPIC_PROVIDER"] = snapshot.snapshot_provider
+        cached = self._ai_overlay_cache.get(project_id, snapshot)
+        if cached is not None:
+            return cached
+        secrets = self.project_caches.get_ai_secret(project_id)
+        cached_secret = secrets.get(snapshot.profile_id) or None
+        proxy_cfg = self.project_caches.get_proxy(project_id)
+        overlay = compute_ai_overlay(
+            snapshot,
+            cached_secret=cached_secret,
+            proxy_config=proxy_cfg,
+        )
+        self._ai_overlay_cache.put(project_id, snapshot, overlay)
         return overlay
 
     def _resolve_proxy_env(self, project_id: str) -> dict[str, str] | None:
@@ -402,7 +508,7 @@ class DispatcherLoop:
         """
         if project_id == ContainerManager._STARTUP_PROJECT_ID:
             return None
-        cfg = self._project_proxy_cache.get(project_id)
+        cfg = self.project_caches.get_proxy(project_id)
         if cfg is None:
             return None
         return _proxy_config_to_env(cfg)
@@ -795,65 +901,13 @@ class DispatcherLoop:
         return self._select_worker_default(project_id, task_type)
 
     def _select_worker_default(self, project_id: str, task_type: str) -> WorkerSelection:
-        now = time.time()
-        candidates: list[WorkerConfig] = []
-        blocked_busy: list[str] = []
-        blocked_unhealthy: list[str] = []
-        blocked_rejected: list[str] = []
-        blocked_task_type: list[str] = []
-        running_counts = self._worker_counts()
-        for worker in self.config.workers:
-            if task_type not in worker.task_types:
-                blocked_task_type.append(worker.name)
-                continue
-            running = running_counts.get(worker.name, 0)
-            if running >= worker.max_running:
-                blocked_busy.append(f"{worker.name}({running}/{worker.max_running})")
-                continue
-            unhealthy_until = self.worker_unhealthy_until.get(worker.name, 0)
-            if unhealthy_until > now:
-                blocked_unhealthy.append(f"{worker.name}({unhealthy_until - now:.1f}s)")
-                continue
-            rejected_until = self.worker_rejected_until.get((project_id, task_type, worker.name), 0)
-            if rejected_until > now:
-                blocked_rejected.append(f"{worker.name}({rejected_until - now:.1f}s)")
-                continue
-            candidates.append(worker)
-        if not candidates:
-            LOG.debug(
-                "worker selection project=%s task=%s no candidates blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s blocked_task_type=%s",
-                project_id,
-                task_type,
-                blocked_busy,
-                blocked_unhealthy,
-                blocked_rejected,
-                blocked_task_type,
-            )
-            return WorkerSelection(
-                worker=None,
-                blocked_busy=blocked_busy,
-                blocked_unhealthy=blocked_unhealthy,
-                blocked_rejected=blocked_rejected,
-                blocked_task_type=blocked_task_type,
-            )
-        ordered = choose_worker(candidates, running_counts)
-        LOG.debug(
-            "worker selection project=%s task=%s candidates=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s blocked_task_type=%s chosen=%s",
-            project_id,
-            task_type,
-            [f"{worker.name}({running_counts.get(worker.name, 0)}/{worker.max_running},p{worker.priority})" for worker in candidates],
-            blocked_busy,
-            blocked_unhealthy,
-            blocked_rejected,
-            blocked_task_type,
-            ordered[0].name if ordered else None,
-        )
-        return WorkerSelection(
-            worker=ordered[0] if ordered else None,
-            blocked_busy=blocked_busy,
-            blocked_unhealthy=blocked_unhealthy,
-            blocked_rejected=blocked_rejected,
-            blocked_task_type=blocked_task_type,
+        return select_worker_default(
+            project_id=project_id,
+            task_type=task_type,
+            workers=self.config.workers,
+            running_counts=self._worker_counts(),
+            worker_unhealthy_until=self.worker_unhealthy_until,
+            worker_rejected_until=self.worker_rejected_until,
         )
 
     def _select_worker_for_ai_chain(
@@ -906,7 +960,7 @@ class DispatcherLoop:
                     project_id, snap.profile_id, reason,
                 )
                 continue
-            overlay = self._ai_worker_env_overlay(snap)
+            overlay = self._ai_worker_env_overlay(project_id, snap)
             if not overlay and snap.snapshot_api_key_env:
                 reason = (
                     f"{snap.profile_id}({snap.snapshot_worker_type}) env "
@@ -1160,6 +1214,7 @@ class DispatcherLoop:
                 if outcome == "unhealthy":
                     retry_after_seconds = UNHEALTHY_RETRY_AFTER_SECONDS
                     self.worker_unhealthy_until[task.worker_name] = time.time() + retry_after_seconds
+                    WORKER_UNHEALTHY_SINCE.labels(worker=task.worker_name).set(time.time())
                     LOG.info(
                         "worker marked unhealthy worker=%s retry_after=%.0fs",
                         task.worker_name,
@@ -1167,6 +1222,7 @@ class DispatcherLoop:
                     )
                 else:
                     self.worker_unhealthy_until.pop(task.worker_name, None)
+                    WORKER_UNHEALTHY_SINCE.labels(worker=task.worker_name).set(0)
                 rejection_key = (task.project_id, task.task_type, task.worker_name)
                 if outcome == "rejected":
                     retry_after_seconds = REJECTED_RETRY_AFTER_SECONDS
@@ -1359,30 +1415,27 @@ class DispatcherLoop:
                 response.status_code,
             )
             return
-        existing_ids = {item.get("id") for item in response.data if isinstance(item, dict)}
-        if not existing_ids:
-            payload = {"workers": self._build_ai_sync_payload()}
-            if not payload["workers"]:
-                LOG.info("ai catalog sync: no supported workers in dispatch.yaml; skipping")
-                return
+        profiles = response.data if isinstance(response.data, list) else []
+        payload = {"workers": self._build_ai_sync_payload()}
+        if payload["workers"]:
             try:
                 sync = self.client.sync_ai_profiles(payload)
             except Exception as exc:  # noqa: BLE001
                 LOG.warning("ai catalog sync: sync_ai_profiles failed error=%s", exc)
-                return
-            if not sync.ok:
-                LOG.warning(
-                    "ai catalog sync: server returned status=%s body=%s",
-                    sync.status_code, sync.text[:200],
-                )
-                return
-            LOG.info(
-                "ai catalog synced from dispatch.yaml workers=%s",
-                [w["name"] for w in payload["workers"]],
-            )
-            profiles = sync.data if isinstance(sync.data, list) else []
+            else:
+                if not sync.ok:
+                    LOG.warning(
+                        "ai catalog sync: server returned status=%s body=%s",
+                        sync.status_code, sync.text[:200],
+                    )
+                else:
+                    LOG.info(
+                        "ai catalog synced from dispatch.yaml workers=%s",
+                        [w["name"] for w in payload["workers"]],
+                    )
+                    profiles = sync.data if isinstance(sync.data, list) else []
         else:
-            profiles = response.data
+            LOG.info("ai catalog sync: no supported workers in dispatch.yaml; using existing profiles")
         # Run the local probe and report results.
         reports = []
         for prof in profiles:
@@ -1437,11 +1490,15 @@ class DispatcherLoop:
             )
             if model_key is None or auth_token_key is None:
                 continue
-            model_value = env.get(model_key, "").strip()
+            default_model = env.get(model_key, "").strip()
             auth_value = env.get(auth_token_key, "").strip()
-            if not model_value or not auth_value:
+            if not default_model or not auth_value:
                 # Skip workers that are not yet AI-shaped.
                 continue
+            models: list[str] = []
+            for model in (default_model, *worker.models):
+                if model not in models:
+                    models.append(model)
             base_url_value = env.get(base_url_key, "").strip() if base_url_key else ""
             # ``auth_value`` may be a ${VAR} reference; the dispatch.yaml
             # loader has already resolved it via the env, but we only want
@@ -1456,10 +1513,17 @@ class DispatcherLoop:
             result.append({
                 "name": worker.name,
                 "worker_type": worker.type,
-                "model": model_value,
+                "model": default_model,
+                "models": models,
                 "base_url": base_url_value,
                 "api_key_env": api_key_env_name,
                 "provider": "",
+                "model_reasoning_effort": worker.model_reasoning_effort,
+                # The dispatcher already has the resolved token in
+                # ``auth_value`` (post-interpolation). Push it into the
+                # server DB so the worker container does not have to
+                # round-trip ``os.environ`` at task-launch time.
+                "sk": auth_value,
             })
         return result
 

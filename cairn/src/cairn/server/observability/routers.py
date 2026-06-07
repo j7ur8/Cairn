@@ -8,17 +8,22 @@ from cairn.server.observability import db
 from cairn.server.observability.models import (
     CreateEventRequest,
     CreateEventResponse,
+    CreateEventsBatchRequest,
+    CreateEventsBatchResponse,
     CreateExecutionRequest,
     CreateExecutionResponse,
     EventListResponse,
+    EventViewResponse,
     ExecutionListResponse,
     FinishExecutionRequest,
     ObservabilitySettings,
 )
 from cairn.server.observability.repository import (
     append_event,
+    append_events,
     create_execution,
     finish_execution,
+    list_event_view,
     list_execution_events,
     list_executions,
     list_project_events,
@@ -46,9 +51,29 @@ def get_project_llm_events(
     project_id: str,
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1),
+    tail: bool = Query(default=False),
 ):
     with db.get_conn() as conn:
-        return EventListResponse(events=list_project_events(conn, project_id, after, _limit(limit)))
+        return EventListResponse(events=list_project_events(conn, project_id, after, _limit(limit), tail=tail))
+
+
+@router.get("/llm-events/view", response_model=EventViewResponse)
+def get_project_llm_event_view(
+    project_id: str,
+    execution_id: str | None = Query(default=None),
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=300, ge=1),
+    include_low_signal: bool = Query(default=False),
+):
+    with db.get_conn() as conn:
+        return list_event_view(
+            conn,
+            project_id,
+            execution_id=execution_id,
+            after=after,
+            limit=_limit(limit),
+            include_low_signal=include_low_signal,
+        )
 
 
 @router.get("/llm-executions/{execution_id}/events", response_model=EventListResponse)
@@ -57,9 +82,10 @@ def get_execution_llm_events(
     execution_id: str,
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1),
+    tail: bool = Query(default=False),
 ):
     with db.get_conn() as conn:
-        return EventListResponse(events=list_execution_events(conn, project_id, execution_id, after, _limit(limit)))
+        return EventListResponse(events=list_execution_events(conn, project_id, execution_id, after, _limit(limit), tail=tail))
 
 
 @router.post("/llm-executions", response_model=CreateExecutionResponse, status_code=201)
@@ -73,6 +99,13 @@ def post_llm_event(project_id: str, execution_id: str, body: CreateEventRequest)
     with db.get_conn() as conn:
         event, dropped = append_event(conn, project_id, execution_id, body, SETTINGS)
         return CreateEventResponse(event=event, dropped=dropped)
+
+
+@router.post("/llm-executions/{execution_id}/events/batch", response_model=CreateEventsBatchResponse, status_code=201)
+def post_llm_events_batch(project_id: str, execution_id: str, body: CreateEventsBatchRequest):
+    with db.get_conn() as conn:
+        events, dropped = append_events(conn, project_id, execution_id, body.events, SETTINGS)
+        return CreateEventsBatchResponse(events=events, dropped=dropped)
 
 
 @router.post("/llm-executions/{execution_id}/finish", response_model=CreateExecutionResponse)

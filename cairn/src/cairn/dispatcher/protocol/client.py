@@ -8,6 +8,7 @@ import threading
 from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, ReasonState, Settings
 
@@ -33,9 +34,20 @@ class ApiResult:
 
 
 class CairnClient:
-    def __init__(self, base_url: str, timeout: float = 10.0):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 10.0,
+        *,
+        api_token: str | None = None,
+    ):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # Bearer token for outbound requests. Reads CAIRN_API_TOKEN when
+        # not passed explicitly so the dispatcher process does not need
+        # extra wiring - just set the env var.
+        import os
+        self._api_token = api_token if api_token is not None else os.environ.get("CAIRN_API_TOKEN", "")
         self._summary_adapter = TypeAdapter(list[ProjectSummary])
         self._local = threading.local()
         self._sessions: dict[int, requests.Session] = {}
@@ -49,17 +61,17 @@ class CairnClient:
             session.close()
 
     def list_projects(self) -> list[ProjectSummary]:
-        response = self._session().get(self._url("/projects"), timeout=self._timeout)
+        response = self._get("/projects")
         response.raise_for_status()
         return self._summary_adapter.validate_python(response.json())
 
     def get_project(self, project_id: str) -> ProjectDetail:
-        response = self._session().get(self._url(f"/projects/{project_id}"), timeout=self._timeout)
+        response = self._get(f"/projects/{project_id}")
         response.raise_for_status()
         return ProjectDetail.model_validate(response.json())
 
     def get_settings(self) -> Settings:
-        response = self._session().get(self._url("/settings"), timeout=self._timeout)
+        response = self._get("/settings")
         response.raise_for_status()
         return Settings.model_validate(response.json())
 
@@ -71,18 +83,33 @@ class CairnClient:
         ``username`` / ``password`` so the worker can construct authenticated
         proxy URLs.
         """
-        response = self._session().get(self._url(f"/proxies/{proxy_id}"), timeout=self._timeout)
+        response = self._get(f"/proxies/{proxy_id}")
         if response.status_code == 404:
             raise LookupError(f"proxy not found: {proxy_id}")
         response.raise_for_status()
         return ProxyConfig.model_validate(response.json())
 
+    def get_ai_profile_secret(self, profile_id: str) -> str | None:
+        """Fetch the raw ``sk`` value for a profile, for worker env injection.
+
+        Returns ``None`` if the profile has no stored sk (operator relies on
+        the host env) or the profile id is unknown. Mirrors the
+        ``get_proxy`` precedent: sensitive data needed at task-launch
+        time is pulled from the server, never carried in the project
+        AI selection snapshot.
+        """
+        response = self._get(f"/ai-profiles/{profile_id}/secret")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None
+        value = payload.get("value")
+        return value if isinstance(value, str) and value else None
+
     def export_project(self, project_id: str) -> str:
-        response = self._session().get(
-            self._url(f"/projects/{project_id}/export"),
-            params={"format": "yaml"},
-            timeout=self._timeout,
-        )
+        response = self._get(f"/projects/{project_id}/export", params={"format": "yaml"})
         response.raise_for_status()
         return response.text
 
@@ -121,10 +148,7 @@ class CairnClient:
 
     def get_reason_state(self, project_id: str) -> ApiResult:
         try:
-            response = self._session().get(
-                self._url(f"/projects/{project_id}/reason/state"),
-                timeout=self._timeout,
-            )
+            response = self._get(f"/projects/{project_id}/reason/state")
         except requests.RequestException as exc:
             LOG.warning("request failed method=GET path=/projects/%s/reason/state error=%s", project_id, exc)
             return ApiResult(status_code=0, text=str(exc))
@@ -215,10 +239,7 @@ class CairnClient:
 
     def get_project_capabilities(self, project_id: str) -> ApiResult:
         try:
-            response = self._session().get(
-                self._url(f"/projects/{project_id}/capabilities"),
-                timeout=self._timeout,
-            )
+            response = self._get(f"/projects/{project_id}/capabilities")
         except requests.RequestException as exc:
             LOG.warning("request failed method=GET path=/projects/%s/capabilities error=%s", project_id, exc)
             return ApiResult(status_code=0, text=str(exc))
@@ -229,10 +250,7 @@ class CairnClient:
 
     def get_project_ai_profiles(self, project_id: str) -> ApiResult:
         try:
-            response = self._session().get(
-                self._url(f"/projects/{project_id}/ai-profiles"),
-                timeout=self._timeout,
-            )
+            response = self._get(f"/projects/{project_id}/ai-profiles")
         except requests.RequestException as exc:
             LOG.warning("request failed method=GET path=/projects/%s/ai-profiles error=%s", project_id, exc)
             return ApiResult(status_code=0, text=str(exc))
@@ -243,9 +261,7 @@ class CairnClient:
 
     def list_ai_profiles(self) -> ApiResult:
         try:
-            response = self._session().get(
-                self._url("/ai-profiles"), timeout=self._timeout,
-            )
+            response = self._get("/ai-profiles")
         except requests.RequestException as exc:
             LOG.warning("request failed method=GET path=/ai-profiles error=%s", exc)
             return ApiResult(status_code=0, text=str(exc))
@@ -279,12 +295,20 @@ class CairnClient:
             return ApiResult(status_code=0, text=str(exc))
         return ApiResult(status_code=response.status_code, text=response.text)
 
+    def post_ai_models_report(self, body: dict[str, Any]) -> ApiResult:
+        try:
+            response = self._session().post(
+                self._url("/ai-profiles/models-report"),
+                json=body, timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=POST path=/ai-profiles/models-report error=%s", exc)
+            return ApiResult(status_code=0, text=str(exc))
+        return ApiResult(status_code=response.status_code, text=response.text)
+
     def get_project_role(self, project_id: str) -> ApiResult:
         try:
-            response = self._session().get(
-                self._url(f"/projects/{project_id}/role"),
-                timeout=self._timeout,
-            )
+            response = self._get(f"/projects/{project_id}/role")
         except requests.RequestException as exc:
             LOG.warning("request failed method=GET path=/projects/%s/role error=%s", project_id, exc)
             return ApiResult(status_code=0, text=str(exc))
@@ -338,6 +362,18 @@ class CairnClient:
             json={"phase": phase, "event_kind": event_kind, "stream": stream, "content": content},
         )
 
+    def create_llm_events(
+        self,
+        project_id: str,
+        execution_id: str,
+        events: list[dict[str, str]],
+    ) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/llm-executions/{execution_id}/events/batch",
+            json={"events": events},
+        )
+
     def finish_llm_execution(
         self,
         project_id: str,
@@ -380,6 +416,31 @@ class CairnClient:
             data = response.json()
         return ApiResult(status_code=response.status_code, data=data, text=response.text)
 
+    @retry(
+        retry=retry_if_exception_type(requests.RequestException),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.5, max=2.0),
+        reraise=True,
+    )
+    def _get(self, path: str, **kwargs: Any) -> requests.Response:
+        """GET with retry for network failures and 5xx responses.
+
+        POST/PUT calls are intentionally *not* retried here because
+        many dispatcher writes are not idempotent. GET is safe to
+        retry and covers the high-volume polling paths.
+        """
+        response = self._session().get(
+            self._url(path),
+            timeout=self._timeout,
+            **kwargs,
+        )
+        if 500 <= response.status_code < 600:
+            raise requests.HTTPError(
+                f"server returned {response.status_code} for GET {path}",
+                response=response,
+            )
+        return response
+
     def _url(self, path: str) -> str:
         return f"{self._base_url}{path}"
 
@@ -392,6 +453,20 @@ class CairnClient:
         adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, pool_block=False)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
+        if self._api_token:
+            session.headers["Authorization"] = f"Bearer {self._api_token}"
+        # Stamp every outbound call with the current trace id so the
+        # server can stitch scheduler -> worker -> server logs
+        # together. The middleware on the server honors the inbound
+        # header and the trace_id_var propagates the same value into
+        # every downstream log line.
+        try:
+            from cairn.observability.trace import get_trace_id
+            tid = get_trace_id()
+            if tid:
+                session.headers["X-Request-Id"] = tid
+        except Exception:  # noqa: BLE001 - observability is best-effort
+            pass
         self._local.session = session
         with self._sessions_lock:
             self._sessions[threading.get_ident()] = session

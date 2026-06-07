@@ -10,6 +10,7 @@ because the dispatcher itself runs as non-root inside its own container.
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -291,6 +292,171 @@ class EnsureWorldWritableDirEpermTests(unittest.TestCase):
                 _ensure_world_writable_dir(fake_path)
                 chmod.assert_not_called()
 
+
+# ---------------------------------------------------------------------------
+# host_path env interpolation in dispatch.yaml
+# ---------------------------------------------------------------------------
+
+
+_BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE = """\
+server: "http://127.0.0.1:8000"
+
+runtime:
+  interval: 3
+  max_workers: 1
+  max_running_projects: 1
+  max_project_workers: 1
+  healthcheck_timeout: 1
+  prompt_group: "mock"
+
+tasks:
+  bootstrap:
+    timeout: 5
+    conclude_timeout: 5
+  reason:
+    timeout: 5
+    max_intents: 1
+  explore:
+    timeout: 5
+    conclude_timeout: 5
+
+observability:
+  enabled: false
+  record_prompts: false
+  record_stdout: false
+  record_stderr: false
+  record_raw_worker_stream: false
+  max_event_bytes: 1024
+  max_bytes_per_execution: 1024
+  flush_interval_ms: 250
+  flush_max_bytes: 1024
+  retention_days: 1
+  redaction_patterns: []
+
+remote_support:
+  enabled: false
+  dnslog:
+    url: ""
+  ssh:
+    host: ""
+    port: 22
+    username: ""
+    password: ""
+
+capabilities:
+  mcp_servers: []
+  skills: []
+
+container:
+  image: "cairn/test:latest"
+  network_mode: "cairn"
+  completed_action: "stop"
+  bind_mounts:
+    - name: "ctf-attachments"
+      host_path: "$HOST_DATAS/attachments"
+      container_path: "/mnt/attachments"
+      read_only: true
+    - name: "project-files"
+      host_path: "$HOST_DATAS/project-files/{project_id}"
+      container_path: "/mnt/project"
+      read_only: false
+
+workers:
+  - name: "mock-w"
+    type: "mock"
+    task_types: [bootstrap, reason, explore]
+    max_running: 1
+    priority: 0
+    env:
+      MOCK_HEALTHCHECK: '{"delay":[0,1],"outcomes":{"ok":1.0,"fail":0.0}}'
+      MOCK_BOOTSTRAP: '{"delay":[0,1],"outcomes":{"complete":0.0,"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      MOCK_REASON: '{"delay":[0,1],"outcomes":{"complete":0.0,"intent":1.0,"noop":0.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      MOCK_EXPLORE_EXECUTE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+      MOCK_EXPLORE_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+"""
+
+
+class BindMountHostPathInterpolationTests(unittest.TestCase):
+    """End-to-end: dispatch.yaml ``host_path`` is interpolated at load time.
+
+    Background: the dispatcher runs inside a container, so a relative
+    path in ``host_path`` would resolve to the image's baked-in
+    ``/cairn/datas/...`` and the bind mount silently degrades to an
+    empty overlay. docker-compose passes the real host path through
+    ``CAIRN_DISPATCHER_DATAS_ROOT`` (or any other env var); the
+    interpolation must substitute it and must leave the ``{project_id}``
+    template in place for the runtime to expand per project.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="cairn-bind-mount-"))
+        self.datas_dir = self.tmp / "datas"
+        self.datas_dir.mkdir()
+        self.config_path = self.tmp / "dispatch.yaml"
+        self.config_path.write_text(
+            _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", "${HOST_DATAS}"),
+            encoding="utf-8",
+        )
+        # Snapshot env so each test can mutate it safely.
+        self._env_snapshot = os.environ.copy()
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self._env_snapshot)
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_host_path_interpolates_env_var(self) -> None:
+        os.environ["HOST_DATAS"] = str(self.datas_dir)
+        from cairn.dispatcher.config import DispatchConfig
+
+        cfg = DispatchConfig.load(self.config_path)
+        mounts = {m.name: m for m in cfg.container.bind_mounts}
+        # _resolve_bind_mount_host_path runs Path.resolve() on the host path,
+        # which on macOS follows the /var/folders -> /private/var/folders
+        # symlink. Compare against the resolved form to stay portable.
+        expected_root = str(self.datas_dir.resolve())
+        self.assertEqual(
+            mounts["ctf-attachments"].host_path,
+            f"{expected_root}/attachments",
+        )
+        self.assertEqual(
+            mounts["project-files"].host_path,
+            f"{expected_root}/project-files/{{project_id}}",
+        )
+
+    def test_host_path_missing_env_var_raises(self) -> None:
+        os.environ.pop("HOST_DATAS", None)
+        from cairn.dispatcher.config import DispatchConfig
+
+        with self.assertRaises(ValueError) as ctx:
+            DispatchConfig.load(self.config_path)
+        self.assertIn("HOST_DATAS", str(ctx.exception))
+
+    def test_host_path_preserves_project_id_template(self) -> None:
+        """``{project_id}`` must NOT be consumed by env interpolation.
+
+        It is expanded at container-launch time by
+        ``ContainerManager._render_bind_mounts_for``. Consuming it during
+        config load would break per-project isolation.
+        """
+        os.environ["HOST_DATAS"] = str(self.datas_dir)
+        from cairn.dispatcher.config import DispatchConfig
+        from cairn.dispatcher.runtime.containers import ContainerManager
+
+        cfg = DispatchConfig.load(self.config_path)
+        host_path = next(
+            m.host_path for m in cfg.container.bind_mounts if m.name == "project-files"
+        )
+        self.assertIn("{project_id}", host_path)
+        # The runtime renderer is a pure function of (config, project_id) so
+        # we can call it directly without instantiating ContainerManager
+        # (and therefore without needing a docker client).
+        rendered = ContainerManager._render_bind_mounts_for(cfg.container, "proj-xyz")
+        rendered_paths = {m["host_path"] for m in rendered}
+        expected_root = str(self.datas_dir.resolve())
+        self.assertIn(f"{expected_root}/project-files/proj-xyz", rendered_paths)
 
 if __name__ == "__main__":
     unittest.main()

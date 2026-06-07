@@ -39,22 +39,25 @@ def _make_config(*workers):
     )
 
 
-def _claudecode(name="c1", model="m", base_url="https://api.example/anthropic", api_key="K", env_overrides=None):
+def _claudecode(name="c1", model="m", base_url="https://api.example/anthropic", api_key="K", env_overrides=None, models=None, model_reasoning_effort=None):
     from cairn.dispatcher.config import WorkerConfig
     env = {"ANTHROPIC_MODEL": model, "ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
     if env_overrides:
         env.update(env_overrides)
     return WorkerConfig(
         name=name, type="claudecode", task_types=["bootstrap"],
-        max_running=1, priority=0, env=env,
+        max_running=1, priority=0, env=env, models=models or [],
+        model_reasoning_effort=model_reasoning_effort,
     )
 
 
-def _codex(name="x1", model="m", base_url="https://api.example/v1", api_key="K"):
+def _codex(name="x1", model="m", base_url="https://api.example/v1", api_key="K", models=None, model_reasoning_effort=None):
     from cairn.dispatcher.config import WorkerConfig
     return WorkerConfig(
         name=name, type="codex", task_types=["bootstrap"],
         max_running=1, priority=0,
+        models=models or [],
+        model_reasoning_effort=model_reasoning_effort,
         env={"CODEX_MODEL": model, "CODEX_BASE_URL": base_url, "OPENAI_API_KEY": api_key},
     )
 
@@ -199,10 +202,12 @@ class HealthCheckSnapshotTests(unittest.TestCase):
 class DispatcherTaskAiSelectionTests(unittest.TestCase):
     def test_project_ai_snapshots_are_task_specific(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
+        from cairn.dispatcher.scheduler.project_cache import ProjectCaches
         from cairn.server.models import ProjectAiProfileSnapshot
 
         loop = DispatcherLoop.__new__(DispatcherLoop)
-        loop._project_ai_cache = {
+        loop.project_caches = ProjectCaches()
+        loop.project_caches.ai_chains = {
             "proj": {
                 "bootstrap": [
                     ProjectAiProfileSnapshot(
@@ -248,6 +253,36 @@ class ProfileWarningsTests(unittest.TestCase):
 
 
 class SyncPayloadTests(unittest.TestCase):
+    def test_worker_models_are_trimmed_and_deduplicated(self) -> None:
+        from cairn.dispatcher.config import WorkerConfig
+
+        worker = WorkerConfig(
+            name="x",
+            type="codex",
+            task_types=["bootstrap"],
+            max_running=1,
+            priority=0,
+            models=[" gpt-large ", "gpt-reason", "gpt-large"],
+            env={"CODEX_MODEL": "gpt-default", "CODEX_BASE_URL": "u", "OPENAI_API_KEY": "k"},
+        )
+
+        self.assertEqual(worker.models, ["gpt-large", "gpt-reason"])
+
+    def test_worker_models_reject_empty_values(self) -> None:
+        from pydantic import ValidationError
+        from cairn.dispatcher.config import WorkerConfig
+
+        with self.assertRaises(ValidationError):
+            WorkerConfig(
+                name="x",
+                type="codex",
+                task_types=["bootstrap"],
+                max_running=1,
+                priority=0,
+                models=["gpt-large", "  "],
+                env={"CODEX_MODEL": "gpt-default", "CODEX_BASE_URL": "u", "OPENAI_API_KEY": "k"},
+            )
+
     def test_supported_workers_only(self) -> None:
         from cairn.dispatcher.config import WorkerConfig
         pi = WorkerConfig(
@@ -325,6 +360,57 @@ class SyncPayloadTests(unittest.TestCase):
         self.assertEqual(codex["worker_type"], "codex")
         self.assertEqual(codex["api_key_env"], "OPENAI_API_KEY")
 
+    def test_multiple_worker_models_stay_on_single_seeded_profile(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop.config = _make_config(
+            _codex(
+                name="codex",
+                model="gpt-default",
+                models=["gpt-default", "gpt-large"],
+                model_reasoning_effort="xhigh",
+            )
+        )
+
+        payload = loop._build_ai_sync_payload()
+
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["name"], "codex")
+        self.assertEqual(payload[0]["model"], "gpt-default")
+        self.assertEqual(payload[0]["models"], ["gpt-default", "gpt-large"])
+        self.assertEqual(payload[0]["model_reasoning_effort"], "xhigh")
+
+    def test_env_default_model_is_first_even_when_not_listed(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop.config = _make_config(
+            _codex(
+                name="codex",
+                model="gpt-default",
+                models=["gpt-large"],
+            )
+        )
+
+        payload = loop._build_ai_sync_payload()
+
+        self.assertEqual([item["name"] for item in payload], ["codex"])
+        self.assertEqual([item["model"] for item in payload], ["gpt-default"])
+        self.assertEqual(payload[0]["models"], ["gpt-default", "gpt-large"])
+
+    def test_single_model_keeps_legacy_seed_name(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop.config = _make_config(_codex(name="codex", model="gpt-default"))
+
+        payload = loop._build_ai_sync_payload()
+
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["name"], "codex")
+        self.assertEqual(payload[0]["model"], "gpt-default")
+
     def test_runtime_env_names_are_canonical(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
         from cairn.dispatcher.config import (
@@ -357,6 +443,134 @@ class SyncPayloadTests(unittest.TestCase):
         loop.config = cfg
         payload = loop._build_ai_sync_payload()
         self.assertEqual(payload[0]["api_key_env"], "ANTHROPIC_AUTH_TOKEN")
+
+    def test_ai_catalog_sync_does_not_fetch_or_report_remote_models(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+        from cairn.dispatcher.config import (
+            DispatchConfig, RuntimeConfig, TasksConfig, ContainerConfig,
+            BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
+        )
+
+        class Result:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def __init__(self, data):
+                self.data = data
+
+        class Client:
+            def __init__(self):
+                self.models_report_calls = 0
+                self.health_report_calls = 0
+
+            def list_ai_profiles(self):
+                return Result([])
+
+            def sync_ai_profiles(self, body):
+                return Result([
+                    {
+                        "id": "ai_codex",
+                        "worker_type": "codex",
+                        "base_url": "",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "model": "gpt-manual",
+                        "healthcheck_timeout": 0.1,
+                    }
+                ])
+
+            def post_ai_health_report(self, body):
+                self.health_report_calls += 1
+                return Result(None)
+
+            def post_ai_models_report(self, body):
+                self.models_report_calls += 1
+                return Result(None)
+
+        runtime = RuntimeConfig(interval=1, max_workers=1, max_project_workers=1, max_running_projects=1, healthcheck_timeout=1, prompt_group="g")
+        tasks = TasksConfig(
+            bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),
+            reason=ReasonTaskConfig(timeout=5, max_intents=3),
+            explore=ExploreTaskConfig(timeout=5, conclude_timeout=5),
+        )
+        cfg = DispatchConfig(
+            server="http://localhost",
+            runtime=runtime,
+            tasks=tasks,
+            container=ContainerConfig(image="cairn/test:latest", user=None, network_mode="cairn", completed_action="stop"),
+            workers=[_codex(model="gpt-manual")],
+        )
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop.config = cfg
+        loop.client = Client()
+
+        loop._sync_ai_catalog_from_dispatch_yaml()
+
+        self.assertEqual(loop.client.health_report_calls, 1)
+        self.assertEqual(loop.client.models_report_calls, 0)
+
+    def test_ai_catalog_sync_runs_even_when_profiles_exist(self) -> None:
+        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+
+        class Result:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def __init__(self, data):
+                self.data = data
+
+        class Client:
+            def __init__(self):
+                self.sync_calls = 0
+                self.sync_body = None
+                self.health_report_calls = 0
+
+            def list_ai_profiles(self):
+                return Result([
+                    {
+                        "id": "ai_existing",
+                        "worker_type": "codex",
+                        "base_url": "",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "model": "gpt-old",
+                        "healthcheck_timeout": 0.1,
+                    }
+                ])
+
+            def sync_ai_profiles(self, body):
+                self.sync_calls += 1
+                self.sync_body = body
+                return Result([
+                    {
+                        "id": "ai_codex",
+                        "worker_type": "codex",
+                        "base_url": "",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "model": "gpt-default",
+                        "healthcheck_timeout": 0.1,
+                    }
+                ])
+
+            def post_ai_health_report(self, body):
+                self.health_report_calls += 1
+                return Result(None)
+
+        loop = DispatcherLoop.__new__(DispatcherLoop)
+        loop.config = _make_config(
+            _codex(name="codex", model="gpt-default", models=["gpt-large"])
+        )
+        loop.client = Client()
+
+        loop._sync_ai_catalog_from_dispatch_yaml()
+
+        self.assertEqual(loop.client.sync_calls, 1)
+        self.assertEqual(
+            [item["name"] for item in loop.client.sync_body["workers"]],
+            ["codex"],
+        )
+        self.assertEqual(loop.client.sync_body["workers"][0]["models"], ["gpt-default", "gpt-large"])
+        self.assertEqual(loop.client.health_report_calls, 1)
 
 
 class AiProfileDbBridgeTests(unittest.TestCase):
@@ -399,14 +613,39 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         ids_after_second = {p.id for p in result2}
         self.assertEqual(ids_after_first, ids_after_second)
 
-        # Sync with one worker removed; the remaining row stays.
+        # Sync with one worker removed; the removed worker's seeded row is
+        # pruned, leaving only the supported worker plus any operator-created
+        # profiles.
         body2 = AiProfileSyncRequest(workers=[
             AiProfileSyncWorker(name="claude_ds", worker_type="claudecode",
                                 model="ds-v4", base_url="https://api.deepseek.com/anthropic",
                                 api_key_env="ANTHROPIC_AUTH_TOKEN"),
         ])
         result3 = sync_ai_profiles(body2)
-        self.assertEqual(len(result3), 2)  # we don't auto-delete
+        self.assertEqual(len(result3), 1)
+        self.assertEqual({p.name for p in result3}, {"claude_ds"})
+
+    def test_sync_updates_profile_models_and_reasoning(self) -> None:
+        from cairn.server.routers.ai_profiles import sync_ai_profiles
+        from cairn.server.models import AiProfileSyncRequest, AiProfileSyncWorker
+
+        body = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(
+                name="codex",
+                worker_type="codex",
+                model="gpt-default",
+                models=["gpt-large", "gpt-default"],
+                base_url="",
+                api_key_env="OPENAI_API_KEY",
+                model_reasoning_effort="xhigh",
+            ),
+        ])
+
+        result = sync_ai_profiles(body)
+        profile = next(item for item in result if item.seeded_from_worker == "codex")
+        self.assertEqual(profile.model, "gpt-default")
+        self.assertEqual(profile.models, ["gpt-default", "gpt-large"])
+        self.assertEqual(profile.model_reasoning_effort, "xhigh")
 
     def test_sync_drops_unsupported_worker_types(self) -> None:
         from cairn.server.routers.ai_profiles import sync_ai_profiles
@@ -423,6 +662,154 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         result = sync_ai_profiles(body)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].name, "claude_ds")
+
+    def test_sync_prunes_obsolete_seeded_profiles(self) -> None:
+        """Workers removed from dispatch.yaml must be pruned by sync.
+
+        Pre-seeds an obsolete ``codex:gpt-5.4`` row the way an older
+        dispatcher would have written it, then syncs the current
+        ``codex``/``claudecode`` worker set and confirms the obsolete
+        row (and its models) are deleted.
+        """
+        from cairn.server.routers.ai_profiles import (
+            list_ai_profiles, sync_ai_profiles,
+        )
+        from cairn.server.models import AiProfileSyncRequest, AiProfileSyncWorker
+
+        # Pre-seed an obsolete seeded profile as if a previous dispatcher
+        # version had inserted it. seeded_from_worker != current worker name.
+        now = "2026-06-05T00:00:00Z"
+        with self.db.get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_profiles (
+                    id, name, worker_type, provider, base_url,
+                    model, api_key_env, available, detail,
+                    healthcheck_timeout, seeded_from_worker,
+                    created_at, updated_at
+                ) VALUES (?, ?, 'codex', '', '', 'gpt-5.4', 'OPENAI_API_KEY', 1, '', 1.0, ?, ?, ?)
+                """,
+                ("ai_seed_codex_gpt-5_4", "codex:gpt-5.4", "codex:gpt-5.4", now, now),
+            )
+            conn.execute(
+                "INSERT INTO ai_profile_models (profile_id, model, updated_at) VALUES (?, ?, ?)",
+                ("ai_seed_codex_gpt-5_4", "gpt-5.4", now),
+            )
+            conn.commit()
+
+        body = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="codex", worker_type="codex",
+                                model="gpt-5.4", base_url="",
+                                api_key_env="OPENAI_API_KEY",
+                                models=["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"]),
+            AiProfileSyncWorker(name="claudecode", worker_type="claudecode",
+                                model="deepseek-v4-pro", base_url="",
+                                api_key_env="ANTHROPIC_AUTH_TOKEN"),
+        ])
+        result = sync_ai_profiles(body)
+        ids = {p.id for p in result}
+        self.assertIn("ai_seed_codex", ids)
+        self.assertIn("ai_seed_claudecode", ids)
+        self.assertNotIn("ai_seed_codex_gpt-5_4", ids)
+
+        # Confirm the obsolete row and its models are gone.
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM ai_profiles WHERE id = ? OR seeded_from_worker = ?",
+                ("ai_seed_codex_gpt-5_4", "codex:gpt-5.4"),
+            ).fetchone()
+            self.assertIsNone(row)
+            model_rows = conn.execute(
+                "SELECT model FROM ai_profile_models WHERE profile_id = ?",
+                ("ai_seed_codex_gpt-5_4",),
+            ).fetchall()
+            self.assertEqual(model_rows, [])
+
+    def test_sync_preserves_operator_created_profiles(self) -> None:
+        """Profiles with seeded_from_worker IS NULL must survive a sync prune."""
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile, list_ai_profiles, sync_ai_profiles,
+        )
+        from cairn.server.models import (
+            AiProfileCreate, AiProfileSyncRequest, AiProfileSyncWorker,
+        )
+
+        manual = create_ai_profile(AiProfileCreate(
+            name="manual", worker_type="codex", model="gpt-manual",
+            api_key_env="OPENAI_API_KEY",
+        ))
+        self.assertIsNone(manual.seeded_from_worker)
+
+        # Sync with a payload that does not include the manual worker.
+        body = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="codex", worker_type="codex",
+                                model="gpt-5.4", base_url="",
+                                api_key_env="OPENAI_API_KEY"),
+        ])
+        sync_ai_profiles(body)
+
+        listed = list_ai_profiles()
+        ids = {p.id for p in listed}
+        self.assertIn(manual.id, ids)
+        self.assertIn("ai_seed_codex", ids)
+
+    def test_sync_with_no_supported_workers_drops_all_seeded(self) -> None:
+        """An empty/payload with only unsupported workers prunes every seeded row."""
+        from cairn.server.routers.ai_profiles import (
+            list_ai_profiles, sync_ai_profiles,
+        )
+        from cairn.server.models import AiProfileSyncRequest, AiProfileSyncWorker
+
+        # Seed two profiles manually.
+        body = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="codex", worker_type="codex",
+                                model="gpt-5.4", base_url="",
+                                api_key_env="OPENAI_API_KEY"),
+            AiProfileSyncWorker(name="claudecode", worker_type="claudecode",
+                                model="ds-v4", base_url="",
+                                api_key_env="ANTHROPIC_AUTH_TOKEN"),
+        ])
+        sync_ai_profiles(body)
+        self.assertEqual(len(list_ai_profiles()), 2)
+
+        # Re-sync with only an unsupported worker. The supported workers are
+        # no longer "active" so their seeded rows must be pruned.
+        body2 = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="pi_x", worker_type="pi",
+                                model="m", base_url="",
+                                api_key_env="PI_API_KEY"),
+        ])
+        sync_ai_profiles(body2)
+        self.assertEqual(len(list_ai_profiles()), 0)
+
+    def test_sync_keeps_seeded_profile_whose_worker_renamed_to_match(self) -> None:
+        """A worker renaming its seed must adopt the old id, not duplicate it."""
+        from cairn.server.routers.ai_profiles import (
+            list_ai_profiles, sync_ai_profiles,
+        )
+        from cairn.server.models import AiProfileSyncRequest, AiProfileSyncWorker
+
+        # First sync establishes the "codex" seeded row.
+        body = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="codex", worker_type="codex",
+                                model="gpt-5.4", base_url="",
+                                api_key_env="OPENAI_API_KEY"),
+        ])
+        sync_ai_profiles(body)
+        self.assertEqual(len(list_ai_profiles()), 1)
+        first_id = list_ai_profiles()[0].id
+
+        # Second sync: the new payload still has a worker named "codex"
+        # so the row is updated in place; the id must stay stable.
+        body2 = AiProfileSyncRequest(workers=[
+            AiProfileSyncWorker(name="codex", worker_type="codex",
+                                model="gpt-5.4", base_url="",
+                                api_key_env="OPENAI_API_KEY",
+                                models=["gpt-5.4", "gpt-5.4-mini"]),
+        ])
+        listed = sync_ai_profiles(body2)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].id, first_id)
 
     def test_health_report_flips_availability(self) -> None:
         from cairn.server.routers.ai_profiles import (

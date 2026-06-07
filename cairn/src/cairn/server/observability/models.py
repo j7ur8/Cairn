@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from typing import Literal
+from typing import Literal as _Literal  # noqa: F401
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
+
+from cairn.server.task_types import TASK_TYPE_REGISTRY, is_known_task_type
 
 ProcessState = Literal["running", "completed", "failed", "timeout", "cancelled", "stale"]
-TaskType = Literal["bootstrap", "explore", "reason"]
+TaskType = str  # any name registered in TASK_TYPE_REGISTRY
 EventKind = Literal[
     "prompt",
     "stdout",
@@ -27,16 +30,35 @@ EventKind = Literal[
     "session_init",
     "api_retry",
     "system_event",
+    "capability_manifest",
     "trace_parse_error",
 ]
 EventStream = Literal["system", "prompt", "stdout", "stderr", "result", "error"]
 
 
+_RECORD_STREAMS = ("prompts", "stdout", "stderr")
+
+
 class ObservabilitySettings(BaseModel):
     enabled: bool = True
-    record_prompts: bool = True
-    record_stdout: bool = True
-    record_stderr: bool = True
+    # New authoritative field. Old ``record_*`` booleans are kept as
+    # computed properties so wire format and reporter.py keep working.
+    record: set[str] = Field(default_factory=lambda: {"prompts", "stdout", "stderr"})
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_prompts(self) -> bool:
+        return "prompts" in self.record
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_stdout(self) -> bool:
+        return "stdout" in self.record
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def record_stderr(self) -> bool:
+        return "stderr" in self.record
     max_event_bytes: int = Field(default=16384, gt=0)
     max_bytes_per_execution: int = Field(default=10485760, gt=0)
     flush_interval_ms: int = Field(default=250, ge=0)
@@ -119,6 +141,15 @@ class CreateEventResponse(BaseModel):
     dropped: bool = False
 
 
+class CreateEventsBatchRequest(BaseModel):
+    events: list[CreateEventRequest] = Field(min_length=1, max_length=200)
+
+
+class CreateEventsBatchResponse(BaseModel):
+    events: list[LlmExecutionEvent | None]
+    dropped: int = 0
+
+
 class FinishExecutionRequest(BaseModel):
     process_state: ProcessState
     returncode: int | None = None
@@ -134,3 +165,26 @@ class ExecutionListResponse(BaseModel):
 
 class EventListResponse(BaseModel):
     events: list[LlmExecutionEvent]
+
+
+class LlmUsageActivity(BaseModel):
+    latest_usage_sequence: int | None = None
+    latest_usage_at: str | None = None
+    subtype: str | None = None
+    tokens: int | None = None
+    delta: int | None = None
+    hidden_usage_count: int = 0
+
+
+class LlmEventStats(BaseModel):
+    total: int
+    returned: int
+    by_kind: dict[str, int] = Field(default_factory=dict)
+    hidden_by_kind: dict[str, int] = Field(default_factory=dict)
+
+
+class EventViewResponse(BaseModel):
+    primary_events: list[LlmExecutionEvent]
+    activity: LlmUsageActivity | None = None
+    stats: LlmEventStats
+    last_sequence: int
