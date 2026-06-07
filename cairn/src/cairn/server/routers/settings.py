@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from cairn.server.db import get_conn
+from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import Settings
 
 router = APIRouter(tags=["settings"])
@@ -15,7 +15,7 @@ def get_settings():
 
 @router.put("/settings", response_model=Settings)
 def update_settings(body: Settings):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         conn.execute(
             "UPDATE settings SET intent_timeout = ?, reason_timeout = ? WHERE rowid = 1",
             (body.intent_timeout, body.reason_timeout),

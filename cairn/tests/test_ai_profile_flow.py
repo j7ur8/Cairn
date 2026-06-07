@@ -64,9 +64,16 @@ class AiProfileFlowTests(unittest.TestCase):
 
         updated = update_ai_profile(
             created.id,
-            AiProfileUpdate(model="deepseek-v3", base_url="https://api.example/v1"),
+            AiProfileUpdate(
+                model="deepseek-v3",
+                models=["deepseek-v3", "deepseek-reasoner"],
+                base_url="https://api.example/v1",
+                model_reasoning_effort="xhigh",
+            ),
         )
         self.assertEqual(updated.model, "deepseek-v3")
+        self.assertEqual(updated.models, ["deepseek-reasoner", "deepseek-v3"])
+        self.assertEqual(updated.model_reasoning_effort, "xhigh")
         self.assertEqual(updated.base_url, "https://api.example/v1")
 
         delete_ai_profile(created.id)
@@ -93,7 +100,12 @@ class AiProfileFlowTests(unittest.TestCase):
         with self.db.get_conn() as conn:
             persist_project_ai_selection(
                 conn, pid,
-                AiProfileSelection(primary_profile_id=a.id, fallback_profile_ids=[b.id, c.id]),
+                AiProfileSelection(
+                    primary_profile_id=a.id,
+                    primary_model="m1",
+                    primary_reasoning_type="medium",
+                    fallback_profile_ids=[b.id, c.id],
+                ),
                 "2026-06-04T00:00:00Z",
             )
             conn.commit()
@@ -110,6 +122,7 @@ class AiProfileFlowTests(unittest.TestCase):
         primary_snapshot = next(s for s in result.snapshots if s.role == "primary")
         self.assertEqual(primary_snapshot.task_type, "legacy")
         self.assertEqual(primary_snapshot.snapshot_model, "m1")
+        self.assertEqual(primary_snapshot.snapshot_reasoning_type, "medium")
         self.assertEqual(primary_snapshot.snapshot_worker_type, "codex")
         self.assertEqual(primary_snapshot.snapshot_api_key_env, "K1")
 
@@ -136,9 +149,24 @@ class AiProfileFlowTests(unittest.TestCase):
                 conn,
                 pid,
                 TaskAiProfileSelections(
-                    bootstrap=AiProfileSelection(primary_profile_id=boot.id, fallback_profile_ids=[]),
-                    explore=AiProfileSelection(primary_profile_id=explore.id, fallback_profile_ids=[]),
-                    reason=AiProfileSelection(primary_profile_id=reason.id, fallback_profile_ids=[boot.id]),
+                    bootstrap=AiProfileSelection(
+                        primary_profile_id=boot.id,
+                        primary_model="m1",
+                        primary_reasoning_type="low",
+                        fallback_profile_ids=[],
+                    ),
+                    explore=AiProfileSelection(
+                        primary_profile_id=explore.id,
+                        primary_model="m2",
+                        primary_reasoning_type="medium",
+                        fallback_profile_ids=[],
+                    ),
+                    reason=AiProfileSelection(
+                        primary_profile_id=reason.id,
+                        primary_model="m3",
+                        primary_reasoning_type="high",
+                        fallback_profile_ids=[boot.id],
+                    ),
                 ),
                 "2026-06-04T00:00:00Z",
             )
@@ -152,6 +180,160 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertEqual(result.selections.reason.fallback_profile_ids, [boot.id])
         self.assertEqual({snap.task_type for snap in result.snapshots}, {"bootstrap", "explore", "reason"})
 
+    def test_task_selection_uses_selected_model(self) -> None:
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile, get_project_ai_profiles, persist_project_ai_selections, post_models_report,
+        )
+        from cairn.server.models import (
+            AiProfileCreate,
+            AiProfileModelsReport,
+            AiProfileModelsReportRequest,
+            AiProfileSelection,
+            TaskAiProfileSelections,
+        )
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="codex", worker_type="codex", model="default-model", api_key_env="K1",
+        ))
+        post_models_report(AiProfileModelsReportRequest(reports=[
+            AiProfileModelsReport(profile_id=profile.id, models=["default-model", "larger-model"]),
+        ]))
+        pid = self._create_project(title="P-model")
+        with self.db.get_conn() as conn:
+            persist_project_ai_selections(
+                conn,
+                pid,
+                TaskAiProfileSelections(
+                    bootstrap=AiProfileSelection(
+                        primary_profile_id=profile.id,
+                        primary_model="larger-model",
+                        primary_reasoning_type="medium",
+                    ),
+                ),
+                "2026-06-05T00:00:00Z",
+            )
+            conn.commit()
+
+        result = get_project_ai_profiles(pid)
+        boot = next(snap for snap in result.snapshots if snap.task_type == "bootstrap")
+        self.assertEqual(boot.snapshot_model, "larger-model")
+        catalog_profile = next(item for item in result.catalog if item.id == profile.id)
+        self.assertIn("larger-model", catalog_profile.models)
+
+    def test_task_selection_uses_selected_reasoning_type(self) -> None:
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile, get_project_ai_profiles, persist_project_ai_selections,
+        )
+        from cairn.server.models import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="codex",
+            worker_type="codex",
+            model="default-model",
+            api_key_env="K1",
+            model_reasoning_effort="medium",
+        ))
+        pid = self._create_project(title="P-reasoning")
+        with self.db.get_conn() as conn:
+            persist_project_ai_selections(
+                conn,
+                pid,
+                TaskAiProfileSelections(
+                    bootstrap=AiProfileSelection(
+                        primary_profile_id=profile.id,
+                        primary_model="default-model",
+                        primary_reasoning_type="low",
+                    ),
+                    reason=AiProfileSelection(
+                        primary_profile_id=profile.id,
+                        primary_model="default-model",
+                        primary_reasoning_type="high",
+                    ),
+                ),
+                "2026-06-05T00:00:00Z",
+            )
+            conn.commit()
+
+        result = get_project_ai_profiles(pid)
+        boot = next(snap for snap in result.snapshots if snap.task_type == "bootstrap")
+        reason = next(snap for snap in result.snapshots if snap.task_type == "reason")
+        self.assertEqual(boot.snapshot_reasoning_type, "low")
+        self.assertEqual(reason.snapshot_reasoning_type, "high")
+
+    def test_complete_task_selection_required(self) -> None:
+        from fastapi import HTTPException
+
+        from cairn.server.routers.ai_profiles import require_complete_ai_profile_selections
+        from cairn.server.models import AiProfileSelection, TaskAiProfileSelections
+
+        with self.assertRaises(HTTPException) as ctx:
+            require_complete_ai_profile_selections(None)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as ctx:
+            require_complete_ai_profile_selections(
+                TaskAiProfileSelections(
+                    bootstrap=AiProfileSelection(
+                        primary_profile_id="ai_boot",
+                        primary_model="m1",
+                        primary_reasoning_type="low",
+                    ),
+                    explore=AiProfileSelection(
+                        primary_profile_id="ai_explore",
+                        primary_model="m2",
+                        primary_reasoning_type="medium",
+                    ),
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("reason", ctx.exception.detail)
+
+        with self.assertRaises(HTTPException) as ctx:
+            require_complete_ai_profile_selections(
+                TaskAiProfileSelections(
+                    bootstrap=AiProfileSelection(primary_profile_id="ai_boot", primary_model="m1"),
+                    explore=AiProfileSelection(
+                        primary_profile_id="ai_explore",
+                        primary_model="m2",
+                        primary_reasoning_type="medium",
+                    ),
+                    reason=AiProfileSelection(
+                        primary_profile_id="ai_reason",
+                        primary_model="m3",
+                        primary_reasoning_type="high",
+                    ),
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("bootstrap.primary_reasoning_type", ctx.exception.detail)
+
+    def test_invalid_selected_model_rejected(self) -> None:
+        from fastapi import HTTPException
+
+        from cairn.server.routers.ai_profiles import create_ai_profile, persist_project_ai_selections
+        from cairn.server.models import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="codex", worker_type="codex", model="default-model", api_key_env="K1",
+        ))
+        pid = self._create_project(title="P-invalid-model")
+        with self.db.get_conn() as conn:
+            with self.assertRaises(HTTPException) as ctx:
+                persist_project_ai_selections(
+                    conn,
+                    pid,
+                    TaskAiProfileSelections(
+                        bootstrap=AiProfileSelection(
+                            primary_profile_id=profile.id,
+                            primary_model="not-available",
+                            primary_reasoning_type="medium",
+                        ),
+                    ),
+                    "2026-06-05T00:00:00Z",
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("not available", ctx.exception.detail)
+
     def test_missing_profile_rejected(self) -> None:
         from cairn.server.routers.ai_profiles import persist_project_ai_selection
         from cairn.server.models import AiProfileSelection
@@ -161,7 +343,12 @@ class AiProfileFlowTests(unittest.TestCase):
             with self.assertRaises(Exception) as ctx:
                 persist_project_ai_selection(
                     conn, pid,
-                    AiProfileSelection(primary_profile_id="ai_doesnotexist", fallback_profile_ids=[]),
+                    AiProfileSelection(
+                        primary_profile_id="ai_doesnotexist",
+                        primary_model="m",
+                        primary_reasoning_type="medium",
+                        fallback_profile_ids=[],
+                    ),
                     "2026-06-04T00:00:00Z",
                 )
         self.assertIn("not found", str(ctx.exception.detail))
@@ -185,7 +372,12 @@ class AiProfileFlowTests(unittest.TestCase):
             with self.assertRaises(Exception) as ctx:
                 persist_project_ai_selection(
                     conn, pid,
-                    AiProfileSelection(primary_profile_id=a.id, fallback_profile_ids=[]),
+                    AiProfileSelection(
+                        primary_profile_id=a.id,
+                        primary_model="m",
+                        primary_reasoning_type="medium",
+                        fallback_profile_ids=[],
+                    ),
                     "2026-06-04T00:00:00Z",
                 )
         self.assertIn("unavailable", str(ctx.exception.detail))
@@ -204,7 +396,12 @@ class AiProfileFlowTests(unittest.TestCase):
         with self.db.get_conn() as conn:
             persist_project_ai_selection(
                 conn, pid,
-                AiProfileSelection(primary_profile_id=a.id, fallback_profile_ids=[]),
+                AiProfileSelection(
+                    primary_profile_id=a.id,
+                    primary_model="m",
+                    primary_reasoning_type="medium",
+                    fallback_profile_ids=[],
+                ),
                 "2026-06-04T00:00:00Z",
             )
             conn.commit()
@@ -229,7 +426,12 @@ class AiProfileFlowTests(unittest.TestCase):
         with self.db.get_conn() as conn:
             persist_project_ai_selection(
                 conn, pid,
-                AiProfileSelection(primary_profile_id=a.id, fallback_profile_ids=[a.id]),
+                AiProfileSelection(
+                    primary_profile_id=a.id,
+                    primary_model="m",
+                    primary_reasoning_type="medium",
+                    fallback_profile_ids=[a.id],
+                ),
                 "2026-06-04T00:00:00Z",
             )
             conn.commit()

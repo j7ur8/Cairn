@@ -491,8 +491,14 @@ class ContainerManager:
         }
 
     def _render_bind_mounts(self, project_id: str) -> list[dict[str, object]]:
+        return self._render_bind_mounts_for(self._config, project_id)
+
+    @staticmethod
+    def _render_bind_mounts_for(
+        config: ContainerConfig, project_id: str,
+    ) -> list[dict[str, object]]:
         rendered: list[dict[str, object]] = []
-        for index, mount in enumerate(self._config.bind_mounts):
+        for index, mount in enumerate(config.bind_mounts):
             name = mount.name or f"bind_mount[{index}]"
             host_path = mount.host_path.replace("{project_id}", project_id)
             rendered.append(

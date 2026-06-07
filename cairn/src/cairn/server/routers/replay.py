@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from cairn.server.db import get_conn
+from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import (
     Fact,
     Hint,
@@ -16,7 +16,7 @@ from cairn.server.models import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
-from cairn.server.routers.ai_profiles import persist_project_ai_selection, persist_project_ai_selections
+from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -44,7 +44,7 @@ _REPLAY_CREATOR = "dispatcher.replay"
 def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
     replay_project_id: str | None = None
     run_id: str | None = None
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_completed(conn, project_id)
         completion = get_completion_intent_or_409(conn, project_id)
         completion_source_ids = _intent_source_ids(conn, project_id, completion["id"])
@@ -127,10 +127,12 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
         if body.role_id:
             _insert_role_snapshot(conn, replay_project_id, body.role_id, now)
 
-        if body.ai_profile_selections is not None:
-            persist_project_ai_selections(conn, replay_project_id, body.ai_profile_selections, now)
-        elif body.ai_profiles is not None:
-            persist_project_ai_selection(conn, replay_project_id, body.ai_profiles, now)
+        persist_project_ai_selections(
+            conn,
+            replay_project_id,
+            require_complete_ai_profile_selections(body.ai_profile_selections),
+            now,
+        )
 
     try:
         _copy_project_attachments(project_id, replay_project_id)
@@ -155,7 +157,7 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
     response_model=ReplayRunAdvanceResponse,
 )
 def advance_replay_run(project_id: str):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         run = conn.execute(
             """
             SELECT *

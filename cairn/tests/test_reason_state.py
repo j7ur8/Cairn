@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import os
+os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32bytes')
+os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
+
+import os
 import sys
 import tempfile
 import unittest

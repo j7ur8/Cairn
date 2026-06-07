@@ -87,6 +87,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
     ) -> DriverResult:
         assert session is not None
         capability_args = self._capability_args(context)
+        effort_args = self._effort_args(worker)
         return DriverResult(
             argv=[
                 "claude",
@@ -97,6 +98,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
                 "--output-format",
                 "stream-json",
                 "--verbose",
+                *effort_args,
                 *capability_args,
                 "--",
                 prompt,
@@ -112,6 +114,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
         context: WorkerExecutionContext | None = None,
     ) -> list[str]:
         capability_args = self._capability_args(context)
+        effort_args = self._effort_args(worker)
         return [
             "claude",
             "-r",
@@ -121,6 +124,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
             "--output-format",
             "stream-json",
             "--verbose",
+            *effort_args,
             *capability_args,
             "--",
             prompt,
@@ -136,6 +140,11 @@ class ClaudeCodeDriver(SeedSessionDriver):
         if context.skill_root:
             args.extend(["--add-dir", context.skill_root])
         return args
+
+    @staticmethod
+    def _effort_args(worker: WorkerConfig) -> list[str]:
+        effort = (worker.env.get("CAIRN_MODEL_REASONING_EFFORT") or "").strip()
+        return ["--effort", effort] if effort else []
 
     def extract_response_text(self, stdout: str, stderr: str) -> str:
         messages: list[str] = []

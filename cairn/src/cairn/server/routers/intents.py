@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from cairn.server.db import get_conn
+from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import (
     ConcludeRequest,
     ConcludeResponse,
@@ -32,7 +32,7 @@ router = APIRouter(tags=["intents"])
     status_code=201,
 )
 def create_intent(project_id: str, body: CreateIntentRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_active(conn, project_id)
         validate_facts_exist(conn, project_id, body.from_)
         validate_goal_not_in_sources(body.from_)
@@ -77,7 +77,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
     response_model=Intent,
 )
 def heartbeat(project_id: str, intent_id: str, body: HeartbeatRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_active(conn, project_id)
 
         now = utcnow()
@@ -90,7 +90,7 @@ def heartbeat(project_id: str, intent_id: str, body: HeartbeatRequest):
     response_model=Intent,
 )
 def release(project_id: str, intent_id: str, body: HeartbeatRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_active(conn, project_id)
         row = release_open_intent_or_409(conn, project_id, intent_id, body.worker)
         return intent_to_model(conn, row, project_id)
@@ -101,7 +101,7 @@ def release(project_id: str, intent_id: str, body: HeartbeatRequest):
     response_model=ConcludeResponse,
 )
 def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_active(conn, project_id)
 
         now = utcnow()

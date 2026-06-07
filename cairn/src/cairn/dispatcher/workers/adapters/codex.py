@@ -17,6 +17,7 @@ CODEX_EXEC_GUARDRAILS = [
     "--ignore-rules",
     "--skip-git-repo-check",
 ]
+DEFAULT_CODEX_REASONING_EFFORT = "high"
 
 
 class CodexDriver(RegexSessionDriver):
@@ -72,7 +73,7 @@ class CodexDriver(RegexSessionDriver):
             "-c",
             'model_providers.cairn.wire_api="responses"',
             "-c",
-            'model_reasoning_effort="high"',
+            CodexDriver._reasoning_effort_config(env),
             "-c",
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
@@ -108,7 +109,7 @@ class CodexDriver(RegexSessionDriver):
             "-c",
             'model_providers.cairn.wire_api="responses"',
             "-c",
-            'model_reasoning_effort="high"',
+            CodexDriver._reasoning_effort_config(env),
             "-c",
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
@@ -121,6 +122,11 @@ class CodexDriver(RegexSessionDriver):
     @staticmethod
     def _capability_args(context: WorkerExecutionContext | None) -> list[str]:
         return CodexDriver._capability_args_for(context, include_skill_root=True)
+
+    @staticmethod
+    def _reasoning_effort_config(env: dict[str, str]) -> str:
+        effort = (env.get("CAIRN_MODEL_REASONING_EFFORT") or DEFAULT_CODEX_REASONING_EFFORT).strip()
+        return f"model_reasoning_effort={json.dumps(effort)}"
 
     @staticmethod
     def _resume_capability_args(context: WorkerExecutionContext | None) -> list[str]:

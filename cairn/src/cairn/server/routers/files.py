@@ -10,6 +10,13 @@ from fastapi.responses import FileResponse
 
 from cairn.server.db import get_conn
 from cairn.server.models import ProjectFileItem, ProjectFilesResponse
+from cairn.server.security.paths import (
+    download_size_guard,
+    force_attachment_disposition,
+    safe_resolve_within,
+    validate_project_id,
+    validate_relative_path,
+)
 from cairn.server.services import get_project_or_404
 
 router = APIRouter(tags=["files"])
@@ -23,14 +30,10 @@ def _iso_mtime(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _safe_relative_path(value: str) -> PurePosixPath:
-    text = (value or "").strip()
-    if not text:
-        raise HTTPException(400, "path must not be empty")
-    rel = PurePosixPath(text)
-    if not rel.parts or rel.is_absolute() or any(part in ("", ".", "..") for part in rel.parts):
-        raise HTTPException(400, "invalid path")
-    return rel
+# Path validation lives in cairn.server.security.paths; this
+# module re-exports the canonical helper under the historic name so
+# any callers that imported the private helper keep working.
+_safe_relative_path = validate_relative_path
 
 
 def _resolve_project_file(project_id: str, source: str, rel_path: str) -> Path:
@@ -41,12 +44,10 @@ def _resolve_project_file(project_id: str, source: str, rel_path: str) -> Path:
     else:
         raise HTTPException(400, "source must be project or attachment")
 
+    validate_project_id(project_id)
     rel = _safe_relative_path(rel_path)
-    root_resolved = root.resolve(strict=False)
-    target = (root / Path(*rel.parts)).resolve(strict=False)
-    if target != root_resolved and root_resolved not in target.parents:
-        raise HTTPException(400, "invalid path")
-    if not target.exists() or not target.is_file():
+    target = safe_resolve_within(root, rel)
+    if not target.is_file():
         raise HTTPException(404, "File not found")
     return target
 
@@ -93,6 +94,7 @@ def _iter_files(root: Path, source: str) -> list[ProjectFileItem]:
 
 @router.get("/projects/{project_id}/files", response_model=ProjectFilesResponse)
 def list_project_files(project_id: str):
+    validate_project_id(project_id)
     with get_conn() as conn:
         get_project_or_404(conn, project_id)
 
@@ -114,5 +116,17 @@ def download_project_file(
         get_project_or_404(conn, project_id)
 
     target = _resolve_project_file(project_id, source, path)
+    download_size_guard(target)
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-    return FileResponse(target, media_type=media_type, filename=target.name)
+    disposition = force_attachment_disposition(media_type)
+    return FileResponse(
+        target,
+        media_type=media_type,
+        filename=target.name,
+        # The FileResponse ``content_disposition_type`` controls the
+        # disposition header that ships with the response. We override
+        # it to ``attachment`` for any HTML/SVG payload to neutralize
+        # a stored-XSS pivot that would otherwise render attacker-
+        # controlled HTML inside the SPA.
+        content_disposition_type=disposition,
+    )

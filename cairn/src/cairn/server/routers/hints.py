@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from cairn.server.db import get_conn
+from cairn.server.db import with_immediate_tx
 from cairn.server.models import CreateHintRequest, Hint
 from cairn.server.services import check_project_hint_writable, next_hint_id, utcnow
 
@@ -13,7 +13,7 @@ router = APIRouter(tags=["hints"])
     status_code=201,
 )
 def create_hint(project_id: str, body: CreateHintRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_hint_writable(conn, project_id)
 
         now = utcnow()

@@ -25,6 +25,11 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
             },
         )
 
+    def _worker_with_effort(self):
+        worker = self._worker()
+        worker.env["CAIRN_MODEL_REASONING_EFFORT"] = "xhigh"
+        return worker
+
     def test_build_execute_uses_print_mode(self) -> None:
         from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
 
@@ -44,6 +49,18 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertIn("--print", argv)
         self.assertNotIn("-p", argv)
 
+    def test_build_execute_includes_effort_when_configured(self) -> None:
+        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+
+        result = ClaudeCodeDriver().build_execute(
+            self._worker_with_effort(),
+            "hello",
+            "11111111-1111-1111-1111-111111111111",
+        )
+
+        self.assertIn("--effort", result.argv)
+        self.assertEqual(result.argv[result.argv.index("--effort") + 1], "xhigh")
+
 
 class CodexDriverCommandTests(unittest.TestCase):
     def _worker(self):
@@ -60,6 +77,11 @@ class CodexDriverCommandTests(unittest.TestCase):
                 "OPENAI_API_KEY": "secret",
             },
         )
+
+    def _worker_with_effort(self):
+        worker = self._worker()
+        worker.env["CAIRN_MODEL_REASONING_EFFORT"] = "xhigh"
+        return worker
 
     def test_build_execute_uses_noninteractive_guardrails(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
@@ -94,6 +116,13 @@ class CodexDriverCommandTests(unittest.TestCase):
         self.assertIn("--ignore-user-config", argv)
         self.assertIn("--ignore-rules", argv)
         self.assertIn("--skip-git-repo-check", argv)
+
+    def test_build_execute_uses_configured_reasoning_effort(self) -> None:
+        from cairn.dispatcher.workers.adapters.codex import CodexDriver
+
+        result = CodexDriver().build_execute(self._worker_with_effort(), "hello", None)
+        joined = " ".join(result.argv)
+        self.assertIn('model_reasoning_effort="xhigh"', joined)
 
     def test_build_conclude_omits_resume_unsupported_add_dir(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver

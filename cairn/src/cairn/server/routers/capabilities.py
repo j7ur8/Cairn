@@ -5,7 +5,7 @@ import json
 
 from fastapi import APIRouter
 
-from cairn.server.db import get_conn
+from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import (
     CapabilityCatalogItem,
     CapabilitySelection,
@@ -54,7 +54,7 @@ def get_project_capabilities(project_id: str):
 
 @router.put("/projects/{project_id}/capabilities", response_model=ProjectCapabilitiesResponse)
 def update_project_capabilities(project_id: str, body: CapabilitySelection):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         check_project_hint_writable(conn, project_id)
         now = utcnow()
         conn.execute("DELETE FROM project_capabilities WHERE project_id = ?", (project_id,))
@@ -85,7 +85,7 @@ def update_project_capabilities(project_id: str, body: CapabilitySelection):
 
 @router.post("/capabilities/catalog", response_model=list[CapabilityCatalogItem])
 def register_capability_catalog(body: RegisterCapabilityCatalogRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         now = utcnow()
         conn.execute("DELETE FROM capability_catalog")
         for item in body.catalog:
@@ -117,7 +117,7 @@ def get_role_catalog():
 
 @router.post("/roles/catalog", response_model=list[RoleCatalogItem])
 def register_role_catalog(body: RegisterRoleCatalogRequest):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         now = utcnow()
         conn.execute("DELETE FROM role_catalog")
         for item in body.roles:

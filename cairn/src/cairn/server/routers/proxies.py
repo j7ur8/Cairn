@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from cairn.server.db import get_conn
+from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.models import (
     ProxyConfig,
     ProxyCreate,
@@ -80,7 +80,7 @@ def list_proxies():
 def create_proxy(body: ProxyCreate):
     now = _utcnow()
     pid = _new_proxy_id()
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         conn.execute(
             """
             INSERT INTO proxies (id, name, type, host, port, username, password, created_at, updated_at)
@@ -104,7 +104,7 @@ def get_proxy(proxy_id: str):
 
 @router.put("/proxies/{proxy_id}", response_model=ProxyConfig)
 def update_proxy(proxy_id: str, body: ProxyUpdate):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         row = conn.execute("SELECT * FROM proxies WHERE id = ?", (proxy_id,)).fetchone()
         if row is None:
             raise HTTPException(404, f"proxy not found: {proxy_id}")
@@ -135,7 +135,7 @@ def update_proxy(proxy_id: str, body: ProxyUpdate):
 
 @router.delete("/proxies/{proxy_id}", status_code=204)
 def delete_proxy(proxy_id: str):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
         row = conn.execute("SELECT id FROM proxies WHERE id = ?", (proxy_id,)).fetchone()
         if row is None:
             raise HTTPException(404, f"proxy not found: {proxy_id}")

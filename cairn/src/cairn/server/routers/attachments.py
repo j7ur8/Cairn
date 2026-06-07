@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from cairn.server.db import get_conn
 from cairn.server.models import AttachmentUpload, AttachmentUploadResponse
+from cairn.server.security.paths import validate_project_id
 from cairn.server.services import check_project_hint_writable, next_hint_id, utcnow
 
 router = APIRouter(tags=["attachments"])
@@ -29,7 +30,13 @@ def _safe_filename(filename: str) -> str:
 
 
 def _dedupe_path(project_dir: Path, filename: str) -> Path:
-    candidate = project_dir / filename
+    # Refuse any path component that tries to escape the project
+    # directory, even though _safe_filename should have stripped
+    # slashes already. This is the TOCTOU safety net.
+    safe = filename.replace("/", "_").replace("\\", "_")
+    candidate = (project_dir / safe).resolve(strict=False)
+    if not str(candidate).startswith(str(project_dir.resolve(strict=False))):
+        raise HTTPException(400, "invalid filename")
     if not candidate.exists():
         return candidate
     stem = candidate.stem or "attachment"
@@ -60,6 +67,7 @@ def upload_project_attachments(
 ):
     if not files:
         raise HTTPException(400, "No files uploaded")
+    validate_project_id(project_id)
 
     creator = creator.strip() or "Human"
     with get_conn() as conn:
