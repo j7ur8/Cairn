@@ -1,0 +1,258 @@
+remote_support:
+  enabled: true
+  dnslog:
+    url: ''
+  ssh:
+    host: ${CAIRN_REMOTE_SSH_HOST:-}
+    port: 22
+    username: ${CAIRN_REMOTE_SSH_USERNAME:-}
+    password: ${CAIRN_REMOTE_SSH_PASSWORD:-}
+capabilities:
+  mcp_servers:
+  - id: kali-server-mcp
+    name: Kali Server MCP
+    description: Kali Linux MCP server exposing authorized Kali tool execution through
+      a local stdio bridge.
+    command: /usr/local/bin/kali-mcp-stdio
+    args: []
+    env:
+      KALI_MCP_TIMEOUT: '300'
+    task_types:
+    - explore
+  - id: metasploit-mcp
+    name: Metasploit MCP
+    description: Metasploit Framework MCP server for module search, session handling,
+      and RPC-backed framework operations.
+    command: /usr/local/bin/metasploit-mcp-stdio
+    args: []
+    env:
+      MSF_MCP_TRANSPORT: stdio
+      MSF_AUTO_START_RPC: 'true'
+      MSF_API_TYPE: messagepack
+      MSF_API_SSL: 'true'
+    task_types:
+    - explore
+  - id: camoufox-reverse
+    name: Camoufox Reverse MCP
+    description: Browser automation MCP backed by Camoufox, preconfigured with a per-project
+      persistent profile directory and headless mode for JS reverse-engineering workflows.
+    command: camoufox-reverse-mcp
+    args:
+    - --stdio
+    env:
+      CAMOUFOX_PROFILE_DIR: /mnt/project/.browser-profile
+      CAMOUFOX_HEADLESS: '1'
+      PLAYWRIGHT_MCP_BROWSER: chromium
+    task_types:
+    - explore
+  skills:
+  - id: cypher-ctf
+    name: Cypher CTF
+    description: CTF orchestration — triages challenge types and delegates to specialist
+      sub-skills (pwn, reverse, crypto, forensics, web).
+    source_path: ./capabilities/skills/cypher-ctf
+    task_types:
+    - explore
+  - id: cypher-pentest
+    name: Cypher Pentest
+    description: Pentest orchestration — scope enforcement, vulnerability triage,
+      sub-skill delegation, evidence and reporting.
+    source_path: ./capabilities/skills/cypher-pentest
+    task_types:
+    - explore
+  - id: cypher-vuln-research
+    name: Cypher Vulnerability Research
+    description: Vuln research orchestration — source audit, CVE reproduction, PoC
+      adaptation, fuzzing and root-cause analysis, sub-skill delegation.
+    source_path: ./capabilities/skills/cypher-vuln-research
+    task_types:
+    - explore
+  - id: cypher-sqli
+    name: Cypher SQL Injection
+    description: 'SQL injection testing: error-based, union, boolean blind, time-based,
+      stacked, second-order, OOB across MySQL, PostgreSQL, MSSQL, Oracle, SQLite.'
+    source_path: ./capabilities/skills/cypher-sqli
+    task_types:
+    - explore
+  - id: cypher-xss
+    name: Cypher XSS
+    description: 'XSS testing: reflected, stored, DOM, mXSS, CSP bypass, postMessage,
+      with context-aware payload selection and WAF bypass.'
+    source_path: ./capabilities/skills/cypher-xss
+    task_types:
+    - explore
+  - id: cypher-ssrf
+    name: Cypher SSRF
+    description: 'SSRF testing: internal port scanning, cloud metadata exfiltration
+      (AWS/GCP/Azure), protocol smuggling, DNS rebinding, blind SSRF via OOB.'
+    source_path: ./capabilities/skills/cypher-ssrf
+    task_types:
+    - explore
+  - id: cypher-command-injection
+    name: Cypher Command Injection
+    description: 'OS command injection: blind/echo/OOB detection, filter bypass, parameter
+      injection, Linux and Windows target coverage.'
+    source_path: ./capabilities/skills/cypher-command-injection
+    task_types:
+    - explore
+  - id: cypher-file-upload
+    name: Cypher File Upload
+    description: 'File upload exploitation: extension bypass, content-type, magic
+      bytes, polyglots, race conditions, image processing, ZIP slip, webshell deployment.'
+    source_path: ./capabilities/skills/cypher-file-upload
+    task_types:
+    - explore
+  - id: cypher-idor
+    name: Cypher IDOR
+    description: 'IDOR and authorization bypass: sequential IDs, UUID prediction,
+      hash traversal, mass assignment, multi-tenant isolation testing.'
+    source_path: ./capabilities/skills/cypher-idor
+    task_types:
+    - explore
+  - id: cypher-deserialization
+    name: Cypher Deserialization
+    description: 'Insecure deserialization: PHP/Java/.NET/Python/Ruby/Node.js gadget
+      chains, ysoserial/phpggc, blind detection via OOB callbacks.'
+    source_path: ./capabilities/skills/cypher-deserialization
+    task_types:
+    - explore
+  - id: cypher-xxe
+    name: Cypher XXE
+    description: 'XML External Entity injection: in-band, OOB, parameter entities,
+      XInclude, SVG, SOAP, Office Open XML, CDATA exfiltration.'
+    source_path: ./capabilities/skills/cypher-xxe
+    task_types:
+    - explore
+  - id: cypher-jwt
+    name: Cypher JWT Attacks
+    description: 'JWT attacks: alg confusion, key confusion (RS256→HS256), kid/jku/x5u
+      injection, weak HMAC secret cracking, JWKS spoofing, token replay.'
+    source_path: ./capabilities/skills/cypher-jwt
+    task_types:
+    - explore
+  - id: cypher-auth-bypass
+    name: Cypher Auth Bypass
+    description: 'Authentication bypass: OAuth/OIDC misconfigurations, SAML flaws,
+      2FA/MFA bypass, password reset poisoning, session fixation, registration attacks.'
+    source_path: ./capabilities/skills/cypher-auth-bypass
+    task_types:
+    - explore
+  - id: cypher-ssti
+    name: Cypher SSTI
+    description: 'Server-Side Template Injection: Jinja2, Twig, Freemarker, Velocity,
+      ERB, Pug, Smarty, Mako detection and sandbox escape to RCE.'
+    source_path: ./capabilities/skills/cypher-ssti
+    task_types:
+    - explore
+  - id: cypher-pwn
+    name: Cypher Pwn / Binary Exploitation
+    description: 'Binary exploitation: stack/heap overflow, ROP/JOP, ret2libc, format
+      strings, integer attacks, heap feng shui, tcache/fastbin poisoning.'
+    source_path: ./capabilities/skills/cypher-pwn
+    task_types:
+    - explore
+  - id: cypher-reverse
+    name: Cypher Reverse Engineering
+    description: 'Reverse engineering: static analysis (Ghidra/IDA/radare2), dynamic
+      debugging (gdb/lldb), deobfuscation, unpacking, anti-debug bypass.'
+    source_path: ./capabilities/skills/cypher-reverse
+    task_types:
+    - explore
+  - id: cypher-crypto
+    name: Cypher Cryptography
+    description: 'Cryptography attacks: classical ciphers, RSA (small e, Wiener, Coppersmith),
+      ECC, padding oracle, hash length extension, PRNG prediction.'
+    source_path: ./capabilities/skills/cypher-crypto
+    task_types:
+    - explore
+  - id: cypher-forensics
+    name: Cypher Forensics
+    description: 'Digital forensics: memory analysis (Volatility3), disk forensics
+      (sleuthkit), file carving, steganography, PCAP analysis, log analysis.'
+    source_path: ./capabilities/skills/cypher-forensics
+    task_types:
+    - explore
+  - id: cypher-blockchain
+    name: Cypher Blockchain / Smart Contracts
+    description: 'Blockchain exploitation: reentrancy, overflow/underflow, access
+      control, flash loans, oracle manipulation, delegatecall, Solidity/Vyper audit.'
+    source_path: ./capabilities/skills/cypher-blockchain
+    task_types:
+    - explore
+  - id: cypher-ad
+    name: Cypher Active Directory
+    description: 'Active Directory attacks: BloodHound, Kerberoasting, AS-REP, DCSync,
+      delegation abuse, NTLM relay, ADCS, lateral movement, cross-trust.'
+    source_path: ./capabilities/skills/cypher-ad
+    task_types:
+    - explore
+  - id: cypher-privesc-linux
+    name: Cypher Linux Privilege Escalation
+    description: 'Linux privilege escalation: SUID/SGID, capabilities, sudo, cron,
+      NFS, Docker breakout, LD_PRELOAD, kernel exploits, systemd, PATH hijacking.'
+    source_path: ./capabilities/skills/cypher-privesc-linux
+    task_types:
+    - explore
+  - id: cypher-privesc-windows
+    name: Cypher Windows Privilege Escalation
+    description: 'Windows privilege escalation: services, AlwaysInstallElevated, UAC
+      bypass, token theft, Potato family, DLL hijacking, unattended installs.'
+    source_path: ./capabilities/skills/cypher-privesc-windows
+    task_types:
+    - explore
+  - id: cypher-cloud
+    name: Cypher Cloud Security
+    description: 'Cloud security: AWS/Azure/GCP metadata, IAM privilege escalation,
+      storage enumeration, serverless exploitation, cross-account attacks.'
+    source_path: ./capabilities/skills/cypher-cloud
+    task_types:
+    - explore
+  - id: cypher-container
+    name: Cypher Container & Kubernetes
+    description: 'Container security: Docker socket abuse, privileged breakout, capabilities,
+      K8s RBAC escalation, pod escape, service account attacks, ETCD.'
+    source_path: ./capabilities/skills/cypher-container
+    task_types:
+    - explore
+  - id: cypher-post-exploit
+    name: Cypher Post-Exploitation
+    description: 'Post-exploitation: shell stabilization, file transfer, tunneling
+      (chisel/ligolo/SSH), credential harvesting, lateral movement, persistence, cleanup.'
+    source_path: ./capabilities/skills/cypher-post-exploit
+    task_types:
+    - explore
+  - id: hello-js-reverse
+    name: Hello JS Reverse
+    description: Frontend JavaScript reverse-engineering workflows that pair the camoufox-reverse-mcp
+      browser MCP with the hello_js_reverse_skill reference material.
+    source_path: ./capabilities/skills/hello-js-reverse
+    task_types:
+    - explore
+roles:
+- id: cypher-ctf-operator
+  name: Cypher CTF Operator
+  description: Fast CTF / cyber-range operator focused on flags, shells, proofs, and
+    reproducible exploit paths.
+  source_path: ./capabilities/roles/cypher-ctf-operator/ROLE.md
+  task_types:
+  - bootstrap
+  - explore
+  - reason
+- id: cypher-pentest-operator
+  name: Cypher Pentest Operator
+  description: Authorized pentest operator focused on scope, evidence, impact validation,
+    cleanup, and reporting.
+  source_path: ./capabilities/roles/cypher-pentest-operator/ROLE.md
+  task_types:
+  - bootstrap
+  - explore
+  - reason
+- id: cypher-vuln-researcher
+  name: Cypher Vulnerability Researcher
+  description: Vulnerability researcher focused on root cause, reproducible PoC, exploitability,
+    and fixes.
+  source_path: ./capabilities/roles/cypher-vuln-researcher/ROLE.md
+  task_types:
+  - bootstrap
+  - explore
+  - reason

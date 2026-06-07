@@ -16,19 +16,29 @@ services:
     container_name: cairn-server
     ports:
       - "8000:8000"
+    # ${PWD} resolves to the directory containing this docker-compose.yaml.
+    # Both the server and the dispatcher need to agree on the same host
+    # path so the server can list files written by worker bind mounts.
+    #
+    # env_file: shares CAIRN_JWT_SECRET and the optional
+    # CAIRN_INITIAL_ADMIN_* with the dispatcher. Both containers must
+    # agree on the same secret; otherwise the dispatcher's API token
+    # would be rejected with 401 by the server.
+    env_file:
+      - .env
     environment:
-      CAIRN_ATTACHMENTS_ROOT: /Users/jmac/Documents/GitHub/Cairn/datas/attachments
-      CAIRN_PROJECT_FILES_ROOT: /Users/jmac/Documents/GitHub/Cairn/datas/project-files
+      CAIRN_ATTACHMENTS_ROOT: ${PWD}/datas/attachments
+      CAIRN_PROJECT_FILES_ROOT: ${PWD}/datas/project-files
       CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
     volumes:
       - ./datas/cairn/:/root/.local/share/cairn/
-      - ./datas:/Users/jmac/Documents/GitHub/Cairn/datas
+      - ${PWD}/datas:${PWD}/datas
     healthcheck:
       test:
         - "CMD"
         - "python"
         - "-c"
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/projects', timeout=5)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
       interval: 10s
       timeout: 5s
       retries: 12
@@ -47,22 +57,56 @@ services:
     # project-root .env file. The file must NEVER be committed; see
     # .gitignore and .dockerignore. SSH defaults in dispatch.yaml use
     # ${VAR:-} so the dispatcher still starts when these are unset.
+    #
+    # CAIRN_DISPATCHER_DATAS_ROOT is the *host* path to the shared datas
+    # directory. dispatch.yaml uses it in bind_mounts[*].host_path so the
+    # Docker daemon can actually resolve the bind mount (the dispatcher
+    # itself runs in a container, so a path relative to dispatch.yaml
+    # would resolve to the image's baked-in datas, which is invisible to
+    # the host's Docker daemon).
     env_file:
       - .env
+    environment:
+      # Hardcoded absolute path; the value lives in .env so a
+      # different host can override without editing this file.
+      CAIRN_DISPATCHER_DATAS_ROOT: ${CAIRN_DISPATCHER_DATAS_ROOT}
+      CAIRN_DISPATCHER_HEALTH_ADDR: 127.0.0.1:9100
+      UV_CACHE_DIR: /tmp/uv-cache
+      XDG_CACHE_HOME: /tmp/.cache
+    # SECURITY: the dispatcher still needs the Docker socket to launch
+    # worker containers; no-new-privileges and a read-only root fs reduce
+    # blast radius but do not make docker.sock safe against RCE.
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./datas/cairn/:/root/.local/share/cairn/
       - ./dispatch.yaml:/cairn/dispatch.yaml
+      - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
-      - ./datas:/Users/jmac/Documents/GitHub/Cairn/datas
+      - ${PWD}/datas:${PWD}/datas
     depends_on:
       cairn-server:
         condition: service_healthy
       cairn-worker-image:
         condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/healthz', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 3s
     networks:
       - cairn
-    command: ["uv", "run", "cairn", "dispatch", "--config", "dispatch.yaml"]
+    command: ["/cairn/.venv/bin/cairn", "dispatch", "--config", "dispatch.yaml"]
 
 networks:
   cairn:

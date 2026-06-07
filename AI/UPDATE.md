@@ -9,6 +9,186 @@
 
 # Cairn 更新记录
 
+## 2026-06-05 · AI Profile 多模型下拉与 reasoning_type（已完成）
+
+### 背景
+
+`dispatch.yaml` 需要配置默认 `model_reasoning_effort`，项目创建页需要为 Bootstrap / Intent / Reason 分别选择 profile、model 和 reasoning type。同时一个 AI profile 应承载多个可选 model，而不是为同一 worker 的多个 model 生成多个 seeded profile。
+
+### 已完成变更
+
+- `WorkerConfig` 新增 `model_reasoning_effort`，取值限定为 `low | medium | high | xhigh`。
+- `dispatch.yaml` 为 codex / claudecode worker 增加 `model_reasoning_effort: "high"` 示例；`workers.models` 继续作为手动静态模型列表。
+- Dispatcher AI sync 改为一个 worker 只同步一个 seeded profile，并通过 `models` 字段把 `[默认模型 + workers.models]` 写入 Server 的 `ai_profile_models`。
+- AI profile / project snapshot 增加 reasoning 字段：profile 保存默认 `model_reasoning_effort`，项目 selection 保存 `primary_reasoning_type`，snapshot 保存 `snapshot_reasoning_type`。
+- Create Project / Replay AI Worker Chains 改为三列下拉：Profiles、Configured Model、Reasoning Type。
+- Settings 的 AI profile 表单支持默认 reasoning 和手动多模型列表。
+- Runtime overlay 会把项目 snapshot reasoning 写入 `CAIRN_MODEL_REASONING_EFFORT`；Codex 使用 `-c model_reasoning_effort=...`，Claude Code 使用 `--effort ...`。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run python -m unittest tests.test_ai_profile_bridge tests.test_ai_profile_flow tests.test_worker_cli_adapters`
+- `cd cairn && uv run python -m unittest discover -s tests`
+- `python -m compileall -q cairn/src/cairn cairn/tests`
+- `git diff --check`
+- `node --check` 校验从 `index.html` 抽取出的 `function cairnApp()`
+- `ANTHROPIC_AUTH_TOKEN=test OPENAI_API_KEY=test uv run --project cairn python - <<'PY' ... DispatchConfig.load(Path('dispatch.yaml')) ...`
+
+### 未完成事项/风险
+
+- reasoning type 当前只暴露共同子集 `low | medium | high | xhigh`；未包含 Codex-only `minimal` 或 Claude-only `max`。
+- 历史上已经生成的 `worker:model` seeded profiles 不会自动删除；后续可由 operator 在 Settings 中手动删除。
+
+## 2026-06-05 · dispatch.yaml workers.models 静态多模型配置（已完成）
+
+### 背景
+
+需要允许一个 codex/claudecode worker 在不调用 provider 远程模型列表接口的前提下，声明多个可选模型供 AI Worker Chains 选择。同时 `env.CODEX_MODEL` / `env.ANTHROPIC_MODEL` 必须继续有效，并代表该 worker 的默认模型。
+
+### 已完成变更
+
+- `WorkerConfig` 新增可选 `models: list[str]`，加载时会 trim、拒绝空字符串、按原顺序去重。
+- Dispatcher `_build_ai_sync_payload()` 会把 `env.CODEX_MODEL` / `env.ANTHROPIC_MODEL` 作为默认模型排在第一位，再追加 `workers.models` 中未重复的模型。
+- 默认模型的 seeded profile 名称继续使用原 `worker.name`，兼容已有 profile 和项目选择。
+- 配置额外候选模型时，Dispatcher 为每个额外模型生成一个 seeded profile，名称为 `worker.name:model`，由 Server 继续按 `seeded_from_worker` 幂等 upsert。
+- Dispatcher 启动时会持续幂等同步 `dispatch.yaml` worker profiles；已有 catalog 不会阻止新增 `workers.models` 生成的新 seeded profiles 出现。
+- `dispatch.yaml` 增加注释示例，明确 `models` 是手动静态列表，不触发远程模型发现。
+
+### 验证结果
+
+- 已新增单元测试覆盖 `models` 去重/空值拒绝、默认模型优先、多模型 payload 展开、单模型 legacy seed name 兼容。
+
+### 未完成事项/风险
+
+- `workers.task_types` 仍是 worker 级约束，适用于该 worker 展开的所有模型；如果未来需要“某个模型只允许 reason/explore”，需要新增模型级 task_types schema。
+
+## 2026-06-05 · AI Worker Chains 改回手动模型配置（已完成）
+
+### 背景
+
+Create Project panel 的 AI Worker Chains 需要避免直铺所有 profiles，并且不再由 Dispatcher 调 provider `/v1/models` 远程获取模型列表。模型来源改为用户在 `dispatch.yaml` worker env 或 Settings 创建/编辑 AI profile 时手动填写的 `model` 字段。
+
+### 已完成变更
+
+- Create Project 的 AI Worker Chains 保留 `Bootstrap Model` / `Intent Model` / `Reason Model` 三个任务切换按钮。
+- Profiles 区域从按钮直铺改为单个下拉列表，只展示可用 profile 标题。
+- Model 区域改为只读 configured model，值来自当前 profile 的 `model`，不再读取 `profile.models` 缓存。
+- 选择 profile 时，前端写入 `primary_profile_id` 和 `primary_model=profile.model`，fallback 仍保持空。
+- Replay primary profile 选择同样改为使用 `profile.model`，不再优先使用 `profile.models[0]`。
+- Dispatcher AI catalog sync 不再调用模型列表同步，也不会请求 provider `/v1/models` 或回写 `/ai-profiles/models-report`。
+- 保留 `ai_profile_models` 表和 Server `/ai-profiles/models-report` 作为兼容遗留接口，不做破坏性迁移。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run python -m unittest tests.test_ai_profile_flow tests.test_ai_profile_bridge`
+- `cd cairn && uv run python -m unittest discover -s tests`
+- `python -m compileall -q cairn/src/cairn cairn/tests`
+- `git diff --check`
+- `node --check` 校验从 `index.html` 抽取出的 `function cairnApp()`
+
+### 未完成事项/风险
+
+- 每个 AI profile 当前只有一个手动配置的默认 `model`；如果未来需要一个 profile 多模型选择，应新增显式手动模型列表字段，而不是恢复 provider 远程抓取。
+
+## 2026-06-05 · Execution Log 恢复与 Project Files 自动刷新（已完成）
+
+### 背景
+
+运行中发现两个 UI 可观测问题：Execution Log 列表突然全部消失，以及 Project Files 未正常列出 worker 运行时写入 `/mnt/project` 的文件。排查确认至少存在两类触发条件：Execution Log 只剩 `usage/thinking_tokens` 时会被默认过滤隐藏；旧 `INSERT OR REPLACE` 路径可能把 `llm_executions.event_count/last_event_at` 重置为 0/NULL，而事件表仍有数据。
+
+### 已完成变更
+
+- `server/observability/repository.py`
+  - `create_execution()` 从 `INSERT OR REPLACE` 改为 `ON CONFLICT DO UPDATE`，避免重建 execution 时清空已有 event 聚合字段。
+  - `list_executions()` 查询时从 `llm_execution_events` 聚合修正 `event_count`、`bytes_written`、`last_event_at`，可恢复历史已被重置的 execution 列表状态。
+  - `finish_execution()` 在缺少 `process_end` event 时自动补一条去重的结束事件，保证取消/异常路径至少有一条默认可见日志。
+- Graph 页 Execution Log
+  - 增量拉取在空列表/强制刷新场景下可从 `after=0` 回填，避免 `llmLastSequence` 与后端 sequence 失配后永久空白。
+  - 当原始事件存在但被当前过滤条件隐藏时，显示“events exist but filters hide them”提示，而不是误报 `No execution log yet`。
+- Project Files
+  - Graph 页面轮询时，如果当前停留在 Files tab，会自动 `loadProjectFiles(true)`，运行时新写入 `/mnt/project` 的文件无需手动刷新即可出现。
+- 新增 `cairn/tests/test_observability_and_files.py`
+  - 覆盖 execution 重建不丢 event、历史聚合修正、finish 自动补 `process_end`、Project Files 分类和下载路径安全。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run python -m unittest tests.test_observability_and_files tests.test_worker_cli_adapters`
+- `cd cairn && uv run python -m unittest discover -s tests`
+- `python -m compileall -q cairn/src/cairn cairn/tests`
+- `git diff --check`
+- `node --check` 校验从 `index.html` 抽取出的 `function cairnApp()`
+
+### 未完成事项/风险
+
+- `Project Files` 仍依赖 Server 可访问 `CAIRN_PROJECT_FILES_ROOT`，Dispatcher worker 必须把同一宿主目录挂载到 `/mnt/project`。
+- 前端 Execution Log 合并逻辑仍没有独立 JS 单测；本次以后端和语法检查覆盖关键失效路径。
+
+## 2026-06-05 · AI Worker Chains 模型选择卡片化（已被手动模型配置取代）
+
+### 背景
+
+项目创建页的 AI Worker Chains 需要从“展示大量 profile 细节 + primary/fallback 选择”调整为更直接的任务模型选择：`Bootstrap Model`、`Intent Model`、`Reason Model` 三类任务分别选择 profile 和该 profile 下的具体模型。模型列表由 Dispatcher 读取 provider API 后回写 Server，避免 Server / frontend 直接持有 provider token。
+
+### 已完成变更
+
+- 新增 `ai_profile_models` 表和迁移 `20260605_006_ai_profile_models`，用于缓存每个 AI profile 可选模型。
+- Dispatcher 曾在 AI catalog sync 后 best-effort 请求模型列表，并通过 `POST /ai-profiles/models-report` 回写 Server；该行为已在后续“手动模型配置”变更中停止。
+- `/ai-profiles` 和 `/projects/{project_id}/ai-profiles` 返回 profile `models` 字段；模型列表请求失败且没有新模型时只更新错误信息，不清空旧缓存。
+- `AiProfileSelection` 新增 `primary_model`；项目快照的 `snapshot_model` 优先使用用户选定模型，并校验该模型必须属于 profile 缓存模型或 profile 默认模型。
+- 项目创建页 AI Worker Chains 改为单卡片：顶部任务按钮切换 `Bootstrap/Intent/Reason`，左侧只显示 profile 标题，右侧显示当前 profile 可选模型；项目创建只提交 primary profile/model，fallback 保持空。
+- Replay 选择保留原有形态，但 primary profile 选择会同步默认 `primary_model`，保持新字段兼容。
+- 新增/更新测试覆盖模型列表拉取、Anthropic 请求头、模型缓存回写、项目快照模型覆盖和非法模型拒绝。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run python -m unittest tests.test_ai_profile_flow tests.test_ai_profile_bridge`
+- `cd cairn && uv run python -m unittest discover -s tests`
+- `python -m compileall -q cairn/src/cairn cairn/tests`
+- `git diff --check`
+- `node --check` 校验从 `index.html` 抽取出的 `function cairnApp()`
+
+### 未完成事项/风险
+
+- 当前版本不再使用 Dispatcher 远程模型缓存；Create Project 使用 AI profile 手动配置的 `model`。
+
+## 2026-06-05 · 当前项目增量审查同步（已完成）
+
+### 背景
+
+对最新提交 `ab041ab Fix worker execution and reason scheduling` 做增量审查，重点覆盖 worker CLI 执行、Codex/Claude trace 解析、Execute Log 展示、reason 调度状态、SQLite 迁移和项目级 AI profile 选择。
+
+### 审查结论
+
+- 未发现会直接导致当前 worker/reason 调度不可用的 P0/P1 问题。
+- 旧库升级模拟通过：从已有 `20260604_001_core_indexes`、`20260604_002_ai_profiles`、`20260604_002b_ai_profile_seed` 的数据库升级到当前 schema，可正常得到 `project_ai_profiles.task_type`、`projects.reason_run_id` 与 reason state migration 记录。
+- `Codex exec resume` 已不再携带 resume 不支持的 `--add-dir`；普通 `codex exec` 仍保留 `--add-dir` 供 skill 访问。
+- Execute Log 前端逻辑已按当前实现过滤 Codex `turn.started`，保留 `turn.completed`，并把同一命令的 `command_start` / `command_end` 合并为一张卡片。
+- Claude `system: thinking_tokens` 现在归类为 `usage`，不再作为普通 Execute Log system 卡片展示。
+- 项目创建支持 `bootstrap`、`explore`、`reason` 三类任务分别保存 AI profile selection；legacy `ai_profiles` 输入仍映射为单一 legacy selection 以兼容旧客户端。
+
+### 残余风险
+
+- `cairn/src/cairn/dispatcher/observability/trace.py` 中 Codex stdin notice 判断仍使用原始 `line`，不是已去 ANSI 的 `plain`。如果 CLI 输出带 ANSI 控制字符的 `Reading additional input from stdin...`，仍可能被记录为 `trace_parse_error`。建议改为 `if plain == "Reading additional input from stdin...":` 并补 ANSI 回归测试。
+- `GET /projects/{project_id}/ai-profiles` 的兼容字段 `selection` 固定返回 `selections.explore`。当三类任务选择不同时，旧客户端读取 `selection` 会看到 explore selection，而不是完整任务级配置；新客户端应使用 `selections` 或 `snapshots`。
+- 前端 Execute Log 的 `mergeLlmCommandEvents()` 没有 JS 单测覆盖；当同一 execution/phase 下缺少 `call_id` / `item_id` 且连续重复相同命令时，退化到 command text key 可能错配 start/end。建议补前端逻辑测试覆盖 `turn.*` 过滤、`thinking_tokens` 归类、重复 command 合并边界。
+
+### 验证结果
+
+已通过：
+
+- `cd cairn && uv run python -m unittest discover -s tests`
+- `python -m compileall -q cairn/src/cairn cairn/tests`
+- `git diff --check`
+- 手工临时 SQLite 旧库升级模拟
+
 ## 2026-06-04 · Worker CLI 非交互协议收敛（Claude `--print` + Codex stdin notice）（已完成）
 
 ### 背景

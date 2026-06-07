@@ -187,6 +187,7 @@ erDiagram
 observability DB 不参与 facts/intents/hints/settings 的业务真相判定。
 Dispatcher 的 observability 配置控制是否发送、发送哪些事件，以及 Dispatcher 侧缓冲/脱敏/大小限制。
 Server 写入 API 当前使用 routers.py 内置的 ObservabilitySettings() 做二次 redaction/truncation，不从 dispatch.yaml 动态读取。
+`create_execution()` 必须使用 upsert 而不是 `INSERT OR REPLACE`：ExecutionReporter 重试或 finish fallback 不能清掉已有 `llm_execution_events` 的聚合状态。`list_executions()` 会从 event 表聚合修正 `event_count`、`bytes_written`、`last_event_at`，用于恢复旧数据不一致。`finish_execution()` 会在缺少 `process_end` 事件时自动补一条去重的结束事件，保证 Execution Log 至少有默认可见的终态卡片。
 
 **BUILTIN 脱敏正则**（Dispatcher 与 Server 两端对齐）覆盖：
 - `CAIRN_REMOTE_SSH_PASSWORD=...` 形式
@@ -284,6 +285,47 @@ Server 保存 capability ID selection 与 role prompt snapshot；不保存 MCP e
 Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语义。
 ```
 
+### `server/routers/ai_profiles.py`
+
+职责：维护 AI profile catalog、缓存 Dispatcher 观测到的 provider 模型列表，并把项目创建时选择的 worker/model/base_url/api_key_env 保存为项目级快照。
+
+关键行为：
+
+| 行为 | 说明 |
+| --- | --- |
+| Catalog CRUD | `/ai-profiles` 管理可选 AI profile，支持 dispatcher 从 `dispatch.yaml` worker 自动 sync seeded profile；`workers.models` 会写入同一个 profile 的 `models` 列表 |
+| Health report | Dispatcher 通过 `/ai-profiles/health-report` 回写探活结果，Server 用 `available` 和 `last_health_*` 保存最后状态 |
+| Model report | `/ai-profiles/models-report` 和 `ai_profile_models` 是兼容遗留缓存；当前 Dispatcher 不再请求 provider `/v1/models`，Create Project 使用 profile 手动配置的 `model` |
+| Legacy selection | `ai_profiles` 输入代表单套 primary/fallback，保存为 `task_type='legacy'` |
+| Task-specific selection | `ai_profile_selections` 分别保存 `bootstrap`、`explore`、`reason` 三类 selection；Create Project 写入 `primary_model` 和 `primary_reasoning_type` |
+| Model validation | 保存项目选择时，`primary_model` 必须等于 profile 默认 `model` 或存在于兼容缓存 `ai_profile_models`，否则 400 |
+| Dispatcher fallback | Dispatcher 读取 `snapshots` 后按 task type 选链；若某 task type 没有专属快照，会 fallback 到 legacy |
+
+重要兼容点：
+
+```text
+GET /projects/{project_id}/ai-profiles 同时返回：
+- selection：兼容旧客户端，当前固定等于 selections.explore
+- selections：bootstrap/explore/reason 三类任务选择，包含 primary_profile_id / primary_model / fallback_profile_ids
+- snapshots：dispatcher 实际使用的项目 AI profile 快照；snapshot_model 是最终执行模型，snapshot_reasoning_type 是最终 reasoning effort
+- catalog：可选 profile 列表；Create Project 使用 profile.models 下拉选择模型，profile.model 是默认模型
+
+当三类任务选择不同时，新客户端必须读取 selections 或 snapshots；不要把 selection 当作完整项目级 AI 配置。
+```
+
+当前模型选择数据流：
+
+```text
+dispatch.yaml worker env.CODEX_MODEL / env.ANTHROPIC_MODEL 作为默认模型
+  + worker.models 作为额外手动模型列表
+  + worker.model_reasoning_effort 作为默认 reasoning type
+  -> Dispatcher _build_ai_sync_payload() 同步单个 seeded profile + models 列表
+  -> Server /ai-profiles/sync 按 seeded_from_worker upsert，并写 ai_profile_models
+  -> frontend 项目创建页通过下拉选择 profile/model/reasoning_type
+  -> frontend 提交 primary_model + primary_reasoning_type
+  -> Server persist_project_ai_selections() 写入 project_ai_profiles.snapshot_model / snapshot_reasoning_type
+```
+
 ### `server/routers/intents.py`
 
 关键端点：
@@ -349,6 +391,16 @@ Capability / Role 是控制面配置，不进入 Fact / Intent / Hint 黑板语�
 
 路径安全：相对路径校验不允许 `..`、绝对路径或空段；`source` 仅接受 `project` 或 `attachment`。
 
+运行时文件数据流：
+
+```text
+worker 写 /mnt/project/...
+  -> Dispatcher bind_mounts.project-files host_path=datas/project-files/{project_id}
+  -> Server CAIRN_PROJECT_FILES_ROOT 指向 datas/project-files
+  -> GET /projects/{project_id}/files rglob 扫描并返回
+  -> Graph Files tab 打开或轮询时刷新
+```
+
 > ⚡ 性能敏感：列表遍历以 `Path.rglob` 触发，不做索引；大项目目录需要 server 端做缓存或截断。
 
 ### `server/routers/replay.py`
@@ -391,7 +443,7 @@ replay 入口与推进：
 | `SkillCapabilityConfig` | `id`、`name`、`source_path`、`task_types`、`description` |
 | `CapabilitiesConfig` | `mcp_servers`、`skills` |
 | `RoleConfig` | `id`、`name`、`task_types`、`description`、`prompt` 或 `source_path` |
-| `WorkerConfig` | `name`、`type`、`task_types`、`max_running`、`priority`、`env` |
+| `WorkerConfig` | `name`、`type`、`task_types`、`max_running`、`priority`、`models`、`model_reasoning_effort`、`env` |
 
 Worker 类型：
 
@@ -401,6 +453,10 @@ Worker 类型：
 | `codex` | `CODEX_MODEL`、`CODEX_BASE_URL`、`OPENAI_API_KEY` |
 | `pi` | `PI_MODEL`、`PI_BASE_URL`、`PI_API_KEY`、`PI_PROVIDER_API` |
 | `mock` | 无必需环境变量 |
+
+`workers.models` 是 codex/claudecode 的可选静态模型列表，不会触发 provider 远程模型发现。`env.CODEX_MODEL` / `env.ANTHROPIC_MODEL` 仍是必填默认模型，并且在 AI profile 同步时始终排在第一位；默认模型的 seeded profile 名称始终保持原 `worker.name`，兼容已有项目选择。额外模型写入同一个 profile 的 `models` 列表，供 Create Project 的 `Configured Model` 下拉选择。
+
+`model_reasoning_effort` 是 worker/profile 默认 reasoning type，取值 `low | medium | high | xhigh`。项目创建时可以按 task 覆盖为 `primary_reasoning_type`，最终进入 snapshot。运行时 Dispatcher 把 snapshot 值注入 `CAIRN_MODEL_REASONING_EFFORT`：Codex adapter 转为 `-c model_reasoning_effort="..."`，Claude Code adapter 转为 `--effort ...`。
 
 >>⚠️ 注意：`common_env` 会合并进每个 worker 的 `env`，worker 自己的 env 覆盖 common env。`remote_support` 也会被转换为 `CAIRN_*` 环境变量后合并进 worker env；它只影响 worker runtime，不写入黑板事实。
 
@@ -784,27 +840,33 @@ extract_response_text(stdout, stderr) -> str
 
 ```bash
 claude --session-id {uuid} --dangerously-skip-permissions \
+  --print \
   --output-format stream-json \
   --verbose \
-  -p -- "{prompt}"
+  -- "{prompt}"
 claude -r {session} --dangerously-skip-permissions \
+  --print \
   --output-format stream-json \
   --verbose \
-  -p -- "{conclude_prompt}"
+  -- "{conclude_prompt}"
 ```
 
 如果 `WorkerExecutionContext` 中有能力注入，Claude adapter 会追加 `--mcp-config {mcp_config_path}` 与 `--add-dir {skill_root}`。
 
 健康检查通过 Anthropic Messages API curl。
 
-`trace_format()` 返回 `claude_stream_json`。Dispatcher 会把 stdout 中的 Claude stream-json 解析成 `agent_message`、`thinking`、`tool_call`、`tool_result`、`command_start`、`command_end`、`usage`、`session_init`、`api_retry`、`system_event` 等 Execution Log 事件；真正进入业务 JSON 校验的是 driver 从最终 assistant/result 文本提取出的内容。
+`trace_format()` 返回 `claude_stream_json`。Dispatcher 会把 stdout 中的 Claude stream-json 解析成 `agent_message`、`thinking`、`tool_call`、`tool_result`、`command_start`、`command_end`、`usage`、`session_init`、`api_retry`、`system_event` 等 Execution Log 事件；Claude `system` subtype 为 `thinking_tokens` 时归类为 `usage`，不作为普通 system 卡片展示。真正进入业务 JSON 校验的是 driver 从最终 assistant/result 文本提取出的内容。
 
 ### Codex
 
 执行命令：
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox \
+env CODEX_NON_INTERACTIVE=1 codex exec \
+  --ignore-user-config \
+  --ignore-rules \
+  --skip-git-repo-check \
+  --dangerously-bypass-approvals-and-sandbox \
   --json \
   --model "$CODEX_MODEL" \
   -c 'model_provider="cairn"' \
@@ -816,17 +878,17 @@ codex exec --dangerously-bypass-approvals-and-sandbox \
   -- "{prompt}"
 ```
 
-如果 `WorkerExecutionContext` 中有能力注入，Codex adapter 会追加 `--add-dir {skill_root}`，并通过 `-c mcp_servers.<id>.*=...` 注入 MCP server 配置。
+如果 `WorkerExecutionContext` 中有能力注入，普通 `codex exec` 会追加 `--add-dir {skill_root}` 供 Codex 访问项目 skill 目录，并通过 `-c mcp_servers.<id>.*=...` 注入 MCP server 配置。
 
 conclude 通过：
 
 ```bash
-codex exec resume {session} ...
+env CODEX_NON_INTERACTIVE=1 codex exec resume {session} ...
 ```
 
-resume 命令同样携带 `--json`、模型 provider 配置和 `--dangerously-bypass-approvals-and-sandbox`。
+resume 命令同样携带 `--json`、模型 provider 配置、`--ignore-user-config`、`--ignore-rules`、`--skip-git-repo-check` 和 `--dangerously-bypass-approvals-and-sandbox`。当前实现刻意不在 `codex exec resume` 上携带 `--add-dir`，因为该参数在 resume 子命令中不受支持；MCP `-c mcp_servers.<id>.*` 配置仍会传入。
 
-`trace_format()` 返回 `codex_jsonl`。Dispatcher 会解析 Codex JSONL 中的 `session_meta`、`response_item`、`event_msg`，用于提取 session id、最终 assistant message 和结构化 Execution Log 事件。
+`trace_format()` 返回 `codex_jsonl`。Dispatcher 会解析 Codex JSONL 中的 `thread.started`、`session_meta`、`response_item`、`event_msg` 和当前版本的 `item.started/item.completed`，用于提取 session id、最终 assistant message 和结构化 Execution Log 事件。Codex CLI 的非 JSON 行 `Reading additional input from stdin...` 被降级为 `system_event` 而不是 `trace_parse_error`；但当前判断仍使用原始 `line`，如果该提示带 ANSI 控制字符，建议改用已 strip ANSI 的 `plain` 判断。
 
 ### Pi
 
@@ -972,6 +1034,9 @@ uv run --project cairn cairn dispatch --config dispatch_mock.yaml --once
 | 测试 | 仓库未见系统性测试目录，建议补 API 单测、dispatcher mock 集成测试 |
 | 语义循环 | 低质量 intent 生成仍需通过 prompt、人工 Hint 和 stop 控制 |
 | DB 生命周期 | `db.configure()` 单进程只初始化一次，对测试隔离不友好 |
+| Trace 解析 | Codex stdin notice 判断应使用 strip ANSI 后的 `plain`，否则带 ANSI 控制字符时仍可能落为 `trace_parse_error` |
+| Execute Log 前端 | `mergeLlmCommandEvents()` 目前缺少 JS 单测；缺少 `call_id/item_id` 且重复相同命令时可能错配 command start/end |
+| AI profile 兼容字段 | `/projects/{id}/ai-profiles` 的 `selection` 是 legacy/explore 兼容字段；任务级选择应读取 `selections` 或 `snapshots` |
 
 ## 12. 修改代码时的推荐路径
 

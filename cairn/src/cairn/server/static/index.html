@@ -9,10 +9,6 @@
 <script src="/static/vendor/dagre.min.js"></script>
 <script src="/static/vendor/cytoscape.min.js"></script>
 <script src="/static/vendor/cytoscape-dagre.js"></script>
-<script src="/static/vendor/klay.js"></script>
-<script src="/static/vendor/cytoscape-klay.js"></script>
-<script src="/static/vendor/elk.bundled.js"></script>
-<script src="/static/vendor/cytoscape-elk.js"></script>
 <script defer src="/static/vendor/alpine.min.js"></script>
 <style>
   [x-cloak] { display: none !important; }
@@ -508,7 +504,7 @@
           @mousedown="beginLlmExecutionSelectionInteraction()"
           @keydown="beginLlmExecutionSelectionInteraction()"
           @change="handleLlmExecutionSelectionChange()"
-          class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
+          class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-mono text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
           <option value="">All executions</option>
           <template x-for="execution in llmExecutions" :key="execution.id">
             <option :value="execution.id" x-text="llmExecutionOptionLabel(execution)"></option>
@@ -527,6 +523,7 @@
           <input type="checkbox" x-model="showUsageLogs" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100">
           <span>Show Usage</span>
         </label>
+        <div x-show="llmViewModel().hiddenSummary" class="text-[10px] text-slate-400 truncate" x-text="llmViewModel().hiddenSummary"></div>
         <div class="grid grid-cols-3 gap-1.5 text-[10px]">
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
             <div class="text-slate-400">Running</div>
@@ -538,25 +535,42 @@
           </div>
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
             <div class="text-slate-400">Events</div>
-            <div class="font-semibold text-slate-600 tabular-nums" x-text="filteredLlmEvents().length"></div>
+            <div class="font-semibold text-slate-600 tabular-nums" x-text="llmViewModel().eventCount"></div>
           </div>
         </div>
       </div>
       <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/25">
-        <template x-if="filteredLlmEvents().length === 0">
+        <template x-if="llmViewModel().showEmpty">
           <p class="text-sm text-slate-300 text-center mt-12">No execution log yet</p>
         </template>
-        <template x-for="event in filteredLlmEvents()" :key="event.sequence">
+        <template x-if="llmViewModel().eventCount === 0 && llmViewModel().usage">
+          <div class="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-700">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="px-1.5 py-0.5 rounded bg-white/80 text-[9px] font-semibold uppercase tracking-wide text-sky-700 shrink-0">Active</span>
+              <span class="font-semibold truncate" x-text="llmViewModel().usage.title"></span>
+              <span class="flex-1"></span>
+              <span class="font-mono text-[10px] text-sky-500 shrink-0" x-text="`#${llmViewModel().usage.sequence}`"></span>
+            </div>
+            <div class="mt-1 text-sky-600" x-text="llmViewModel().usage.detail"></div>
+            <div class="mt-1 text-[10px] text-sky-400" x-text="formatTime(llmViewModel().usage.created_at)"></div>
+          </div>
+        </template>
+        <template x-if="llmViewModel().eventCount === 0 && llmViewModel().hasFilterHiddenEvents">
+          <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700">
+            Current filter hides available execution events. Switch to All or adjust filters.
+          </div>
+        </template>
+        <template x-for="event in llmViewModel().events" :key="event.sequence">
           <article class="rounded-lg border bg-white shadow-sm overflow-hidden" :class="llmEventBorderClass(event)">
             <button type="button" @click="toggleLlmEvent(event.sequence)" class="w-full px-3 py-2 text-left hover:bg-slate-50 transition">
               <div class="flex items-center gap-2 min-w-0">
                 <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide shrink-0" :class="llmEventBadgeClass(event)" x-text="llmEventLabel(event)"></span>
                 <span class="text-[10px] text-slate-400 font-mono shrink-0" x-text="`#${event.sequence}`"></span>
-                <span class="text-[10px] text-slate-400 truncate" x-text="`${event.task_type} · ${event.worker}`"></span>
+                <span class="text-[11px] font-medium text-slate-600 truncate" x-show="llmEventHeaderText(event)" :title="llmEventHeaderTitle(event)" x-text="llmEventHeaderText(event)"></span>
                 <span class="flex-1"></span>
                 <span class="text-[10px] text-slate-300 shrink-0" x-text="formatTime(event.created_at)"></span>
               </div>
-              <div class="mt-1 text-[11px] text-slate-400 truncate" x-text="event.phase"></div>
+              <div class="mt-1 text-[11px] text-slate-400 truncate" x-text="llmEventSubHeaderText(event)"></div>
             </button>
             <div x-show="llmEventExpanded(event)" class="border-t border-slate-100 bg-slate-950 text-slate-100">
               <template x-if="llmEventContentMode(event) === 'json_card'">
@@ -623,6 +637,10 @@
             </div>
           </article>
         </template>
+        <button x-show="llmViewModel().canLoadMore" type="button" @click="showMoreLlmEvents()"
+          class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition">
+          Show more events
+        </button>
       </div>
     </div>
 
@@ -645,6 +663,7 @@
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
         </button>
         <select x-model="layoutMode" @change="applySelectedLayout()"
+          :disabled="layoutLoading"
           class="h-7 bg-white/90 backdrop-blur rounded-lg shadow-sm border border-slate-200/60 px-2.5 text-xs text-slate-600 hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-300 transition">
           <option value="dagre_tb">Dagre ↓</option>
           <option value="dagre_lr">Dagre →</option>
@@ -782,12 +801,12 @@
                 <div class="p-4 space-y-4">
                   <div class="space-y-2">
                     <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                    <template x-if="summaryHeadline(summaryView(fact.description, 'fact'))">
-                      <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(fact.description, 'fact'))"></p>
+                    <template x-if="summaryCardViewModel(fact.description, 'fact').headline">
+                      <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(fact.description, 'fact').headline"></p>
                     </template>
-                    <template x-if="summaryHasMeta(summaryView(fact.description, 'fact'))">
+                    <template x-if="summaryCardViewModel(fact.description, 'fact').hasMeta">
                       <div class="flex flex-wrap gap-1.5">
-                        <template x-for="item in summaryMetaItems(summaryView(fact.description, 'fact'))" :key="`${fact.id}-${item.key}-${item.value}`">
+                        <template x-for="item in summaryCardViewModel(fact.description, 'fact').metaItems" :key="`${fact.id}-${item.key}-${item.value}`">
                           <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
                             <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
                             <span class="break-all" x-text="item.value"></span>
@@ -795,8 +814,8 @@
                         </template>
                       </div>
                     </template>
-                    <template x-if="summaryBody(summaryView(fact.description, 'fact'))">
-                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(fact.description, 'fact'))"></p>
+                    <template x-if="summaryCardViewModel(fact.description, 'fact').body">
+                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(fact.description, 'fact').body"></p>
                     </template>
                   </div>
                   <template x-if="factRelationSummary(fact)">
@@ -833,12 +852,12 @@
             <div class="p-4 space-y-4">
               <div class="space-y-2">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                <template x-if="summaryHeadline(summaryView(selectedFactRecord().description, 'fact'))">
-                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(selectedFactRecord().description, 'fact'))"></p>
+                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').headline">
+                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(selectedFactRecord().description, 'fact').headline"></p>
                 </template>
-                <template x-if="summaryHasMeta(summaryView(selectedFactRecord().description, 'fact'))">
+                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').hasMeta">
                   <div class="flex flex-wrap gap-1.5">
-                    <template x-for="item in summaryMetaItems(summaryView(selectedFactRecord().description, 'fact'))" :key="`${selectedFactId()}-${item.key}-${item.value}`">
+                    <template x-for="item in summaryCardViewModel(selectedFactRecord().description, 'fact').metaItems" :key="`${selectedFactId()}-${item.key}-${item.value}`">
                       <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
                         <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
                         <span class="break-all" x-text="item.value"></span>
@@ -846,8 +865,8 @@
                     </template>
                   </div>
                 </template>
-                <template x-if="summaryBody(summaryView(selectedFactRecord().description, 'fact'))">
-                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(selectedFactRecord().description, 'fact'))"></p>
+                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').body">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(selectedFactRecord().description, 'fact').body"></p>
                 </template>
               </div>
               <template x-if="hasProjectFileRefs(selectedFactRecord().description)">
@@ -901,12 +920,12 @@
             <div class="p-4 space-y-4">
               <div class="space-y-2">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                <template x-if="summaryHeadline(summaryView(selectedIntentRecord().description, 'intent'))">
-                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryHeadline(summaryView(selectedIntentRecord().description, 'intent'))"></p>
+                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').headline">
+                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(selectedIntentRecord().description, 'intent').headline"></p>
                 </template>
-                <template x-if="summaryHasMeta(summaryView(selectedIntentRecord().description, 'intent'))">
+                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').hasMeta">
                   <div class="flex flex-wrap gap-1.5">
-                    <template x-for="item in summaryMetaItems(summaryView(selectedIntentRecord().description, 'intent'))" :key="`${selectedIntentId()}-${item.key}-${item.value}`">
+                    <template x-for="item in summaryCardViewModel(selectedIntentRecord().description, 'intent').metaItems" :key="`${selectedIntentId()}-${item.key}-${item.value}`">
                       <span class="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">
                         <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
                         <span class="break-all" x-text="item.value"></span>
@@ -914,8 +933,8 @@
                     </template>
                   </div>
                 </template>
-                <template x-if="summaryBody(summaryView(selectedIntentRecord().description, 'intent'))">
-                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryBody(summaryView(selectedIntentRecord().description, 'intent'))"></p>
+                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').body">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(selectedIntentRecord().description, 'intent').body"></p>
                 </template>
               </div>
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
@@ -971,9 +990,6 @@
             <button @click="loadProjectFiles(true)" :disabled="filesLoading" class="px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50 transition disabled:opacity-40">Refresh</button>
           </div>
           <div class="p-4 space-y-4">
-            <template x-if="filesLoading">
-              <p class="text-xs text-slate-400">Loading files...</p>
-            </template>
             <template x-if="filesError">
               <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" x-text="filesError"></div>
             </template>
@@ -1001,7 +1017,7 @@
                             <span x-text="formatTime(file.modified_at)"></span>
                           </div>
                         </div>
-                        <a :href="projectFileDownloadUrl(file)" :download="file.name" class="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-700 transition">Download</a>
+                        <button type="button" @click="downloadProjectFile(file)" class="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-700 transition">Download</button>
                       </div>
                     </article>
                   </template>
@@ -1131,10 +1147,10 @@
             </div>
           </section>
         </template>
-        <template x-if="timelineEvents().length === 0">
+        <template x-if="timelineViewModel().empty">
           <p class="text-sm text-slate-300 text-center mt-12">No activity yet</p>
         </template>
-        <template x-for="entry in timelineEvents()" :key="entry.id">
+        <template x-for="entry in timelineViewModel().events" :key="entry.id">
           <div class="flex items-stretch gap-3" :id="timelineEntryDomId(entry.id)">
             <div class="flex flex-col items-center shrink-0">
               <div class="w-2.5 h-2.5 rounded-full mt-1.5" :class="timelineEventDotClass(entry)"></div>
@@ -1157,12 +1173,12 @@
               </template>
               <template x-if="entry.summary">
                 <div class="mt-2 space-y-1">
-                  <template x-if="summaryHeadline(summaryView(entry.summary, timelineSummaryKind(entry)))">
-                    <p class="text-sm font-medium text-slate-600 leading-relaxed break-words" x-text="summaryHeadline(summaryView(entry.summary, timelineSummaryKind(entry)))"></p>
+                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline">
+                    <p class="text-sm font-medium text-slate-600 leading-relaxed break-words" x-text="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline"></p>
                   </template>
-                  <template x-if="summaryHasMeta(summaryView(entry.summary, timelineSummaryKind(entry)))">
+                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).hasMeta">
                     <div class="flex flex-wrap gap-1.5">
-                      <template x-for="item in summaryMetaItems(summaryView(entry.summary, timelineSummaryKind(entry)))" :key="`${entry.id}-${item.key}-${item.value}`">
+                      <template x-for="item in summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).metaItems" :key="`${entry.id}-${item.key}-${item.value}`">
                         <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
                           <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
                           <span class="break-all" x-text="item.value"></span>
@@ -1170,8 +1186,8 @@
                       </template>
                     </div>
                   </template>
-                  <template x-if="summaryBody(summaryView(entry.summary, timelineSummaryKind(entry)))">
-                    <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="summaryBody(summaryView(entry.summary, timelineSummaryKind(entry)))"></p>
+                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).body">
+                    <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).body"></p>
                   </template>
                 </div>
               </template>
@@ -1281,39 +1297,38 @@
             <button type="button" x-show="taskAiProfileSelectionsHasValue(newProject.ai_profile_selections)" @click="clearNewProjectAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
           </div>
           <template x-if="newProjectAiProfileItems().length === 0">
-            <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
+            <p class="text-xs text-rose-500 rounded-xl border border-dashed border-rose-200 bg-rose-50 px-3 py-3">Add an available AI Profile in Settings before creating a project.</p>
           </template>
-          <div class="space-y-3 max-h-72 overflow-y-auto pr-1">
+          <div x-show="newProjectAiProfileItems().length > 0" class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+            <div class="hidden sm:grid grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              <span>Task</span>
+              <span>AI Profile</span>
+              <span>AI Model</span>
+              <span>Thinking Level</span>
+            </div>
             <template x-for="task in aiProfileTaskTypes()" :key="task.key">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50/60 p-2">
-                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2" x-text="task.label"></div>
-                <div class="space-y-2">
-                  <template x-for="item in newProjectAiProfileItems()" :key="`${task.key}:${item.id}`">
-                    <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                      <div class="flex items-start gap-2">
-                        <div class="flex flex-col gap-1 pt-0.5">
-                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                            <input type="radio" :name="`newProjectAiPrimary-${task.key}`" :value="item.id" :checked="newProjectPrimaryAiProfileSelected(task.key) === item.id" @change="setNewProjectPrimaryAiProfile(item.id, task.key)" class="h-3 w-3 border-slate-300 text-brand-500 focus:ring-brand-100">
-                            <span>primary</span>
-                          </label>
-                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                            <input type="checkbox" :disabled="newProjectPrimaryAiProfileSelected(task.key) === item.id" :checked="isNewProjectFallbackAiProfile(item.id, task.key)" @change="toggleNewProjectFallbackAiProfile(item.id, $event.target.checked, task.key)" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100 disabled:opacity-30">
-                            <span>fallback</span>
-                          </label>
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                          <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
-                          <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
-                        </div>
-                      </div>
-                    </div>
+              <div class="grid grid-cols-1 sm:grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 items-center rounded-xl border border-slate-100 bg-white p-2">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500" x-text="task.label"></div>
+                <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_profile_id" @change="selectNewProjectAiProfile($event.target.value, task.key)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                  <template x-for="item in newProjectAiProfileItems()" :key="`${task.key}:profile:${item.id}`">
+                    <option :value="item.id" x-text="item.name"></option>
                   </template>
-                </div>
+                </select>
+                <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_model" @change="setTaskAiModel(newProject, task.key, $event.target.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                  <template x-for="model in taskAiModelOptions(newProject, task.key, newProjectAiProfileItems())" :key="`${task.key}:model:${model}`">
+                    <option :value="model" x-text="model"></option>
+                  </template>
+                </select>
+                <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_reasoning_type" @change="setTaskAiReasoning(newProject, task.key, $event.target.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                  <option value="">Select level</option>
+                  <template x-for="option in aiReasoningTypeOptions()" :key="`${task.key}:reasoning:${option}`">
+                    <option :value="option" x-text="option"></option>
+                  </template>
+                </select>
               </div>
             </template>
           </div>
-          <p class="text-[11px] text-slate-400 mt-2">Bootstrap, Intent, and Reason can use different primary/fallback chains. Empty chains use the default worker pool.</p>
+          <p class="text-[11px] text-slate-400 mt-2">Bootstrap, Intent, and Reason require explicit AI Profile, model, and thinking level choices.</p>
         </div>
 
       <div>
@@ -1360,7 +1375,7 @@
     </div>
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showNewProject = false" :disabled="isCreatingProject" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
-      <button @click="createProject()" :disabled="isCreatingProject || !newProject.title || !newProject.origin || !newProject.goal"
+      <button @click="createProject()" :disabled="!canCreateProject()"
         class="px-5 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition disabled:opacity-30 shadow-sm shadow-brand-200" x-text="isCreatingProject ? 'Creating...' : 'Create'"></button>
     </div>
   </div>
@@ -1441,39 +1456,38 @@
             <button type="button" x-show="taskAiProfileSelectionsHasValue(replayConfig.ai_profile_selections)" @click="clearReplayConfigAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
           </div>
           <template x-if="replayConfigAiProfileItems().length === 0">
-            <p class="text-xs text-slate-400 rounded-xl border border-dashed border-violet-100 bg-white px-3 py-3">No AI profiles configured. Add one in Settings to constrain workers to a specific model.</p>
+            <p class="text-xs text-rose-500 rounded-xl border border-dashed border-rose-200 bg-rose-50 px-3 py-3">Add an available AI Profile in Settings before creating a replay project.</p>
           </template>
-          <div class="space-y-3 max-h-72 overflow-y-auto pr-1">
+          <div x-show="replayConfigAiProfileItems().length > 0" class="rounded-2xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
+            <div class="hidden sm:grid grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-500/70">
+              <span>Task</span>
+              <span>AI Profile</span>
+              <span>AI Model</span>
+              <span>Thinking Level</span>
+            </div>
             <template x-for="task in aiProfileTaskTypes()" :key="task.key">
-              <div class="rounded-2xl border border-violet-100 bg-violet-50/40 p-2">
-                <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-500 mb-2" x-text="task.label"></div>
-                <div class="space-y-2">
-                  <template x-for="item in replayConfigAiProfileItems()" :key="`${task.key}:${item.id}`">
-                    <div class="rounded-xl border border-violet-100 bg-white px-3 py-2">
-                      <div class="flex items-start gap-2">
-                        <div class="flex flex-col gap-1 pt-0.5">
-                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                            <input type="radio" :name="`replayConfigAiPrimary-${task.key}`" :value="item.id" :checked="replayConfigPrimaryAiProfileSelected(task.key) === item.id" @change="setReplayConfigPrimaryAiProfile(item.id, task.key)" class="h-3 w-3 border-slate-300 text-violet-500 focus:ring-violet-100">
-                            <span>primary</span>
-                          </label>
-                          <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
-                            <input type="checkbox" :disabled="replayConfigPrimaryAiProfileSelected(task.key) === item.id" :checked="isReplayConfigFallbackAiProfile(item.id, task.key)" @change="toggleReplayConfigFallbackAiProfile(item.id, $event.target.checked, task.key)" class="h-3 w-3 rounded border-slate-300 text-violet-600 focus:ring-violet-100 disabled:opacity-30">
-                            <span>fallback</span>
-                          </label>
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                          <div class="text-[10px] font-mono text-slate-400" x-text="`${item.worker_type} · ${item.model}${item.base_url ? ' @ ' + item.base_url : ''}`"></div>
-                          <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${item.api_key_env}${item.provider ? ' · provider: ' + item.provider : ''}`"></div>
-                        </div>
-                      </div>
-                    </div>
+              <div class="grid grid-cols-1 sm:grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 items-center rounded-xl border border-violet-100 bg-white p-2">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-500" x-text="task.label"></div>
+                <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_profile_id" @change="selectReplayConfigAiProfile($event.target.value, task.key)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                  <template x-for="item in replayConfigAiProfileItems()" :key="`${task.key}:profile:${item.id}`">
+                    <option :value="item.id" x-text="item.name"></option>
                   </template>
-                </div>
+                </select>
+                <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_model" @change="setTaskAiModel(replayConfig, task.key, $event.target.value)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                  <template x-for="model in taskAiModelOptions(replayConfig, task.key, replayConfigAiProfileItems())" :key="`${task.key}:model:${model}`">
+                    <option :value="model" x-text="model"></option>
+                  </template>
+                </select>
+                <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_reasoning_type" @change="setTaskAiReasoning(replayConfig, task.key, $event.target.value)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                  <option value="">Select level</option>
+                  <template x-for="option in aiReasoningTypeOptions()" :key="`${task.key}:reasoning:${option}`">
+                    <option :value="option" x-text="option"></option>
+                  </template>
+                </select>
               </div>
             </template>
           </div>
-          <p class="text-[11px] text-violet-500/80 mt-2">Replay can override source AI chains per task type. Empty chains use the default worker pool.</p>
+          <p class="text-[11px] text-violet-500/80 mt-2">Replay requires explicit AI Profile, model, and thinking level choices for each task type.</p>
         </div>
 
       <div>
@@ -1496,7 +1510,7 @@
     </div>
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showReplayConfigModal = false" :disabled="isCreatingReplayRun" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
-      <button @click="createReplayRun()" :disabled="isCreatingReplayRun || !replayConfig.title || !replayConfig.origin || !replayConfig.goal"
+      <button @click="createReplayRun()" :disabled="!canCreateReplayRun()"
         class="px-5 py-2 text-sm bg-violet-500 text-white rounded-xl font-medium hover:bg-violet-600 transition disabled:opacity-30 shadow-sm shadow-violet-200" x-text="isCreatingReplayRun ? 'Starting...' : 'Start Worker Replay'"></button>
     </div>
   </div>
@@ -1742,20 +1756,36 @@
       </div>
 
       <div x-show="aiProfileForm.id || aiProfileFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
-          <input x-model="aiProfileForm.name" placeholder="Name (e.g. gpt-deepseek-v4)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-          <select x-model="aiProfileForm.worker_type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            <option value="codex">codex</option>
-            <option value="claudecode">claudecode</option>
-          </select>
+        <div class="grid grid-cols-2 gap-1 p-1 rounded-lg bg-white border border-slate-200" role="tablist" aria-label="Worker type">
+          <button type="button" @click="setAiProfileWorkerType('codex')" :disabled="!!aiProfileForm.id" :aria-pressed="aiProfileForm.worker_type === 'codex'" :class="aiProfileForm.worker_type === 'codex' ? 'bg-brand-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'" class="px-3 py-1.5 text-xs font-medium rounded-md transition disabled:cursor-not-allowed disabled:opacity-60">Codex</button>
+          <button type="button" @click="setAiProfileWorkerType('claudecode')" :disabled="!!aiProfileForm.id" :aria-pressed="aiProfileForm.worker_type === 'claudecode'" :class="aiProfileForm.worker_type === 'claudecode' ? 'bg-brand-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'" class="px-3 py-1.5 text-xs font-medium rounded-md transition disabled:cursor-not-allowed disabled:opacity-60">Claude</button>
         </div>
+        <p x-show="aiProfileForm.id" class="text-[10px] text-slate-400 -mt-1">Worker type is locked for existing profiles. Create a new profile to switch.</p>
+        <input x-model="aiProfileForm.name" placeholder="Name (e.g. gpt-deepseek-v4)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input x-model="aiProfileForm.provider" placeholder="provider (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-          <input x-model="aiProfileForm.base_url" placeholder="base URL (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="aiProfileForm.base_url" :placeholder="aiProfileBaseUrlPlaceholder()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <input x-model="aiProfileForm.model" placeholder="model id" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-          <input x-model="aiProfileForm.api_key_env" placeholder="api_key_env (env var name)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px] gap-2">
+          <input x-model="aiProfileForm.model" :placeholder="aiProfileModelPlaceholder()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="aiProfileForm.api_key_env" :placeholder="aiProfileApiKeyEnvPlaceholder()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <select x-model="aiProfileForm.model_reasoning_effort" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition" title="Default reasoning effort for project selections">
+            <option value="">reasoning default</option>
+            <template x-for="option in aiReasoningTypeOptions()" :key="`profile-reasoning:${option}`">
+              <option :value="option" x-text="option"></option>
+            </template>
+          </select>
+        </div>
+        <textarea x-model="aiProfileForm.models_text" rows="2" placeholder="optional models, one per line or comma-separated" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <input type="password" autocomplete="off" x-model="aiProfileForm.sk" @input="aiProfileForm.skTouched = true" :placeholder="aiProfileSkPlaceholder()" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" title="Raw secret key. Stored locally in datas/cairn/cairn.db.">
+            <button type="button" x-show="aiProfileForm.skTouched && aiProfileForm.sk.length > 0" @click="aiProfileForm.sk = ''" class="px-2 py-1.5 text-[10px] text-slate-500 hover:text-rose-500 transition" title="Clear the input">clear</button>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-slate-400">
+            <span x-text="aiProfileForm.id ? (aiProfileForm.skStoredPreview ? `Stored: ${aiProfileForm.skStoredPreview}` : 'No key stored (falls back to host env).') : 'Leave blank to keep current. Submit a new value to replace.'"></span>
+            <button type="button" x-show="aiProfileForm.id && aiProfileForm.skStoredPreview && !aiProfileForm.skTouched" @click="clearStoredAiProfileSk()" class="text-rose-500 hover:underline" title="Mark the stored key for clearing on save">clear stored key</button>
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center">
           <input x-model="aiProfileForm.description" placeholder="description (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
@@ -1784,6 +1814,7 @@
                   <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.name"></div>
                   <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="p.worker_type"></span>
                   <span x-show="p.seeded_from_worker" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700" :title="`Seeded from dispatch.yaml worker: ${p.seeded_from_worker}`">seeded</span>
+                  <span x-show="p.sk_set" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700" :title="p.sk_preview ? `Stored key: ${p.sk_preview}` : 'Stored key: (none)'">sk set</span>
                   <span x-show="!p.available" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">unavailable</span>
                 </div>
                 <div class="text-[10px] font-mono text-slate-400" x-text="`${p.model}${p.base_url ? ' @ ' + p.base_url : ''}`"></div>
@@ -1863,6 +1894,38 @@
   </div>
 </div>
 
+<!-- Login overlay: shown when no valid token is in localStorage. -->
+<div x-show="showLogin" x-cloak class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm">
+  <form @submit.prevent="loginForm.busy || (loginForm.busy = true, login(loginForm.email, loginForm.password).catch(e => { loginForm.error = e.message || 'login failed'; }).finally(() => { loginForm.busy = false; }))"
+        class="w-[360px] max-w-[92vw] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+    <div class="space-y-1">
+      <h2 class="text-lg font-semibold text-slate-800 dark:text-slate-100">Sign in to Cairn</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400">Enter the email and password you were provisioned with.</p>
+    </div>
+    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">
+      Email
+      <input type="email" required autocomplete="username"
+             x-model="loginForm.email"
+             :disabled="loginForm.busy"
+             class="mt-1 w-full px-3 py-2 text-sm rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500" />
+    </label>
+    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">
+      Password
+      <input type="password" required autocomplete="current-password"
+             x-model="loginForm.password"
+             :disabled="loginForm.busy"
+             class="mt-1 w-full px-3 py-2 text-sm rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500" />
+    </label>
+    <div x-show="loginForm.error" x-text="loginForm.error" class="text-xs text-red-600 dark:text-red-400"></div>
+    <button type="submit"
+            :disabled="loginForm.busy"
+            class="w-full px-3 py-2 text-sm font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed">
+      <span x-show="!loginForm.busy">Sign in</span>
+      <span x-show="loginForm.busy" x-cloak>Signing in…</span>
+    </button>
+  </form>
+</div>
+
 <!-- Toast -->
 <div x-show="toast.show" x-cloak
   x-transition:enter="transition ease-out duration-300"
@@ -1877,6 +1940,40 @@
 </div>
 
 <script>
+const LLM_EVENT_KIND_FILTERS = Object.freeze([
+  { id: 'all', label: 'All' },
+  { id: 'tools', label: 'Tools' },
+  { id: 'commands', label: 'Cmds' },
+  { id: 'output', label: 'Output' },
+  { id: 'errors', label: 'Errors' },
+]);
+const GRAPH_STYLES = Object.freeze([
+  { selector: 'node[nodeType="origin"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
+  { selector: 'node[nodeType="goal"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#f43f5e',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
+  { selector: 'node[nodeType="fact"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
+  { selector: 'node[nodeType="in_progress"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#f59e0b','background-opacity':0.8,label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#d97706' }},
+  { selector: 'node[nodeType="unclaimed"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#cbd5e1','background-opacity':0.5,label:'data(label)',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
+  { selector: 'node[nodeType="bootstrap_pending"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#fff7ed','background-opacity':0.96,label:'data(label)',color:'#c2410c','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#fdba74','border-style':'dashed','text-wrap':'wrap','text-max-width':'70px' }},
+  { selector: 'node[nodeType="bootstrap_running"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#fb923c','background-opacity':0.96,label:'data(label)',color:'#fff7ed','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#ea580c','text-wrap':'wrap','text-max-width':'70px' }},
+  { selector: 'edge[status="concluded"]', style: { width:2,'line-color':'#6ee7b7','target-arrow-color':'#6ee7b7','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
+  { selector: 'edge[status="in_progress"]', style: { width:2,'line-color':'#fbbf24','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fbbf24','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#b45309','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#fffbeb','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
+  { selector: 'edge[status="unclaimed"]', style: { width:1.5,'line-color':'#cbd5e1','line-style':'dashed','line-dash-pattern':[5,5],'target-arrow-color':'#cbd5e1','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.7 }},
+  { selector: 'edge[status="bootstrap_pending"]', style: { width:2,'line-color':'#fdba74','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fdba74','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.85 }},
+  { selector: 'edge[status="bootstrap_running"]', style: { width:2.5,'line-color':'#fb923c','line-style':'dashed','line-dash-pattern':[10,4],'line-dash-offset':0,'target-arrow-color':'#fb923c','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.95 }},
+  { selector: 'edge[edgeType="bootstrap_scope"]', style: { label:'',width:1.8,'curve-style':'bezier','line-style':'dotted','line-dash-pattern':[2,5],'target-arrow-shape':'triangle-backcurve','arrow-scale':0.75,'target-distance-from-node':2 }},
+  { selector: '.highlight', style: { 'z-index':999 }},
+  { selector: 'edge.highlight', style: { 'z-index':999 }},
+  { selector: 'node.focus', style: { 'border-width':3,'border-color':'#312e81','border-opacity':0.95,'z-index':1000 }},
+  { selector: 'edge.focus', style: { 'z-index':1000,'overlay-color':'#93c5fd','overlay-opacity':0.22,'overlay-padding':5 }},
+  { selector: 'node.selected-fact', style: { 'border-width':0,'underlay-color':'#93c5fd','underlay-padding':8,'underlay-opacity':0.28,'z-index':1001 }},
+  { selector: '.faded', style: { opacity:0.5 }},
+  { selector: '.fresh', style: { opacity:0 }},
+]);
+const LAYOUT_ENGINE_SCRIPTS = Object.freeze({
+  klay: ['/static/vendor/klay.js', '/static/vendor/cytoscape-klay.js'],
+  elk: ['/static/vendor/elk.bundled.js', '/static/vendor/cytoscape-elk.js'],
+});
+
 function cairnApp() {
   return {
     view: 'list',
@@ -1891,6 +1988,7 @@ function cairnApp() {
     selectedFacts: [],
     selectedTimelineEntryId: null,
     layoutMode: 'dagre_tb',
+    layoutLoading: false,
     sidePanelWidth: 320,
     isResizingPanel: false,
     llmPanelWidth: 320,
@@ -1899,23 +1997,45 @@ function cairnApp() {
     llmExecutions: [],
     llmEvents: [],
     llmLastSequence: 0,
+    // Stable project-wide snapshot used only when "All Executions" is selected.
+    // This decouples the all-executions view from the rolling 1200-event live window.
+    llmAllExecutionEvents: [],
+    llmAllExecutionEventsLoading: false,
+    llmAllExecutionEventsLoaded: false,
+    llmAllExecutionLastSequence: 0,
+    llmAllExecutionEventCountLimit: 5000,
+    llmEventViewActivity: null,
+    llmEventViewStats: null,
     llmSelectedExecutionId: '',
+    llmSelectedExecutionEvents: [],
+    llmSelectedExecutionEventsLoading: false,
     llmExecutionSelectInteracting: false,
     llmExecutionsRefreshPending: false,
     llmEventContentCache: {},
+    // Memoization for filteredLlmEvents() / _llmEventsForView(). Bumped on
+    // any input change (event list, per-exec selection, filter, show-usage).
+    // 6+ template call sites in a single render collapse to 1 computation.
+    _llmViewVersion: 0,
+    _llmViewCache: null,
+    _llmViewCacheKey: '',
+    _llmEventsForViewCache: null,
+    _llmEventsForViewCacheKey: '',
+    _llmViewModelCache: null,
+    _llmViewModelCacheKey: '',
+    // Shared cache of tryParseLlmJsonObject(event.content) results, keyed by
+    // event.sequence. Reused by mergeLlmCommandEvents and parseLlmEventContent.
+    _llmParsedPayloadCache: new Map(),
     llmEventKindFilter: 'all',
     showUsageLogs: false,
-    llmEventKindFilters: [
-      { id: 'all', label: 'All' },
-      { id: 'tools', label: 'Tools' },
-      { id: 'commands', label: 'Cmds' },
-      { id: 'output', label: 'Output' },
-      { id: 'errors', label: 'Errors' },
-    ],
+    llmEventKindFilters: LLM_EVENT_KIND_FILTERS,
     llmExpandedEvents: {},
     llmPollTimer: null,
+    llmPollInFlight: false,
+    projectPollInFlight: false,
     llmPollingPaused: false,
     llmLastSlowPollAt: 0,
+    llmRenderLimit: 100,
+    llmRenderStep: 100,
     capabilities: {
       catalog: [],
       selection: { mcp_server_ids: [], skill_ids: [] },
@@ -1954,7 +2074,6 @@ function cairnApp() {
       attachments: [],
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
-      ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
       ai_profile_selections: {
         bootstrap: { primary_profile_id: '', fallback_profile_ids: [] },
         explore: { primary_profile_id: '', fallback_profile_ids: [] },
@@ -1976,11 +2095,10 @@ function cairnApp() {
       hints: [],
       role_id: '',
       capabilities: { mcp_server_ids: [], skill_ids: [] },
-      ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
       ai_profile_selections: {
-        bootstrap: { primary_profile_id: '', fallback_profile_ids: [] },
-        explore: { primary_profile_id: '', fallback_profile_ids: [] },
-        reason: { primary_profile_id: '', fallback_profile_ids: [] },
+        bootstrap: { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] },
+        explore: { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] },
+        reason: { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] },
       },
       catalog: { capabilities: [], roles: [], ai_profiles: [] },
     },
@@ -1999,9 +2117,18 @@ function cairnApp() {
       provider: '',
       base_url: '',
       model: '',
+      models_text: '',
       api_key_env: '',
       available: true,
       healthcheck_timeout: 1.0,
+      model_reasoning_effort: '',
+      // Write-only sk. skTouched tracks whether the user has typed
+      // anything since the form was opened: untouched means "send
+      // null and keep whatever the server has". skStoredPreview shows
+      // the masked server-side value next to the input on edit.
+      sk: '',
+      skTouched: false,
+      skStoredPreview: '',
     },
     aiProfileFormOpen: false,
     isSyncingAiProfiles: false,
@@ -2015,6 +2142,10 @@ function cairnApp() {
     yamlPreviewText: '',
     yamlPreviewHtml: '',
     toast: { show: false, message: '', type: 'info' },
+    // --- Auth state ---
+    showLogin: false,
+    currentUser: null,
+    loginForm: { email: '', password: '', error: '', busy: false },
     replay: {
       active: false,
       playing: false,
@@ -2027,7 +2158,18 @@ function cairnApp() {
     },
     _timelineEventsCacheProject: null,
     _timelineEventsCache: [],
+    _timelineViewModelCacheKey: '',
+    _timelineViewModelCache: null,
+    _summaryCardCache: new Map(),
+    _summaryCardCacheOrder: [],
+    _loadedScriptUrls: new Set(['/static/vendor/dagre.min.js', '/static/vendor/cytoscape.min.js', '/static/vendor/cytoscape-dagre.js']),
+    _scriptLoadPromises: {},
     _centerAnimation: null,
+    _graphSignature: '',
+    _panelResizeFrame: null,
+    _panelResizePendingEvent: null,
+    _llmPanelResizeFrame: null,
+    _llmPanelResizePendingEvent: null,
     projectListScrollTop: 0,
     shouldRestoreProjectListScroll: false,
     isStoppingAllProjects: false,
@@ -2041,7 +2183,31 @@ function cairnApp() {
       window.addEventListener('pointerup', this._panelResizeStop);
       window.addEventListener('pointermove', this._llmPanelResizeMove);
       window.addEventListener('pointerup', this._llmPanelResizeStop);
+      // Invalidate the LLM-event view cache whenever any input changes. This
+      // lets filteredLlmEvents() / _llmEventsForView() reuse a single
+      // computation across the 6+ template call sites in a render. Manual
+      // bumps at pollLlmEvents / loadLlmExecutionEvents / resetLlmState are
+      // belt-and-suspenders for the push/slice mutation paths.
+      const bumpLlmView = () => { this._llmViewVersion++; };
+      this.$watch('llmEvents', bumpLlmView);
+      this.$watch('llmSelectedExecutionId', bumpLlmView);
+      this.$watch('llmSelectedExecutionEvents', bumpLlmView);
+      this.$watch('llmEventKindFilter', bumpLlmView);
+      this.$watch('showUsageLogs', async () => {
+        bumpLlmView();
+        await this.reloadLlmEventView(true);
+      });
+      this.$watch('_llmViewVersion', () => {
+        this.llmRenderLimit = 100;
+      });
       this.loadLocalPrefs();
+      // Validate the stored token (if any) before loading any data
+      // so the first GET /projects does not pop a 401 toast.
+      await this.bootstrapSession();
+      if (this.showLogin) {
+        // Stay on the login overlay; everything else is gated.
+        return;
+      }
       await this.loadProjects();
       await this.loadSettings();
       this.startPolling();
@@ -2063,19 +2229,111 @@ function cairnApp() {
       }
     },
 
+    async authFetch(path, opts = {}) {
+      const request = {
+        ...opts,
+        headers: { ...(opts.headers || {}) },
+      };
+      const token = localStorage.getItem('cairn.token');
+      if (token) request.headers['Authorization'] = `Bearer ${token}`;
+      let r = await fetch(path, request);
+      // One transparent refresh on 401. If the user has no token or
+      // the refresh itself fails, fall through to the error path so
+      // the login overlay can be shown.
+      if (r.status === 401 && token) {
+        const refreshed = await this.refreshSession();
+        if (refreshed) {
+          const newToken = localStorage.getItem('cairn.token');
+          request.headers['Authorization'] = `Bearer ${newToken}`;
+          r = await fetch(path, request);
+        }
+      }
+      return r;
+    },
+
     async api(method, path, body) {
       const opts = { method, headers: { 'Content-Type': 'application/json' } };
       if (body) opts.body = JSON.stringify(body);
-      const r = await fetch(path, opts);
+      const r = await this.authFetch(path, opts);
       if (r.status === 204) return null;
-      const data = await r.json();
+      const data = await r.json().catch(() => null);
       if (!r.ok) {
+        if (r.status === 401) this.showLogin = true;
         let msg = `HTTP ${r.status}`;
-        if (typeof data.detail === 'string') msg = data.detail;
-        else if (Array.isArray(data.detail)) msg = data.detail.map(e => e.msg).join('; ');
+        if (data && typeof data.detail === 'string') msg = data.detail;
+        else if (data && Array.isArray(data.detail)) msg = data.detail.map(e => e.msg).join('; ');
         throw new Error(msg);
       }
       return data;
+    },
+
+    async refreshSession() {
+      const current = localStorage.getItem('cairn.token');
+      if (!current) return false;
+      try {
+        const r = await fetch('/auth/refresh', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${current}` },
+        });
+        if (!r.ok) return false;
+        const data = await r.json();
+        if (data && data.access_token) {
+          localStorage.setItem('cairn.token', data.access_token);
+          return true;
+        }
+        return false;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    async login(email, password) {
+      const r = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => null);
+        const detail = data && data.detail;
+        throw new Error(typeof detail === 'string' ? detail : `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      localStorage.setItem('cairn.token', data.access_token);
+      this.currentUser = data.user;
+      this.showLogin = false;
+      return data;
+    },
+
+    async logout() {
+      localStorage.removeItem('cairn.token');
+      this.currentUser = null;
+      this.showLogin = true;
+    },
+
+    async bootstrapSession() {
+      // Used on first paint: if a token is sitting in localStorage,
+      // try /auth/me to confirm it is still valid. If yes, hide the
+      // login overlay; if no, surface the overlay.
+      const token = localStorage.getItem('cairn.token');
+      if (!token) {
+        this.showLogin = true;
+        return;
+      }
+      try {
+        const r = await fetch('/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (r.ok) {
+          this.currentUser = await r.json();
+          this.showLogin = false;
+        } else {
+          localStorage.removeItem('cairn.token');
+          this.showLogin = true;
+        }
+      } catch (e) {
+        this.showLogin = true;
+      }
     },
 
     async fetchText(path) {
@@ -2104,6 +2362,48 @@ function cairnApp() {
         if (typeof structuredClone === 'function') return structuredClone(value);
         throw error;
       }
+    },
+
+    invalidateProjectViewCaches() {
+      this._timelineEventsCacheProject = null;
+      this._timelineEventsCache = [];
+      this._timelineViewModelCacheKey = '';
+      this._timelineViewModelCache = null;
+      this._summaryCardCache.clear();
+      this._summaryCardCacheOrder = [];
+    },
+
+    loadScriptOnce(src) {
+      if (this._loadedScriptUrls.has(src)) return Promise.resolve();
+      if (this._scriptLoadPromises[src]) return this._scriptLoadPromises[src];
+      this._scriptLoadPromises[src] = new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+          existing.addEventListener('load', () => {
+            this._loadedScriptUrls.add(src);
+            resolve();
+          }, { once: true });
+          existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = false;
+        script.onload = () => {
+          this._loadedScriptUrls.add(src);
+          resolve();
+        };
+        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.head.appendChild(script);
+      });
+      return this._scriptLoadPromises[src];
+    },
+
+    async ensureLayoutEngineLoaded(mode = this.layoutMode) {
+      const engine = this.layoutEngine(mode);
+      const scripts = LAYOUT_ENGINE_SCRIPTS[engine] || [];
+      if (scripts.length === 0) return;
+      await scripts.reduce((promise, src) => promise.then(() => this.loadScriptOnce(src)), Promise.resolve());
     },
 
     isValidLayoutMode(mode) {
@@ -2418,6 +2718,10 @@ function cairnApp() {
       }).join('');
     },
 
+    safeExportPreviewHtml(tab, text) {
+      return tab === 'yaml' ? this.highlightYaml(text) : this.highlightTimeline(text);
+    },
+
     projectLabel(projectId, projectTitle) {
       return projectTitle ? `${projectId} - ${projectTitle}` : projectId;
     },
@@ -2458,7 +2762,7 @@ function cairnApp() {
       try {
         const text = await this.fetchText(`/projects/${this.exportProjectId}/export?format=${tab}`);
         this.yamlPreviewText = text;
-        this.yamlPreviewHtml = tab === 'yaml' ? this.highlightYaml(text) : this.highlightTimeline(text);
+        this.yamlPreviewHtml = this.safeExportPreviewHtml(tab, text);
       } catch (e) {
         this.showToast(e.message, 'error');
       }
@@ -2600,12 +2904,62 @@ function cairnApp() {
         provider: '',
         base_url: '',
         model: '',
+        models_text: '',
         api_key_env: '',
         available: true,
         detail: '',
         healthcheck_timeout: 1.0,
+        model_reasoning_effort: '',
+        sk: '',
+        skTouched: false,
+        skStoredPreview: '',
       };
       this.aiProfileFormOpen = false;
+    },
+
+    setAiProfileWorkerType(type) {
+      if (this.aiProfileForm.id) return; // type is locked on edit
+      if (this.aiProfileForm.worker_type === type) return;
+      this.aiProfileForm.worker_type = type;
+      // Pre-fill the canonical env-var name only if the user has not
+      // already typed one. Other fields (base_url, model, sk) are
+      // user-driven and never auto-overwritten on pill switch.
+      if (!this.aiProfileForm.api_key_env.trim()) {
+        this.aiProfileForm.api_key_env = type === 'codex' ? 'OPENAI_API_KEY' : 'ANTHROPIC_AUTH_TOKEN';
+      }
+    },
+
+    aiProfileApiKeyEnvPlaceholder() {
+      return this.aiProfileForm.worker_type === 'codex'
+        ? 'api_key_env (default: OPENAI_API_KEY)'
+        : 'api_key_env (default: ANTHROPIC_AUTH_TOKEN)';
+    },
+
+    aiProfileBaseUrlPlaceholder() {
+      return this.aiProfileForm.worker_type === 'codex'
+        ? 'base URL (e.g. https://api.openai.com/v1)'
+        : 'base URL (e.g. https://api.anthropic.com)';
+    },
+
+    aiProfileModelPlaceholder() {
+      return this.aiProfileForm.worker_type === 'codex'
+        ? 'model id (e.g. gpt-5.4)'
+        : 'model id (e.g. claude-sonnet-4.5)';
+    },
+
+    aiProfileSkPlaceholder() {
+      return this.aiProfileForm.worker_type === 'codex'
+        ? 'sk-... (Codex, write only; leave blank to keep current)'
+        : 'sk-ant-... (Claude, write only; leave blank to keep current)';
+    },
+
+    clearStoredAiProfileSk() {
+      // User clicked "clear stored key" on an existing profile. Mark
+      // the form as touched with an empty value, so saveAiProfile
+      // sends "" to the PUT endpoint, which the server interprets
+      // as "clear the stored sk".
+      this.aiProfileForm.skTouched = true;
+      this.aiProfileForm.sk = '';
     },
 
     openCreateAiProfile() {
@@ -2624,10 +2978,18 @@ function cairnApp() {
           provider: p.provider || '',
           base_url: p.base_url || '',
           model: p.model || '',
+          models_text: this.aiProfileModelOptions(p).join('\n'),
           api_key_env: p.api_key_env || '',
           available: p.available !== false,
           detail: p.detail || '',
           healthcheck_timeout: Number(p.healthcheck_timeout) || 1.0,
+          model_reasoning_effort: p.model_reasoning_effort || '',
+          // Write-only: the server never echoes the raw sk value, only
+          // sk_set / sk_preview. Keep the input blank; show the
+          // preview next to it.
+          sk: '',
+          skTouched: false,
+          skStoredPreview: p.sk_preview || '',
         };
         this.aiProfileFormOpen = true;
       } catch (e) {
@@ -2640,18 +3002,34 @@ function cairnApp() {
     },
 
     async saveAiProfile() {
-      const body = {
+      const base = {
         name: this.aiProfileForm.name.trim(),
         description: this.aiProfileForm.description || '',
         worker_type: this.aiProfileForm.worker_type,
         provider: this.aiProfileForm.provider || '',
         base_url: this.aiProfileForm.base_url || '',
         model: this.aiProfileForm.model.trim(),
+        models: this.aiProfileModelsFromForm(),
         api_key_env: this.aiProfileForm.api_key_env.trim(),
         available: this.aiProfileForm.available,
         detail: this.aiProfileForm.detail || '',
         healthcheck_timeout: Number(this.aiProfileForm.healthcheck_timeout) || 1.0,
+        model_reasoning_effort: this.aiProfileForm.model_reasoning_effort || null,
       };
+      // sk semantics:
+      //   POST  -> always include the literal sk ("" means "do not store")
+      //   PUT   -> include only if skTouched. Non-empty replaces, ""
+      //           clears, untouched (omitted) leaves the server value
+      //           intact.
+      let body;
+      if (this.aiProfileForm.id) {
+        body = { ...base };
+        if (this.aiProfileForm.skTouched) {
+          body.sk = this.aiProfileForm.sk;
+        }
+      } else {
+        body = { ...base, sk: this.aiProfileForm.sk };
+      }
       try {
         if (this.aiProfileForm.id) {
           await this.api('PUT', `/ai-profiles/${encodeURIComponent(this.aiProfileForm.id)}`, body);
@@ -2667,6 +3045,14 @@ function cairnApp() {
       }
     },
 
+    aiProfileModelsFromForm() {
+      const values = [
+        this.aiProfileForm.model || '',
+        ...String(this.aiProfileForm.models_text || '').split(/[\n,]/),
+      ].map(item => item.trim()).filter(Boolean);
+      return [...new Set(values)];
+    },
+
     async deleteAiProfile(profileId, profileName) {
       const ok = window.confirm(`Delete AI profile "${profileName}"? Existing project snapshots are preserved, but the profile can no longer be selected for new projects.`);
       if (!ok) return;
@@ -2675,16 +3061,8 @@ function cairnApp() {
         this.showToast('AI profile deleted');
         if (this.aiProfileForm.id === profileId) this.resetAiProfileForm();
         await this.loadAiProfiles();
-        if (this.newProject && this.newProject.ai_profiles) {
-          if (this.newProject.ai_profiles.primary_profile_id === profileId) this.newProject.ai_profiles.primary_profile_id = '';
-          this.newProject.ai_profiles.fallback_profile_ids = (this.newProject.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
-          this.removeProfileFromTaskAiSelections(this.newProject.ai_profile_selections, profileId);
-        }
-        if (this.replayConfig && this.replayConfig.ai_profiles) {
-          if (this.replayConfig.ai_profiles.primary_profile_id === profileId) this.replayConfig.ai_profiles.primary_profile_id = '';
-          this.replayConfig.ai_profiles.fallback_profile_ids = (this.replayConfig.ai_profiles.fallback_profile_ids || []).filter(id => id !== profileId);
-          this.removeProfileFromTaskAiSelections(this.replayConfig.ai_profile_selections, profileId);
-        }
+        if (this.newProject) this.removeProfileFromTaskAiSelections(this.newProject.ai_profile_selections, profileId);
+        if (this.replayConfig) this.removeProfileFromTaskAiSelections(this.replayConfig.ai_profile_selections, profileId);
       } catch (e) {
         this.showToast(e.message, 'error');
       }
@@ -2717,6 +3095,7 @@ function cairnApp() {
     async loadProject(id) {
       try {
         this.project = await this.api('GET', `/projects/${id}`);
+        this.invalidateProjectViewCaches();
         if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
       } catch(e) { this.showToast(e.message, 'error'); }
     },
@@ -2802,6 +3181,44 @@ function cairnApp() {
       return `/projects/${encodeURIComponent(this.selectedProjectId)}/files/download?source=${encodeURIComponent(file.source)}&path=${encodeURIComponent(file.path)}`;
     },
 
+    async downloadProjectFile(file) {
+      try {
+        const r = await this.authFetch(this.projectFileDownloadUrl(file), { method: 'GET' });
+        if (!r.ok) {
+          if (r.status === 401) this.showLogin = true;
+          const text = await r.text().catch(() => '');
+          let msg = `HTTP ${r.status}`;
+          try {
+            const data = JSON.parse(text);
+            if (typeof data.detail === 'string') msg = data.detail;
+            else if (Array.isArray(data.detail)) msg = data.detail.map(e => e.msg).join('; ');
+          } catch (e) {
+            if (text) msg = text;
+          }
+          throw new Error(msg);
+        }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = this.filenameFromContentDisposition(r.headers.get('content-disposition')) || file.name || 'download';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        this.filesError = e.message || String(e);
+      }
+    },
+
+    filenameFromContentDisposition(value) {
+      const header = String(value || '');
+      const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match) return decodeURIComponent(utf8Match[1].replace(/"/g, ''));
+      const plainMatch = header.match(/filename="?([^";]+)"?/i);
+      return plainMatch ? plainMatch[1] : '';
+    },
+
     resetProjectFiles() {
       this.projectFiles = [];
       this.filesLoading = false;
@@ -2818,7 +3235,6 @@ function cairnApp() {
         role_id: '',
         proxy_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
-        ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
         ai_profile_selections: this.defaultTaskAiProfileSelections(),
       };
     },
@@ -2861,6 +3277,7 @@ function cairnApp() {
       this.resetNewProject();
       this.showNewProject = true;
       await Promise.all([this.loadNewProjectCatalog(), this.loadProxies(), this.loadAiProfiles()]);
+      this.ensureAllTaskAiProfilesSelected(this.newProject, this.newProjectAiProfileItems());
     },
 
     async loadNewProjectCatalog() {
@@ -2912,6 +3329,16 @@ function cairnApp() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
 
+    aiReasoningTypeOptions() {
+      return ['low', 'medium', 'high', 'xhigh'];
+    },
+
+    aiProfileModelOptions(profile) {
+      if (!profile) return [];
+      const values = [profile.model, ...((profile.models || []))].filter(Boolean);
+      return [...new Set(values)];
+    },
+
     aiProfileTaskTypes() {
       return [
         { key: 'bootstrap', label: 'Bootstrap' },
@@ -2921,7 +3348,7 @@ function cairnApp() {
     },
 
     defaultAiProfileSelection() {
-      return { primary_profile_id: '', fallback_profile_ids: [] };
+      return { primary_profile_id: '', primary_model: '', primary_reasoning_type: '', fallback_profile_ids: [] };
     },
 
     defaultTaskAiProfileSelections() {
@@ -2934,21 +3361,23 @@ function cairnApp() {
 
     ensureTaskAiProfileSelections(target) {
       if (!target.ai_profile_selections) {
-        const legacy = target.ai_profiles || this.defaultAiProfileSelection();
         target.ai_profile_selections = {
-          bootstrap: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
-          explore: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
-          reason: { primary_profile_id: legacy.primary_profile_id || '', fallback_profile_ids: [...(legacy.fallback_profile_ids || [])] },
+          bootstrap: this.defaultAiProfileSelection(),
+          explore: this.defaultAiProfileSelection(),
+          reason: this.defaultAiProfileSelection(),
         };
       }
       for (const task of ['bootstrap', 'explore', 'reason']) {
         if (!target.ai_profile_selections[task]) target.ai_profile_selections[task] = this.defaultAiProfileSelection();
+        if (!Array.isArray(target.ai_profile_selections[task].fallback_profile_ids)) target.ai_profile_selections[task].fallback_profile_ids = [];
+        if (target.ai_profile_selections[task].primary_model == null) target.ai_profile_selections[task].primary_model = '';
+        if (target.ai_profile_selections[task].primary_reasoning_type == null) target.ai_profile_selections[task].primary_reasoning_type = '';
       }
       return target.ai_profile_selections;
     },
 
     aiProfileSelectionHasValue(selection) {
-      return !!(selection && (selection.primary_profile_id || (selection.fallback_profile_ids || []).length > 0));
+      return !!(selection && (selection.primary_profile_id || selection.primary_model || selection.primary_reasoning_type || (selection.fallback_profile_ids || []).length > 0));
     },
 
     taskAiProfileSelectionsHasValue(selections) {
@@ -2958,7 +3387,11 @@ function cairnApp() {
     removeProfileFromTaskAiSelections(selections, profileId) {
       for (const selection of Object.values(selections || {})) {
         if (!selection) continue;
-        if (selection.primary_profile_id === profileId) selection.primary_profile_id = '';
+        if (selection.primary_profile_id === profileId) {
+          selection.primary_profile_id = '';
+          selection.primary_model = '';
+          selection.primary_reasoning_type = '';
+        }
         selection.fallback_profile_ids = (selection.fallback_profile_ids || []).filter(id => id !== profileId);
       }
     },
@@ -2968,49 +3401,111 @@ function cairnApp() {
       return {
         bootstrap: {
           primary_profile_id: current.bootstrap?.primary_profile_id || null,
+          primary_model: current.bootstrap?.primary_model || null,
+          primary_reasoning_type: current.bootstrap?.primary_reasoning_type || null,
           fallback_profile_ids: current.bootstrap?.fallback_profile_ids || [],
         },
         explore: {
           primary_profile_id: current.explore?.primary_profile_id || null,
+          primary_model: current.explore?.primary_model || null,
+          primary_reasoning_type: current.explore?.primary_reasoning_type || null,
           fallback_profile_ids: current.explore?.fallback_profile_ids || [],
         },
         reason: {
           primary_profile_id: current.reason?.primary_profile_id || null,
+          primary_model: current.reason?.primary_model || null,
+          primary_reasoning_type: current.reason?.primary_reasoning_type || null,
           fallback_profile_ids: current.reason?.fallback_profile_ids || [],
         },
       };
     },
 
-    newProjectPrimaryAiProfileSelected(taskType = 'explore') {
-      return this.ensureTaskAiProfileSelections(this.newProject)[taskType]?.primary_profile_id || '';
+    taskAiProfileSelectionsComplete(target, items = null) {
+      const availableItems = (items || this.aiProfiles || []).filter(item => item.available !== false);
+      const availableIds = new Set(availableItems.map(item => item.id));
+      if (availableIds.size === 0) return false;
+      const selections = this.ensureTaskAiProfileSelections(target);
+      return this.aiProfileTaskTypes().every(task => {
+        const selection = selections[task.key] || {};
+        const id = selection.primary_profile_id || '';
+        const profile = availableItems.find(item => item.id === id);
+        const modelOptions = this.aiProfileModelOptions(profile);
+        return id
+          && availableIds.has(id)
+          && selection.primary_model
+          && modelOptions.includes(selection.primary_model)
+          && selection.primary_reasoning_type;
+      });
     },
 
-    setNewProjectPrimaryAiProfile(profileId, taskType = 'explore') {
+    ensureAllTaskAiProfilesSelected(target, items) {
+      const availableItems = (items || []).filter(item => item.available !== false);
+      if (availableItems.length === 0) return false;
+      const selections = this.ensureTaskAiProfileSelections(target);
+      for (const task of this.aiProfileTaskTypes()) {
+        const selection = selections[task.key];
+        if (!selection.primary_profile_id || !availableItems.some(item => item.id === selection.primary_profile_id)) {
+          selection.primary_profile_id = availableItems[0].id;
+          selection.fallback_profile_ids = [];
+        }
+        this.hydrateTaskAiSelectionFromProfile(selection, availableItems.find(item => item.id === selection.primary_profile_id));
+      }
+      return true;
+    },
+
+    hydrateTaskAiSelectionFromProfile(selection, profile) {
+      if (!profile) {
+        selection.primary_profile_id = '';
+        selection.primary_model = '';
+        selection.primary_reasoning_type = '';
+        selection.fallback_profile_ids = [];
+        return;
+      }
+      const modelOptions = this.aiProfileModelOptions(profile);
+      if (!selection.primary_model || !modelOptions.includes(selection.primary_model)) {
+        selection.primary_model = profile.model || modelOptions[0] || '';
+      }
+      if (!selection.primary_reasoning_type) {
+        selection.primary_reasoning_type = profile.model_reasoning_effort || '';
+      }
+    },
+
+    taskAiModelOptions(target, taskType, items) {
+      const selection = this.ensureTaskAiProfileSelections(target)[taskType] || {};
+      const profile = (items || []).find(item => item.id === selection.primary_profile_id);
+      return this.aiProfileModelOptions(profile);
+    },
+
+    setTaskAiModel(target, taskType, model) {
+      this.ensureTaskAiProfileSelections(target)[taskType].primary_model = model || '';
+    },
+
+    setTaskAiReasoning(target, taskType, reasoning) {
+      this.ensureTaskAiProfileSelections(target)[taskType].primary_reasoning_type = reasoning || '';
+    },
+
+    selectNewProjectAiProfile(profileId, taskType = 'explore') {
+      const profile = this.newProjectAiProfileItems().find(item => item.id === profileId);
       const selection = this.ensureTaskAiProfileSelections(this.newProject)[taskType];
-      selection.primary_profile_id = profileId || '';
-      // Primary must not also appear in fallback
-      const current = new Set(selection.fallback_profile_ids || []);
-      if (profileId) current.delete(profileId);
-      selection.fallback_profile_ids = Array.from(current).sort();
+      selection.primary_profile_id = profile?.id || '';
+      selection.fallback_profile_ids = [];
+      this.hydrateTaskAiSelectionFromProfile(selection, profile);
     },
 
-    isNewProjectFallbackAiProfile(profileId, taskType = 'explore') {
-      return (this.ensureTaskAiProfileSelections(this.newProject)[taskType]?.fallback_profile_ids || []).includes(profileId);
-    },
-
-    toggleNewProjectFallbackAiProfile(profileId, checked, taskType = 'explore') {
-      const selection = this.ensureTaskAiProfileSelections(this.newProject)[taskType];
-      const current = new Set(selection.fallback_profile_ids || []);
-      if (checked) current.add(profileId);
-      else current.delete(profileId);
-      // Fallback must not include the primary
-      if (selection.primary_profile_id) current.delete(selection.primary_profile_id);
-      selection.fallback_profile_ids = Array.from(current).sort();
+    newProjectAiSelectionSummary() {
+      const selections = this.ensureTaskAiProfileSelections(this.newProject);
+      const parts = this.aiProfileTaskTypes().map(task => {
+        const profile = this.newProjectAiProfileItems().find(item => item.id === selections[task.key]?.primary_profile_id);
+        const model = selections[task.key]?.primary_model || '';
+        const reasoning = selections[task.key]?.primary_reasoning_type || '';
+        return `${task.label}: ${profile ? `${profile.name} / ${model}${reasoning ? ' / ' + reasoning : ''}` : 'missing profile'}`;
+      });
+      return parts.join(' · ');
     },
 
     clearNewProjectAiProfiles() {
-      this.newProject.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
       this.newProject.ai_profile_selections = this.defaultTaskAiProfileSelections();
+      this.ensureAllTaskAiProfilesSelected(this.newProject, this.newProjectAiProfileItems());
     },
 
     resetReplayConfig() {
@@ -3023,7 +3518,6 @@ function cairnApp() {
         hints: [],
         role_id: '',
         capabilities: { mcp_server_ids: [], skill_ids: [] },
-        ai_profiles: { primary_profile_id: '', fallback_profile_ids: [] },
         ai_profile_selections: this.defaultTaskAiProfileSelections(),
         catalog: { capabilities: [], roles: [], ai_profiles: [] },
       };
@@ -3059,34 +3553,17 @@ function cairnApp() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
 
-    replayConfigPrimaryAiProfileSelected(taskType = 'explore') {
-      return this.ensureTaskAiProfileSelections(this.replayConfig)[taskType]?.primary_profile_id || '';
-    },
-
-    setReplayConfigPrimaryAiProfile(profileId, taskType = 'explore') {
+    selectReplayConfigAiProfile(profileId, taskType = 'explore') {
       const selection = this.ensureTaskAiProfileSelections(this.replayConfig)[taskType];
-      selection.primary_profile_id = profileId || '';
-      const current = new Set(selection.fallback_profile_ids || []);
-      if (profileId) current.delete(profileId);
-      selection.fallback_profile_ids = Array.from(current).sort();
-    },
-
-    isReplayConfigFallbackAiProfile(profileId, taskType = 'explore') {
-      return (this.ensureTaskAiProfileSelections(this.replayConfig)[taskType]?.fallback_profile_ids || []).includes(profileId);
-    },
-
-    toggleReplayConfigFallbackAiProfile(profileId, checked, taskType = 'explore') {
-      const selection = this.ensureTaskAiProfileSelections(this.replayConfig)[taskType];
-      const current = new Set(selection.fallback_profile_ids || []);
-      if (checked) current.add(profileId);
-      else current.delete(profileId);
-      if (selection.primary_profile_id) current.delete(selection.primary_profile_id);
-      selection.fallback_profile_ids = Array.from(current).sort();
+      const profile = this.replayConfigAiProfileItems().find(item => item.id === profileId);
+      selection.primary_profile_id = profile?.id || '';
+      selection.fallback_profile_ids = [];
+      this.hydrateTaskAiSelectionFromProfile(selection, profile);
     },
 
     clearReplayConfigAiProfiles() {
-      this.replayConfig.ai_profiles = { primary_profile_id: '', fallback_profile_ids: [] };
       this.replayConfig.ai_profile_selections = this.defaultTaskAiProfileSelections();
+      this.ensureAllTaskAiProfilesSelected(this.replayConfig, this.replayConfigAiProfileItems());
     },
 
 
@@ -3146,7 +3623,15 @@ function cairnApp() {
       this.llmExecutions = [];
       this.llmEvents = [];
       this.llmLastSequence = 0;
+      this.llmAllExecutionEvents = [];
+      this.llmAllExecutionEventsLoading = false;
+      this.llmAllExecutionEventsLoaded = false;
+      this.llmAllExecutionLastSequence = 0;
+      this.llmEventViewActivity = null;
+      this.llmEventViewStats = null;
       this.llmSelectedExecutionId = '';
+      this.llmSelectedExecutionEvents = [];
+      this.llmSelectedExecutionEventsLoading = false;
       this.llmExecutionSelectInteracting = false;
       this.llmExecutionsRefreshPending = false;
       this.llmEventContentCache = {};
@@ -3154,6 +3639,14 @@ function cairnApp() {
       this.llmExpandedEvents = {};
       this.llmPollingPaused = false;
       this.llmLastSlowPollAt = 0;
+      this._llmViewVersion++;
+      this._llmViewCache = null;
+      this._llmViewCacheKey = '';
+      this._llmEventsForViewCache = null;
+      this._llmEventsForViewCacheKey = '';
+      this._llmViewModelCache = null;
+      this._llmViewModelCacheKey = '';
+      this._llmParsedPayloadCache.clear();
     },
 
     async loadLlmExecutions() {
@@ -3193,6 +3686,16 @@ function cairnApp() {
       if (this.llmSelectedExecutionId && !next.some(execution => execution.id === this.llmSelectedExecutionId)) {
         this.llmSelectedExecutionId = '';
       }
+      if (!this.llmSelectedExecutionId) {
+        const running = next.find(execution => execution.process_state === 'running');
+        if (running) {
+          this.llmSelectedExecutionId = running.id;
+          this.llmSelectedExecutionEvents = [];
+          this.llmSelectedExecutionEventsLoading = true;
+          this._llmViewVersion++;
+          this.$nextTick(() => this.loadLlmExecutionEvents(running.id));
+        }
+      }
       this.llmExecutionsRefreshPending = false;
     },
 
@@ -3207,27 +3710,179 @@ function cairnApp() {
     },
 
     handleLlmExecutionSelectionChange() {
+      const targetId = this.llmSelectedExecutionId;
+      this.llmSelectedExecutionEvents = [];
+      this.llmEventViewActivity = null;
+      this.llmEventViewStats = null;
+      this.llmSelectedExecutionEventsLoading = false;
+      this._llmViewVersion++;
+      if (targetId) {
+        this.llmSelectedExecutionEventsLoading = true;
+      }
       this.$nextTick(() => {
         this.endLlmExecutionSelectionInteraction();
+        if (targetId) {
+          this.loadLlmExecutionEvents(targetId);
+        }
       });
+    },
+
+    llmEventViewUrl({ executionId = '', after = 0, limit = 300 } = {}) {
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      params.set('include_low_signal', this.showUsageLogs ? 'true' : 'false');
+      if (executionId) params.set('execution_id', executionId);
+      if (after > 0) params.set('after', String(after));
+      return `/projects/${this.selectedProjectId}/llm-events/view?${params.toString()}`;
+    },
+
+    applyLlmEventViewMeta(data) {
+      this.llmEventViewActivity = data?.activity || null;
+      this.llmEventViewStats = data?.stats || null;
+      const lastSequence = Number(data?.last_sequence || 0);
+      if (Number.isFinite(lastSequence) && lastSequence > 0) {
+        this.llmLastSequence = Math.max(this.llmLastSequence, lastSequence);
+      }
+    },
+
+    mergeLlmEventRows(existing, incoming, limit = 1200) {
+      const rows = Array.isArray(incoming) ? incoming : [];
+      if (rows.length === 0) return existing;
+      const bySequence = new Map(existing.map(event => [event.sequence, event]));
+      for (const event of rows) {
+        if (event && event.sequence !== undefined && !bySequence.has(event.sequence)) {
+          bySequence.set(event.sequence, event);
+        }
+      }
+      const merged = Array.from(bySequence.values())
+        .sort((a, b) => this.llmEventSequence(a) - this.llmEventSequence(b))
+        .slice(-limit);
+      this.pruneLlmCachesForEvents(merged);
+      return merged;
+    },
+
+    pruneLlmCachesForEvents(events) {
+      const keep = new Set((Array.isArray(events) ? events : []).map(event => event.sequence));
+      for (const key of this._llmParsedPayloadCache.keys()) {
+        if (!keep.has(key)) this._llmParsedPayloadCache.delete(key);
+      }
+      const nextContentCache = {};
+      for (const [key, value] of Object.entries(this.llmEventContentCache || {})) {
+        const sequence = Number(String(key).split(':')[0]);
+        if (keep.has(sequence)) nextContentCache[key] = value;
+      }
+      this.llmEventContentCache = nextContentCache;
+    },
+
+    async reloadLlmEventView(force = false) {
+      if (!this.selectedProjectId || this.view !== 'graph') return;
+      if (this.llmSelectedExecutionId) {
+        await this.loadLlmExecutionEvents(this.llmSelectedExecutionId);
+      } else {
+        await this.loadAllExecutionEvents(force);
+      }
+    },
+
+    async loadLlmExecutionEvents(executionId) {
+      if (!this.selectedProjectId || !executionId) {
+        this.llmSelectedExecutionEventsLoading = false;
+        this._llmViewVersion++;
+        return;
+      }
+      try {
+        const data = await this.api('GET', this.llmEventViewUrl({ executionId, limit: 300 }));
+        const events = Array.isArray(data?.primary_events) ? data.primary_events : [];
+        if (this.llmSelectedExecutionId === executionId) {
+          this.llmSelectedExecutionEvents = events;
+          this.applyLlmEventViewMeta(data);
+          this._llmViewVersion++;
+        }
+      } catch (e) {
+        console.error(e);
+        if (this.llmSelectedExecutionId === executionId) {
+          this.llmSelectedExecutionEvents = [];
+          this._llmViewVersion++;
+        }
+      } finally {
+        if (this.llmSelectedExecutionId === executionId) {
+          this.llmSelectedExecutionEventsLoading = false;
+          this._llmViewVersion++;
+        }
+      }
+    },
+
+    async loadAllExecutionEvents(force = false) {
+      if (!this.selectedProjectId || this.view !== 'graph') return;
+      if (this.llmAllExecutionEventsLoading) return;
+      if (!force && this.llmAllExecutionEventsLoaded) return;
+      this.llmAllExecutionEventsLoading = true;
+      this._llmViewVersion++;
+      try {
+        const data = await this.api('GET', this.llmEventViewUrl({ limit: 300 }));
+        const rows = Array.isArray(data?.primary_events) ? data.primary_events : [];
+        this.llmAllExecutionEvents = rows;
+        this.llmAllExecutionLastSequence = Number(data?.last_sequence || 0);
+        this.llmLastSequence = Math.max(this.llmLastSequence, this.llmAllExecutionLastSequence);
+        this.applyLlmEventViewMeta(data);
+        this.llmAllExecutionEventsLoaded = true;
+        this._llmViewVersion++;
+      } catch (e) {
+        console.error(e);
+      } finally {
+        this.llmAllExecutionEventsLoading = false;
+        this._llmViewVersion++;
+      }
     },
 
     async pollLlmEvents(force = false) {
       if (!this.selectedProjectId || this.view !== 'graph' || this.replay.active) return;
       if (!force && (this.llmPanelCollapsed || this.llmPollingPaused)) return;
+      if (this.llmPollInFlight && !force) return;
+      this.llmPollInFlight = true;
       try {
-        const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-events?after=${this.llmLastSequence}&limit=200`);
-        const events = data.events || [];
-        if (events.length > 0) {
-          this.llmEvents.push(...events);
-          if (this.llmEvents.length > 1200) this.llmEvents = this.llmEvents.slice(-1200);
-          this.llmLastSequence = Math.max(this.llmLastSequence, ...events.map(event => event.sequence || 0));
+        const after = force && this.llmEvents.length === 0 ? 0 : this.llmLastSequence;
+        const data = await this.api(
+          'GET',
+          this.llmEventViewUrl({ executionId: this.llmSelectedExecutionId || '', after, limit: 200 }),
+        );
+        const events = Array.isArray(data?.primary_events) ? data.primary_events : [];
+        const lastSequence = Number(data?.last_sequence || 0);
+        const hasNewWindow = lastSequence > after;
+        this.applyLlmEventViewMeta(data);
+        if (events.length > 0 || hasNewWindow) {
+          if (after === 0) {
+            this.llmEvents = [];
+            if (this.llmSelectedExecutionId) this.llmSelectedExecutionEvents = [];
+          }
+          this.llmEvents = this.mergeLlmEventRows(this.llmEvents, events, 1200);
+
+          if (this.llmSelectedExecutionId) {
+            const selectedAppended = events.filter(event => event.execution_id === this.llmSelectedExecutionId);
+            this.llmSelectedExecutionEvents = this.mergeLlmEventRows(this.llmSelectedExecutionEvents, selectedAppended, 1000);
+          }
+
+          if (!this.llmSelectedExecutionId && this.llmAllExecutionEventsLoaded) {
+            this.llmAllExecutionEvents = this.mergeLlmEventRows(
+              this.llmAllExecutionEvents,
+              events,
+              this.llmAllExecutionEventCountLimit,
+            );
+            this.llmAllExecutionLastSequence = Math.max(this.llmAllExecutionLastSequence, lastSequence || 0);
+          }
+
+          this._llmViewVersion++;
           await this.loadLlmExecutions();
         } else if (force || this.llmExecutions.some(execution => execution.process_state === 'running')) {
           await this.loadLlmExecutions();
+          if (this.llmEvents.length === 0 && this.llmExecutions.length > 0 && after !== 0) {
+            this.llmLastSequence = 0;
+            await this.pollLlmEvents(true);
+          }
         }
       } catch (e) {
         console.error(e);
+      } finally {
+        this.llmPollInFlight = false;
       }
     },
 
@@ -3244,16 +3899,124 @@ function cairnApp() {
       }, 1000);
     },
 
+    _llmEventsForView() {
+      const cacheKey = `${this._llmViewVersion}:${this.llmSelectedExecutionId || ''}:${this.llmSelectedExecutionEventsLoading ? 1 : 0}:${this.llmSelectedExecutionEvents.length}:${this.llmAllExecutionEventsLoaded ? 1 : 0}:${this.llmAllExecutionEventsLoading ? 1 : 0}:${this.llmAllExecutionEvents.length}`;
+      if (this._llmEventsForViewCache && this._llmEventsForViewCacheKey === cacheKey) {
+        return this._llmEventsForViewCache;
+      }
+      let result;
+      if (!this.llmSelectedExecutionId) {
+        // "All Executions" is backed by the stable complete-history snapshot,
+        // not the rolling llmEvents live window.
+        result = this.llmAllExecutionEvents;
+      } else if (this.llmSelectedExecutionEvents.length > 0 || this.llmSelectedExecutionEventsLoading) {
+        result = this.llmSelectedExecutionEvents;
+      } else {
+        // Fallback while the per-execution fetch has not produced results yet:
+        // surface what is already in the rolling 1200-event window so the
+        // user does not see an empty pane flash.
+        result = this.llmEvents.filter(event => event.execution_id === this.llmSelectedExecutionId);
+      }
+      this._llmEventsForViewCache = result;
+      this._llmEventsForViewCacheKey = cacheKey;
+      return result;
+    },
+
     filteredLlmEvents() {
-      const events = this.llmSelectedExecutionId
-        ? this.llmEvents.filter(event => event.execution_id === this.llmSelectedExecutionId)
-        : this.llmEvents;
-      return this.mergeLlmCommandEvents(events.filter(event => this.isVisibleLlmEvent(event)))
+      if (this._llmViewCache && this._llmViewCacheKey === String(this._llmViewVersion)) {
+        return this._llmViewCache;
+      }
+      const events = this._llmEventsForView();
+      const result = this.mergeLlmCommandEvents(events.filter(event => this.isVisibleLlmEvent(event)))
         .filter(event => this.matchesLlmEventKindFilter(event))
-        .slice(-500);
+        .sort((a, b) => this.llmEventSequence(b) - this.llmEventSequence(a))
+        .slice(0, 500);
+      this._llmViewCache = result;
+      this._llmViewCacheKey = String(this._llmViewVersion);
+      return result;
+    },
+
+    llmViewModel() {
+      const cacheKey = `${this._llmViewVersion}:${this.llmRenderLimit}`;
+      if (this._llmViewModelCache && this._llmViewModelCacheKey === cacheKey) {
+        return this._llmViewModelCache;
+      }
+      const allEvents = this.filteredLlmEvents();
+      const usage = this.llmUsageActivity();
+      const hasFilterHiddenEvents = this._llmEventsForView().length > 0 && allEvents.length === 0 && !usage;
+      const hiddenSummary = this.llmHiddenEventSummary();
+      const visibleEvents = allEvents.slice(0, this.llmRenderLimit);
+      const model = {
+        allEvents,
+        events: visibleEvents,
+        eventCount: allEvents.length,
+        usage,
+        hiddenSummary,
+        hasFilterHiddenEvents,
+        showEmpty: allEvents.length === 0 && !usage && !hasFilterHiddenEvents,
+        canLoadMore: allEvents.length > visibleEvents.length,
+      };
+      this._llmViewModelCache = model;
+      this._llmViewModelCacheKey = cacheKey;
+      return model;
+    },
+
+    showMoreLlmEvents() {
+      this.llmRenderLimit = Math.min(
+        this.filteredLlmEvents().length,
+        this.llmRenderLimit + this.llmRenderStep,
+      );
+    },
+
+    llmUsageActivity() {
+      if (this.showUsageLogs || !['all', 'output'].includes(this.llmEventKindFilter)) return null;
+      const activity = this.llmEventViewActivity;
+      if (!activity || !activity.hidden_usage_count) return null;
+      const subtype = typeof activity.subtype === 'string' ? activity.subtype : '';
+      const title = subtype === 'thinking_tokens' ? 'Worker is thinking' : 'Worker activity';
+      const parts = [];
+      if (activity.tokens !== undefined && activity.tokens !== null && activity.tokens !== '') {
+        parts.push(`tokens ${activity.tokens}`);
+      }
+      if (activity.delta !== undefined && activity.delta !== null && activity.delta !== '') {
+        parts.push(`+${activity.delta}`);
+      }
+      if (subtype) {
+        parts.push(subtype.replace(/_/g, ' '));
+      }
+      parts.push(`${activity.hidden_usage_count} usage hidden`);
+      return {
+        sequence: activity.latest_usage_sequence || 0,
+        created_at: activity.latest_usage_at,
+        title,
+        detail: parts.join(' · '),
+      };
+    },
+
+    llmHasFilterHiddenEvents() {
+      return this.llmViewModel().hasFilterHiddenEvents;
+    },
+
+    llmHasHiddenEvents() {
+      return this.llmUsageActivity() !== null || this.llmHasFilterHiddenEvents();
+    },
+
+    llmHiddenEventSummary() {
+      const hidden = this.llmEventViewStats?.hidden_by_kind || {};
+      const parts = Object.entries(hidden)
+        .filter(([, count]) => Number(count || 0) > 0)
+        .map(([kind, count]) => `${count} ${kind}`);
+      return parts.length > 0 ? `Hidden: ${parts.join(' · ')}` : '';
+    },
+
+    llmEventSequence(event) {
+      const sequence = Number(event?.sequence || 0);
+      return Number.isFinite(sequence) ? sequence : 0;
     },
 
     isVisibleLlmEvent(event) {
+      if (event.event_kind === 'usage') return this.showUsageLogs;
+      if (['prompt', 'capability_manifest'].includes(event.event_kind)) return this.llmEventKindFilter === 'output';
       if (event.event_kind !== 'system_event') return true;
       const payload = this.tryParseLlmJsonObject(event.content);
       if (!payload || typeof payload.type !== 'string') return true;
@@ -3261,35 +4024,67 @@ function cairnApp() {
       return true;
     },
 
+    _LLM_CALL_MERGEABLE_KINDS: ['tool_call', 'tool_result', 'command_start', 'command_end'],
+
+    _getParsedPayload(event) {
+      const cached = this._llmParsedPayloadCache.get(event.sequence);
+      if (cached !== undefined) return cached;
+      // tryParseLlmJsonObject returns null for non-JSON content. Distinguish
+      // "not yet parsed" (undefined) from "parsed and is null" (null) by
+      // storing both — the cache check above handles either.
+      const parsed = this.tryParseLlmJsonObject(event.content);
+      this._llmParsedPayloadCache.set(event.sequence, parsed === null ? null : parsed);
+      return parsed;
+    },
+
     mergeLlmCommandEvents(events) {
       const merged = [];
-      const pending = new Map();
+      const groups = new Map();
       for (const event of events) {
-        if (!['command_start', 'command_end'].includes(event.event_kind)) {
+        if (!this._LLM_CALL_MERGEABLE_KINDS.includes(event.event_kind)) {
           merged.push(event);
           continue;
         }
-        const payload = this.tryParseLlmJsonObject(event.content) || {};
+        const payload = this._getParsedPayload(event) || {};
         const key = this.llmCommandEventKey(event, payload);
         if (!key) {
           merged.push(event);
           continue;
         }
-        if (event.event_kind === 'command_start') {
-          const commandEvent = this.buildMergedLlmCommandEvent(event, payload, null, null);
-          pending.set(key, { index: merged.length, event, payload });
-          merged.push(commandEvent);
-          continue;
+        let group = groups.get(key);
+        if (!group) {
+          group = {
+            toolCall: null,
+            toolResult: null,
+            commandStart: null,
+            commandEnd: null,
+            toolCallPayload: null,
+            toolResultPayload: null,
+            commandStartPayload: null,
+            commandEndPayload: null,
+            firstIndex: merged.length,
+          };
+          groups.set(key, group);
+          merged.push(null); // placeholder, filled in below
         }
-        const start = pending.get(key);
-        if (start) {
-          merged[start.index] = this.buildMergedLlmCommandEvent(start.event, start.payload, event, payload);
-          pending.delete(key);
-        } else {
-          merged.push(this.buildMergedLlmCommandEvent(null, null, event, payload));
+        if (event.event_kind === 'tool_call') {
+          group.toolCall = event;
+          group.toolCallPayload = payload;
+        } else if (event.event_kind === 'tool_result') {
+          group.toolResult = event;
+          group.toolResultPayload = payload;
+        } else if (event.event_kind === 'command_start') {
+          group.commandStart = event;
+          group.commandStartPayload = payload;
+        } else if (event.event_kind === 'command_end') {
+          group.commandEnd = event;
+          group.commandEndPayload = payload;
         }
+        merged[group.firstIndex] = this.buildMergedLlmCallEvent(group);
       }
-      return merged;
+      // Strip the placeholders (only present if every key was unmergeable,
+      // which cannot happen — but keep the filter as a safety net).
+      return merged.filter(item => item !== null);
     },
 
     llmCommandEventKey(event, payload) {
@@ -3300,36 +4095,120 @@ function cairnApp() {
       return command ? `${scope}:command:${command}` : '';
     },
 
-    buildMergedLlmCommandEvent(startEvent, startPayload, endEvent, endPayload) {
-      const source = endEvent || startEvent;
+    buildMergedLlmCallEvent(group) {
+      const {
+        toolCall,
+        toolResult,
+        commandStart,
+        commandEnd,
+        toolCallPayload,
+        toolResultPayload,
+        commandStartPayload,
+        commandEndPayload,
+      } = group;
+      // Pick the most informative "source" event for sequence / phase / created_at.
+      // Precedence: command_end > tool_result > command_start > tool_call.
+      const source = commandEnd || toolResult || commandStart || toolCall;
+      const toolPayload = toolCallPayload || {};
+      const startPayload = commandStartPayload || {};
+      const endPayload = commandEndPayload || {};
+      const resultPayload = toolResultPayload || {};
+
       const payload = {
-        ...(startPayload || {}),
-        ...(endPayload || {}),
+        ...toolPayload,
+        ...startPayload,
+        ...endPayload,
+        ...resultPayload,
       };
-      payload.command = payload.command || startPayload?.command || endPayload?.command || payload.summary;
-      payload.status = payload.status || (endEvent ? 'completed' : 'in_progress');
-      payload.started_sequence = startEvent?.sequence || null;
-      payload.ended_sequence = endEvent?.sequence || null;
-      const summary = this.llmFieldText('command', payload.command || payload.summary || source?.content || '').trim();
-      payload.summary = summary || payload.summary || 'command';
+
+      // Tool name (the LLM's tool identifier, e.g. "exec_command").
+      if (toolPayload.tool) payload.tool = toolPayload.tool;
+
+      // Command: prefer command_start, then command_end, then tool_call.arguments.cmd.
+      if (!payload.command) {
+        if (startPayload.command) payload.command = startPayload.command;
+        else if (endPayload.command) payload.command = endPayload.command;
+        else if (toolPayload.arguments && typeof toolPayload.arguments === 'object' && toolPayload.arguments.cmd) {
+          payload.command = toolPayload.arguments.cmd;
+        }
+      }
+
+      // Workdir / cwd: prefer command_start.workdir, then command_end.cwd, then tool_call.arguments.workdir.
+      if (!payload.workdir) {
+        payload.workdir = startPayload.workdir || endPayload.cwd
+          || (toolPayload.arguments && typeof toolPayload.arguments === 'object' ? toolPayload.arguments.workdir : undefined)
+          || payload.workdir;
+      }
+      if (!payload.cwd) {
+        payload.cwd = endPayload.cwd || startPayload.workdir || payload.workdir;
+      }
+
+      // Output fields: command_end wins; tool_result.output is the fallback.
+      if (endPayload.output !== undefined) payload.output = endPayload.output;
+      else if (resultPayload.output !== undefined && payload.output === undefined) {
+        payload.output = resultPayload.output;
+      }
+      if (endPayload.stdout !== undefined) payload.stdout = endPayload.stdout;
+      if (endPayload.stderr !== undefined) payload.stderr = endPayload.stderr;
+
+      // Error / duration / exit_code: prefer command_end, fall back to tool_result.
+      if (endPayload.exit_code !== undefined) payload.exit_code = endPayload.exit_code;
+      if (endPayload.duration !== undefined) payload.duration = endPayload.duration;
+      if (resultPayload.is_error !== undefined && payload.is_error === undefined) {
+        payload.is_error = resultPayload.is_error;
+      }
+
+      // Status lifecycle.
+      if (endPayload.status) {
+        payload.status = endPayload.status;
+      } else if (commandEnd) {
+        payload.status = 'completed';
+      } else if (commandStart) {
+        payload.status = 'in_progress';
+      } else if (toolResult) {
+        payload.status = 'completed';
+      } else {
+        payload.status = 'pending';
+      }
+
+      payload.started_sequence = commandStart?.sequence || toolCall?.sequence || null;
+      payload.ended_sequence = commandEnd?.sequence || toolResult?.sequence || null;
+
+      // Visible summary: <tool> · <command> when a tool is known, else the command.
+      const toolName = toolPayload.tool || '';
+      const commandText = this.llmFieldText('command', payload.command || payload.summary || '').trim();
+      if (toolName && commandText) payload.summary = `${toolName} · ${commandText}`;
+      else if (toolName) payload.summary = toolName;
+      else if (commandText) payload.summary = commandText;
+      else if (!payload.summary) payload.summary = 'call';
+
+      const contentString = JSON.stringify(payload, null, 2);
       return {
         ...source,
-        sequence: endEvent?.sequence || startEvent?.sequence,
+        sequence: source?.sequence,
         event_kind: 'command_end',
-        stream: endEvent?.stream || startEvent?.stream || 'system',
-        content: JSON.stringify(payload, null, 2),
-        _merged_command: true,
+        stream: source?.stream || (commandEnd ? 'system' : 'result'),
+        content: contentString,
+        _merged_call: true,
+        // Pre-parsed payload for parseLlmEventContent's fast path. Avoids
+        // re-parsing contentString on every render.
+        _parsedPayload: payload,
       };
     },
 
     matchesLlmEventKindFilter(event) {
       const kind = event.event_kind || '';
       if (kind === 'usage') return this.showUsageLogs && ['all', 'output'].includes(this.llmEventKindFilter);
+      // Merged call events (tool_call + command_start + command_end + tool_result
+      // collapsed by call_id) are visible under the two related filter pills.
+      if (event._merged_call) {
+        return ['all', 'tools', 'commands'].includes(this.llmEventKindFilter);
+      }
       if (this.llmEventKindFilter === 'all') return true;
       if (this.llmEventKindFilter === 'tools') return ['tool_call', 'tool_result'].includes(kind);
       if (this.llmEventKindFilter === 'commands') return ['command_start', 'command_end'].includes(kind);
       if (this.llmEventKindFilter === 'output') {
-        return ['stdout', 'stderr', 'model_response', 'agent_message', 'thinking', 'result'].includes(kind);
+        return ['stdout', 'stderr', 'model_response', 'agent_message', 'thinking', 'result', 'prompt', 'capability_manifest'].includes(kind);
       }
       if (this.llmEventKindFilter === 'errors') {
         return ['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(kind);
@@ -3351,8 +4230,21 @@ function cairnApp() {
     },
 
     llmExecutionOptionLabel(execution) {
+      const stamp = this.formatExecutionStamp(execution.started_at) || '--:--';
+      const taskType = execution.task_type || '';
       const intent = execution.intent_id ? ` · ${execution.intent_id}` : '';
-      return `${execution.task_type}${intent} · ${execution.worker} · ${execution.process_state}`;
+      const state = execution.process_state || '';
+      const events = Number(execution.event_count || 0);
+      const eventText = `${events} events`;
+
+      let taskPadding = '';
+      if (taskType === 'reason') taskPadding = '   ';
+      else if (taskType === 'explore') taskPadding = '  ';
+      // bootstrap => no extra task padding
+
+      const missingIntentPadding = execution.intent_id ? '' : '    ';
+
+      return `${stamp}  ${taskType}${taskPadding}${intent}${missingIntentPadding}  ${state}  ${eventText}`;
     },
 
     llmEventContentMode(event) {
@@ -3368,14 +4260,26 @@ function cairnApp() {
     },
 
     parseLlmEventContent(event) {
-      const key = `${event.sequence}:${event.event_kind}:${event.content || ''}`;
-      const cached = this.llmEventContentCache[event.sequence];
-      if (cached && cached.key === key) return cached.value;
+      // Cheap cache key: events are immutable after insert, and merged
+      // events expose their parsed payload directly. Skips the O(content)
+      // key construction the old implementation did on every render.
+      const cacheKey = `${event.sequence}:${event._merged_call ? 1 : 0}`;
+      const cached = this.llmEventContentCache[cacheKey];
+      if (cached) return cached;
 
-      const raw = typeof event.content === 'string' ? event.content : String(event.content || '');
-      let value = { mode: 'plain_text', card: null, cards: [] };
+      // Fast path: merged events have _parsedPayload attached at build time.
+      if (event._parsedPayload) {
+        const value = {
+          mode: 'json_card',
+          card: this.buildLlmJsonCard(event, event._parsedPayload),
+          cards: [],
+        };
+        this.llmEventContentCache[cacheKey] = value;
+        return value;
+      }
 
-      const parsedObject = this.tryParseLlmJsonObject(raw);
+      const parsedObject = this._getParsedPayload(event);
+      let value;
       if (parsedObject) {
         value = {
           mode: 'json_card',
@@ -3383,6 +4287,7 @@ function cairnApp() {
           cards: [],
         };
       } else {
+        const raw = typeof event.content === 'string' ? event.content : String(event.content || '');
         const parsedLines = this.tryParseLlmJsonLines(raw);
         if (parsedLines.length > 1) {
           value = {
@@ -3390,10 +4295,11 @@ function cairnApp() {
             card: null,
             cards: parsedLines.map((payload, index) => this.buildLlmJsonCard(event, payload, index)),
           };
+        } else {
+          value = { mode: 'plain_text', card: null, cards: [] };
         }
       }
-
-      this.llmEventContentCache[event.sequence] = { key, value };
+      this.llmEventContentCache[cacheKey] = value;
       return value;
     },
 
@@ -3468,6 +4374,12 @@ function cairnApp() {
         addBlock('stderr', 'Stderr', payload.stderr);
         addBlock('output', 'Output', payload.output);
         addBlock('duration', 'Duration', payload.duration);
+        // Merged CALL cards surface `description` as the row-1 title via
+        // llmEventHeaderText. Mark it used here so the trailing fallback
+        // loop does not render a duplicate Description inline field.
+        if (payload.description !== undefined && payload.description !== null && payload.description !== '') {
+          used.add('description');
+        }
       } else if (event.event_kind === 'usage') {
         for (const key of ['type', 'subtype', 'input_tokens', 'output_tokens', 'thinking_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'service_tier', 'model']) {
           if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
@@ -3482,6 +4394,13 @@ function cairnApp() {
       } else if (event.event_kind === 'api_retry') {
         for (const key of ['attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error', 'session_id']) {
           if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+      } else if (event.event_kind === 'capability_manifest') {
+        for (const key of ['project_id', 'task_type']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addInline(key, this.llmFieldLabel(key), payload[key]);
+        }
+        for (const key of ['mcp_servers', 'skills', 'unavailable_mcp_server_ids', 'unavailable_skill_ids']) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) addBlock(key, this.llmFieldLabel(key), payload[key]);
         }
       } else if (event.event_kind === 'system_event') {
         for (const key of ['type', 'subtype', 'session_id']) {
@@ -3543,6 +4462,10 @@ function cairnApp() {
         slash_commands: 'Slash Commands',
         permissionMode: 'Permission Mode',
         apiKeySource: 'API Key Source',
+        project_id: 'Project ID',
+        task_type: 'Task Type',
+        unavailable_mcp_server_ids: 'Unavailable MCP Servers',
+        unavailable_skill_ids: 'Unavailable Skills',
       };
       if (labels[key]) return labels[key];
       return key
@@ -3564,7 +4487,46 @@ function cairnApp() {
       return String(value);
     },
 
+    // For CALL cards, the merged payload's description becomes the row-1
+    // title and task_type / worker / phase collapse into row 2. Other
+    // events keep the original task_type · worker / phase split.
+    _llmEventHasDescription(event) {
+      if (!event || !event._merged_call) return false;
+      const desc = event._parsedPayload && event._parsedPayload.description;
+      return typeof desc === 'string' ? desc.trim().length > 0 : !!desc;
+    },
+
+    _llmEventDescriptionText(event) {
+      const desc = event._parsedPayload && event._parsedPayload.description;
+      return typeof desc === 'string' ? desc.trim() : String(desc);
+    },
+
+    llmEventHeaderText(event) {
+      // CALL cards with a description show it as the title; everything else
+      // has no title text in row 1 (just badge + #sequence + time).
+      return this._llmEventHasDescription(event)
+        ? this._llmEventDescriptionText(event)
+        : '';
+    },
+
+    llmEventHeaderTitle(event) {
+      return this._llmEventHasDescription(event)
+        ? this._llmEventDescriptionText(event)
+        : '';
+    },
+
+    llmEventSubHeaderText(event) {
+      if (this._llmEventHasDescription(event)) {
+        const parts = [event.task_type, event.worker, event.phase].filter(
+          (part) => part !== undefined && part !== null && String(part).length > 0,
+        );
+        return parts.join(' · ');
+      }
+      return event.phase || '';
+    },
+
     llmEventLabel(event) {
+      if (event._merged_call) return 'Call';
       if (event._merged_command) return 'Command';
       const labels = {
         prompt: 'Prompt',
@@ -3587,12 +4549,14 @@ function cairnApp() {
         session_init: 'Session Init',
         api_retry: 'API Retry',
         system_event: 'System',
+        capability_manifest: 'Capabilities',
         trace_parse_error: 'Trace Parse',
       };
       return labels[event.event_kind] || event.event_kind || 'Event';
     },
 
     llmEventBadgeClass(event) {
+      if (event._merged_call) return 'bg-sky-50 text-sky-700';
       const kind = event.event_kind;
       if (kind === 'prompt') return 'bg-violet-50 text-violet-700';
       if (kind === 'stdout') return 'bg-slate-100 text-slate-700';
@@ -3603,22 +4567,25 @@ function cairnApp() {
       if (kind === 'tool_call' || kind === 'tool_result') return 'bg-sky-50 text-sky-700';
       if (kind === 'command_start' || kind === 'command_end') return 'bg-slate-100 text-slate-700';
       if (kind === 'usage') return 'bg-emerald-50 text-emerald-700';
+      if (kind === 'capability_manifest') return 'bg-cyan-50 text-cyan-700';
       if (['session_init', 'api_retry', 'system_event'].includes(kind)) return 'bg-slate-100 text-slate-700';
       if (['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(kind)) return 'bg-rose-50 text-rose-700';
       return 'bg-sky-50 text-sky-700';
     },
 
     llmEventBorderClass(event) {
+      if (event._merged_call) return 'border-sky-200';
       if (['parse_error', 'trace_parse_error', 'timeout', 'cancelled', 'error'].includes(event.event_kind)) return 'border-rose-200';
       if (event.event_kind === 'stderr') return 'border-amber-200';
+      if (event.event_kind === 'capability_manifest') return 'border-cyan-200';
       if (['tool_call', 'tool_result'].includes(event.event_kind)) return 'border-sky-200';
       if (['command_start', 'command_end'].includes(event.event_kind)) return 'border-slate-300';
       return 'border-slate-200';
     },
 
     llmEventExpanded(event) {
-      if (event.event_kind === 'prompt') return !!this.llmExpandedEvents[event.sequence];
-      return this.llmExpandedEvents[event.sequence] !== false;
+      // Every card is collapsed by default; only explicit user toggles open it.
+      return !!this.llmExpandedEvents[event.sequence];
     },
 
     toggleLlmEvent(sequence) {
@@ -3979,8 +4946,7 @@ function cairnApp() {
         .map(item => this.cloneData(item.event))
         .filter(entry => entry.type !== 'reason_started')
         .map((entry, index, list) => ({ ...entry, isLast: index === list.length - 1 }));
-      this._timelineEventsCacheProject = null;
-      this._timelineEventsCache = [];
+      this.invalidateProjectViewCaches();
 
       if (reinitialize) {
         this.teardownAutoFit();
@@ -3989,10 +4955,10 @@ function cairnApp() {
           this.cy = null;
         }
         this.$nextTick(() => {
-          this.initGraph();
-          this.followReplayTimelineTail();
-        });
-        return;
+          void this.initGraph();
+        this.followReplayTimelineTail();
+      });
+      return;
       }
 
       this.updateGraph();
@@ -4050,10 +5016,6 @@ function cairnApp() {
             mcp_server_ids: projectCapabilities?.selection?.mcp_server_ids || [],
             skill_ids: projectCapabilities?.selection?.skill_ids || [],
           },
-          ai_profiles: {
-            primary_profile_id: replaySelections.explore.primary_profile_id || '',
-            fallback_profile_ids: replaySelections.explore.fallback_profile_ids || [],
-          },
           ai_profile_selections: replaySelections,
           catalog: {
             capabilities: catalogCapabilities || [],
@@ -4061,6 +5023,7 @@ function cairnApp() {
             ai_profiles: this.aiProfiles,
           },
         };
+        this.ensureAllTaskAiProfilesSelected(this.replayConfig, this.replayConfigAiProfileItems());
         if (this.replayConfig.hints.length === 0) this.replayConfig.hints = [{ content: '' }];
         this.showReplayConfigModal = true;
       } catch (e) {
@@ -4071,6 +5034,9 @@ function cairnApp() {
     async createReplayRun() {
       if (this.isCreatingReplayRun || !this.replayConfig.sourceProjectId) return;
       try {
+        if (!this.taskAiProfileSelectionsComplete(this.replayConfig, this.replayConfigAiProfileItems())) {
+          throw new Error('Select an AI Profile for Bootstrap, Intent, and Reason before creating a replay project.');
+        }
         this.isCreatingReplayRun = true;
         const actor = this.actorName();
         const hints = (this.replayConfig.hints || [])
@@ -4088,9 +5054,7 @@ function cairnApp() {
           },
         };
         const aiSelections = this.ensureTaskAiProfileSelections(this.replayConfig);
-        if (this.taskAiProfileSelectionsHasValue(aiSelections)) {
-          body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
-        }
+        body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
         const data = await this.api('POST', `/projects/${this.replayConfig.sourceProjectId}/replay-runs`, body);
         const replayProjectId = data.project?.project?.id;
         this.showReplayConfigModal = false;
@@ -4103,6 +5067,14 @@ function cairnApp() {
       } finally {
         this.isCreatingReplayRun = false;
       }
+    },
+
+    canCreateReplayRun() {
+      return !this.isCreatingReplayRun
+        && !!this.replayConfig.title
+        && !!this.replayConfig.origin
+        && !!this.replayConfig.goal
+        && this.taskAiProfileSelectionsComplete(this.replayConfig, this.replayConfigAiProfileItems());
     },
 
     async startProjectReplay() {
@@ -4196,8 +5168,7 @@ function cairnApp() {
         sourceProject: null,
         timer: null,
       };
-      this._timelineEventsCacheProject = null;
-      this._timelineEventsCache = [];
+      this.invalidateProjectViewCaches();
       this.polling = true;
       if (!projectId) return;
       await this.loadProject(projectId);
@@ -4207,7 +5178,7 @@ function cairnApp() {
           this.cy.destroy();
           this.cy = null;
         }
-        this.initGraph();
+        void this.initGraph();
       });
     },
 
@@ -4242,8 +5213,7 @@ function cairnApp() {
         this.replay.visibleEvents = [];
         this.replay.frameIndex = -1;
         this.replay.sourceProject = null;
-        this._timelineEventsCacheProject = null;
-        this._timelineEventsCache = [];
+        this.invalidateProjectViewCaches();
         this.polling = true;
       }
       this.rememberProjectListScroll();
@@ -4259,6 +5229,9 @@ function cairnApp() {
       await this.loadCapabilities();
       this.view = 'graph';
       await this.loadLlmExecutions();
+      // Materialize a stable, complete project-wide snapshot for the
+      // default "All Executions" mode before warming the rolling live window.
+      await this.loadAllExecutionEvents(true);
       await this.pollLlmEvents(true);
       if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
       this.$nextTick(() => {
@@ -4274,7 +5247,7 @@ function cairnApp() {
         }
         this.teardownAutoFit();
         if (this.cy) { this.cy.destroy(); this.cy = null; }
-        this.initGraph();
+        void this.initGraph();
       });
     },
 
@@ -4287,13 +5260,13 @@ function cairnApp() {
         this.replay.visibleEvents = [];
         this.replay.frameIndex = -1;
         this.replay.sourceProject = null;
-        this._timelineEventsCacheProject = null;
-        this._timelineEventsCache = [];
+        this.invalidateProjectViewCaches();
         this.polling = true;
       }
       this.view = 'list';
       this.shouldRestoreProjectListScroll = true;
       this.project = null;
+      this.invalidateProjectViewCaches();
       this.selectedProjectId = '';
       this.resetLlmState();
       this.selectedNode = null;
@@ -4311,11 +5284,18 @@ function cairnApp() {
     startPolling() {
       this.pollTimer = setInterval(async () => {
         if (!this.polling) return;
-        if (this.selectedProjectId && this.view === 'graph') {
-          await this.loadProject(this.selectedProjectId);
-          this.updateGraph();
-        } else {
-          await this.loadProjects();
+        if (this.projectPollInFlight) return;
+        this.projectPollInFlight = true;
+        try {
+          if (this.selectedProjectId && this.view === 'graph') {
+            await this.loadProject(this.selectedProjectId);
+            if (this.sideTab === 'files') await this.loadProjectFiles(true);
+            this.updateGraph();
+          } else {
+            await this.loadProjects();
+          }
+        } finally {
+          this.projectPollInFlight = false;
         }
       }, 5000);
     },
@@ -4366,10 +5346,41 @@ function cairnApp() {
       return { nodes, edges };
     },
 
-    initGraph() {
+    graphSignatureFromElements(nodes, edges) {
+      const nodeSig = nodes
+        .map(node => `${node.data.id}:${node.data.label}:${node.data.width}:${node.data.height}`)
+        .sort()
+        .join('|');
+      const edgeSig = edges
+        .map(edge => `${edge.data.id}:${edge.data.source}->${edge.data.target}:${edge.data.edgeType || ''}`)
+        .sort()
+        .join('|');
+      return `${nodeSig}::${edgeSig}`;
+    },
+
+    graphEdgeDataChanged(current, next) {
+      return current.data('status') !== next.status
+        || current.data('label') !== next.label
+        || current.data('edgeType') !== next.edgeType
+        || current.data('intentId') !== next.intentId;
+    },
+
+    async initGraph() {
       const container = document.getElementById('cy');
       if (!container) return;
+      try {
+        this.layoutLoading = true;
+        await this.ensureLayoutEngineLoaded();
+      } catch (error) {
+        this.showToast(error.message, 'error');
+        this.layoutMode = 'dagre_tb';
+        this.localPrefs.layout_mode = 'dagre_tb';
+        this.saveLocalPrefs();
+      } finally {
+        this.layoutLoading = false;
+      }
       const { nodes, edges } = this.buildElements();
+      this._graphSignature = this.graphSignatureFromElements(nodes, edges);
       const rawCy = cytoscape({
         container,
         elements: [...nodes, ...edges],
@@ -4387,31 +5398,7 @@ function cairnApp() {
     },
 
     graphStyles() {
-      const common = { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif' };
-      return [
-        { selector: 'node[nodeType="origin"]', style: { ...common, shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="goal"]', style: { ...common, shape:'round-rectangle','background-color':'#f43f5e',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'round-rectangle','background-color':'#f59e0b','background-opacity':0.8,label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#d97706' }},
-        { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'round-rectangle','background-color':'#cbd5e1','background-opacity':0.5,label:'data(label)',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
-        { selector: 'node[nodeType="bootstrap_pending"]', style: { ...common, shape:'round-rectangle','background-color':'#fff7ed','background-opacity':0.96,label:'data(label)',color:'#c2410c','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#fdba74','border-style':'dashed','text-wrap':'wrap','text-max-width':'70px' }},
-        { selector: 'node[nodeType="bootstrap_running"]', style: { ...common, shape:'round-rectangle','background-color':'#fb923c','background-opacity':0.96,label:'data(label)',color:'#fff7ed','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#ea580c','text-wrap':'wrap','text-max-width':'70px' }},
-
-        { selector: 'edge[status="concluded"]', style: { width:2,'line-color':'#6ee7b7','target-arrow-color':'#6ee7b7','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
-        { selector: 'edge[status="in_progress"]', style: { width:2,'line-color':'#fbbf24','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fbbf24','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#b45309','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#fffbeb','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
-        { selector: 'edge[status="unclaimed"]', style: { width:1.5,'line-color':'#cbd5e1','line-style':'dashed','line-dash-pattern':[5,5],'target-arrow-color':'#cbd5e1','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.7 }},
-        { selector: 'edge[status="bootstrap_pending"]', style: { width:2,'line-color':'#fdba74','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fdba74','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.85 }},
-        { selector: 'edge[status="bootstrap_running"]', style: { width:2.5,'line-color':'#fb923c','line-style':'dashed','line-dash-pattern':[10,4],'line-dash-offset':0,'target-arrow-color':'#fb923c','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.95 }},
-        { selector: 'edge[edgeType="bootstrap_scope"]', style: { label:'',width:1.8,'curve-style':'bezier','line-style':'dotted','line-dash-pattern':[2,5],'target-arrow-shape':'triangle-backcurve','arrow-scale':0.75,'target-distance-from-node':2 }},
-
-        { selector: '.highlight', style: { 'z-index':999 }},
-        { selector: 'edge.highlight', style: { 'z-index':999 }},
-        { selector: 'node.focus', style: { 'border-width':3,'border-color':'#312e81','border-opacity':0.95,'z-index':1000 }},
-        { selector: 'edge.focus', style: { 'z-index':1000,'overlay-color':'#93c5fd','overlay-opacity':0.22,'overlay-padding':5 }},
-        { selector: 'node.selected-fact', style: { 'border-width':0,'underlay-color':'#93c5fd','underlay-padding':8,'underlay-opacity':0.28,'z-index':1001 }},
-        { selector: '.faded', style: { opacity:0.5 }},
-        { selector: '.fresh', style: { opacity:0 }},
-      ];
+      return GRAPH_STYLES;
     },
 
     layoutOpts(animate = true) {
@@ -4539,13 +5526,15 @@ function cairnApp() {
     updateGraph() {
       if (!this.cy || !this.project) return;
       const { nodes, edges } = this.buildElements();
+      const nextSignature = this.graphSignatureFromElements(nodes, edges);
       const wantNodes = new Set(nodes.map(n => n.data.id));
       const wantEdges = new Set(edges.map(e => e.data.id));
       const previousPositions = this.snapshotNodePositions();
       let changed = false;
+      let layoutChanged = nextSignature !== this._graphSignature;
 
-      this.cy.nodes().forEach(n => { if (!wantNodes.has(n.id())) { n.remove(); changed = true; } });
-      this.cy.edges().forEach(e => { if (!wantEdges.has(e.id())) { e.remove(); changed = true; } });
+      this.cy.nodes().forEach(n => { if (!wantNodes.has(n.id())) { n.remove(); changed = true; layoutChanged = true; } });
+      this.cy.edges().forEach(e => { if (!wantEdges.has(e.id())) { e.remove(); changed = true; layoutChanged = true; } });
 
       for (const n of nodes) {
         const ex = this.cy.getElementById(n.data.id);
@@ -4554,6 +5543,7 @@ function cairnApp() {
           const a = this.cy.add(initialPosition ? { ...n, position: initialPosition } : n);
           this.fadeInFreshElement(a);
           changed = true;
+          layoutChanged = true;
         } else if (
           ex.data('nodeType') !== n.data.nodeType ||
           ex.data('label') !== n.data.label ||
@@ -4570,11 +5560,17 @@ function cairnApp() {
           const a = this.cy.add(e);
           this.fadeInFreshElement(a);
           changed = true;
-        } else if (ex.data('status') !== e.data.status) {
+          layoutChanged = true;
+        } else if (this.graphEdgeDataChanged(ex, e.data)) {
           ex.data(e.data);
         }
       }
-      if (changed) this.cy.layout(this.layoutOpts()).run();
+      if (layoutChanged) {
+        this._graphSignature = nextSignature;
+        void this.ensureLayoutEngineLoaded()
+          .then(() => this.cy?.layout(this.layoutOpts()).run())
+          .catch((error) => this.showToast(error.message, 'error'));
+      }
       this.pulseActive();
       this.refreshGraphDecorations();
     },
@@ -4744,11 +5740,24 @@ function cairnApp() {
         this._resizeObserver = null;
       }
     },
-    applySelectedLayout() {
+    async applySelectedLayout() {
       this.layoutMode = this.isValidLayoutMode(this.layoutMode) ? this.layoutMode : 'dagre_tb';
       this.localPrefs.layout_mode = this.layoutMode;
       this.saveLocalPrefs();
-      if (this.cy) this.cy.layout(this.layoutOpts()).run();
+      if (!this.cy) return;
+      try {
+        this.layoutLoading = true;
+        await this.ensureLayoutEngineLoaded();
+        this.cy.layout(this.layoutOpts()).run();
+      } catch (error) {
+        this.showToast(error.message, 'error');
+        this.layoutMode = 'dagre_tb';
+        this.localPrefs.layout_mode = 'dagre_tb';
+        this.saveLocalPrefs();
+        this.cy.layout(this.layoutOpts()).run();
+      } finally {
+        this.layoutLoading = false;
+      }
     },
 
     clampPanelWidth(width) {
@@ -4773,6 +5782,18 @@ function cairnApp() {
 
     onPanelResize(e) {
       if (!this.isResizingPanel) return;
+      this._panelResizePendingEvent = e;
+      if (this._panelResizeFrame) return;
+      this._panelResizeFrame = requestAnimationFrame(() => {
+        this._panelResizeFrame = null;
+        const pending = this._panelResizePendingEvent;
+        this._panelResizePendingEvent = null;
+        this.applyPanelResize(pending);
+      });
+    },
+
+    applyPanelResize(e) {
+      if (!this.isResizingPanel || !e) return;
       const rect = document.getElementById('graphLayout')?.getBoundingClientRect();
       if (!rect) return;
       this.sidePanelWidth = this.clampPanelWidth(rect.right - e.clientX);
@@ -4792,6 +5813,18 @@ function cairnApp() {
 
     onLlmPanelResize(e) {
       if (!this.isResizingLlmPanel) return;
+      this._llmPanelResizePendingEvent = e;
+      if (this._llmPanelResizeFrame) return;
+      this._llmPanelResizeFrame = requestAnimationFrame(() => {
+        this._llmPanelResizeFrame = null;
+        const pending = this._llmPanelResizePendingEvent;
+        this._llmPanelResizePendingEvent = null;
+        this.applyLlmPanelResize(pending);
+      });
+    },
+
+    applyLlmPanelResize(e) {
+      if (!this.isResizingLlmPanel || !e) return;
       const rect = document.getElementById('graphLayout')?.getBoundingClientRect();
       if (!rect) return;
       this.llmPanelWidth = this.clampLlmPanelWidth(e.clientX - rect.left);
@@ -5234,6 +6267,29 @@ function cairnApp() {
       return this.summaryMetaItems(view).length > 0;
     },
 
+    summaryCardViewModel(text, kind = 'plain') {
+      const raw = String(text || '');
+      const cacheKey = `${kind}:${raw}`;
+      const cached = this._summaryCardCache.get(cacheKey);
+      if (cached) return cached;
+      const view = this.summaryView(raw, kind);
+      const metaItems = this.summaryMetaItems(view);
+      const model = {
+        view,
+        headline: this.summaryHeadline(view),
+        body: this.summaryBody(view),
+        metaItems,
+        hasMeta: metaItems.length > 0,
+      };
+      this._summaryCardCache.set(cacheKey, model);
+      this._summaryCardCacheOrder.push(cacheKey);
+      while (this._summaryCardCacheOrder.length > 300) {
+        const staleKey = this._summaryCardCacheOrder.shift();
+        this._summaryCardCache.delete(staleKey);
+      }
+      return model;
+    },
+
     intentDisplayTitle(intent) {
       return intent?.id || '';
     },
@@ -5423,6 +6479,34 @@ function cairnApp() {
       this._timelineEventsCacheProject = this.project;
       this._timelineEventsCache = cached;
       return cached;
+    },
+
+    timelineViewModel() {
+      const events = this.timelineEvents();
+      const cacheKey = [
+        this.replay.active ? 'replay' : 'project',
+        this.project?.project?.id || '',
+        this.project?.project?.updated_at || '',
+        events.length,
+        events[0]?.id || '',
+        events[events.length - 1]?.id || '',
+        this.selectedTimelineEntryId || '',
+        this.selectedNode?.type || '',
+        this.selectedNode?.id || '',
+        this.selectedFacts.join(','),
+      ].join('|');
+      if (this._timelineViewModelCache && this._timelineViewModelCacheKey === cacheKey) {
+        return this._timelineViewModelCache;
+      }
+      const latestEntryId = events.length > 0 ? events[events.length - 1].id : null;
+      const model = {
+        events,
+        empty: events.length === 0,
+        latestEntryId,
+      };
+      this._timelineViewModelCache = model;
+      this._timelineViewModelCacheKey = cacheKey;
+      return model;
     },
 
     resolveTimelineBucket(bucket) {
@@ -5672,6 +6756,13 @@ function cairnApp() {
 
     formatTime(ts) { if (!ts) return ''; return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },
     formatDate(ts) { if (!ts) return ''; const d = new Date(ts); return d.toLocaleDateString([],{year:'numeric',month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); },
+    formatExecutionStamp(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    },
     formatTimelineDate(ts) { if (!ts) return ''; return new Date(ts).toLocaleDateString([],{year:'numeric',month:'short',day:'numeric'}); },
     formatDurationMs(ms) {
       const totalSeconds = Math.max(0, Math.round(ms / 1000));
@@ -5696,10 +6787,21 @@ function cairnApp() {
       return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[idx]}`;
     },
 
+    canCreateProject() {
+      return !this.isCreatingProject
+        && !!this.newProject.title
+        && !!this.newProject.origin
+        && !!this.newProject.goal
+        && this.taskAiProfileSelectionsComplete(this.newProject, this.newProjectAiProfileItems());
+    },
+
     async createProject() {
       if (this.isCreatingProject) return;
       let createdProjectId = null;
       try {
+        if (!this.taskAiProfileSelectionsComplete(this.newProject, this.newProjectAiProfileItems())) {
+          throw new Error('Select an AI Profile for Bootstrap, Intent, and Reason before creating a project.');
+        }
         this.isCreatingProject = true;
         const actor = this.actorName();
         const attachments = [...(this.newProject.attachments || [])];
@@ -5718,9 +6820,7 @@ function cairnApp() {
           body.proxy_id = this.newProject.proxy_id;
         }
         const aiSelections = this.ensureTaskAiProfileSelections(this.newProject);
-        if (this.taskAiProfileSelectionsHasValue(aiSelections)) {
-          body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
-        }
+        body.ai_profile_selections = this.compactTaskAiProfileSelections(aiSelections);
         const data = await this.api('POST', '/projects', body);
         createdProjectId = data.project.id;
         await this.uploadProjectAttachments(createdProjectId, attachments, actor);
@@ -5842,16 +6942,21 @@ function cairnApp() {
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
-    saveLocalSettings() {
+    async saveLocalSettings() {
       try {
         this.localPrefs.actor_name = this.actorName();
         this.localPrefs.layout_mode = this.isValidLayoutMode(this.localPrefs.layout_mode) ? this.localPrefs.layout_mode : 'dagre_tb';
         this.layoutMode = this.localPrefs.layout_mode;
         this.saveLocalPrefs();
-        if (this.cy) this.cy.layout(this.layoutOpts()).run();
+        if (this.cy) {
+          this.layoutLoading = true;
+          await this.ensureLayoutEngineLoaded();
+          this.cy.layout(this.layoutOpts()).run();
+        }
         this.showLocalPrefs = false;
         this.showToast('Local preferences saved');
       } catch(e) { this.showToast(e.message, 'error'); }
+      finally { this.layoutLoading = false; }
     },
 
     async saveServerSettings() {
