@@ -394,6 +394,92 @@ Capability 与 Role 是控制面配置，不是黑板数据：
 
 MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使用 `--mcp-config` / `--add-dir`；Codex adapter 使用 `--add-dir` 与 `-c mcp_servers.<id>.*=...`。
 
+### Prompt 注入与执行链路
+
+Dispatcher 不把 role、capability、remote support 写进黑板表；它们只在任务执行前被渲染进 prompt 或 worker CLI 参数。三个主阶段共享同一条骨架：先 healthcheck，再拉取项目级控制面快照，最后把模板占位符替换成阶段上下文。
+
+```mermaid
+flowchart TB
+    Server[(Cairn Server / SQLite)]
+    Scheduler[DispatcherLoop._try_dispatch_project]
+    Bootstrap[run_bootstrap_task]
+    Explore[run_explore_task]
+    Reason[run_reason_task]
+    Cap[inject_project_capabilities]
+    Role[inject_project_role]
+    Prompt[load_prompt + render_prompt]
+    Adapter[Worker adapter\nCodex / Claude / Pi / Mock]
+    Container[Project worker container]
+    Contract[contracts.py JSON validation]
+    WriteBack[write Fact / Intent / Complete]
+
+    Server -->|ProjectDetail + capability/role snapshots| Scheduler
+    Scheduler --> Bootstrap
+    Scheduler --> Explore
+    Scheduler --> Reason
+    Bootstrap --> Cap
+    Explore --> Cap
+    Reason --> Cap
+    Bootstrap --> Role
+    Explore --> Role
+    Reason --> Role
+    Cap --> Prompt
+    Role --> Prompt
+    Prompt --> Adapter
+    Adapter --> Container
+    Container --> Contract
+    Contract --> WriteBack
+    WriteBack --> Server
+```
+
+```mermaid
+sequenceDiagram
+    participant Loop as DispatcherLoop
+    participant Task as Task runner
+    participant API as CairnClient/API
+    participant Cap as dispatcher.capabilities
+    participant Role as dispatcher.roles
+    participant Prompt as prompting.py
+    participant Driver as WorkerDriver
+    participant C as Worker container
+    participant DB as Server DB
+
+    Loop->>Task: selected bootstrap/explore/reason
+    Task->>C: healthcheck
+    Task->>API: GET /projects/{id}/capabilities
+    API->>DB: load per-task capability snapshots
+    API-->>Task: catalog + per_task selection
+    Task->>Cap: inject_project_capabilities(task_type)
+    Cap->>C: write mcp dirs, skill dirs, mcp.json
+    Cap-->>Task: capability_instructions + WorkerExecutionContext
+    Task->>API: GET /projects/{id}/role
+    API-->>Task: role prompt snapshot
+    Task->>Role: inject_project_role(task_type)
+    Role-->>Task: role_instructions
+    Task->>Prompt: load_prompt(prompt_group, template)
+    Prompt-->>Task: rendered prompt
+    Task->>Driver: build_execute(prompt, context)
+    Driver->>C: agent CLI argv
+    C-->>Task: stdout/stderr stream
+    Task->>Task: parse JSON contract
+    Task->>API: conclude / create intent / complete
+```
+
+阶段差异：
+
+| 阶段 | 模板 | 注入内容 | 能力注入 | 输出合同 |
+| --- | --- | --- | --- | --- |
+| `bootstrap` | `bootstrap.md` | `origin`、`goal`、`hints`、remote support、capability、role | MCP/skill 目录与 `mcp.json` 可执行 | `fact` + `complete` |
+| `explore` | `explore.md` | graph YAML 文件引用、当前 intent、remote support、capability、role | MCP/skill 目录与 `mcp.json` 可执行 | 单个 fact description |
+| `reason` | `reason.md` | graph YAML 文件引用、valid fact ids、open intents、`max_intents`、capability metadata、role | 仅 capability metadata；prompt 明确禁止执行/读取工具 | `complete` / `intents` / `blocked` / noop |
+| `*_conclude` | `bootstrap_conclude.md` / `explore_conclude.md` | 已知上下文与已确认事实 | 不新增能力注入；沿用 session/context 只用于总结 | 已确认 fact |
+
+Role 注入永远在主 prompt 内的 `{role_instructions}` 位置出现，格式由 `dispatcher/roles.py` 生成：`# Project Role`、role id/name、task type、role prompt sha256 与完整 role prompt。它只影响方法、优先级和领域风格，不能覆盖 Cairn 任务契约、JSON 输出要求、scope/ROE 或黑板语义。
+
+Capability 注入在 `dispatcher/capabilities.py` 完成。`bootstrap` / `explore` 会把选中的 MCP 和 skill 写进任务实例隔离目录；`reason` 只收到 MCP/skill metadata，避免 reason 阶段直接执行工具。MCP 可以声明 `required_skill_ids`，例如 `chrome-devtools-host` 自动带入 `js-reverse-automation`，保存到 `project_capability_snapshots.source = "required"` 后随同普通 skill 一起注入。
+
+`{capability_instructions}` 是动态渲染槽，不预设具体 MCP/skill 的业务规则。Catalog 行可声明 `use_when`、`activation_hint`、MCP 的 `required_skill_ids`、skill 的 `preferred_mcp_ids`；Dispatcher 只通用渲染这些字段。执行阶段会输出 MCP config 路径、skill 路径和 routing metadata；`reason` 阶段只输出 metadata，不输出目录路径。
+
 **HTTP transport**（Streamable HTTP, MCP 2025-03-26）— `McpServerCapabilityConfig.transport: "http"` 时走 `url` + 可选 `bearer_token_env`:
 
 - token 通过 env 注入,**不**写入 `mcp.json` 持久文件 (Codex 路径) 或**仅在序列化时现场拼**到 `headers` (Claude 路径),序列化后立即释放;
@@ -410,12 +496,16 @@ MCP `command/args/env` 支持 `{capability_root}` 占位符。Claude adapter 使
 
 | 目录 | 内容 |
 | --- | --- |
-| `capabilities/skills/cypher-ctf` | CTF workflow |
-| `capabilities/skills/cypher-pentest` | 授权渗透测试 workflow |
+| `capabilities/skills/cypher-ctf` | CTF workflow；专家 sub-skills 内置在 `skills/<sub-skill-id>/` 二级目录 |
+| `capabilities/skills/cypher-pentest` | 授权渗透测试 workflow；AD/cloud/container sub-skills 内置在 `skills/<sub-skill-id>/` 二级目录 |
 | `capabilities/skills/cypher-vuln-research` | 漏洞研究 / PoC / root cause workflow |
 | `capabilities/roles/cypher-ctf-operator/ROLE.md` | CTF primary role |
 | `capabilities/roles/cypher-pentest-operator/ROLE.md` | Pentest primary role |
 | `capabilities/roles/cypher-vuln-researcher/ROLE.md` | Vulnerability research primary role |
+
+`cypher-ctf` 依赖的 Web/Pwn/Reverse/Crypto/Forensics/Blockchain/Privesc/Post-exploit 专家 skill 不再作为独立 catalog skill 注册。选择 `cypher-ctf` 时，Dispatcher 复制整个 `capabilities/skills/cypher-ctf` 目录，二级 `skills/` 会随顶层 skill 一起进入 worker；prompt 只列出顶层 `cypher-ctf` capability。
+
+`cypher-pentest` 的 AD/cloud/container 专家 skill 同样不再作为独立 catalog skill 注册。选择 `cypher-pentest` 时，Dispatcher 复制整个 `capabilities/skills/cypher-pentest` 目录，二级 `skills/` 会随顶层 skill 一起进入 worker；prompt 只列出顶层 `cypher-pentest` capability。
 
 
 ### 项目级代理池

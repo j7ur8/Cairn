@@ -950,6 +950,119 @@ Remote Support prompt 注入规则：
 - 注入内容只说明 `CAIRN_DNSLOG_URL` 与 `CAIRN_REMOTE_SSH_*` 环境变量可用，不包含 SSH 密码值。
 - 这不会改变 JSON 输出契约，也不会改变 facts/intents 写入规则。
 
+### Prompt 注入实现细节
+
+Prompt 注入由三个层次组成：模板占位符替换、项目级控制面块（role/capability/remote support）、worker adapter CLI 参数。
+
+```mermaid
+flowchart LR
+    Config[dispatch.yaml\nruntime.prompt_group]
+    Template[prompts/{group}/{stage}.md]
+    Task[task runner\nbootstrap/explore/reason]
+    Cap[capability_instructions\n+ WorkerExecutionContext]
+    Role[role_instructions]
+    Remote[remote_support_instructions]
+    Render[render_prompt]
+    Driver[WorkerDriver.build_execute]
+    CLI[Agent CLI argv]
+
+    Config --> Template
+    Task --> Cap
+    Task --> Role
+    Task --> Remote
+    Template --> Render
+    Cap --> Render
+    Role --> Render
+    Remote --> Render
+    Render --> Driver
+    Cap --> Driver
+    Driver --> CLI
+```
+
+| 层次 | 关键文件 | 具体逻辑 |
+| --- | --- | --- |
+| 模板加载 | `dispatcher/prompting.py` | `load_prompt(group, name)` 从包资源读取 markdown；`render_prompt()` 做简单 `{token}` 字符串替换 |
+| placeholder 校验 | `dispatcher/config.py` | `validate_prompt_resources()` 在 `DispatchConfig.load()` 阶段校验 prompt group 和必需占位符，`mock` group 走特殊 required token 表 |
+| graph 上下文 | `dispatcher/tasks/common.py` | `write_graph_snapshot_reference()` 把 YAML 图快照写入容器文件，prompt 中放文件引用，避免大 graph 直接膨胀 prompt |
+| role 注入 | `dispatcher/roles.py` | `inject_project_role()` 读取 server 返回的 role snapshot，生成 `# Project Role` 块，包含 role id/name/task type/sha256/role prompt |
+| capability 注入 | `dispatcher/capabilities.py` | `inject_project_capabilities()` 按 task type 取 selection，复制 MCP/skill，写 `mcp.json`，生成 `# Project Capabilities` 块和 `WorkerExecutionContext` |
+| remote support | `dispatcher/prompting.py` | `format_remote_support_instructions()` 只渲染可用环境变量名，不渲染 SSH 密码明文 |
+| worker argv | `dispatcher/workers/adapters/*.py` | Adapter 把 rendered prompt 和 `WorkerExecutionContext` 转为 Claude/Codex/Pi/Mock CLI 参数 |
+
+#### 阶段注入矩阵
+
+| 阶段 | Task runner | Prompt 模板 | 注入占位符 | Role | Capability | Remote Support | Worker context |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Bootstrap execute | `run_bootstrap_task()` | `bootstrap.md` | `origin`、`goal`、`hints`、`remote_support_instructions`、`capability_instructions`、`role_instructions` | 注入完整 role prompt | MCP/skill 可执行注入 | 注入 | 传给 `build_execute()` |
+| Bootstrap conclude fallback | `_try_conclude_fallback()` | `bootstrap_conclude.md` | `origin`、`goal`、`hints` | 不重新渲染主 role 块 | 沿用 session/context，但 prompt 要求停止探索 | 不注入 | 传给 `build_conclude()` |
+| Explore execute | `run_explore_task()` | `explore.md` | `graph_yaml`、`intent_id`、`intent_description`、`remote_support_instructions`、`capability_instructions`、`role_instructions` | 注入完整 role prompt | MCP/skill 可执行注入 | 注入 | 传给 `build_execute()` |
+| Explore conclude fallback | `_try_conclude_fallback()` | `explore_conclude.md` | `graph_yaml`、`intent_id`、`intent_description` | 不重新渲染主 role 块 | 沿用 session/context，但 prompt 要求停止探索 | 不注入 | 传给 `build_conclude()` |
+| Reason execute | `run_reason_task()` | `reason.md` | `graph_yaml`、`fact_ids`、`open_intents`、`max_intents`、`capability_instructions`、`role_instructions` | 注入完整 role prompt | 仅 metadata，不复制/读取工具目录 | 不注入 | `WorkerExecutionContext` 为空或 metadata-only |
+
+> ⚠️ 注意：`reason` 阶段虽然调用 `inject_project_capabilities()`，但 `dispatcher/capabilities.py` 会走 `_reason_instructions()`，只列 MCP/skill 元数据，并在 prompt 中明确禁止执行工具、打开 MCP session 或读取 skill 目录。执行型能力边界在 `bootstrap` / `explore`。
+
+#### 不同角色如何注入
+
+Primary role 是项目创建或后续设置时保存的 snapshot，而不是运行时读取最新 role 文件。Server 在 `project_roles` 中保存 `role_id`、`role_name`、`role_prompt`、`role_prompt_sha256`；Dispatcher 每次任务开始调用 `GET /projects/{project_id}/role` 并渲染：
+
+```text
+# Project Role
+The current Cairn project selected a primary role...
+- Role id: ...
+- Role name: ...
+- Task type: bootstrap|explore|reason
+- Role prompt sha256: ...
+
+## Role Prompt
+[role prompt snapshot]
+```
+
+因此 CTF、Pentest、Vulnerability Research 等不同角色的差异来自 `capabilities/roles/<id>/ROLE.md` 或 `dispatch.capabilities.yaml roles[]` 中声明的 prompt 内容，但注入位置和优先级完全一致：都进入 `{role_instructions}`，且不能覆盖 JSON contract、scope/ROE、黑板语义。
+
+#### MCP/Skill 注入与 required skill
+
+`ProjectCapabilitiesResponse.per_task[task_type]` 是运行时 truth。Server 侧 `expand_task_capabilities()` 会把用户选择和自动 required 依赖合并：
+
+- 用户显式选中的 MCP/skill 保存为 `source = "selected"`。
+- `skill.requires_ids` 的子 skill 自动展开，保存为 `source = "required"`。
+- `mcp.required_skill_ids` 也自动展开，例如 `chrome-devtools-host` 需要 `js-reverse-automation`，项目选择该 MCP 后会自动注入 matching skill。
+- `task_types` 不匹配或 catalog 不可用的 required skill 会被跳过；用户显式选中的无效 ID 会进入 warnings/errors。
+
+`{capability_instructions}` 不承载系统代码里的固定能力清单。能力路由由 catalog metadata 动态插入：
+
+- MCP 可声明 `use_when`、`activation_hint`、`required_skill_ids`。
+- Skill 可声明 `use_when`、`activation_hint`、`preferred_mcp_ids`。
+- `dispatcher/capabilities.py` 只按字段通用渲染，不硬编码 `chrome-devtools-host`、`js-reverse-automation` 等具体能力规则。
+- 选择 `Host Chrome DevTools MCP` 时，Server 自动把 `js-reverse-automation` 加入同一 task selection；prompt 再展示 MCP 的使用场景、required skill、skill 路径、skill 的 preferred MCP 和 activation hint。
+- `reason` 阶段仍只看 metadata：可用这些字段规划 intent，但不能打开 MCP session、读取 skill 目录或执行工具。
+
+执行型注入目录固定为：
+
+```text
+/tmp/cairn-capabilities/{project_id}/{task_instance_id}/
+├── mcp.json
+├── mcp/<mcp_id>/
+└── skills/<skill_id>/
+```
+
+目录型 skill 会整体复制。`cypher-ctf` 的专家 sub-skills 已内置在 `capabilities/skills/cypher-ctf/skills/<sub-skill-id>/`，`cypher-pentest` 的 AD/cloud/container sub-skills 已内置在 `capabilities/skills/cypher-pentest/skills/<sub-skill-id>/`。选择顶层 orchestration skill 时 worker 会获得这些二级目录，但 catalog/prompt 只展示顶层 skill。被内置的专家 skill 不再单独出现在 `capabilities.skills[]` 中。
+
+Claude Code adapter 对能力上下文的处理：
+
+```text
+claude --session-id <uuid> --mcp-config <mcp.json> --add-dir <skill_root> -- "<prompt>"
+claude -r <uuid> --mcp-config <mcp.json> --add-dir <skill_root> -- "<conclude_prompt>"
+```
+
+Codex adapter 对能力上下文的处理：
+
+```text
+codex exec --add-dir <skill_root> -c mcp_servers.<id>.command=... -c mcp_servers.<id>.args=... -- "<prompt>"
+codex exec resume <thread_id> -c mcp_servers.<id>.command=... -- "<conclude_prompt>"
+```
+
+> 🔧 向后兼容：Codex resume/conclude 路径不会重复 `--add-dir <skill_root>`，依赖初次 `codex exec` 已把 skill root 加进会话；MCP 配置仍会在 resume 时重新传入，保证 MCP server 参数可用。
+
 ## 8. 外部系统与集成
 
 | 系统 | 连接方式 | 配置 |

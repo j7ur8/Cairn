@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi import HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -30,7 +30,19 @@ from cairn.server.observability import db as observability_db
 from cairn.server.observability import routers as observability_routers
 from cairn.server.observability.retention import retention_loop
 from cairn.server.routers import (
-    attachments, auth, capabilities, export, files, hints, intents, projects, proxies, replay, settings, ai_profiles,
+    attachments,
+    auth,
+    capabilities,
+    dispatcher_lock,
+    export,
+    files,
+    hints,
+    intents,
+    projects,
+    proxies,
+    replay,
+    settings,
+    ai_profiles,
 )
 from cairn.server.security.deps import current_user_optional
 from cairn.server.security.users import bootstrap_superuser_if_configured
@@ -174,6 +186,18 @@ app = FastAPI(
 app.add_middleware(RequestIdMiddleware)
 
 
+@app.exception_handler(sqlite3.DatabaseError)
+async def sqlite_database_error_handler(request: Request, exc: sqlite3.DatabaseError) -> JSONResponse:
+    db.close_thread_conn()
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "degraded",
+            "database_error": db.diagnostic_error(exc),
+        },
+    )
+
+
 @app.get("/metrics", include_in_schema=False)
 def metrics() -> Response:
     body, content_type = render_metrics()
@@ -221,6 +245,7 @@ app.include_router(export.router)
 app.include_router(files.router)
 app.include_router(replay.router)
 app.include_router(capabilities.router)
+app.include_router(dispatcher_lock.router)
 app.include_router(observability_routers.router)
 
 

@@ -72,6 +72,42 @@ remote_support:
         self.assertEqual(len(cfg.roles), 1)
         self.assertTrue(cfg.remote_support.enabled)
 
+    def test_repo_capability_routing_metadata_loads_from_sidecar(self) -> None:
+        from cairn.dispatcher.config import DispatchConfig
+
+        old_env = {
+            key: os.environ.get(key)
+            for key in (
+                "CAIRN_DISPATCHER_DATAS_ROOT",
+                "ANTHROPIC_AUTH_TOKEN",
+                "OPENAI_API_KEY",
+            )
+        }
+        os.environ["CAIRN_DISPATCHER_DATAS_ROOT"] = "/tmp/cairn-test"
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "test"
+        os.environ["OPENAI_API_KEY"] = "test"
+        try:
+            cfg = DispatchConfig.load(_REPO / "dispatch.yaml")
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        mcp_by_id = {item.id: item for item in cfg.capabilities.mcp_servers}
+        skill_by_id = {item.id: item for item in cfg.capabilities.skills}
+        self.assertEqual(mcp_by_id["kali-server-mcp"].required_skill_ids, [])
+        self.assertEqual(mcp_by_id["metasploit-mcp"].required_skill_ids, [])
+        self.assertTrue(mcp_by_id["kali-server-mcp"].use_when)
+        self.assertTrue(mcp_by_id["metasploit-mcp"].use_when)
+        self.assertIn("Kali command", mcp_by_id["kali-server-mcp"].activation_hint)
+        self.assertIn("authorized scope", mcp_by_id["metasploit-mcp"].activation_hint)
+        self.assertTrue(skill_by_id["cypher-ctf"].use_when)
+        self.assertTrue(skill_by_id["cypher-pentest"].use_when)
+        self.assertIn("SKILL.md", skill_by_id["cypher-ctf"].activation_hint)
+        self.assertIn("scope/ROE", skill_by_id["cypher-pentest"].activation_hint)
+
 
 if __name__ == "__main__":
     unittest.main()

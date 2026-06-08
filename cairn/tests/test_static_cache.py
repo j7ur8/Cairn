@@ -84,6 +84,26 @@ class StaticCacheTests(unittest.TestCase):
         self.assertEqual(body["status"], "degraded")
         self.assertIn("database disk image is malformed", body["database_error"])
 
+    def test_route_database_errors_are_degraded_json(self) -> None:
+        from fastapi.testclient import TestClient
+        from cairn.server.app import app
+        from cairn.server.security.jwt import issue_token
+
+        @contextmanager
+        def broken_get_conn():
+            raise sqlite3.DatabaseError("database disk image is malformed")
+            yield
+
+        headers = {
+            "Authorization": f"Bearer {issue_token('test-service', extra_claims={'role': 'service'})}",
+        }
+        with patch("cairn.server.routers.settings.get_conn", broken_get_conn), TestClient(app) as client:
+            r = client.get("/settings", headers=headers)
+        self.assertEqual(r.status_code, 503)
+        body = r.json()
+        self.assertEqual(body["status"], "degraded")
+        self.assertIn("database disk image is malformed", body["database_error"])
+
 
 if __name__ == "__main__":
     unittest.main()

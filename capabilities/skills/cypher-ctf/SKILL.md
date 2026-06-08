@@ -12,6 +12,8 @@ Use this skill when the project looks like a CTF challenge, cyber range, HTB/THM
 
 When a challenge category is identified, load the corresponding specialist skill for detailed methodology:
 
+Specialist skills are bundled under this skill's `skills/` directory. Read `skills/<sub-skill-id>/SKILL.md` before applying a specialist workflow.
+
 | Category | Sub-skill | Key role |
 |----------|-----------|----------|
 | Web | `cypher-sqli`, `cypher-xss`, `cypher-ssrf`, `cypher-command-injection`, `cypher-file-upload`, `cypher-idor`, `cypher-deserialization`, `cypher-xxe`, `cypher-jwt`, `cypher-auth-bypass`, `cypher-ssti` | Web exploit chains |
@@ -20,7 +22,7 @@ When a challenge category is identified, load the corresponding specialist skill
 | Crypto | `cypher-crypto` | Cipher attacks, oracle exploitation |
 | Forensics / Stego | `cypher-forensics` | File carving, memory analysis |
 | Blockchain | `cypher-blockchain` | Smart contract exploits |
-| Full-box | All of the above + post-exploit sub-skills | Multi-stage compromise |
+| Full-box | All of the above + `cypher-privesc-linux`, `cypher-privesc-windows`, `cypher-post-exploit` | Multi-stage compromise |
 
 ## Completion standards
 
@@ -58,7 +60,7 @@ A CTF task is complete only when one of these is confirmed:
 
 1. Read Origin, Goal, Hints, and `/mnt/attachments`.
 2. Identify category: web / pwn / reverse / crypto / forensics / stego / misc / full-box.
-3. Load the appropriate specialist sub-skill(s) from `capabilities/skills/`.
+3. Load the appropriate specialist sub-skill(s) from this skill's `skills/` directory.
 4. Build one narrow path to the goal before broadening.
 5. Prefer exact reproducibility over broad speculation.
 6. If a path fails, write a `BLOCKER` fact with the decisive negative evidence.

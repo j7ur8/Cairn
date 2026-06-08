@@ -1,24 +1,26 @@
 ---
 name: cypher-vuln-research
-description: Vulnerability research orchestration skill — delegates source audit, CVE reproduction, PoC adaptation, fuzzing, and root-cause analysis to specialist sub-skills, coordinates evidence collection and research report generation.
+description: Vulnerability research orchestration skill — coordinates source audit, CVE reproduction, PoC adaptation, fuzzing, root-cause analysis, evidence collection, and research report generation.
 version: 0.2.0
 ---
 
 # Cypher Vulnerability Research Skill (Orchestration Layer)
 
-Use this skill for source-code audit, CVE reproduction, exploit adaptation, binary analysis, fuzzing, or patch-diff research. This skill acts as the **orchestration layer** — it triages the target, delegates to specialist sub-skills, and coordinates root-cause evidence.
+Use this skill for source-code audit, CVE reproduction, exploit adaptation, binary analysis, fuzzing, or patch-diff research. This skill acts as the **orchestration layer** — it triages the target, chooses focused research lanes, and coordinates root-cause evidence.
 
-## Sub-skill delegation
+## Research lanes
 
-| Research area | Sub-skill |
+The CTF specialist skills are bundled under `cypher-ctf/skills/`, and pentest AD/cloud/container specialist skills are bundled under `cypher-pentest/skills/`. They are not independently injected with this skill. Use the lanes below as methodology categories unless a project explicitly selects those orchestration skills too.
+
+| Research area | Lane |
 |--------------|-----------|
-| Binary / Pwnable | `cypher-pwn` |
-| Reverse Engineering | `cypher-reverse` |
-| Cryptographic Analysis | `cypher-crypto` |
-| Forensics / Artifact Analysis | `cypher-forensics` |
-| Blockchain / Smart Contract | `cypher-blockchain` |
-| Web Vulnerability Research | `cypher-sqli`, `cypher-deserialization`, `cypher-ssti`, `cypher-xxe`, etc. |
-| Container / Cloud | `cypher-container`, `cypher-cloud` |
+| Binary / Pwnable | Binary exploitation research |
+| Reverse Engineering | Reverse engineering |
+| Cryptographic Analysis | Cryptographic analysis |
+| Forensics / Artifact Analysis | Artifact analysis |
+| Blockchain / Smart Contract | Smart contract research |
+| Web Vulnerability Research | Web vulnerability research |
+| Container / Cloud | Container and cloud research |
 
 ## Core loop
 

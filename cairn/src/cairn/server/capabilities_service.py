@@ -61,6 +61,18 @@ def _row_to_entry(row: sqlite3.Row) -> _CatalogEntry:
         probe_config = {}
     args_value = json.loads(row["args"] or "[]") if "args" in row.keys() and row["args"] else []
     headers_value = json.loads(row["headers"] or "{}") if "headers" in row.keys() and row["headers"] else {}
+    try:
+        required_skill_ids = json.loads(row["required_skill_ids"] or "[]")
+    except json.JSONDecodeError:
+        required_skill_ids = []
+    try:
+        use_when = json.loads(row["use_when"] or "[]")
+    except json.JSONDecodeError:
+        use_when = []
+    try:
+        preferred_mcp_ids = json.loads(row["preferred_mcp_ids"] or "[]")
+    except json.JSONDecodeError:
+        preferred_mcp_ids = []
     item = CapabilityCatalogItem(
         kind=row["kind"],
         id=row["id"],
@@ -68,6 +80,10 @@ def _row_to_entry(row: sqlite3.Row) -> _CatalogEntry:
         description=row["description"],
         task_types=json.loads(row["task_types"] or "[]"),
         requires_ids=requires_ids,
+        required_skill_ids=required_skill_ids,
+        use_when=use_when,
+        activation_hint=row["activation_hint"] if "activation_hint" in row.keys() else "",
+        preferred_mcp_ids=preferred_mcp_ids,
         source=row["source"] if "source" in row.keys() else "builtin",
         probe_config=probe_config,
         available=bool(row["available"]),
@@ -97,7 +113,8 @@ def _row_to_entry(row: sqlite3.Row) -> _CatalogEntry:
 
 _SELECT_COLUMNS = (
     "kind, id, name, description, task_types, available, detail, "
-    "source, requires_ids, probe_config, last_probe_status, last_probe_at, "
+    "source, requires_ids, required_skill_ids, use_when, activation_hint, preferred_mcp_ids, "
+    "probe_config, last_probe_status, last_probe_at, "
     "last_probe_message, source_path, transport, command, args, url, "
     "bearer_token_env, headers"
 )
@@ -131,6 +148,32 @@ def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: Capability
     requires_ids = body.requires_ids
     if kind == "mcp_server" and requires_ids:
         raise HTTPException(400, "mcp_server capabilities cannot declare requires_ids")
+    required_skill_ids = body.required_skill_ids
+    if kind == "skill" and required_skill_ids:
+        raise HTTPException(400, "skill capabilities cannot declare required_skill_ids")
+    preferred_mcp_ids = body.preferred_mcp_ids
+    if kind == "mcp_server" and preferred_mcp_ids:
+        raise HTTPException(400, "mcp_server capabilities cannot declare preferred_mcp_ids")
+    if kind == "mcp_server" and required_skill_ids:
+        # Each id must resolve to an existing skill row. Caught at write
+        # time so the UI gets a clear 400 instead of silently dropping
+        # the binding at expansion. Mirrors the skill.requires_ids
+        # existence check below.
+        for rid in required_skill_ids:
+            row = conn.execute(
+                "SELECT 1 FROM capability_catalog WHERE kind = 'skill' AND id = ?",
+                (rid,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(400, f"required skill id not in catalog: {rid}")
+    if kind == "skill" and preferred_mcp_ids:
+        for rid in preferred_mcp_ids:
+            row = conn.execute(
+                "SELECT 1 FROM capability_catalog WHERE kind = 'mcp_server' AND id = ?",
+                (rid,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(400, f"preferred MCP id not in catalog: {rid}")
     if kind == "skill" and requires_ids:
         # Reject self-reference and missing targets up front so the user
         # gets a clear 400 rather than a SQL constraint error later.
@@ -155,15 +198,20 @@ def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: Capability
             """
             INSERT INTO capability_catalog (
                 kind, id, name, description, task_types, available, detail,
-                source, requires_ids, probe_config, updated_at,
+                source, requires_ids, required_skill_ids, use_when, activation_hint,
+                preferred_mcp_ids, probe_config, updated_at,
                 source_path, transport, command, args, url, bearer_token_env, headers
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 kind, body.id, body.name, body.description,
                 json.dumps(body.task_types, ensure_ascii=False),
                 1 if body.available else 0, detail,
                 json.dumps(requires_ids, ensure_ascii=False),
+                json.dumps(required_skill_ids, ensure_ascii=False),
+                json.dumps(body.use_when or [], ensure_ascii=False),
+                body.activation_hint,
+                json.dumps(preferred_mcp_ids, ensure_ascii=False),
                 json.dumps(body.probe_config or {}, ensure_ascii=False),
                 now,
                 body.source_path, body.transport, body.command,
@@ -177,7 +225,8 @@ def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: Capability
             """
             UPDATE capability_catalog SET
                 name = ?, description = ?, task_types = ?, available = ?, detail = ?,
-                requires_ids = ?, probe_config = ?, updated_at = ?,
+                requires_ids = ?, required_skill_ids = ?, use_when = ?, activation_hint = ?,
+                preferred_mcp_ids = ?, probe_config = ?, updated_at = ?,
                 source_path = ?, transport = ?, command = ?, args = ?,
                 url = ?, bearer_token_env = ?, headers = ?
             WHERE kind = ? AND id = ?
@@ -187,6 +236,10 @@ def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: Capability
                 json.dumps(body.task_types, ensure_ascii=False),
                 1 if body.available else 0, detail,
                 json.dumps(requires_ids, ensure_ascii=False),
+                json.dumps(required_skill_ids, ensure_ascii=False),
+                json.dumps(body.use_when or [], ensure_ascii=False),
+                body.activation_hint,
+                json.dumps(preferred_mcp_ids, ensure_ascii=False),
                 json.dumps(body.probe_config or {}, ensure_ascii=False),
                 now,
                 body.source_path, body.transport, body.command,
@@ -248,9 +301,10 @@ def register_builtin_catalog(
             """
             INSERT OR REPLACE INTO capability_catalog (
                 kind, id, name, description, task_types, available, detail,
-                source, requires_ids, probe_config, updated_at,
+                source, requires_ids, required_skill_ids, use_when, activation_hint,
+                preferred_mcp_ids, probe_config, updated_at,
                 source_path, transport, command, args, url, bearer_token_env, headers
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 kind, cid,
@@ -260,6 +314,10 @@ def register_builtin_catalog(
                 1 if item.get("available", True) else 0,
                 item.get("detail", ""),
                 json.dumps(item.get("requires_ids", []), ensure_ascii=False),
+                json.dumps(item.get("required_skill_ids", []), ensure_ascii=False),
+                json.dumps(item.get("use_when", []), ensure_ascii=False),
+                item.get("activation_hint", ""),
+                json.dumps(item.get("preferred_mcp_ids", []), ensure_ascii=False),
                 json.dumps(item.get("probe_config", {}), ensure_ascii=False),
                 now,
                 item.get("source_path"),
@@ -374,13 +432,43 @@ def expand_task_capabilities(
                 continue
             keep_skill.append(cid)
 
+        # Expand MCP -> required_skill_ids. Each kept MCP can declare
+        # skills that the agent must load alongside it. Mirrors the
+        # sub-skill walk below: same dedupe, same task_type gating.
+        # Required skills that the user already picked are NOT in
+        # auto_added (they keep source = "selected"); the user_pick
+        # path owns them.
+        mcp_required_auto: list[str] = []
+        mcp_required_seen: set[str] = set()
+        for mid in keep_mcp:
+            entry = catalog.get(("mcp_server", mid))
+            if entry is None:
+                continue
+            for sid in entry.item.required_skill_ids:
+                if sid in keep_skill or sid in mcp_required_auto or sid in mcp_required_seen:
+                    continue
+                if sid in keep_skill:
+                    # User already picked it: leave source = "selected".
+                    mcp_required_seen.add(sid)
+                    continue
+                skill_entry = catalog.get(("skill", sid))
+                if skill_entry is None or not skill_entry.item.available:
+                    continue
+                if task not in skill_entry.item.task_types:
+                    continue
+                mcp_required_auto.append(sid)
+                mcp_required_seen.add(sid)
+
         # Expand sub-skill requires transitively. Sub-skills are NOT
         # validated against the task_type whitelist: the user picked
         # the parent, so a requires-link that targets a skill only
         # enabled for a sibling task is operator intent, not a bug.
-        auto_added: list[str] = []
-        visited: set[str] = set()
-        queue: list[str] = list(keep_skill)
+        # Seed the queue with both user_picked skills AND
+        # MCP-required skills, so the closure walks through both
+        # dependency edges uniformly.
+        auto_added: list[str] = list(mcp_required_auto)
+        visited: set[str] = set(mcp_required_seen)
+        queue: list[str] = list(keep_skill) + [s for s in mcp_required_auto]
         while queue:
             sid = queue.pop()
             if sid in visited:
@@ -403,7 +491,11 @@ def expand_task_capabilities(
                 auto_added.append(child)
                 queue.append(child)
 
-        expanded[task] = TaskCapabilities(
+        # model_construct skips Pydantic validators; we already
+        # separated user picks from auto-required skills and do not
+        # want the wire-compat auto-fill (in TaskCapabilities._dedupe
+        # / before-validator) to overwrite user_skill_ids.
+        expanded[task] = TaskCapabilities.model_construct(
             mcp_server_ids=list(dict.fromkeys(keep_mcp)),
             skill_ids=list(dict.fromkeys(keep_skill + auto_added)),
             user_mcp_server_ids=user_mcp,

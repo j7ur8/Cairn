@@ -36,7 +36,6 @@ from cairn.observability.metrics import (
     DISPATCHER_TICKS,
     WORKER_UNHEALTHY_SINCE,
 )
-from cairn.server import db as server_db
 from cairn.server.models import (
     Intent,
     ProjectAiProfileSnapshot,
@@ -44,7 +43,6 @@ from cairn.server.models import (
     ProjectSummary,
     ProxyConfig,
 )
-from cairn.server.sqlite_diagnostics import database_error_detail
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -97,10 +95,9 @@ class DispatcherLoop:
     def __init__(self, config_path: Path):
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
-        server_db.configure(server_db.DEFAULT_DB)
-        self._validate_sqlite_startup()
         self.client = CairnClient(self.config.server)
         self.leader = DispatcherLeader(
+            client=self.client,
             ttl_seconds=float(os.environ.get("CAIRN_LEADER_TTL_SECONDS", "15")),
         )
         self._last_tick_at: float | None = None
@@ -147,21 +144,6 @@ class DispatcherLoop:
         self.project_caches = ProjectCaches()
         self._ai_overlay_cache = AIOverlayCache()
 
-    def _validate_sqlite_startup(self) -> None:
-        try:
-            quick = server_db.quick_check()
-        except Exception as exc:  # noqa: BLE001 - startup diagnostic boundary
-            detail = database_error_detail(server_db.configured_path(), exc)
-            raise RuntimeError(
-                "SQLite startup quick_check could not run: "
-                f"{detail}. Run `cairn db diagnose` and do not delete -wal/-shm files while Cairn is running."
-            ) from exc
-        if quick != ["ok"]:
-            raise RuntimeError(
-                "SQLite startup quick_check failed: "
-                f"{quick}; status={server_db.sqlite_status()}. Run `cairn db diagnose` before starting dispatcher."
-            )
-
     def close(self) -> None:
         if self.futures:
             LOG.info(
@@ -172,13 +154,13 @@ class DispatcherLoop:
         self.executor.shutdown(wait=True)
         self.cleanup_executor.shutdown(wait=True)
         self.container_manager.close()
-        self.client.close()
-        self.health_server.stop()
         try:
-            if self.leader.is_leader:
+            if self.leader._is_leader:
                 self.leader.release()
         except Exception:
             LOG.exception("failed to release dispatcher leadership")
+        self.client.close()
+        self.health_server.stop()
 
     def run(self, once: bool = False) -> None:
         """Main dispatcher loop.

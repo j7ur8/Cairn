@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
-from contextlib import contextmanager
 from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -16,25 +14,46 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
 
+class FakeClient:
+    def __init__(self) -> None:
+        from cairn.dispatcher.protocol.client import ApiResult
+
+        self.ApiResult = ApiResult
+        self.holder: str | None = None
+        self.fail_current = False
+        self.release_calls = 0
+        self.current_calls = 0
+
+    def dispatcher_lock_acquire(self, name: str, holder: str, ttl_seconds: float):
+        if self.holder is None or self.holder == holder:
+            self.holder = holder
+            return self.ApiResult(200, {"acquired": True, "holder": holder, "held": True})
+        return self.ApiResult(200, {"acquired": False, "holder": self.holder, "held": False})
+
+    def dispatcher_lock_heartbeat(self, name: str, holder: str):
+        held = self.holder == holder
+        return self.ApiResult(200, {"held": held, "holder": holder if held else None})
+
+    def dispatcher_lock_release(self, name: str, holder: str):
+        self.release_calls += 1
+        if self.holder == holder:
+            self.holder = None
+            return self.ApiResult(200, {"released": True})
+        return self.ApiResult(200, {"released": False})
+
+    def dispatcher_lock_current(self, name: str):
+        self.current_calls += 1
+        if self.fail_current:
+            return self.ApiResult(503, {"status": "degraded"})
+        return self.ApiResult(200, {"holder": self.holder, "held": self.holder is not None})
+
+
 class DispatcherLeaderTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-        self.tmp.close()
-        from cairn.server import db
-        db._db_path = None
-        db.close_thread_conn()
-        db.configure(Path(self.tmp.name))
-        self.db = db
-
-    def tearDown(self) -> None:
-        self.db.close_thread_conn()
-        self.db._db_path = None
-        os.unlink(self.tmp.name)
-
     def test_single_dispatcher_acquires(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        client = FakeClient()
+        leader = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
         self.assertTrue(leader.acquire())
         self.assertTrue(leader.is_leader)
         self.assertEqual(leader.current_holder(), "a")
@@ -42,121 +61,73 @@ class DispatcherLeaderTests(unittest.TestCase):
     def test_second_dispatcher_does_not_steal_fresh_lock(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        a = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
-        b = DispatcherLeader(name="test", holder="b", ttl_seconds=10)
+        client = FakeClient()
+        a = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
+        b = DispatcherLeader(client=client, name="test", holder="b", ttl_seconds=10)
         self.assertTrue(a.acquire())
         self.assertFalse(b.acquire())
         self.assertEqual(a.current_holder(), "a")
 
-    def test_stale_lock_can_be_stolen(self) -> None:
-        from cairn.dispatcher.leadership import DispatcherLeader
-
-        a = DispatcherLeader(name="test", holder="a", ttl_seconds=0.01)
-        b = DispatcherLeader(name="test", holder="b", ttl_seconds=0.01)
-        self.assertTrue(a.acquire())
-        time.sleep(0.03)
-        self.assertTrue(b.acquire())
-        self.assertEqual(b.current_holder(), "b")
-
     def test_heartbeat_renews_lock(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        a = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        client = FakeClient()
+        a = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
         self.assertTrue(a.acquire())
         self.assertTrue(a.heartbeat())
         self.assertTrue(a.is_leader)
 
+    def test_heartbeat_loss_marks_follower(self) -> None:
+        from cairn.dispatcher.leadership import DispatcherLeader
+
+        client = FakeClient()
+        a = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
+        self.assertTrue(a.acquire())
+        client.holder = "b"
+        self.assertFalse(a.heartbeat())
+        self.assertFalse(a.is_leader)
+
     def test_release_unlocks(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        a = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
-        b = DispatcherLeader(name="test", holder="b", ttl_seconds=10)
+        client = FakeClient()
+        a = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
+        b = DispatcherLeader(client=client, name="test", holder="b", ttl_seconds=10)
         self.assertTrue(a.acquire())
         a.release()
         self.assertTrue(b.acquire())
         self.assertEqual(b.current_holder(), "b")
 
-    def test_acquire_retries_transient_sqlite_database_error(self) -> None:
-        import sqlite3
+    def test_is_leader_uses_cached_heartbeat_age(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
-        real_tx = self.db.with_immediate_tx
-        calls = {"count": 0}
-
-        @contextmanager
-        def flaky_tx():
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise sqlite3.DatabaseError("database disk image is malformed")
-            with real_tx() as conn:
-                yield conn
-
-        with patch("cairn.dispatcher.leadership.with_immediate_tx", flaky_tx), patch("time.sleep"):
-            self.assertTrue(leader.acquire())
-        self.assertEqual(calls["count"], 2)
-        self.assertEqual(leader.current_holder(), "a")
-
-    def test_acquire_raises_diagnostic_after_retries_exhausted(self) -> None:
-        import sqlite3
-        from cairn.dispatcher.leadership import DispatcherLeader
-
-        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
-
-        @contextmanager
-        def broken_tx():
-            raise sqlite3.DatabaseError("database disk image is malformed")
-            yield
-
-        with patch("cairn.dispatcher.leadership.with_immediate_tx", broken_tx), patch("time.sleep"):
-            with self.assertRaises(RuntimeError) as ctx:
-                leader.acquire()
-        message = str(ctx.exception)
-        self.assertIn("database disk image is malformed", message)
-        self.assertIn("wal_exists=", message)
-        self.assertIn("cairn db diagnose", message)
-
-    def test_current_holder_retries_transient_sqlite_database_error(self) -> None:
-        import sqlite3
-        from cairn.dispatcher.leadership import DispatcherLeader
-
-        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
+        client = FakeClient()
+        leader = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=0.01)
         self.assertTrue(leader.acquire())
-        real_get_conn = self.db.get_conn
-        calls = {"count": 0}
+        time.sleep(0.03)
+        self.assertFalse(leader.is_leader)
 
-        @contextmanager
-        def flaky_get_conn():
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise sqlite3.DatabaseError("database disk image is malformed")
-            with real_get_conn() as conn:
-                yield conn
+    def test_check_health_raises_on_degraded_server(self) -> None:
+        from cairn.dispatcher.leadership import DispatcherLeader, LeadershipLost
 
-        with patch("cairn.dispatcher.leadership.get_conn", flaky_get_conn), patch("time.sleep"):
-            self.assertEqual(leader.current_holder(), "a")
-        self.assertEqual(calls["count"], 2)
+        client = FakeClient()
+        leader = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
+        self.assertTrue(leader.acquire())
+        client.fail_current = True
+        with self.assertRaises(LeadershipLost):
+            leader.check_health()
+        self.assertFalse(leader.is_leader)
 
-    def test_is_expired_retries_transient_sqlite_database_error(self) -> None:
-        import sqlite3
+    def test_acquired_context_release_does_not_call_current_holder(self) -> None:
         from cairn.dispatcher.leadership import DispatcherLeader
 
-        leader = DispatcherLeader(name="test", holder="a", ttl_seconds=10)
-        self.assertTrue(leader.acquire())
-        real_get_conn = self.db.get_conn
-        calls = {"count": 0}
-
-        @contextmanager
-        def flaky_get_conn():
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise sqlite3.DatabaseError("database disk image is malformed")
-            with real_get_conn() as conn:
-                yield conn
-
-        with patch("cairn.dispatcher.leadership.get_conn", flaky_get_conn), patch("time.sleep"):
-            self.assertFalse(leader.is_expired())
-        self.assertEqual(calls["count"], 2)
+        client = FakeClient()
+        leader = DispatcherLeader(client=client, name="test", holder="a", ttl_seconds=10)
+        with leader.acquired(retry_interval=0.01):
+            self.assertTrue(leader.is_leader)
+        self.assertEqual(client.release_calls, 1)
+        self.assertEqual(client.current_calls, 0)
+        self.assertFalse(leader._is_leader)
 
 
 if __name__ == "__main__":

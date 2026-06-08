@@ -33,16 +33,29 @@ class TaskCapabilities(BaseModel):
     user_mcp_server_ids: list[str] = Field(default_factory=list)
     user_skill_ids: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _wire_compat_user_fields(cls, data):
+        """Mirror the merged ids into ``user_*`` fields when missing.
+
+        Old clients send the flat ``mcp_server_ids`` / ``skill_ids``
+        lists without the user/explicit vs. auto/required split. Treat
+        the merged set as the user picks so the server can still tell
+        ``user_*`` from the auto-expanded set in the persisted
+        snapshot. Runs in ``before`` mode so internal construction
+        (where the caller already separates user vs. auto) is not
+        touched.
+        """
+        if not isinstance(data, dict):
+            return data
+        if not data.get("user_mcp_server_ids") and data.get("mcp_server_ids"):
+            data = {**data, "user_mcp_server_ids": list(data["mcp_server_ids"])}
+        if not data.get("user_skill_ids") and data.get("skill_ids"):
+            data = {**data, "user_skill_ids": list(data["skill_ids"])}
+        return data
+
     @model_validator(mode="after")
     def _dedupe(self) -> "TaskCapabilities":
-        # Always reflect the user picks in the *user_* fields even when the
-        # caller only supplied the merged set. This keeps the wire shape
-        # consistent for old callers that still send the flat
-        # mcp_server_ids/skill_ids only.
-        if not self.user_mcp_server_ids and self.mcp_server_ids:
-            self.user_mcp_server_ids = list(self.mcp_server_ids)
-        if not self.user_skill_ids and self.skill_ids:
-            self.user_skill_ids = list(self.skill_ids)
         for field in ("mcp_server_ids", "skill_ids", "user_mcp_server_ids", "user_skill_ids"):
             value = getattr(self, field) or []
             seen: set[str] = set()
@@ -83,6 +96,18 @@ class CapabilityCatalogItem(BaseModel):
     description: str = ""
     task_types: list[str] = Field(default_factory=list)
     requires_ids: list[str] = Field(default_factory=list)
+    # MCP-only: skills the agent must load alongside this MCP. Mirrors
+    # ``requires_ids`` (skill-only) but in the opposite direction: an
+    # MCP declares which skills it needs. The expansion layer uses this
+    # to auto-inject ``source="required"`` snapshot rows. Empty for
+    # ``kind = "skill"``; the server rejects writes that try to set it.
+    required_skill_ids: list[str] = Field(default_factory=list)
+    # Dynamic routing metadata for prompt injection. These fields are
+    # generic declarations rendered by dispatcher/capabilities.py; the
+    # Python code must not hardcode skill- or MCP-specific usage rules.
+    use_when: list[str] = Field(default_factory=list)
+    activation_hint: str = ""
+    preferred_mcp_ids: list[str] = Field(default_factory=list)
     source: CapabilitySource = "builtin"
     probe_config: dict = Field(default_factory=dict)
     available: bool = True
@@ -136,6 +161,37 @@ class CapabilityCatalogItem(BaseModel):
             deduped.append(key)
         return deduped
 
+    @field_validator("required_skill_ids")
+    @classmethod
+    def validate_required_skill_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+    @field_validator("use_when", "preferred_mcp_ids")
+    @classmethod
+    def validate_string_lists(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+    @field_validator("activation_hint")
+    @classmethod
+    def validate_activation_hint(cls, value: str) -> str:
+        return (value or "").strip()
+
 
 class CapabilityAdminRequest(BaseModel):
     id: str
@@ -143,6 +199,13 @@ class CapabilityAdminRequest(BaseModel):
     description: str = ""
     task_types: list[str] = Field(default_factory=list)
     requires_ids: list[str] = Field(default_factory=list)
+    # MCP-only: skills to auto-inject alongside this MCP. Validated as a
+    # catalog-existence + kind check on the server side; clients can
+    # write it but the server rejects unknown ids with HTTP 400.
+    required_skill_ids: list[str] = Field(default_factory=list)
+    use_when: list[str] = Field(default_factory=list)
+    activation_hint: str = ""
+    preferred_mcp_ids: list[str] = Field(default_factory=list)
     probe_config: dict = Field(default_factory=dict)
     detail: str = ""
     available: bool = True
@@ -288,5 +351,4 @@ class CapabilitySelection(BaseModel):
             seen.add(text)
             cleaned.append(text)
         return cleaned
-
 

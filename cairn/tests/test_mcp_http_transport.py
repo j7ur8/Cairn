@@ -333,12 +333,106 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         self.assertEqual(result.mcp_servers, ["m"])
         self.assertEqual(result.skills, ["s"])
-        self.assertIn("MCP server config file", result.instructions)
-        self.assertIn("Skill directory root", result.instructions)
+        self.assertIn("Config file: /tmp/cairn-capabilities/proj/task/mcp.json", result.instructions)
+        self.assertIn("Directory root: /tmp/cairn-capabilities/proj/task/skills", result.instructions)
+        self.assertIn("Description: metadata mcp", result.instructions)
+        self.assertIn("Description: metadata skill", result.instructions)
         self.assertEqual(len(manager.files), 1)
         self.assertEqual(len(manager.directories), 1)
         self.assertEqual(result.context.mcp_config_path, "/tmp/cairn-capabilities/proj/task/mcp.json")
         self.assertEqual(result.context.skill_root, "/tmp/cairn-capabilities/proj/task/skills")
+
+    def test_cypher_ctf_injection_uses_bundled_sub_skill_directory(self):
+        from types import SimpleNamespace
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.dispatcher.config import SkillCapabilityConfig
+
+        skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
+        config = SimpleNamespace(
+            capabilities=SimpleNamespace(
+                mcp_servers=[],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="cypher-ctf",
+                        name="Cypher CTF",
+                        source_path=str(skill_path),
+                        task_types=["explore"],
+                    )
+                ],
+            )
+        )
+        selection = {
+            "per_task": {
+                "explore": {"mcp_server_ids": [], "skill_ids": ["cypher-ctf"]},
+            }
+        }
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            config,
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            selection,
+        )
+
+        self.assertEqual(result.skills, ["cypher-ctf"])
+        self.assertEqual(len(manager.directories), 1)
+        _, target_path, source_path = manager.directories[0]
+        self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-ctf")
+        self.assertEqual(Path(source_path), skill_path)
+        self.assertTrue((Path(source_path) / "skills" / "cypher-sqli" / "SKILL.md").exists())
+        self.assertIn("cypher-ctf", result.instructions)
+        self.assertNotIn("skills/cypher-sqli", result.instructions)
+
+    def test_cypher_pentest_injection_uses_bundled_sub_skill_directory(self):
+        from types import SimpleNamespace
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.dispatcher.config import SkillCapabilityConfig
+
+        skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
+        config = SimpleNamespace(
+            capabilities=SimpleNamespace(
+                mcp_servers=[],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="cypher-pentest",
+                        name="Cypher Pentest",
+                        source_path=str(skill_path),
+                        task_types=["explore"],
+                    )
+                ],
+            )
+        )
+        selection = {
+            "per_task": {
+                "explore": {"mcp_server_ids": [], "skill_ids": ["cypher-pentest"]},
+            }
+        }
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            config,
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            selection,
+        )
+
+        self.assertEqual(result.skills, ["cypher-pentest"])
+        self.assertEqual(len(manager.directories), 1)
+        _, target_path, source_path = manager.directories[0]
+        self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-pentest")
+        self.assertEqual(Path(source_path), skill_path)
+        self.assertTrue((Path(source_path) / "skills" / "cypher-ad" / "SKILL.md").exists())
+        self.assertTrue((Path(source_path) / "skills" / "cypher-cloud" / "SKILL.md").exists())
+        self.assertTrue((Path(source_path) / "skills" / "cypher-container" / "SKILL.md").exists())
+        self.assertIn("cypher-pentest", result.instructions)
+        self.assertNotIn("skills/cypher-ad", result.instructions)
 
     def test_reason_injection_uses_metadata_only_without_runtime_resources(self):
         from cairn.dispatcher.capabilities import inject_project_capabilities
@@ -357,10 +451,12 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.mcp_servers, ["m"])
         self.assertEqual(result.skills, ["s"])
         self.assertIn("intent design only", result.instructions)
-        self.assertIn("m: MCP - metadata mcp", result.instructions)
-        self.assertIn("s: Skill - metadata skill", result.instructions)
+        self.assertIn("m: MCP", result.instructions)
+        self.assertIn("Description: metadata mcp", result.instructions)
+        self.assertIn("s: Skill", result.instructions)
+        self.assertIn("Description: metadata skill", result.instructions)
         self.assertNotIn("mcp.json", result.instructions)
-        self.assertNotIn("Skill directory root", result.instructions)
+        self.assertNotIn("Directory root", result.instructions)
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
         self.assertEqual(result.context.mcp_config_path, "")

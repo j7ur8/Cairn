@@ -530,6 +530,28 @@ MIGRATIONS: list[tuple[str, str]] = [
             WHERE to_fact_id IS NOT NULL AND to_fact_id != 'goal';
         """,
     ),
+    (
+        "20260608_004_mcp_required_skill_ids",
+        """
+        -- One-to-many binding from MCP to skills the agent must load
+        -- alongside the MCP. Mirrors the skill.requires_ids column: when
+        -- a project task picks MCP X, the dispatcher auto-injects each
+        -- skill in X.required_skill_ids with project_capability_snapshots
+        -- .source = 'required'. Empty default keeps existing rows valid.
+        ALTER TABLE capability_catalog ADD COLUMN required_skill_ids TEXT NOT NULL DEFAULT '[]';
+        """,
+    ),
+    (
+        "20260608_005_capability_routing_metadata",
+        """
+        -- Dynamic routing metadata for capability prompt injection.
+        -- System code renders these declarations generically instead
+        -- of hardcoding business-specific MCP/skill usage rules.
+        ALTER TABLE capability_catalog ADD COLUMN use_when TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE capability_catalog ADD COLUMN activation_hint TEXT NOT NULL DEFAULT '';
+        ALTER TABLE capability_catalog ADD COLUMN preferred_mcp_ids TEXT NOT NULL DEFAULT '[]';
+        """,
+    ),
 ]
 
 

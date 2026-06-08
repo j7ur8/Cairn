@@ -54,6 +54,14 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "bearer_token_env": item.bearer_token_env,
                 "headers": {},
                 "probe_config": dict(item.probe_config),
+                # Skills the dispatcher must auto-inject when this MCP
+                # is selected. Carried through the catalog register
+                # call so the server can persist it and the expansion
+                # layer can use it on every project save.
+                "required_skill_ids": list(item.required_skill_ids),
+                "use_when": list(item.use_when),
+                "activation_hint": item.activation_hint,
+                "preferred_mcp_ids": [],
             }
         )
     for item in config.capabilities.skills:
@@ -67,6 +75,9 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "available": True,
                 "detail": "directory",
                 "source_path": item.source_path,
+                "use_when": list(item.use_when),
+                "activation_hint": item.activation_hint,
+                "preferred_mcp_ids": list(item.preferred_mcp_ids),
             }
         )
     return payload
@@ -408,25 +419,34 @@ def _instructions(
     mcp_servers: list[McpServerCapabilityConfig],
     skills: list[SkillCapabilityConfig],
 ) -> str:
-    lines = ["# Project Capabilities", "Authorized project capabilities are available inside this container.", ""]
+    lines = [
+        "# Project Capabilities",
+        "The following capabilities are enabled for this task. Use them when their routing metadata matches the current work; do not use a capability only because it is available.",
+        "",
+    ]
     if mcp_servers:
-        lines.extend(
-            [
-                f"- MCP server config file: {mcp_path}",
-                "- MCP servers:",
-                *[f"  - {item.id}: {item.name}" for item in mcp_servers],
-                "",
-            ]
-        )
+        lines.extend(["## MCP Servers", f"Config file: {mcp_path}", ""])
+        for item in mcp_servers:
+            lines.append(f"- {item.id}: {item.name}")
+            _append_text(lines, "Description", item.description)
+            _append_list(lines, "Use when", item.use_when)
+            _append_list(lines, "Required skills", item.required_skill_ids)
+            _append_text(lines, "Instruction", item.activation_hint)
+            lines.append("")
     if skills:
-        lines.extend(
-            [
-                f"- Skill directory root: {skill_root}",
-                "- Skills:",
-                *[f"  - {item.id}: {item.name} at {skill_root}/{item.id}" for item in skills],
-                "",
-            ]
-        )
+        lines.extend(["## Skills", f"Directory root: {skill_root}", ""])
+        for item in skills:
+            path = f"{skill_root}/{item.id}"
+            lines.append(f"- {item.id}: {item.name}")
+            lines.append(f"  Path: {path}")
+            _append_text(lines, "Description", item.description)
+            _append_list(lines, "Use when", item.use_when)
+            _append_list(lines, "Preferred MCP servers", item.preferred_mcp_ids)
+            if item.activation_hint:
+                _append_text(lines, "Instruction", item.activation_hint)
+            else:
+                lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md first and follow its workflow.")
+            lines.append("")
     lines.extend(
         [
             "Use these capabilities only for the current Cairn project/challenge.",
@@ -448,21 +468,23 @@ def _reason_instructions(
         "",
     ]
     if mcp_servers:
-        lines.extend(
-            [
-                "- MCP server metadata:",
-                *[f"  - {item.id}: {item.name} - {item.description or 'no description'}" for item in mcp_servers],
-                "",
-            ]
-        )
+        lines.append("- MCP server metadata:")
+        for item in mcp_servers:
+            lines.append(f"  - {item.id}: {item.name}")
+            _append_text(lines, "Description", item.description, indent="    ")
+            _append_list(lines, "Use when", item.use_when, indent="    ")
+            _append_list(lines, "Required skills", item.required_skill_ids, indent="    ")
+            _append_text(lines, "Instruction", item.activation_hint, indent="    ")
+        lines.append("")
     if skills:
-        lines.extend(
-            [
-                "- Skill metadata:",
-                *[f"  - {item.id}: {item.name} - {item.description or 'no description'}" for item in skills],
-                "",
-            ]
-        )
+        lines.append("- Skill metadata:")
+        for item in skills:
+            lines.append(f"  - {item.id}: {item.name}")
+            _append_text(lines, "Description", item.description, indent="    ")
+            _append_list(lines, "Use when", item.use_when, indent="    ")
+            _append_list(lines, "Preferred MCP servers", item.preferred_mcp_ids, indent="    ")
+            _append_text(lines, "Instruction", item.activation_hint, indent="    ")
+        lines.append("")
     lines.extend(
         [
             "Use this metadata only to choose focused, non-overlapping next intents.",
@@ -470,6 +492,21 @@ def _reason_instructions(
         ]
     )
     return "\n".join(lines)
+
+
+def _append_text(lines: list[str], label: str, value: str, indent: str = "  ") -> None:
+    text = (value or "").strip()
+    if text:
+        lines.append(f"{indent}{label}: {text}")
+
+
+def _append_list(lines: list[str], label: str, values: list[str], indent: str = "  ") -> None:
+    items = [item.strip() for item in values if item.strip()]
+    if not items:
+        return
+    lines.append(f"{indent}{label}:")
+    for item in items:
+        lines.append(f"{indent}  - {item}")
 
 
 def _summary(mcp_ids: list[str], skill_ids: list[str], errors: list[str]) -> str:

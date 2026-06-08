@@ -335,6 +335,15 @@ class McpServerCapabilityConfig(BaseModel):
     probe_config: dict[str, Any] = Field(default_factory=dict)
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
     description: str = ""
+    # Skills that the dispatcher must auto-inject whenever a project
+    # task selects this MCP. Mirrors skill.requires_ids in the opposite
+    # direction: an MCP declares which skills it needs. Each id must be
+    # declared in the same ``capabilities.skills`` block; the
+    # ``CapabilitiesConfig`` validator below enforces that at startup
+    # so a broken YAML never reaches runtime.
+    required_skill_ids: list[str] = Field(default_factory=list)
+    use_when: list[str] = Field(default_factory=list)
+    activation_hint: str = ""
 
     @field_validator("id", "name", "command", "source_path", "url", "bearer_token_env")
     @classmethod
@@ -407,6 +416,24 @@ class McpServerCapabilityConfig(BaseModel):
         _check_known_task_types(value)
         return value
 
+    @field_validator("required_skill_ids", "use_when")
+    @classmethod
+    def validate_string_list(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+    @field_validator("activation_hint")
+    @classmethod
+    def validate_activation_hint(cls, value: str) -> str:
+        return value.strip()
+
 
 class SkillCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -416,6 +443,9 @@ class SkillCapabilityConfig(BaseModel):
     source_path: str
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore", "reason"])
     description: str = ""
+    use_when: list[str] = Field(default_factory=list)
+    preferred_mcp_ids: list[str] = Field(default_factory=list)
+    activation_hint: str = ""
 
     @field_validator("id", "name", "source_path")
     @classmethod
@@ -450,6 +480,24 @@ class SkillCapabilityConfig(BaseModel):
         _check_known_task_types(value)
         return value
 
+    @field_validator("use_when", "preferred_mcp_ids")
+    @classmethod
+    def validate_string_list(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+    @field_validator("activation_hint")
+    @classmethod
+    def validate_activation_hint(cls, value: str) -> str:
+        return value.strip()
+
 
 class CapabilitiesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -465,6 +513,25 @@ class CapabilitiesConfig(BaseModel):
             raise ValueError("capabilities.mcp_servers ids must be unique")
         if len(skill_ids) != len(set(skill_ids)):
             raise ValueError("capabilities.skills ids must be unique")
+        # Every MCP's required_skill_ids must point at a declared skill.
+        # Caught here so a broken dispatch.yaml fails fast at startup
+        # instead of surprising the expansion layer mid-dispatch.
+        declared_skill_ids = set(skill_ids)
+        for mcp in self.mcp_servers:
+            for required_skill_id in mcp.required_skill_ids:
+                if required_skill_id not in declared_skill_ids:
+                    raise ValueError(
+                        f"mcp_server {mcp.id} requires skill {required_skill_id!r} "
+                        f"but that id is not declared in capabilities.skills"
+                    )
+        declared_mcp_ids = set(mcp_ids)
+        for skill in self.skills:
+            for preferred_mcp_id in skill.preferred_mcp_ids:
+                if preferred_mcp_id not in declared_mcp_ids:
+                    raise ValueError(
+                        f"skill {skill.id} prefers mcp_server {preferred_mcp_id!r} "
+                        f"but that id is not declared in capabilities.mcp_servers"
+                    )
         return self
 
 

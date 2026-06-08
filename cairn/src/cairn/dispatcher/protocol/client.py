@@ -331,6 +331,38 @@ class CairnClient:
             json={"roles": roles},
         )
 
+    def dispatcher_lock_acquire(self, name: str, holder: str, ttl_seconds: float) -> ApiResult:
+        return self._request_json(
+            "POST",
+            "/dispatcher-lock/acquire",
+            json={"name": name, "holder": holder, "ttl_seconds": ttl_seconds},
+        )
+
+    def dispatcher_lock_heartbeat(self, name: str, holder: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            "/dispatcher-lock/heartbeat",
+            json={"name": name, "holder": holder},
+        )
+
+    def dispatcher_lock_release(self, name: str, holder: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            "/dispatcher-lock/release",
+            json={"name": name, "holder": holder},
+        )
+
+    def dispatcher_lock_current(self, name: str) -> ApiResult:
+        try:
+            response = self._get("/dispatcher-lock/current", params={"name": name})
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=GET path=/dispatcher-lock/current error=%s", exc)
+            return ApiResult(status_code=0, text=str(exc))
+        data: Any | None = None
+        if response.headers.get("content-type", "").startswith("application/json"):
+            data = response.json()
+        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+
     def create_llm_execution(
         self,
         project_id: str,

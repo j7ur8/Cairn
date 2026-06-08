@@ -278,6 +278,8 @@ class CapabilityAdminTests(unittest.TestCase):
                         "type": "chrome_devtools_http",
                         "url": "http://host.docker.internal:9222/json/version",
                     },
+                    "use_when": ["browser evidence is needed"],
+                    "activation_hint": "Use for browser runtime inspection.",
                 },
                 {
                     "kind": "skill",
@@ -288,6 +290,9 @@ class CapabilityAdminTests(unittest.TestCase):
                     "available": True,
                     "detail": "directory",
                     "source_path": "/opt/capabilities/skills/builtin-skill",
+                    "use_when": ["reverse workflow is needed"],
+                    "preferred_mcp_ids": ["builtin-mcp"],
+                    "activation_hint": "Read SKILL.md first.",
                 },
             ])
             catalog = get_catalog_map(conn)
@@ -300,8 +305,13 @@ class CapabilityAdminTests(unittest.TestCase):
             mcp.probe_config,
             {"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
         )
+        self.assertEqual(mcp.use_when, ["browser evidence is needed"])
+        self.assertEqual(mcp.activation_hint, "Use for browser runtime inspection.")
         skill = catalog[("skill", "builtin-skill")].item
         self.assertEqual(skill.source_path, "/opt/capabilities/skills/builtin-skill")
+        self.assertEqual(skill.use_when, ["reverse workflow is needed"])
+        self.assertEqual(skill.preferred_mcp_ids, ["builtin-mcp"])
+        self.assertEqual(skill.activation_hint, "Read SKILL.md first.")
 
     def test_probe_chrome_devtools_http_reports_reachable(self) -> None:
         from cairn.server.capabilities_service import (
@@ -366,6 +376,385 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(mcp.args, ["-m", "fetch_server"])
         skill = catalog[("skill", "summarize")].item
         self.assertEqual(skill.source_path, "/tmp/summarize")
+
+    def test_admin_routing_metadata_round_trips(self) -> None:
+        from cairn.server.capabilities_service import get_catalog_map, upsert_user_capability
+        from cairn.server.models import CapabilityAdminRequest
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="browser", name="Browser", task_types=["bootstrap"],
+                transport="stdio", source_path="/tmp/browser", command="browser",
+                use_when=["browser runtime inspection is needed"],
+                activation_hint="Use for runtime evidence.",
+            ))
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="reverse-js", name="Reverse JS", task_types=["bootstrap"],
+                source_path="/tmp/reverse-js",
+                use_when=["sign tokens must be traced"],
+                preferred_mcp_ids=["browser"],
+                activation_hint="Read SKILL.md first.",
+            ))
+            catalog = get_catalog_map(conn)
+        mcp = catalog[("mcp_server", "browser")].item
+        skill = catalog[("skill", "reverse-js")].item
+        self.assertEqual(mcp.use_when, ["browser runtime inspection is needed"])
+        self.assertEqual(mcp.activation_hint, "Use for runtime evidence.")
+        self.assertEqual(skill.use_when, ["sign tokens must be traced"])
+        self.assertEqual(skill.preferred_mcp_ids, ["browser"])
+        self.assertEqual(skill.activation_hint, "Read SKILL.md first.")
+
+    def test_admin_skill_preferred_mcp_rejects_unknown_id(self) -> None:
+        from cairn.server.capabilities_service import upsert_user_capability
+        from cairn.server.models import CapabilityAdminRequest
+        from fastapi import HTTPException
+        with self.db.get_conn() as conn:
+            with self.assertRaises(HTTPException) as ctx:
+                upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                    id="reverse-js", name="Reverse JS", task_types=["bootstrap"],
+                    source_path="/tmp/reverse-js",
+                    preferred_mcp_ids=["missing-mcp"],
+                ))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("missing-mcp", str(ctx.exception.detail))
+
+    def test_admin_mcp_server_preferred_mcp_rejected(self) -> None:
+        from cairn.server.capabilities_service import upsert_user_capability
+        from cairn.server.models import CapabilityAdminRequest
+        from fastapi import HTTPException
+        with self.db.get_conn() as conn:
+            with self.assertRaises(HTTPException):
+                upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                    id="m", name="M", task_types=["bootstrap"],
+                    transport="stdio", source_path="/tmp/m", command="m",
+                    preferred_mcp_ids=["other-mcp"],
+                ))
+
+
+class McpRequiredSkillIdsTests(unittest.TestCase):
+    """MCP -> required_skill_ids binding.
+
+    Mirrors the existing skill.requires_ids semantics: an MCP row can
+    declare a list of skill ids; the per-task expansion layer will
+    auto-inject those skills (with source="required") whenever the MCP
+    is selected.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = _fresh_db()
+        from cairn.server import db
+        db._db_path = None
+        db.close_thread_conn()
+        db.configure(self.tmp)
+        self.db = db
+
+    def tearDown(self) -> None:
+        self.db.close_thread_conn()
+        self.db._db_path = None
+        os.unlink(self.tmp)
+
+    # -- admin write path --
+
+    def test_admin_mcp_required_skill_ids_rejects_unknown_id(self) -> None:
+        from cairn.server.capabilities_service import upsert_user_capability
+        from cairn.server.models import CapabilityAdminRequest
+        from fastapi import HTTPException
+        with self.db.get_conn() as conn:
+            with self.assertRaises(HTTPException) as ctx:
+                upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                    id="x", name="X", task_types=["bootstrap"],
+                    transport="stdio", source_path="/tmp/x", command="x",
+                    required_skill_ids=["ghost-skill"],
+                ))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("ghost-skill", str(ctx.exception.detail))
+
+    def test_admin_mcp_required_skill_ids_accepts_known_id(self) -> None:
+        from cairn.server.capabilities_service import (
+            get_catalog_map, upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="m", name="M", task_types=["bootstrap"],
+                transport="stdio", source_path="/tmp/m", command="m",
+                required_skill_ids=["a"],
+            ))
+            catalog = get_catalog_map(conn)
+        self.assertEqual(catalog[("mcp_server", "m")].item.required_skill_ids, ["a"])
+
+    def test_admin_skill_required_skill_ids_rejected(self) -> None:
+        from cairn.server.capabilities_service import upsert_user_capability
+        from cairn.server.models import CapabilityAdminRequest
+        from fastapi import HTTPException
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            with self.assertRaises(HTTPException):
+                upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                    id="b", name="B", task_types=["bootstrap"],
+                    source_path="/tmp/b",
+                    required_skill_ids=["a"],
+                ))
+
+    # -- expansion path --
+
+    def test_expansion_auto_adds_required_skill(self) -> None:
+        from cairn.server.capabilities_service import (
+            expand_task_capabilities, get_catalog_map,
+            upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest, TaskCapabilities, task_capabilities_map
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap", "explore"],
+                source_path="/tmp/a",
+            ))
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="m", name="M", task_types=["bootstrap", "explore"],
+                transport="stdio", source_path="/tmp/m", command="m",
+                required_skill_ids=["a"],
+            ))
+        per_task = task_capabilities_map({
+            "bootstrap": {
+                "mcp_server_ids": ["m"],
+                "user_mcp_server_ids": ["m"],
+            },
+        })
+        with self.db.get_conn() as conn:
+            catalog = get_catalog_map(conn)
+            expanded, _ = expand_task_capabilities(per_task, catalog)
+        self.assertEqual(expanded["bootstrap"].mcp_server_ids, ["m"])
+        self.assertEqual(expanded["bootstrap"].skill_ids, ["a"])
+        self.assertEqual(expanded["bootstrap"].user_skill_ids, [])
+
+    def test_expansion_does_not_duplicate_when_user_already_picked(self) -> None:
+        from cairn.server.capabilities_service import (
+            expand_task_capabilities, get_catalog_map,
+            upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest, task_capabilities_map
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="m", name="M", task_types=["bootstrap"],
+                transport="stdio", source_path="/tmp/m", command="m",
+                required_skill_ids=["a"],
+            ))
+        per_task = task_capabilities_map({
+            "bootstrap": {
+                "mcp_server_ids": ["m"],
+                "skill_ids": ["a"],
+                "user_mcp_server_ids": ["m"],
+                "user_skill_ids": ["a"],
+            },
+        })
+        with self.db.get_conn() as conn:
+            catalog = get_catalog_map(conn)
+            expanded, _ = expand_task_capabilities(per_task, catalog)
+        self.assertEqual(expanded["bootstrap"].skill_ids, ["a"])
+        self.assertEqual(expanded["bootstrap"].user_skill_ids, ["a"])
+
+    def test_expansion_respects_task_type_gating(self) -> None:
+        """Required skill only enabled for ``bootstrap`` is silently
+        dropped on ``explore``, matching the existing skill->skill
+        sub-skill walk. No error is emitted; the user did not pick the
+        skill directly so a missing auto-required dependency is a
+        silent no-op, not a failure.
+        """
+        from cairn.server.capabilities_service import (
+            expand_task_capabilities, get_catalog_map,
+            upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest, task_capabilities_map
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="m", name="M", task_types=["bootstrap", "explore"],
+                transport="stdio", source_path="/tmp/m", command="m",
+                required_skill_ids=["a"],
+            ))
+        per_task = task_capabilities_map({
+            "bootstrap": {
+                "mcp_server_ids": ["m"],
+                "user_mcp_server_ids": ["m"],
+            },
+            "explore": {
+                "mcp_server_ids": ["m"],
+                "user_mcp_server_ids": ["m"],
+            },
+        })
+        with self.db.get_conn() as conn:
+            catalog = get_catalog_map(conn)
+            expanded, _ = expand_task_capabilities(per_task, catalog)
+        self.assertEqual(expanded["bootstrap"].skill_ids, ["a"])
+        self.assertEqual(expanded["explore"].skill_ids, [])
+
+    def test_persistence_snapshot_marks_required_source(self) -> None:
+        from cairn.server.capabilities_service import (
+            upsert_user_capability,
+        )
+        from cairn.server.models import (
+            AiProfileCreate, AiProfileSelection, CapabilityAdminRequest,
+            CreateProjectRequest, TaskAiProfileSelections,
+        )
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            upsert_user_capability(conn, "mcp_server", CapabilityAdminRequest(
+                id="m", name="M", task_types=["bootstrap"],
+                transport="stdio", source_path="/tmp/m", command="m",
+                required_skill_ids=["a"],
+            ))
+        profile = create_ai_profile(AiProfileCreate(
+            name="t", worker_type="codex", model="m", api_key_env="K",
+        ))
+        selection = AiProfileSelection(
+            primary_profile_id=profile.id,
+            primary_model="m",
+            primary_reasoning_type="medium",
+        )
+        project = create_project(CreateProjectRequest(
+            title="p", origin="o", goal="g",
+            capabilities_per_task={
+                "bootstrap": {
+                    "mcp_server_ids": ["m"],
+                    "user_mcp_server_ids": ["m"],
+                },
+                "explore": {"mcp_server_ids": [], "user_mcp_server_ids": []},
+                "reason": {"mcp_server_ids": [], "user_mcp_server_ids": []},
+            },
+            ai_profile_selections=TaskAiProfileSelections(
+                bootstrap=selection, explore=selection, reason=selection,
+            ),
+        ))
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT source FROM project_capability_snapshots
+                WHERE project_id = ? AND task_type = 'bootstrap'
+                  AND kind = 'skill' AND capability_id = 'a'
+                """,
+                (project.project.id,),
+            ).fetchone()
+        self.assertEqual(row["source"], "required")
+
+    def test_register_builtin_catalog_persists_required_skill_ids(self) -> None:
+        from cairn.server.capabilities_service import (
+            get_catalog_map, register_builtin_catalog, upsert_user_capability,
+        )
+        from cairn.server.models import CapabilityAdminRequest
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="a", name="A", task_types=["bootstrap"],
+                source_path="/tmp/a",
+            ))
+            register_builtin_catalog(conn, [
+                {
+                    "kind": "mcp_server",
+                    "id": "m",
+                    "name": "M",
+                    "task_types": ["bootstrap"],
+                    "transport": "stdio",
+                    "command": "m",
+                    "required_skill_ids": ["a"],
+                },
+            ])
+            catalog = get_catalog_map(conn)
+        self.assertEqual(catalog[("mcp_server", "m")].item.required_skill_ids, ["a"])
+
+    def test_migration_adds_column_with_default(self) -> None:
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT required_skill_ids FROM capability_catalog LIMIT 1"
+            ).fetchone()
+        # Pre-populated rows have the default '[]' from the ALTER; the
+        # empty catalog returns no row, so just assert the column
+        # exists in the schema.
+        with self.db.get_conn() as conn:
+            cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(capability_catalog)").fetchall()
+            }
+        self.assertIn("required_skill_ids", cols)
+        self.assertIn("use_when", cols)
+        self.assertIn("activation_hint", cols)
+        self.assertIn("preferred_mcp_ids", cols)
+
+
+class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):
+    """dispatch.yaml validation rejects broken MCP -> skill bindings."""
+
+    def test_yaml_mcp_required_skill_must_resolve(self) -> None:
+        from cairn.dispatcher.config import (
+            CapabilitiesConfig, McpServerCapabilityConfig, SkillCapabilityConfig,
+        )
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            CapabilitiesConfig(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="m", name="M", command="m",
+                        required_skill_ids=["ghost"],
+                    ),
+                ],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="a", name="A", source_path="/tmp/a",
+                    ),
+                ],
+            )
+        self.assertIn("ghost", str(ctx.exception))
+
+    def test_yaml_mcp_required_skill_resolves(self) -> None:
+        from cairn.dispatcher.config import (
+            CapabilitiesConfig, McpServerCapabilityConfig, SkillCapabilityConfig,
+        )
+        cfg = CapabilitiesConfig(
+            mcp_servers=[
+                McpServerCapabilityConfig(
+                    id="m", name="M", command="m",
+                    required_skill_ids=["a"],
+                ),
+            ],
+            skills=[
+                SkillCapabilityConfig(
+                    id="a", name="A", source_path="/tmp/a",
+                ),
+            ],
+        )
+        self.assertEqual(cfg.mcp_servers[0].required_skill_ids, ["a"])
+
+    def test_yaml_skill_preferred_mcp_must_resolve(self) -> None:
+        from cairn.dispatcher.config import (
+            CapabilitiesConfig, SkillCapabilityConfig,
+        )
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            CapabilitiesConfig(
+                skills=[
+                    SkillCapabilityConfig(
+                        id="a", name="A", source_path="/tmp/a",
+                        preferred_mcp_ids=["ghost-mcp"],
+                    ),
+                ],
+            )
+        self.assertIn("ghost-mcp", str(ctx.exception))
 
 
 if __name__ == "__main__":

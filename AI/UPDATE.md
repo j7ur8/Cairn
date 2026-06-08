@@ -9,6 +9,138 @@
 
 # Cairn 更新记录
 
+## 2026-06-08 · Cypher 与 Kali/Metasploit 路由元数据补齐（已完成）
+
+### 背景
+
+`{capability_instructions}` 已改为动态渲染 catalog metadata。本次为常用 Cypher 顶层 skill 和 Kali/Metasploit MCP 补齐 `use_when` 与 `activation_hint`，让 agent 能在实际需要时自行选择能力，而不是依赖 MCP 自动注入 skill。
+
+### 已完成变更
+
+- `kali-server-mcp` 增加授权 Kali 工具执行场景的 `use_when` 和 `activation_hint`。
+- `metasploit-mcp` 增加模块搜索、漏洞验证、payload/session/post-module 场景的 `use_when` 和 `activation_hint`。
+- `cypher-ctf` 增加 CTF/cyber range/flag/writeup/exploit solve 场景的 `use_when` 和 `activation_hint`。
+- `cypher-pentest` 增加授权 pentest/scope/ROE/evidence/reporting 场景的 `use_when` 和 `activation_hint`。
+- `kali-server-mcp` 与 `metasploit-mcp` 的 `required_skill_ids` 保持空，不自动注入 skill。
+
+### 验证结果
+
+- `cd cairn && .venv/bin/python -m unittest tests.test_dispatch_sidecar_config tests.test_capability_manifest tests.test_capability_admin -v`
+- `cd cairn && .venv/bin/python -m unittest discover -s tests -t .`
+- `git diff --check`
+
+### 未完成事项/风险
+
+- 这些提示只在对应 MCP/skill 已被项目选择时生效；Kali/Metasploit 不会自行带入 Cypher skill。
+
+---
+
+## 2026-06-08 · Cypher Pentest 专家 skill 内置二级目录（已完成）
+
+### 背景
+
+`cypher-ad`、`cypher-cloud`、`cypher-container` 更适合作为 `cypher-pentest` 的专项方法，而不是独立项目能力。将它们内置到 `cypher-pentest` 后，项目能力选择和 prompt 只暴露顶层 pentest orchestration skill。
+
+### 已完成变更
+
+- 将 `cypher-ad`、`cypher-cloud`、`cypher-container` 移入 `capabilities/skills/cypher-pentest/skills/<sub-skill-id>/`。
+- 从 `dispatch.capabilities.yaml` 删除这三个 skill 的独立 catalog entries，保留 `cypher-pentest` 顶层 skill。
+- 更新 `cypher-pentest/SKILL.md`，要求从自身 `skills/` 二级目录读取 AD/cloud/container workflow。
+- 更新 `cypher-vuln-research/SKILL.md`，将 container/cloud 改为 research lane，不再引用独立注入的 skill。
+- 补充注入测试，确认 `cypher-pentest` 注入目录包含 bundled sub-skill，但 prompt 只列顶层 skill。
+
+### 验证结果
+
+- `CAIRN_JWT_SECRET=... CAIRN_SECRETS_KEY=... CAIRN_DISPATCHER_DATAS_ROOT=/tmp/cairn-test ANTHROPIC_AUTH_TOKEN=test OPENAI_API_KEY=test python3 - <<'PY' ... DispatchConfig.load(Path('dispatch.yaml')) ...`
+- `cd cairn && .venv/bin/python -m unittest tests.test_mcp_http_transport.CapabilityProjectInjectionTests tests.test_capability_manifest tests.test_capability_admin -v`
+- `cd cairn && .venv/bin/python -m unittest discover -s tests -t .`
+- `git diff --check`
+
+### 未完成事项/风险
+
+- `cypher-vuln-research` 不再自动获得 AD/cloud/container 专家目录；如后续需要这些专项方法，应为 vuln-research 建二级目录或抽 shared 目录。
+
+---
+
+## 2026-06-08 · Cypher CTF 专家 skill 内置二级目录（已完成）
+
+### 背景
+
+`cypher-ctf` 的专家方法不再作为独立 skill 注入，而是作为 `cypher-ctf` 的内部二级目录随顶层 skill 一起进入 worker，减少项目能力选择和 prompt 中的独立 skill 噪音。
+
+### 已完成变更
+
+- 将 CTF 专家 skill 移入 `capabilities/skills/cypher-ctf/skills/<sub-skill-id>/`。
+- 从 `dispatch.capabilities.yaml` 删除这些专家 skill 的独立 catalog entries，保留 `cypher-ctf` 顶层 skill。
+- 更新 `cypher-ctf/SKILL.md`，要求从自身 `skills/` 二级目录读取专家 workflow。
+- 更新 `cypher-pentest` / `cypher-vuln-research` 文档，避免引用已不再独立注入的 CTF 专家 skill。
+- 补充注入测试，确认 `cypher-ctf` 注入目录包含 bundled sub-skill，但 prompt 只列顶层 skill。
+
+### 验证结果
+
+- `CAIRN_JWT_SECRET=... CAIRN_SECRETS_KEY=... CAIRN_DISPATCHER_DATAS_ROOT=/tmp/cairn-test ANTHROPIC_AUTH_TOKEN=test OPENAI_API_KEY=test python3 - <<'PY' ... DispatchConfig.load(Path('dispatch.yaml')) ...`
+- `cd cairn && .venv/bin/python -m unittest tests.test_mcp_http_transport.CapabilityProjectInjectionTests tests.test_capability_manifest tests.test_capability_admin -v`
+- `cd cairn && .venv/bin/python -m unittest discover -s tests -t .`
+- `git diff --check`
+
+### 未完成事项/风险
+
+- `cypher-pentest` 和 `cypher-vuln-research` 目前不再共享这些专家 skill；如后续需要专家方法，应为它们建立独立二级目录或 shared 目录。
+
+---
+
+## 2026-06-08 · Capability routing metadata 动态注入（已完成）
+
+### 背景
+
+`{capability_instructions}` 需要支持大量 MCP/skill 的组合关系，不能在系统代码里预设某个 MCP 应该调用某个 skill 的具体业务规则。本次把能力路由改成 catalog metadata 驱动：系统代码只负责通用渲染，能力何时使用由配置和 catalog 字段声明。
+
+### 已完成变更
+
+- `capability_catalog` 新增 `use_when`、`activation_hint`、`preferred_mcp_ids` 迁移列。
+- Dispatcher / Server model 与 admin upsert/register builtin catalog 均支持 routing metadata。
+- `dispatcher/capabilities.py` 重写 `{capability_instructions}` 渲染：执行阶段输出 MCP config、skill 路径和动态路由提示；`reason` 阶段只输出 metadata 并禁止执行能力。
+- `dispatch.capabilities.yaml` 为 `chrome-devtools-host` 与 `js-reverse-automation` 配置动态触发条件、activation hint、`required_skill_ids` 与 `preferred_mcp_ids`。
+- 补充单测覆盖 DB/API 持久化、YAML 引用校验、catalog payload、执行/reason prompt 渲染。
+
+### 验证结果
+
+- `python3 -m py_compile cairn/src/cairn/dispatcher/capabilities.py cairn/src/cairn/dispatcher/config.py cairn/src/cairn/server/capabilities_service.py cairn/src/cairn/server/db.py cairn/src/cairn/server/models_pkg/capabilities.py`
+- `cd cairn && .venv/bin/python -m unittest tests.test_mcp_http_transport.CapabilityProjectInjectionTests tests.test_capability_admin tests.test_capability_manifest -v`
+
+### 未完成事项/风险
+
+- 当前只给 `chrome-devtools-host` / `js-reverse-automation` 写了 routing metadata；其他 skill 需要后续按同一字段补齐。
+- UI 如需编辑这些字段，需要补 Settings 表单交互；后端 API 已可持久化。
+
+---
+
+## 2026-06-08 · Prompt 注入链路文档更新（已完成）
+
+### 背景
+
+本次审查聚焦 Dispatcher 如何把不同阶段、不同 primary role、MCP/skill capability 与 remote support 注入到 worker prompt 和 Agent CLI 参数中。目标是让后续实现或排障时能直接从 `AI/` 文档理解 prompt 的来源、渲染顺序、阶段差异和能力边界。
+
+### 已完成变更
+
+- `AI/ARCHITECTURE.md`：在 MCP / Skill / Role 控制面章节补充「Prompt 注入与执行链路」，新增总览 flowchart、共用执行 sequence diagram、bootstrap/explore/reason/conclude 阶段矩阵。
+- `AI/ARCHITECTURE.md`：明确 role 只进入 `{role_instructions}`，capability 只影响 worker runtime 与 prompt 控制面，`reason` 阶段仅收到 capability metadata，不执行 MCP/skill。
+- `AI/CODEBASE_ANALYSIS.md`：在 Prompt 设计章节补充实现细节，覆盖 `prompting.py`、`tasks/{bootstrap,explore,reason}.py`、`roles.py`、`capabilities.py` 与 worker adapters 的注入职责。
+- `AI/CODEBASE_ANALYSIS.md`：补充阶段注入矩阵、role snapshot 渲染格式、MCP/skill `source=selected|required` 语义、`mcp.required_skill_ids` 自动注入 skill 机制，以及 Claude/Codex adapter 的能力参数差异。
+
+### 验证结果
+
+- 使用 `rg` 校验文档引用的关键函数和文件路径仍存在。
+- 检查新增 Mermaid / text fenced code block 闭合完整。
+- 本次只更新文档，未改运行时代码。
+
+### 未完成事项/风险
+
+- `AI/PROJECT_OVERVIEW.md` 未更新；本次变更不涉及项目定位、技术栈或快速开始。
+- 如后续新增 task type 或 worker adapter，需要同步更新阶段矩阵和 worker argv 注入说明。
+
+---
+
 ## 2026-06-07 · SQLite health/status 降级与无副作用状态查询（已完成）
 
 ### 背景
