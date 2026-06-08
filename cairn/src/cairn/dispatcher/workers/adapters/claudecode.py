@@ -137,6 +137,8 @@ class ClaudeCodeDriver(SeedSessionDriver):
         args: list[str] = []
         if context.mcp_config_path:
             args.extend(["--mcp-config", context.mcp_config_path])
+        if context.claude_plugin_dir:
+            args.extend(["--plugin-dir", context.claude_plugin_dir])
         if context.skill_root:
             args.extend(["--add-dir", context.skill_root])
         return args

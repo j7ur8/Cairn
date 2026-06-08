@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 CAPABILITY_ROOT = "/tmp/cairn-capabilities"
 CHROME_DEVTOOLS_PROBE_TYPE = "chrome_devtools_http"
 HOST_DOCKER_INTERNAL = "host.docker.internal"
+CLAUDE_SESSION_PLUGIN_NAME = "cairn-session-capabilities"
 LOG = logging.getLogger(__name__)
 
 
@@ -163,6 +164,7 @@ def inject_project_capabilities(
     mcp_root = f"{capability_root}/mcp"
     mcp_path = f"{capability_root}/mcp.json"
     skill_root = f"{capability_root}/skills"
+    claude_plugin_dir = f"{capability_root}/claude-plugin"
     injected_mcp_servers = list(mcp_servers)
     injected_skills: list[SkillCapabilityConfig] = []
     injected_mcp_details: list[dict[str, Any]] = []
@@ -188,6 +190,22 @@ def inject_project_capabilities(
             errors.append(f"skill:{skill.id}: failed to inject directory: {exc}")
             continue
         injected_skills.append(skill)
+    if injected_skills:
+        try:
+            container_manager.write_text_file(
+                container_name,
+                f"{claude_plugin_dir}/.claude-plugin/plugin.json",
+                _claude_plugin_json(),
+            )
+            for skill in injected_skills:
+                container_manager.write_directory(
+                    container_name,
+                    f"{claude_plugin_dir}/skills/{skill.id}",
+                    Path(skill.source_path),
+                )
+        except Exception as exc:
+            errors.append(f"claude_plugin: failed to write session plugin: {exc}")
+            claude_plugin_dir = ""
 
     instructions = _instructions(mcp_path, skill_root, injected_mcp_servers, injected_skills)
     return CapabilityInjection(
@@ -200,6 +218,7 @@ def inject_project_capabilities(
             capability_root=capability_root if (injected_mcp_servers or injected_skills) else "",
             mcp_config_path=mcp_path if injected_mcp_servers else "",
             skill_root=skill_root if injected_skills else "",
+            claude_plugin_dir=claude_plugin_dir if injected_skills and claude_plugin_dir else "",
             mcp_servers=injected_mcp_details,
             skills=[item.id for item in injected_skills],
         ),
@@ -212,6 +231,15 @@ def _mcp_json(mcp_servers: list[McpServerCapabilityConfig], capability_root: str
             item.id: _mcp_config_detail(item, capability_root)
             for item in mcp_servers
         }
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _claude_plugin_json() -> str:
+    payload = {
+        "name": CLAUDE_SESSION_PLUGIN_NAME,
+        "version": "0.0.0",
+        "description": "Session-only Cairn capability skills for the current task.",
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -435,10 +463,13 @@ def _instructions(
             lines.append("")
     if skills:
         lines.extend(["## Skills", f"Directory root: {skill_root}", ""])
+        lines.append("When your agent runtime exposes a native Skill tool and routing conditions match, invoke the matching skill first. If native skill invocation is unavailable, read the listed SKILL.md path and follow that workflow.")
+        lines.append("")
         for item in skills:
             path = f"{skill_root}/{item.id}"
             lines.append(f"- {item.id}: {item.name}")
             lines.append(f"  Path: {path}")
+            lines.append(f"  Claude native Skill name: {CLAUDE_SESSION_PLUGIN_NAME}:{item.id}")
             _append_text(lines, "Description", item.description)
             _append_list(lines, "Use when", item.use_when)
             _append_list(lines, "Preferred MCP servers", item.preferred_mcp_ids)

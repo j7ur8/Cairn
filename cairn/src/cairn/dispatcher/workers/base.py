@@ -21,6 +21,7 @@ class WorkerExecutionContext:
     capability_root: str = ""
     mcp_config_path: str = ""
     skill_root: str = ""
+    claude_plugin_dir: str = ""
     mcp_servers: list[dict[str, Any]] | None = None
     skills: list[str] | None = None
 

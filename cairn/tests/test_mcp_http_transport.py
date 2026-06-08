@@ -335,12 +335,23 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.skills, ["s"])
         self.assertIn("Config file: /tmp/cairn-capabilities/proj/task/mcp.json", result.instructions)
         self.assertIn("Directory root: /tmp/cairn-capabilities/proj/task/skills", result.instructions)
+        self.assertIn("native Skill tool", result.instructions)
+        self.assertIn("Claude native Skill name: cairn-session-capabilities:s", result.instructions)
         self.assertIn("Description: metadata mcp", result.instructions)
         self.assertIn("Description: metadata skill", result.instructions)
-        self.assertEqual(len(manager.files), 1)
-        self.assertEqual(len(manager.directories), 1)
+        self.assertEqual(len(manager.files), 2)
+        self.assertEqual(len(manager.directories), 2)
         self.assertEqual(result.context.mcp_config_path, "/tmp/cairn-capabilities/proj/task/mcp.json")
         self.assertEqual(result.context.skill_root, "/tmp/cairn-capabilities/proj/task/skills")
+        self.assertEqual(result.context.claude_plugin_dir, "/tmp/cairn-capabilities/proj/task/claude-plugin")
+        plugin_file = [item for item in manager.files if item[1].endswith("/.claude-plugin/plugin.json")][0]
+        self.assertEqual(plugin_file[1], "/tmp/cairn-capabilities/proj/task/claude-plugin/.claude-plugin/plugin.json")
+        self.assertIn('"name": "cairn-session-capabilities"', plugin_file[2])
+        self.assertIn('"version": "0.0.0"', plugin_file[2])
+        self.assertIn(
+            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/s", "/tmp/skill"),
+            [(container, target, str(source)) for container, target, source in manager.directories],
+        )
 
     def test_cypher_ctf_injection_uses_bundled_sub_skill_directory(self):
         from types import SimpleNamespace
@@ -379,10 +390,15 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         )
 
         self.assertEqual(result.skills, ["cypher-ctf"])
-        self.assertEqual(len(manager.directories), 1)
-        _, target_path, source_path = manager.directories[0]
+        self.assertEqual(len(manager.directories), 2)
+        runtime_dir = [item for item in manager.directories if item[1].endswith("/skills/cypher-ctf")][0]
+        _, target_path, source_path = runtime_dir
         self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-ctf")
         self.assertEqual(Path(source_path), skill_path)
+        self.assertIn(
+            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/cypher-ctf", str(skill_path)),
+            [(container, target, str(source)) for container, target, source in manager.directories],
+        )
         self.assertTrue((Path(source_path) / "skills" / "cypher-sqli" / "SKILL.md").exists())
         self.assertIn("cypher-ctf", result.instructions)
         self.assertNotIn("skills/cypher-sqli", result.instructions)
@@ -424,10 +440,15 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         )
 
         self.assertEqual(result.skills, ["cypher-pentest"])
-        self.assertEqual(len(manager.directories), 1)
-        _, target_path, source_path = manager.directories[0]
+        self.assertEqual(len(manager.directories), 2)
+        runtime_dir = [item for item in manager.directories if item[1].endswith("/skills/cypher-pentest")][0]
+        _, target_path, source_path = runtime_dir
         self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-pentest")
         self.assertEqual(Path(source_path), skill_path)
+        self.assertIn(
+            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/cypher-pentest", str(skill_path)),
+            [(container, target, str(source)) for container, target, source in manager.directories],
+        )
         self.assertTrue((Path(source_path) / "skills" / "cypher-ad" / "SKILL.md").exists())
         self.assertTrue((Path(source_path) / "skills" / "cypher-cloud" / "SKILL.md").exists())
         self.assertTrue((Path(source_path) / "skills" / "cypher-container" / "SKILL.md").exists())
@@ -461,6 +482,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(manager.directories, [])
         self.assertEqual(result.context.mcp_config_path, "")
         self.assertEqual(result.context.skill_root, "")
+        self.assertEqual(result.context.claude_plugin_dir, "")
 
     def test_reason_skips_capabilities_not_enabled_for_reason(self):
         from cairn.dispatcher.capabilities import inject_project_capabilities

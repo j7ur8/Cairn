@@ -61,6 +61,54 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertIn("--effort", result.argv)
         self.assertEqual(result.argv[result.argv.index("--effort") + 1], "xhigh")
 
+    def test_build_execute_includes_claude_session_plugin_and_skill_dir(self) -> None:
+        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+        context = WorkerExecutionContext(
+            mcp_config_path="/tmp/cairn-capabilities/proj/task/mcp.json",
+            skill_root="/tmp/cairn-capabilities/proj/task/skills",
+            claude_plugin_dir="/tmp/cairn-capabilities/proj/task/claude-plugin",
+        )
+        result = ClaudeCodeDriver().build_execute(
+            self._worker(),
+            "hello",
+            "11111111-1111-1111-1111-111111111111",
+            context,
+        )
+
+        self.assertIn("--plugin-dir", result.argv)
+        self.assertEqual(
+            result.argv[result.argv.index("--plugin-dir") + 1],
+            "/tmp/cairn-capabilities/proj/task/claude-plugin",
+        )
+        self.assertIn("--add-dir", result.argv)
+        self.assertEqual(
+            result.argv[result.argv.index("--add-dir") + 1],
+            "/tmp/cairn-capabilities/proj/task/skills",
+        )
+
+    def test_build_conclude_includes_claude_session_plugin(self) -> None:
+        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+        context = WorkerExecutionContext(
+            skill_root="/tmp/cairn-capabilities/proj/task/skills",
+            claude_plugin_dir="/tmp/cairn-capabilities/proj/task/claude-plugin",
+        )
+        argv = ClaudeCodeDriver().build_conclude(
+            self._worker(),
+            "hello",
+            "11111111-1111-1111-1111-111111111111",
+            context,
+        )
+
+        self.assertIn("--plugin-dir", argv)
+        self.assertEqual(
+            argv[argv.index("--plugin-dir") + 1],
+            "/tmp/cairn-capabilities/proj/task/claude-plugin",
+        )
+
 
 class CodexDriverCommandTests(unittest.TestCase):
     def _worker(self):
@@ -153,10 +201,15 @@ class CodexDriverCommandTests(unittest.TestCase):
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
-        context = WorkerExecutionContext(skill_root="/tmp/cairn-capabilities/proj/skills")
+        context = WorkerExecutionContext(
+            skill_root="/tmp/cairn-capabilities/proj/skills",
+            claude_plugin_dir="/tmp/cairn-capabilities/proj/claude-plugin",
+        )
         result = CodexDriver().build_execute(self._worker(), "hello", None, context)
         self.assertIn("--add-dir", result.argv)
         self.assertIn("/tmp/cairn-capabilities/proj/skills", result.argv)
+        self.assertNotIn("--plugin-dir", result.argv)
+        self.assertNotIn("/tmp/cairn-capabilities/proj/claude-plugin", result.argv)
 
 
 class CodexTraceParserTests(unittest.TestCase):
