@@ -241,12 +241,12 @@ capabilities:
     source_path: ./capabilities/skills/cypher-post-exploit
     task_types:
     - explore
-  - id: hello-js-reverse
-    name: Hello JS Reverse
-    description: Frontend JavaScript reverse-engineering workflows that pair the camoufox-reverse-mcp
-      browser MCP with the hello_js_reverse_skill reference material.
-    source_path: ./capabilities/skills/hello-js-reverse
+  - id: js-reverse-automation
+    name: js-reverse-automation
+    description: use devtools mcp to reverse js 
+    source_path: ./capabilities/skills/js-reverse-automation
     task_types:
+    - bootstrap
     - explore
 roles:
 - id: cypher-ctf-operator
