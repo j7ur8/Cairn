@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, Query
 
+from cairn.server import db as main_db
 from cairn.server.observability import db
 from cairn.server.observability.models import (
     CreateEventRequest,
@@ -28,6 +29,7 @@ from cairn.server.observability.repository import (
     list_executions,
     list_project_events,
 )
+from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}", tags=["llm-execution-log"])
@@ -65,6 +67,14 @@ def get_project_llm_event_view(
     limit: int = Query(default=300, ge=1),
     include_low_signal: bool = Query(default=False),
 ):
+    with main_db.get_conn() as main_conn:
+        row = main_conn.execute(
+            "SELECT llm_hidden_event_kinds FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+        hidden_event_kinds = parse_llm_hidden_event_kinds(
+            row["llm_hidden_event_kinds"] if row is not None else None
+        )
     with db.get_conn() as conn:
         return list_event_view(
             conn,
@@ -73,6 +83,7 @@ def get_project_llm_event_view(
             after=after,
             limit=_limit(limit),
             include_low_signal=include_low_signal,
+            hidden_event_kinds=hidden_event_kinds,
         )
 
 

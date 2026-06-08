@@ -14,8 +14,10 @@ from cairn.server.models_pkg.projects import (
     CreateHintInline,
     Fact,
     Intent,
+    LLM_EVENT_KIND_OPTIONS,
     ProjectDetail,
     ProjectMeta,
+    normalize_llm_event_kinds,
 )
 
 class CapabilitySelection(BaseModel):
@@ -65,6 +67,7 @@ class CreateProjectRequest(BaseModel):
     role_id: str | None = None
     proxy_id: str | None = None
     ai_profile_selections: TaskAiProfileSelections | None = None
+    llm_visible_event_kinds: list[str] | None = None
 
     @model_validator(mode="after")
     def _merge_capabilities(self) -> "CreateProjectRequest":
@@ -77,7 +80,17 @@ class CreateProjectRequest(BaseModel):
             )
         if self.capabilities_per_task is None:
             self.capabilities_per_task = task_capabilities_map(None)
+        if self.llm_visible_event_kinds is None:
+            self.llm_visible_event_kinds = list(LLM_EVENT_KIND_OPTIONS)
+            self.llm_visible_event_kinds.remove("usage")
         return self
+
+    @field_validator("llm_visible_event_kinds")
+    @classmethod
+    def validate_llm_visible_event_kinds(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return normalize_llm_event_kinds(value)
 
     @field_validator("title", "origin", "goal", "role_id")
     @classmethod
@@ -314,6 +327,14 @@ class ReplayRunCreateRequest(BaseModel):
     capabilities: CapabilitySelection | None = None
     role_id: str | None = None
     ai_profile_selections: TaskAiProfileSelections | None = None
+    llm_visible_event_kinds: list[str] | None = None
+
+    @field_validator("llm_visible_event_kinds")
+    @classmethod
+    def validate_llm_visible_event_kinds(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return normalize_llm_event_kinds(value)
 
     @field_validator("title", "origin", "goal", "role_id")
     @classmethod

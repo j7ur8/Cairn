@@ -7,6 +7,7 @@ from hashlib import sha256
 from fastapi import HTTPException
 
 from cairn.server.models import Intent, ProjectMeta, ProjectReason, ReasonState
+from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
 
 
 REASON_FAILURE_BACKOFF_BASE_SECONDS = 30
@@ -314,6 +315,9 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         status=row["status"],
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
+        llm_hidden_event_kinds=parse_llm_hidden_event_kinds(
+            row["llm_hidden_event_kinds"] if "llm_hidden_event_kinds" in row.keys() else None
+        ),
     )
 
 

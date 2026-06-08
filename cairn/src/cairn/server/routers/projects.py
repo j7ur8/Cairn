@@ -1,3 +1,4 @@
+import json
 import logging
 import sqlite3
 
@@ -33,6 +34,7 @@ from cairn.server.capabilities_service import (
     probe_per_task,
 )
 from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
+from cairn.server.models_pkg.projects import hidden_kinds_from_visible
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -125,10 +127,11 @@ def create_project(body: CreateProjectRequest):
             proxy_summary = _proxy_summary_from_row(proxy_row)
 
         try:
+            llm_hidden_event_kinds = hidden_kinds_from_visible(body.llm_visible_event_kinds)
             conn.execute(
-                "INSERT INTO projects (id, title, status, created_at, proxy_id) "
-                "VALUES (?, ?, 'active', ?, ?)",
-                (pid, body.title, now, body.proxy_id),
+                "INSERT INTO projects (id, title, status, created_at, proxy_id, llm_hidden_event_kinds) "
+                "VALUES (?, ?, 'active', ?, ?, ?)",
+                (pid, body.title, now, body.proxy_id, json.dumps(llm_hidden_event_kinds, ensure_ascii=False)),
             )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(400, f"invalid proxy_id: {body.proxy_id}") from exc
@@ -193,7 +196,14 @@ def create_project(body: CreateProjectRequest):
 
 
         return ProjectDetail(
-            project=ProjectMeta(id=pid, title=body.title, status="active", created_at=now, reason=None),
+            project=ProjectMeta(
+                id=pid,
+                title=body.title,
+                status="active",
+                created_at=now,
+                reason=None,
+                llm_hidden_event_kinds=llm_hidden_event_kinds,
+            ),
             facts=[
                 Fact(id="origin", description=body.origin),
                 Fact(id="goal", description=body.goal),

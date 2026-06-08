@@ -287,6 +287,38 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(view.stats.hidden_by_kind, {})
 
+    def test_event_view_default_hides_only_usage(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+
+        project_id = "proj_view_default"
+        execution_id = "exec_view_default"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+        for kind in ("usage", "prompt", "capability_manifest", "agent_message"):
+            append_event(
+                self.conn,
+                project_id,
+                execution_id,
+                CreateEventRequest(phase="bootstrap", event_kind=kind, stream="system" if kind != "agent_message" else "result", content=kind),
+                ObservabilitySettings(),
+            )
+
+        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10)
+
+        self.assertEqual(
+            [event.event_kind for event in view.primary_events],
+            ["agent_message", "capability_manifest", "prompt"],
+        )
+        self.assertEqual(view.stats.hidden_by_kind, {"usage": 1})
+
 
 class ProjectFilesRouterTests(unittest.TestCase):
     def setUp(self) -> None:

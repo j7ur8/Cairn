@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS projects (
     title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
+    llm_hidden_event_kinds TEXT NOT NULL DEFAULT '["usage"]',
     reason_worker TEXT,
     reason_run_id TEXT,
     reason_trigger TEXT,
@@ -577,6 +578,11 @@ def configure(path: Path) -> None:
             )
         if "reason_run_id" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN reason_run_id TEXT")
+        if "llm_hidden_event_kinds" not in cols:
+            conn.execute(
+                "ALTER TABLE projects ADD COLUMN llm_hidden_event_kinds "
+                "TEXT NOT NULL DEFAULT '[\"usage\"]'"
+            )
         _apply_migrations(conn)
 
 

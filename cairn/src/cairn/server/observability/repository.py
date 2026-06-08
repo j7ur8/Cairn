@@ -15,6 +15,7 @@ from cairn.server.observability.models import (
     ObservabilitySettings,
 )
 from cairn.server.observability.redaction import redact_content, truncate_content
+from cairn.server.models_pkg.projects import DEFAULT_LLM_HIDDEN_EVENT_KINDS, normalize_llm_event_kinds
 from cairn.server.services import utcnow
 
 
@@ -334,9 +335,6 @@ def list_execution_events(
     return [row_to_event(row) for row in rows]
 
 
-LOW_SIGNAL_EVENT_KINDS = ("usage", "prompt", "capability_manifest")
-
-
 def list_event_view(
     conn: sqlite3.Connection,
     project_id: str,
@@ -345,6 +343,7 @@ def list_event_view(
     after: int = 0,
     limit: int = 300,
     include_low_signal: bool = False,
+    hidden_event_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> EventViewResponse:
     where = ["project_id = ?"]
     params: list[object] = [project_id]
@@ -375,10 +374,14 @@ def list_event_view(
 
     event_where = list(where)
     event_params = list(params)
+    hidden_kinds = normalize_llm_event_kinds(
+        hidden_event_kinds if hidden_event_kinds is not None else list(DEFAULT_LLM_HIDDEN_EVENT_KINDS)
+    )
     if not include_low_signal:
-        placeholders = ", ".join("?" for _ in LOW_SIGNAL_EVENT_KINDS)
-        event_where.append(f"event_kind NOT IN ({placeholders})")
-        event_params.extend(LOW_SIGNAL_EVENT_KINDS)
+        if hidden_kinds:
+            placeholders = ", ".join("?" for _ in hidden_kinds)
+            event_where.append(f"event_kind NOT IN ({placeholders})")
+            event_params.extend(hidden_kinds)
     rows = conn.execute(
         f"""
         SELECT * FROM llm_execution_events
@@ -392,7 +395,7 @@ def list_event_view(
 
     hidden_by_kind: dict[str, int] = {}
     if not include_low_signal:
-        hidden_by_kind = {kind: by_kind.get(kind, 0) for kind in LOW_SIGNAL_EVENT_KINDS if by_kind.get(kind, 0) > 0}
+        hidden_by_kind = {kind: by_kind.get(kind, 0) for kind in hidden_kinds if by_kind.get(kind, 0) > 0}
 
     activity = _latest_usage_activity(conn, where_sql, params)
     return EventViewResponse(

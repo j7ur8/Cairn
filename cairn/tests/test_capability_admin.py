@@ -194,6 +194,31 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(per_task["explore"].mcp_server_ids, ["m"])
         self.assertEqual(per_task["reason"].mcp_server_ids, [])
 
+    def test_create_project_persists_llm_visible_event_config(self) -> None:
+        import json
+        from cairn.server.models import CreateProjectRequest
+        from cairn.server.routers.projects import create_project
+
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            llm_visible_event_kinds=["prompt", "agent_message"],
+            ai_profile_selections=self._create_profile(),
+        ))
+
+        self.assertEqual(project.project.llm_visible_event_kinds, ["prompt", "agent_message"])
+        self.assertIn("usage", project.project.llm_hidden_event_kinds)
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT llm_hidden_event_kinds FROM projects WHERE id = ?",
+                (project.project.id,),
+            ).fetchone()
+        hidden = json.loads(row["llm_hidden_event_kinds"])
+        self.assertNotIn("prompt", hidden)
+        self.assertNotIn("agent_message", hidden)
+        self.assertIn("usage", hidden)
+
     def test_requires_auto_expands_in_same_task(self) -> None:
         from cairn.server.capabilities_service import (
             expand_task_capabilities, get_catalog_map,

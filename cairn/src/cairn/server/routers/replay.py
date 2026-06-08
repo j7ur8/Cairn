@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from cairn.server.capabilities_service import (
     task_capabilities_map,
 )
 from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
+from cairn.server.models_pkg.projects import hidden_kinds_from_visible, parse_llm_hidden_event_kinds
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -67,10 +69,21 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
         now = utcnow()
         replay_project_id = next_project_id(conn)
         run_id = f"replay_{replay_project_id}"
+        source_project = get_project_or_404(conn, project_id)
+        llm_hidden_event_kinds = (
+            hidden_kinds_from_visible(body.llm_visible_event_kinds)
+            if body.llm_visible_event_kinds is not None
+            else parse_llm_hidden_event_kinds(
+                source_project["llm_hidden_event_kinds"]
+                if "llm_hidden_event_kinds" in source_project.keys()
+                else None
+            )
+        )
 
         conn.execute(
-            "INSERT INTO projects (id, title, status, created_at) VALUES (?, ?, 'stopped', ?)",
-            (replay_project_id, body.title, now),
+            "INSERT INTO projects (id, title, status, created_at, llm_hidden_event_kinds) "
+            "VALUES (?, ?, 'stopped', ?, ?)",
+            (replay_project_id, body.title, now, json.dumps(llm_hidden_event_kinds, ensure_ascii=False)),
         )
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
