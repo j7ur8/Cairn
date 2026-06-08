@@ -52,6 +52,24 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("async downloadProjectFile(file)", html)
         self.assertNotIn(':href="projectFileDownloadUrl(file)"', html)
 
+    def test_text_export_uses_authenticated_fetch(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("async fetchText(path)", html)
+        self.assertIn("await this.authFetch(path, { method: 'GET' })", html)
+        self.assertNotIn("const r = await fetch(path);", html)
+
+    def test_attachment_upload_uses_authenticated_fetch(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("async uploadProjectAttachments(projectId, attachments, actor)", html)
+        self.assertIn(
+            "await this.authFetch(`/projects/${encodeURIComponent(projectId)}/attachments`, { method: 'POST', body: form })",
+            html,
+        )
+
     def test_health_reports_migration_errors(self) -> None:
         from fastapi.testclient import TestClient
         from cairn.server import db

@@ -2693,7 +2693,7 @@ function cairnApp() {
     },
 
     async fetchText(path) {
-      const r = await fetch(path);
+      const r = await this.authFetch(path, { method: 'GET' });
       const text = await r.text();
       if (!r.ok) {
         let detail = text;
@@ -3640,7 +3640,7 @@ function cairnApp() {
         form.append('descriptions', attachment.description?.trim() || '附件');
       }
       form.append('creator', actor);
-      const r = await fetch(`/projects/${encodeURIComponent(projectId)}/attachments`, { method: 'POST', body: form });
+      const r = await this.authFetch(`/projects/${encodeURIComponent(projectId)}/attachments`, { method: 'POST', body: form });
       let data = null;
       try { data = await r.json(); } catch {}
       if (!r.ok) {
