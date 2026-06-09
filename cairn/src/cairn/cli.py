@@ -7,7 +7,6 @@ import uvicorn
 from cairn.dispatcher.logging import configure_logging
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
-from cairn.server.observability import db as observability_db
 
 
 @click.group()
@@ -18,26 +17,10 @@ def main():
 @main.command()
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default=8000, show_default=True, help="Bind port")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
 @click.option("--log-level", default="info", show_default=True, help="Uvicorn log level")
 @click.option("--access-log/--no-access-log", default=True, show_default=True, help="Enable Uvicorn access log")
-def serve(host: str, port: int, db_path: str, observability_db_path: str, log_level: str, access_log: bool):
+def serve(host: str, port: int, log_level: str, access_log: bool):
     """Start the Cairn API server."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
     from cairn.server.app import app
 
     uvicorn.run(
@@ -79,87 +62,13 @@ def dispatch(config_path: Path, once: bool, startup_healthcheck_only: bool, log_
 
 @main.group("db")
 def db_commands():
-    """SQLite maintenance commands."""
+    """PostgreSQL database commands."""
 
 
 @db_commands.command("status")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
-def db_status(db_path: str, observability_db_path: str):
-    """Print SQLite status for the main and observability databases."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
-    click.echo(
-        json.dumps(
-            {
-                "main": db.sqlite_status(),
-                "observability": observability_db.sqlite_status(),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-
-
-@db_commands.command("integrity-check")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
-def db_integrity_check(db_path: str, observability_db_path: str):
-    """Run PRAGMA integrity_check on both SQLite databases."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
-    result = {
-        "main": db.integrity_check(),
-        "observability": observability_db.integrity_check(),
-    }
-    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
-    if result["main"] != ["ok"] or result["observability"] != ["ok"]:
-        raise click.ClickException("SQLite integrity check failed")
-
-
-@db_commands.command("diagnose")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
-def db_diagnose(db_path: str, observability_db_path: str):
-    """Print SQLite status, checks, and dispatcher lock diagnostics."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
+def db_status():
+    """Print PostgreSQL status and dispatcher lock diagnostics."""
+    db.configure()
     with db.get_conn() as conn:
         lock_rows = [
             dict(row)
@@ -168,112 +77,29 @@ def db_diagnose(db_path: str, observability_db_path: str):
             ).fetchall()
         ]
     result = {
-        "main": {
-            "status": db.sqlite_status(),
-            "integrity_check": db.integrity_check(),
-            "dispatcher_locks": lock_rows,
-        },
-        "observability": {
-            "status": observability_db.sqlite_status(),
-            "integrity_check": observability_db.integrity_check(),
-        },
-        "note": "Do not delete -wal or -shm files while Cairn server or dispatcher is running.",
-    }
-    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
-    if result["main"]["integrity_check"] != ["ok"] or result["observability"]["integrity_check"] != ["ok"]:
-        raise click.ClickException("SQLite diagnose found integrity errors")
-
-
-@db_commands.command("checkpoint")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
-def db_checkpoint(db_path: str, observability_db_path: str):
-    """Run WAL TRUNCATE checkpoint for both SQLite databases."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
-    result = {
-        "main": db.checkpoint_truncate(),
-        "observability": observability_db.checkpoint_truncate(),
+        "status": db.postgres_status(),
+        "dispatcher_locks": lock_rows,
     }
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-@db_commands.command("recover-plan")
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-def db_recover_plan(db_path: str):
-    """Print the manual SQLite recovery runbook; does not modify files."""
-    path = Path(db_path).expanduser()
-    result = {
-        "database": str(path),
-        "warning": "This command is informational only and does not modify files.",
-        "steps": [
-            "Stop cairn-dispatcher and cairn-server.",
-            f"Copy {path}, {path}-wal, and {path}-shm to a timestamped backup location if they exist.",
-            "Run `cairn db diagnose --db-path <path>` while services are stopped.",
-            "If integrity_check is ok, run `cairn db checkpoint --db-path <path>` before restarting services.",
-            "Only if services are stopped and the main database integrity_check is ok, stale -wal/-shm files may be moved aside for recovery.",
-            "Restart cairn-server first, then cairn-dispatcher.",
-        ],
-    }
-    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+@db_commands.command("migrate")
+def db_migrate():
+    """Run Alembic migrations to head."""
+    db.configure(run_migrations=False)
+    db.upgrade_head()
+    db.seed_defaults()
+    click.echo(json.dumps(db.postgres_status(), ensure_ascii=False, indent=2))
 
 
-@db_commands.command("backup")
-@click.argument("destination", type=click.Path(path_type=Path))
-@click.option(
-    "--db-path",
-    type=click.Path(),
-    default=str(db.DEFAULT_DB),
-    show_default=True,
-    help="SQLite database path",
-)
-@click.option(
-    "--observability-db-path",
-    type=click.Path(),
-    default=str(observability_db.DEFAULT_OBSERVABILITY_DB),
-    show_default=True,
-    help="LLM execution observability SQLite database path",
-)
-def db_backup(destination: Path, db_path: str, observability_db_path: str):
-    """Create online backups for both SQLite databases."""
-    db.configure(Path(db_path))
-    observability_db.configure(Path(observability_db_path))
-    if destination.suffix:
-        main_destination = destination
-        obs_destination = destination.with_name(
-            f"{destination.stem}-observability{destination.suffix}"
-        )
-    else:
-        destination.mkdir(parents=True, exist_ok=True)
-        main_destination = destination
-        obs_destination = destination
-    main_backup = db.backup_to(main_destination)
-    obs_backup = observability_db.backup_to(obs_destination)
-    click.echo(
-        json.dumps(
-            {
-                "main": str(main_backup),
-                "observability": str(obs_backup),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+@db_commands.command("reset")
+@click.option("--yes", is_flag=True, help="Confirm destructive schema reset")
+def db_reset(yes: bool):
+    """Drop and recreate the PostgreSQL schema. Destructive."""
+    if not yes:
+        raise click.ClickException("Refusing to reset without --yes")
+    db.configure(run_migrations=False)
+    db.drop_all_for_tests()
+    db.upgrade_head()
+    db.seed_defaults()
+    click.echo(json.dumps(db.postgres_status(), ensure_ascii=False, indent=2))

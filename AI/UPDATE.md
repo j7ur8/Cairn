@@ -5,6 +5,18 @@
 
 # 更新日志
 
+## 2026-06-09 PostgreSQL Migration And Browser Verification
+
+- 全量移除运行时 SQLite 路径：删除旧 `db_schema.py`、`db_migrations.py`、`sqlite_diagnostics.py`，新增 PostgreSQL-only `server/db.py`、SQLAlchemy ORM metadata `server/orm.py`、Alembic 配置与 `0001/0002` migrations。
+- Docker Compose 新增 `cairn-postgres`，server/dispatcher 通过 `CAIRN_DATABASE_URL` 连接 PostgreSQL；`/health` 和 `cairn db status/migrate/reset` 改为报告 PostgreSQL/Alembic 状态。
+- 测试集已改为 PostgreSQL 语义，移除 WAL、PRAGMA、sqlite_master、migration_errors 等旧断言；`uv run --project cairn python -m unittest discover -s cairn/tests` 已通过，结果为 `325 tests OK`。
+- 使用 `docker compose down -v && docker compose up -d --build` 重建本地栈，`cairn-postgres`、`cairn-server`、`cairn-dispatcher` 均为 healthy，`/health` 返回 Alembic revision `0002_intent_partial_uniques`。
+- 使用本机 `chrome-devtools` MCP 访问 `http://127.0.0.1:8000/` 完成真实浏览器回归：登录、AI Profiles Check、Capabilities Probe、Proxy CRUD、Server Settings 保存、Create Project、bootstrap、Execution Log、Hints/Files/Caps、Replay Project、Stop 均可操作。
+- 已确认 AI Profiles 中每个 profile 的 `Check` 按钮位于 `Edit` 左侧；`claudecode_deepseek-v4-pro` check 通过，`codex` check 因上游 429 显示 unavailable，按当前人工确认不作为阻塞。
+- 已确认 Create Project 和 Replay Project 中 `EXECUTION LOG DEFAULT VISIBLE EVENTS` 不再重复出现。
+- 浏览器网络请求除首次未登录 `GET /auth/me [401]` 外无失败；控制台未发现业务 JS error，仅有 Tailwind runtime 生产警告和表单可访问性 issue。
+- 注意：运行时已 PostgreSQL-only，但业务层仍保留 SQLAlchemy-backed SQL adapter 和部分 raw SQL 查询；若要求严格“无 raw SQL adapter”，需要后续继续做 repository/ORM 查询替换。
+
 ## 2026-06-09 Browser Regression Execution
 
 - 使用 `docker compose up --build -d` 启动本地栈，并通过本机 MCP `chrome-devtools` 访问 `http://127.0.0.1:8000/` 执行真实浏览器回归。

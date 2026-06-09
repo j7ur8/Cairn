@@ -1,9 +1,9 @@
 """FastAPI dependencies for JWT-authenticated routes.
 
-The pattern matches the rest of Cairn: no SQLAlchemy, no async, the
+The pattern matches the rest of Cairn: synchronous repository calls, the
 ``current_user`` dependency reads the ``Authorization: Bearer ...`` header,
 verifies the JWT against ``CAIRN_JWT_SECRET``, looks up the user in
-SQLite, and returns the public view. Active-user enforcement is the
+PostgreSQL, and returns the public view. Active-user enforcement is the
 default; ``current_active_superuser`` adds the superuser check.
 
 Routes that need to stay public (login, register, health, metrics) opt

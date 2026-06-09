@@ -1,4 +1,25 @@
 services:
+  cairn-postgres:
+    image: postgres:16-alpine
+    container_name: cairn-postgres
+    environment:
+      POSTGRES_DB: cairn
+      POSTGRES_USER: cairn
+      POSTGRES_PASSWORD: cairn
+    ports:
+      - "5432:5432"
+    volumes:
+      - cairn-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cairn -d cairn"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - cairn
+
   cairn-worker-image:
     build:
       context: ./container
@@ -27,12 +48,15 @@ services:
     env_file:
       - .env
     environment:
+      CAIRN_DATABASE_URL: ${CAIRN_DATABASE_URL:-postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn}
       CAIRN_ATTACHMENTS_ROOT: ${PWD}/datas/attachments
       CAIRN_PROJECT_FILES_ROOT: ${PWD}/datas/project-files
       CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
     volumes:
-      - ./datas/cairn/:/root/.local/share/cairn/
       - ${PWD}/datas:${PWD}/datas
+    depends_on:
+      cairn-postgres:
+        condition: service_healthy
     healthcheck:
       test:
         - "CMD"
@@ -67,6 +91,7 @@ services:
     env_file:
       - .env
     environment:
+      CAIRN_DATABASE_URL: ${CAIRN_DATABASE_URL:-postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn}
       # Hardcoded absolute path; the value lives in .env so a
       # different host can override without editing this file.
       CAIRN_DISPATCHER_DATAS_ROOT: ${CAIRN_DISPATCHER_DATAS_ROOT}
@@ -83,12 +108,13 @@ services:
       - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./datas/cairn/:/root/.local/share/cairn/
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
       - ${PWD}/datas:${PWD}/datas
     depends_on:
+      cairn-postgres:
+        condition: service_healthy
       cairn-server:
         condition: service_healthy
       cairn-worker-image:
@@ -112,3 +138,6 @@ networks:
   cairn:
     name: cairn
     driver: bridge
+
+volumes:
+  cairn-postgres-data:

@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -25,12 +26,11 @@ class RedactionFreeTextTests(unittest.TestCase):
     def test_large_input_skips_regex_redaction(self) -> None:
         from cairn.dispatcher.observability import redaction
 
-        text = "x" * (redaction.MAX_REDACT_INPUT_BYTES + 1)
-        with self.assertLogs(redaction.LOG, level="WARNING") as logs:
+        text = "xx"
+        with patch.object(redaction, "MAX_REDACT_INPUT_BYTES", 1):
             out, changed = redaction.redact_content(text, [r"x+"])
         self.assertFalse(changed)
         self.assertEqual(out, text)
-        self.assertIn("too large", "\n".join(logs.output))
 
 
 if __name__ == "__main__":

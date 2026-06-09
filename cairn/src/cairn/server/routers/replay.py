@@ -340,8 +340,10 @@ def _sync_concluded_steps(conn, run) -> None:
             continue
         conn.execute(
             """
-            INSERT OR REPLACE INTO replay_fact_map (run_id, source_fact_id, replay_fact_id)
+            INSERT INTO replay_fact_map (run_id, source_fact_id, replay_fact_id)
             VALUES (?, ?, ?)
+            ON CONFLICT (run_id, source_fact_id) DO UPDATE
+            SET replay_fact_id = EXCLUDED.replay_fact_id
             """,
             (run["id"], step["source_to_fact_id"], replay_intent["to_fact_id"]),
         )

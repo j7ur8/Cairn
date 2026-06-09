@@ -5,7 +5,6 @@ os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 
 import os
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -19,14 +18,21 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class ObservabilityRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
+        self.tmp.close()
+        from cairn.server import db
         from cairn.server.observability import db as obs_db
 
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(obs_db.SCHEMA)
+        db.reset_for_tests()
+        obs_db.configure(Path(self.tmp.name))
+        self.main_db = db
+        self.conn_cm = obs_db.get_conn()
+        self.conn = self.conn_cm.__enter__()
 
     def tearDown(self) -> None:
-        self.conn.close()
+        self.conn_cm.__exit__(None, None, None)
+        self.main_db.reset_for_tests()
+        os.unlink(self.tmp.name)
 
     def test_recreating_execution_preserves_existing_event_counters(self) -> None:
         from cairn.server.observability.models import (
@@ -322,7 +328,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
 
 class ProjectFilesRouterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_file = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
+        self.db_file = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
         self.db_file.close()
         self.tmpdir = tempfile.TemporaryDirectory()
         self.project_root = Path(self.tmpdir.name) / "project-files"
@@ -330,7 +336,7 @@ class ProjectFilesRouterTests(unittest.TestCase):
 
         from cairn.server import db
 
-        db._db_path = None
+        db.reset_for_tests()
         db.configure(Path(self.db_file.name))
         self.db = db
         with db.get_conn() as conn:
@@ -350,7 +356,7 @@ class ProjectFilesRouterTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.files_router._PROJECT_FILES_ROOT = self.old_project_root
         self.files_router._ATTACHMENTS_ROOT = self.old_attachments_root
-        self.db._db_path = None
+        self.db.reset_for_tests()
         self.tmpdir.cleanup()
         os.unlink(self.db_file.name)
 

@@ -779,12 +779,24 @@ class McpRequiredSkillIdsTests(unittest.TestCase):
         # exists in the schema.
         with self.db.get_conn() as conn:
             cols = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(capability_catalog)").fetchall()
+                row["column_name"]
+                for row in conn.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'capability_catalog'
+                    """
+                ).fetchall()
             }
             role_cols = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(role_catalog)").fetchall()
+                row["column_name"]
+                for row in conn.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'role_catalog'
+                    """
+                ).fetchall()
             }
         self.assertIn("required_skill_ids", cols)
         self.assertIn("use_when", cols)

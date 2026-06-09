@@ -20,6 +20,8 @@
 
 1. 运行现有 Python 测试集，确认没有静态回归。
 2. 使用 Docker 启动服务栈，确认 `cairn-server` 和 `cairn-dispatcher` 健康。
+   - 当前数据库唯一支持 PostgreSQL；若测试不需要保留历史项目，可使用 `docker compose down -v` 重建 `cairn-postgres` volume。
+   - 健康检查必须返回 `database=postgresql` 且 Alembic revision 为当前 head。
 3. 启动本机 Chrome 远程调试：
 
 ```bash
@@ -123,6 +125,7 @@
 - 浏览器控制台无 error
 - 关键网络请求无失败
 - 后端健康检查为 `ok`
+- `/health` 返回 PostgreSQL/Alembic 状态正常
 - 破坏性操作仅作用于测试数据，并在回归结束后清理
 
 ## 6. 本地辅助文件

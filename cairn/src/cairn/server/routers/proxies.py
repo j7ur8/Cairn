@@ -6,14 +6,14 @@ worker container reads its proxy at task-launch time via
 ``dispatcher.protocol.client.CairnClient.get_proxy`` and injects the resolved
 env vars into the container.
 
-Auth credentials are stored in plaintext in SQLite for this round; observability
+Auth credentials are stored in plaintext for this round; observability
 redaction covers log/observability leaks. Encryption-at-rest is a follow-up.
 """
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -32,7 +32,7 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _row_to_summary(row: sqlite3.Row) -> ProxySummary:
+def _row_to_summary(row: Any) -> ProxySummary:
     return ProxySummary(
         id=row["id"],
         name=row["name"],
@@ -45,7 +45,7 @@ def _row_to_summary(row: sqlite3.Row) -> ProxySummary:
     )
 
 
-def _row_to_config(row: sqlite3.Row) -> ProxyConfig:
+def _row_to_config(row: Any) -> ProxyConfig:
     return ProxyConfig(
         id=row["id"],
         name=row["name"],

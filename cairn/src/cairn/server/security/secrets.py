@@ -1,7 +1,6 @@
 """Fernet-encrypted secret store for AI profile sk values.
 
-``sk`` values used to live in the SQLite database in plaintext. This
-module replaces that with a thin encryption layer:
+``sk`` values are persisted encrypted at rest through a thin encryption layer:
 
   * on write, the plaintext sk is encrypted with Fernet (AES128-CBC + HMAC)
     and the resulting ciphertext is stored in a new column
@@ -9,8 +8,8 @@ module replaces that with a thin encryption layer:
   * on read (via the dispatcher-only ``/secret`` endpoint), the
     ciphertext is decrypted back to plaintext just before the response
     leaves the server;
-  * the legacy plaintext ``sk`` column is dropped after a one-time
-    migration.
+  * the plaintext ``sk`` column is retained only as a write-through
+    compatibility field for the existing API shape.
 
 The encryption key is loaded from ``CAIRN_JWT_SECRET`` (falling back to
 ``CAIRN_SECRETS_KEY``) so operators do not need a third secret. Fernet

@@ -1,15 +1,16 @@
 import asyncio
 import os
 import json
-import sqlite3
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi import HTTPException, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from cairn.observability.logging import configure_logging
@@ -26,7 +27,6 @@ from cairn.observability.trace import (
 
 from cairn import __version__
 from cairn.server import db
-from cairn.server.observability import db as observability_db
 from cairn.server.observability import routers as observability_routers
 from cairn.server.observability.retention import retention_loop
 from cairn.server.routers import (
@@ -109,8 +109,7 @@ async def lifespan(app: FastAPI):
         level=os.environ.get("CAIRN_LOG_LEVEL", "INFO"),
         component="cairn.server",
     )
-    db.configure(db.DEFAULT_DB)
-    observability_db.configure(observability_db.DEFAULT_OBSERVABILITY_DB)
+    db.configure()
     try:
         bootstrap_superuser_if_configured()
     except Exception:  # noqa: BLE001 - never let bootstrap break startup
@@ -186,16 +185,25 @@ app = FastAPI(
 app.add_middleware(RequestIdMiddleware)
 
 
-@app.exception_handler(sqlite3.DatabaseError)
-async def sqlite_database_error_handler(request: Request, exc: sqlite3.DatabaseError) -> JSONResponse:
-    db.close_thread_conn()
+def _database_error_response(exc: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=503,
         content={
             "status": "degraded",
-            "database_error": db.diagnostic_error(exc),
+            "database": "postgresql",
+            "database_error": str(exc),
         },
     )
+
+
+@app.exception_handler(db.DatabaseUnavailable)
+async def database_unavailable_handler(_request: Request, exc: db.DatabaseUnavailable) -> JSONResponse:
+    return _database_error_response(exc)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_error_handler(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    return _database_error_response(exc)
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -207,31 +215,23 @@ def metrics() -> Response:
 @app.get("/health", include_in_schema=False)
 def health() -> Response:
     try:
-        with db.get_conn() as conn:
-            row = conn.execute(
-                "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-    except sqlite3.DatabaseError as exc:
+        status_payload = db.postgres_status()
+    except Exception as exc:  # noqa: BLE001
         body = {
             "status": "degraded",
-            "database_error": db.diagnostic_error(exc),
+            "database": "postgresql",
+            "database_error": str(exc),
         }
         return Response(
             content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
             status_code=503,
             media_type="application/json",
         )
-    if row is not None:
-        body = {
-            "status": "degraded",
-            "migration_error": {"version": row["version"], "occurred_at": row["occurred_at"]},
-        }
-        return Response(
-            content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
-            status_code=503,
-            media_type="application/json",
-        )
-    return Response(content='{"status":"ok"}', media_type="application/json")
+    body = {"status": "ok", "version": __version__, **status_payload}
+    return Response(
+        content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+        media_type="application/json",
+    )
 
 app.include_router(auth.router)
 app.include_router(settings.router)

@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Any, Iterable
 
-import sqlite3
 from fastapi import APIRouter, HTTPException
 from cairn.server.security.deps import current_user_optional
 from fastapi import Depends
@@ -65,13 +64,13 @@ def _profile_select_sql(where: str = "", order_by: str = "p.created_at DESC, p.i
     return f"""
         SELECT p.*,
                (
-                   SELECT group_concat(model, char(10))
+                   SELECT string_agg(model, chr(10))
                    FROM (
                        SELECT model
                        FROM ai_profile_models
                        WHERE profile_id = p.id
                        ORDER BY model
-                   )
+                   ) AS profile_model_rows
                ) AS models
         FROM ai_profiles p
         {where_clause}
@@ -79,7 +78,7 @@ def _profile_select_sql(where: str = "", order_by: str = "p.created_at DESC, p.i
     """
 
 
-def _row_to_profile(row: sqlite3.Row) -> AiProfile:
+def _row_to_profile(row: Any) -> AiProfile:
     model_list = _parse_models(row["models"] if "models" in row.keys() else None, fallback=row["model"])
     api_key_env = canonical_auth_env(row["worker_type"]) or row["api_key_env"]
     return AiProfile(
@@ -111,7 +110,7 @@ def _row_to_profile(row: sqlite3.Row) -> AiProfile:
     )
 
 
-def _resolve_sk_from_row(row: sqlite3.Row) -> str:
+def _resolve_sk_from_row(row: Any) -> str:
     """Read the sk from a DB row, preferring the encrypted column.
 
     Falls back to the legacy plaintext column when the encrypted
@@ -140,7 +139,7 @@ def _normalized_api_key_env(worker_type: str, api_key_env: str | None = None) ->
     return canonical_auth_env(worker_type) or (api_key_env or "").strip()
 
 
-def _replace_profile_models(conn: sqlite3.Connection, profile_id: str, default_model: str, models: Iterable[str], now: str) -> None:
+def _replace_profile_models(conn: Any, profile_id: str, default_model: str, models: Iterable[str], now: str) -> None:
     values = [item.strip() for item in (default_model, *models) if item and item.strip()]
     values = list(dict.fromkeys(values))
     conn.execute(
@@ -150,8 +149,10 @@ def _replace_profile_models(conn: sqlite3.Connection, profile_id: str, default_m
     for model in values:
         conn.execute(
             """
-            INSERT OR REPLACE INTO ai_profile_models (profile_id, model, updated_at)
+            INSERT INTO ai_profile_models (profile_id, model, updated_at)
             VALUES (?, ?, ?)
+            ON CONFLICT (profile_id, model) DO UPDATE
+            SET updated_at = EXCLUDED.updated_at
             """,
             (profile_id, model, now),
         )
@@ -179,7 +180,7 @@ def list_ai_profiles():
     return [_row_to_profile(row) for row in rows]
 
 
-def _row_to_check_request(row: sqlite3.Row) -> AiProfileCheckRequest:
+def _row_to_check_request(row: Any) -> AiProfileCheckRequest:
     return AiProfileCheckRequest(
         id=row["id"],
         profile_id=row["profile_id"],
@@ -537,7 +538,7 @@ def sync_ai_profiles(body: AiProfileSyncRequest):
 
 
 def _prune_orphaned_seeded_profiles(
-    conn: sqlite3.Connection,
+    conn: Any,
     active_worker_names: set[str],
 ) -> int:
     """Delete seeded profiles whose worker is no longer in ``dispatch.yaml``.

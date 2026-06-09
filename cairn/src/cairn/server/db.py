@@ -1,258 +1,229 @@
 from __future__ import annotations
 
-import logging
-import sqlite3
-import threading
-import time
+import os
+import re
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Generator, Iterable
 
-from cairn.server.db_migrations import MIGRATIONS
-from cairn.server.db_schema import SCHEMA
-from cairn.server.sqlite_diagnostics import (
-    database_error_detail,
-    file_state,
-    quick_check as run_quick_check,
-    truncate_checkpoint,
-)
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
-DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
-SQLITE_TIMEOUT_SECONDS = 5.0
-SQLITE_BUSY_TIMEOUT_MS = 5000
+from cairn.server.orm import Base, CounterRow, SettingRow
+DEFAULT_DATABASE_URL_ENV = "CAIRN_DATABASE_URL"
 
-LOG = logging.getLogger(__name__)
-
-_db_path: Path | None = None
-_local = threading.local()
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
+_database_url: str | None = None
+_db_path: object | None = object()
 
 
-def configure(path: Path) -> None:
-    global _db_path
-    if _db_path is not None:
+class DatabaseUnavailable(RuntimeError):
+    pass
+
+
+def database_url() -> str:
+    url = _database_url or os.environ.get(DEFAULT_DATABASE_URL_ENV, "").strip()
+    if not url:
+        raise DatabaseUnavailable(f"{DEFAULT_DATABASE_URL_ENV} is required")
+    if url.startswith("sqlite"):
+        raise DatabaseUnavailable("SQLite URLs are not supported; configure PostgreSQL")
+    return url
+
+
+def configure(url: str | os.PathLike[str] | None = None, *, run_migrations: bool = True) -> None:
+    global _engine, _SessionLocal, _database_url, _db_path
+    legacy_test_path = False
+    if url is not None:
+        candidate = str(url)
+        legacy_test_path = not candidate.startswith(("postgresql://", "postgresql+"))
+    if _engine is not None and not legacy_test_path:
         return
-    _db_path = path
-    _db_path.parent.mkdir(parents=True, exist_ok=True)
-    with get_conn() as conn:
-        conn.executescript(SCHEMA)
-        # Progressive migration: add projects.proxy_id to databases created
-        # before proxies were introduced. SQLite has no ADD COLUMN IF NOT
-        # EXISTS, so we introspect via PRAGMA table_info.
-        cols = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(projects)").fetchall()
-        }
-        if "proxy_id" not in cols:
-            conn.execute(
-                "ALTER TABLE projects ADD COLUMN proxy_id TEXT "
-                "REFERENCES proxies(id) ON DELETE SET NULL"
-            )
-        if "reason_run_id" not in cols:
-            conn.execute("ALTER TABLE projects ADD COLUMN reason_run_id TEXT")
-        if "llm_hidden_event_kinds" not in cols:
-            conn.execute(
-                "ALTER TABLE projects ADD COLUMN llm_hidden_event_kinds "
-                "TEXT NOT NULL DEFAULT '[\"usage\"]'"
-            )
-        _apply_migrations(conn)
-
-
-def configured_path() -> Path:
-    assert _db_path is not None
-    return _db_path
-
-
-def _apply_migrations(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    if legacy_test_path:
+        _database_url = database_url()
+    elif url is not None:
+        candidate = str(url)
+        _database_url = candidate
+    resolved = database_url()
+    if _engine is None:
+        _engine = create_engine(
+            resolved,
+            pool_pre_ping=True,
+            pool_size=int(os.environ.get("CAIRN_DB_POOL_SIZE", "5")),
+            max_overflow=int(os.environ.get("CAIRN_DB_MAX_OVERFLOW", "10")),
+            pool_timeout=float(os.environ.get("CAIRN_DB_POOL_TIMEOUT", "30")),
+            future=True,
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS migration_errors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            version TEXT NOT NULL,
-            sql TEXT NOT NULL,
-            error TEXT NOT NULL,
-            occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-        )
-        """
-    )
-    for version, sql in MIGRATIONS:
-        applied = conn.execute(
-            "SELECT 1 FROM schema_migrations WHERE version = ?",
-            (version,),
-        ).fetchone()
-        if applied is not None:
-            continue
-        if version == "20260604_005_reason_run_id":
-            project_cols = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(projects)").fetchall()
-            }
-            if "reason_run_id" in project_cols:
-                conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
-                continue
-        try:
-            conn.executescript(sql)
-            conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
-        except Exception as exc:
-            conn.execute(
-                "INSERT INTO migration_errors (version, sql, error) VALUES (?, ?, ?)",
-                (version, sql, str(exc)),
-            )
-            raise
+        _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False, future=True)
+    if legacy_test_path:
+        drop_all_for_tests()
+        Base.metadata.create_all(engine())
+        seed_defaults()
+        _db_path = url
+        return
+    if run_migrations:
+        upgrade_head()
+        seed_defaults()
+    _db_path = url if legacy_test_path else object()
 
 
-def _open_conn() -> sqlite3.Connection:
-    assert _db_path is not None
-    conn = sqlite3.connect(str(_db_path), timeout=SQLITE_TIMEOUT_SECONDS)
-    conn.row_factory = sqlite3.Row
+def reset_for_tests() -> None:
+    global _engine, _SessionLocal, _database_url, _db_path
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _SessionLocal = None
+    _database_url = None
+    _db_path = object()
+
+
+def engine() -> Engine:
+    if _engine is None:
+        configure()
+    assert _engine is not None
+    return _engine
+
+
+def session_factory() -> sessionmaker[Session]:
+    if _SessionLocal is None:
+        configure()
+    assert _SessionLocal is not None
+    return _SessionLocal
+
+
+@contextmanager
+def session_scope() -> Generator[Session, None, None]:
+    session = session_factory()()
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
-    except sqlite3.DatabaseError as exc:
-        lower = str(exc).lower()
-        if "file is not a database" not in lower and "disk i/o error" not in lower:
-            conn.close()
-            raise
-        wal_path = Path(f"{_db_path}-wal")
-        shm_path = Path(f"{_db_path}-shm")
-        LOG.warning(
-            "sqlite wal setup failed path=%s error=%s wal_exists=%s shm_exists=%s; falling back to DELETE journal mode",
-            _db_path,
-            exc,
-            wal_path.exists(),
-            shm_path.exists(),
-        )
-        conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-
-def sqlite_status() -> dict[str, Any]:
-    """Return operator-facing SQLite status for health/debug commands."""
-    path = configured_path()
-    with get_conn() as conn:
-        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
-        foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
-        quick = run_quick_check(conn)
-        migration_error = conn.execute(
-            "SELECT version, error, occurred_at FROM migration_errors ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        applied_count = conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"]
-    status = {
-        "journal_mode": journal_mode,
-        "busy_timeout_ms": busy_timeout,
-        "foreign_keys": bool(foreign_keys),
-        "quick_check": quick,
-        "applied_migrations": applied_count,
-        "migration_error": dict(migration_error) if migration_error is not None else None,
-    }
-    return {**file_state(path), **status}
-
-
-def quick_check() -> list[str]:
-    """Run SQLite PRAGMA quick_check and return every result row."""
-    with get_conn() as conn:
-        return run_quick_check(conn)
-
-
-def integrity_check() -> list[str]:
-    """Run SQLite PRAGMA integrity_check and return every result row."""
-    with get_conn() as conn:
-        rows = conn.execute("PRAGMA integrity_check").fetchall()
-    return [str(row[0]) for row in rows]
-
-
-def checkpoint_truncate() -> dict[str, Any]:
-    """Run PRAGMA wal_checkpoint(TRUNCATE) and return before/after file state."""
-    path = configured_path()
-    before = file_state(path)
-    with get_conn() as conn:
-        result = truncate_checkpoint(conn)
-    after = file_state(path)
-    return {"path": str(path), "before": before, "checkpoint": result, "after": after}
-
-
-def diagnostic_error(exc: BaseException) -> str:
-    """Render a DB error with the configured SQLite file state."""
-    return database_error_detail(configured_path(), exc)
-
-
-def backup_to(destination: Path) -> Path:
-    """Create a consistent online backup of the configured database."""
-    destination = destination.expanduser()
-    if destination.is_dir():
-        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-        destination = destination / f"cairn-{stamp}.sqlite"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    source = _thread_conn()
-    target = sqlite3.connect(str(destination))
-    try:
-        source.backup(target)
-        target.commit()
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
-        target.close()
-    return destination
+        session.close()
 
 
-def _thread_conn() -> sqlite3.Connection:
-    assert _db_path is not None
-    cached = getattr(_local, "conn", None)
-    cached_path = getattr(_local, "path", None)
-    if cached is not None and cached_path == _db_path:
-        return cached
-    if cached is not None:
+def get_session() -> Generator[Session, None, None]:
+    with session_scope() as session:
+        yield session
+
+
+def alembic_config() -> Config:
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    cfg = Config(os.path.join(root, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(root, "migrations"))
+    cfg.set_main_option("sqlalchemy.url", database_url())
+    return cfg
+
+
+def upgrade_head() -> None:
+    command.upgrade(alembic_config(), "head")
+
+
+def create_all_for_tests() -> None:
+    Base.metadata.create_all(engine())
+    seed_defaults()
+
+
+def drop_all_for_tests() -> None:
+    with engine().begin() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+
+
+def seed_defaults() -> None:
+    with session_scope() as session:
+        if session.get(SettingRow, 1) is None:
+            session.add(SettingRow(id=1, intent_timeout=15, reason_timeout=15))
+        if session.get(CounterRow, "project") is None:
+            session.add(CounterRow(name="project", value=0))
+
+
+def postgres_status() -> dict[str, Any]:
+    with session_scope() as session:
+        session.execute(text("SELECT 1")).scalar_one()
         try:
-            cached.close()
-        except Exception:
-            pass
-    conn = _open_conn()
-    _local.conn = conn
-    _local.path = _db_path
-    return conn
+            revision = session.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar_one_or_none()
+        except SQLAlchemyError:
+            revision = None
+    return {"database": "postgresql", "ok": True, "alembic_revision": revision}
 
 
 def close_thread_conn() -> None:
-    """Close the cached SQLite connection for the current thread."""
-    cached = getattr(_local, "conn", None)
-    if cached is not None:
-        cached.close()
-    _local.conn = None
-    _local.path = None
+    return None
+
+
+class RowAdapter(dict[str, Any]):
+    def keys(self):  # type: ignore[override]
+        return super().keys()
+
+
+class ResultAdapter:
+    def __init__(self, result):
+        self._result = result
+        self.rowcount = result.rowcount
+
+    def fetchone(self) -> RowAdapter | None:
+        row = self._result.mappings().fetchone()
+        return RowAdapter(row) if row is not None else None
+
+    def fetchall(self) -> list[RowAdapter]:
+        return [RowAdapter(row) for row in self._result.mappings().fetchall()]
+
+
+class SessionSqlAdapter:
+    """Temporary SQLAlchemy-backed adapter while routers move to ORM calls."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def execute(self, sql: str, params: Iterable[Any] | dict[str, Any] = ()) -> ResultAdapter:
+        sql, bound = _translate_sql(sql, params)
+        return ResultAdapter(self.session.execute(text(sql), bound))
+
+    def commit(self) -> None:
+        self.session.commit()
+
+    def rollback(self) -> None:
+        self.session.rollback()
+
+
+def _translate_sql(sql: str, params: Iterable[Any] | dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    normalized = _normalize_sql(sql)
+    if isinstance(params, dict):
+        return normalized, params
+    values = list(params)
+    bound = {f"p{i}": value for i, value in enumerate(values)}
+    for i in range(len(values)):
+        normalized = normalized.replace("?", f":p{i}", 1)
+    return normalized, bound
+
+
+def _normalize_sql(sql: str) -> str:
+    normalized = sql.strip()
+    normalized = normalized.replace("WHERE rowid = 1", "WHERE id = 1")
+    normalized = normalized.replace("ORDER BY rowid", "ORDER BY fact_id")
+    normalized = normalized.replace("INSERT OR IGNORE INTO scoped_counters", "INSERT INTO scoped_counters")
+    if normalized.startswith("INSERT INTO scoped_counters") and "ON CONFLICT" not in normalized:
+        normalized += " ON CONFLICT (project_id, kind) DO NOTHING"
+    normalized = normalized.replace("INSERT OR IGNORE INTO counters", "INSERT INTO counters")
+    if normalized.startswith("INSERT INTO counters") and "ON CONFLICT" not in normalized:
+        normalized += " ON CONFLICT (name) DO NOTHING"
+    normalized = re.sub(r"\bTRUE\b", "true", normalized)
+    normalized = re.sub(r"\bFALSE\b", "false", normalized)
+    return normalized
 
 
 @contextmanager
-def get_conn() -> Generator[sqlite3.Connection, None, None]:
-    conn = _thread_conn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+def get_conn() -> Generator[SessionSqlAdapter, None, None]:
+    with session_scope() as session:
+        yield SessionSqlAdapter(session)
 
 
 @contextmanager
-def with_immediate_tx() -> Generator[sqlite3.Connection, None, None]:
-    """Open a connection and acquire a write lock up front.
-
-    SQLite's default deferred transactions acquire the write lock only
-    at the first write statement, which can make multi-step writes fail
-    late with SQLITE_BUSY. ``BEGIN IMMEDIATE`` grabs the reserved lock
-    before the caller runs any read-modify-write sequence.
-    """
-    conn = _thread_conn()
-    try:
-        conn.execute("BEGIN IMMEDIATE")
+def with_immediate_tx() -> Generator[SessionSqlAdapter, None, None]:
+    with get_conn() as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise

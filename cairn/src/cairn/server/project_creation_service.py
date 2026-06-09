@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -47,7 +46,7 @@ class ProjectCreationDraft:
 
 
 def create_project_from_draft(
-    conn: sqlite3.Connection,
+    conn: Any,
     draft: ProjectCreationDraft,
 ) -> ProjectDetail:
     pid = draft.project_id or next_project_id(conn)
@@ -84,7 +83,7 @@ def create_project_from_draft(
                 json.dumps(hidden_event_kinds, ensure_ascii=False),
             ),
         )
-    except sqlite3.IntegrityError as exc:
+    except Exception as exc:
         raise HTTPException(400, f"invalid project create request: {exc}") from exc
 
     conn.execute(
@@ -151,7 +150,7 @@ def create_project_from_draft(
     )
 
 
-def proxy_summary_from_row(row: sqlite3.Row) -> ProxySummary:
+def proxy_summary_from_row(row: Any) -> ProxySummary:
     return ProxySummary(
         id=row["id"],
         name=row["name"],
@@ -164,7 +163,7 @@ def proxy_summary_from_row(row: sqlite3.Row) -> ProxySummary:
     )
 
 
-def _load_role(conn: sqlite3.Connection, role_id: str | None) -> sqlite3.Row | None:
+def _load_role(conn: Any, role_id: str | None) -> Any | None:
     if not role_id:
         return None
     role = conn.execute(
@@ -180,7 +179,7 @@ def _load_role(conn: sqlite3.Connection, role_id: str | None) -> sqlite3.Row | N
     return role
 
 
-def _role_default_skill_ids(role: sqlite3.Row | None) -> list[str]:
+def _role_default_skill_ids(role: Any | None) -> list[str]:
     if role is None:
         return []
     try:
@@ -193,9 +192,9 @@ def _role_default_skill_ids(role: sqlite3.Row | None) -> list[str]:
 
 
 def _insert_role_snapshot(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
-    role: sqlite3.Row,
+    role: Any,
     now: str,
 ) -> None:
     conn.execute(

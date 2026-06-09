@@ -1,8 +1,8 @@
-"""User repository over the existing sqlite3 layer.
+"""User repository over the configured database layer.
 
-A thin module: no SQLAlchemy, no async. ``UserRow`` is a lightweight named
-tuple the auth router and FastAPI dependency share. The repository talks
-to the same ``get_conn()`` context manager everything else uses.
+``UserRow`` is a lightweight named tuple the auth router and FastAPI
+dependency share. The repository talks to the same transaction context
+manager everything else uses.
 """
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import sqlite3
 
 from cairn.server.db import get_conn
 
@@ -27,7 +26,7 @@ class UserRow:
     updated_at: str
 
 
-def _row_to_user(row: sqlite3.Row) -> UserRow:
+def _row_to_user(row: Any) -> UserRow:
     return UserRow(
         id=row["id"],
         email=row["email"],

@@ -10,7 +10,6 @@ Covers:
 from __future__ import annotations
 
 import os
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -103,14 +102,15 @@ class AiProfileEncryptedStorageTests(unittest.TestCase):
         secret = get_ai_profile_secret(created.id)
         self.assertEqual(secret["value"], plaintext)
 
-        # The on-disk column is encrypted, not plaintext.
-        with sqlite3.connect(self.tmp.name) as conn:
+        # The stored column is encrypted, not plaintext.
+        from cairn.server import db
+        with db.get_conn() as conn:
             row = conn.execute(
                 "SELECT sk, sk_ciphertext FROM ai_profiles WHERE id = ?", (created.id,),
             ).fetchone()
-        self.assertNotEqual(row[1], "")
-        self.assertNotIn(plaintext, row[1])
-        self.assertNotIn(plaintext, row[0])
+        self.assertNotEqual(row["sk_ciphertext"], "")
+        self.assertNotIn(plaintext, row["sk_ciphertext"])
+        self.assertNotIn(plaintext, row["sk"])
 
     def test_sync_writes_ciphertext(self) -> None:
         from cairn.server.routers.ai_profiles import sync_ai_profiles, get_ai_profile_secret
@@ -128,12 +128,13 @@ class AiProfileEncryptedStorageTests(unittest.TestCase):
         # The sk is queryable via the dispatcher secret endpoint.
         secret = get_ai_profile_secret("ai_seed_codex")
         self.assertEqual(secret["value"], plaintext)
-        with sqlite3.connect(self.tmp.name) as conn:
+        from cairn.server import db
+        with db.get_conn() as conn:
             row = conn.execute(
                 "SELECT sk, sk_ciphertext FROM ai_profiles WHERE id = ?", ("ai_seed_codex",),
             ).fetchone()
-        self.assertNotEqual(row[1], "")
-        self.assertNotIn(plaintext, row[1])
+        self.assertNotEqual(row["sk_ciphertext"], "")
+        self.assertNotIn(plaintext, row["sk_ciphertext"])
 
 
 if __name__ == "__main__":

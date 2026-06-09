@@ -73,7 +73,7 @@ class AiProfileBase(BaseModel):
     # Raw secret. Excluded from JSON responses; the read shape exposes
     # only ``sk_set`` / ``sk_preview`` so the form can show whether a
     # key is on file without revealing it. The dispatcher secret
-    # endpoint reads this column directly from SQLite, never via the
+    # endpoint reads this column directly from the database, never via the
     # serialized model. ``sk`` stays on the input shape so the Add /
     # Edit form can populate it.
     sk: str = Field(default="", exclude=True)

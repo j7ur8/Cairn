@@ -21,7 +21,7 @@ Cairn 是一个基于事实图的通用问题求解引擎，以 penetration test
 |------|------|
 | 后端 | Python 3.12+、FastAPI、Pydantic、Click、Uvicorn |
 | 前端 | 无构建 SPA，Alpine.js、Tailwind runtime、Cytoscape 及布局插件 |
-| 数据库 | SQLite 主库、SQLite observability 库、WAL、迁移脚本 |
+| 数据库 | PostgreSQL、SQLAlchemy ORM metadata、Alembic migrations |
 | Dispatcher | Python scheduler、Docker SDK、Requests、Tenacity、worker adapter |
 | 安全 | JWT、bcrypt、cryptography、路径安全校验、secret 加密 |
 | 部署 | Docker Compose、worker container image、host Docker socket |
@@ -37,7 +37,7 @@ project-root/
 │   ├── pyproject.toml         # Python 包与依赖
 │   ├── src/cairn/
 │   │   ├── cli.py             # cairn serve / dispatch / db 命令入口
-│   │   ├── server/            # FastAPI API、SQLite、模型、安全、静态 SPA
+│   │   ├── server/            # FastAPI API、PostgreSQL、模型、安全、静态 SPA
 │   │   ├── dispatcher/        # 调度循环、容器运行时、任务执行、worker 协议
 │   │   └── observability/     # 日志、trace、metrics
 │   └── tests/                 # unittest 测试集
@@ -81,8 +81,8 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 | Server 入口 | `cairn/src/cairn/server/app.py` |
 | CLI 入口 | `cairn/src/cairn/cli.py` |
 | Dispatcher 主循环 | `cairn/src/cairn/dispatcher/scheduler/loop.py` |
-| 数据库 schema | `cairn/src/cairn/server/db_schema.py` |
-| 数据库 migrations | `cairn/src/cairn/server/db_migrations.py` |
+| 数据库 ORM schema | `cairn/src/cairn/server/orm.py` |
+| 数据库 migrations | `cairn/migrations/` |
 | Worker container | `container/Dockerfile` |
 | Capabilities | `capabilities/README.md` |
 | 测试协议 | `AI/TESTING_PROTOCOL.md` |

@@ -30,9 +30,9 @@ flowchart TB
         ObsApi["server.observability\nLLM execution/event APIs"]
     end
 
-    subgraph Data["SQLite 与文件数据"]
-        MainDb["主库\nprojects/facts/intents/hints\ncapabilities/roles/AI profiles/replay/users"]
-        ObsDb["观测库\nllm_executions/llm_events"]
+    subgraph Data["PostgreSQL 与文件数据"]
+        MainDb["PostgreSQL 主库\nprojects/facts/intents/hints\ncapabilities/roles/AI profiles/replay/users"]
+        ObsDb["同库观测表\nllm_executions/llm_events"]
         Files["datas/\nattachments/project-files"]
     end
 
@@ -93,8 +93,8 @@ sequenceDiagram
     participant API as Cairn Server API
 
     CLI->>DB: cairn serve: configure(DEFAULT_DB)
-    DB->>DB: executescript(SCHEMA) + _apply_migrations(MIGRATIONS)
-    CLI->>ODB: configure(DEFAULT_OBSERVABILITY_DB)
+    DB->>DB: SQLAlchemy engine + Alembic upgrade head
+    CLI->>ODB: observability uses shared PostgreSQL connection
     CLI->>App: import app and uvicorn.run()
     App->>App: lifespan configure logging
     App->>DB: bootstrap superuser if env configured
@@ -130,9 +130,9 @@ sequenceDiagram
 | Server Routers | `server/routers/` | HTTP 层入参、状态码、响应模型 | Pydantic DTO | JSON / files | services, db |
 | Domain Services | `server/*_service.py`, `server/services.py` | 项目创建、capability 展开、AI profile snapshot、图操作 | DB conn + domain input | DB rows / Pydantic models | models, db |
 | Models | `server/models_pkg/` | API/DB 领域模型和 validation | Python dict / JSON | Pydantic models | pydantic |
-| Database | `server/db*.py` | SQLite 连接、schema、migrations、诊断 | db path | sqlite3.Connection / status | sqlite3 |
+| Database | `server/db.py`, `server/orm.py`, `migrations/` | PostgreSQL engine/session、ORM metadata、Alembic migrations、健康状态 | `CAIRN_DATABASE_URL` | SQLAlchemy session / status | SQLAlchemy, Alembic, psycopg |
 | Security | `server/security/` | JWT、用户、密码、secret 加密、路径安全 | token/password/path | auth user / encrypted secret | pyjwt, bcrypt, cryptography |
-| Observability | `server/observability/`, `observability/` | LLM events、retention、metrics、trace | execution/event reports | queryable events / Prometheus text | SQLite, metrics |
+| Observability | `server/observability/`, `observability/` | LLM events、retention、metrics、trace | execution/event reports | queryable events / Prometheus text | PostgreSQL, metrics |
 | Dispatcher Scheduler | `dispatcher/scheduler/` | leader loop、project cache、worker selection、AI overlay | project graph + config | submitted tasks | protocol client, runtime |
 | Dispatcher Tasks | `dispatcher/tasks/` | bootstrap/explore/reason 执行模板 | ProjectDetail, Intent, WorkerConfig | outcome + graph writes | worker drivers, runtime |
 | Runtime | `dispatcher/runtime/` | Docker container、process、heartbeat、cancel | worker command | ProcessResult / container state | docker |
@@ -141,10 +141,10 @@ sequenceDiagram
 
 ## 4. 内部模块间通信
 
-- Server 内部通过直接函数调用和同一 SQLite connection 完成事务一致性。
+- Server 内部通过直接函数调用和同一 PostgreSQL/SQLAlchemy session 完成事务一致性。
 - Dispatcher 只通过 HTTP JSON API 与 Server 通信，不直接写数据库。
 - Worker 进程通过 stdout/stderr 和结构化 JSON contract 与 Dispatcher 通信。
-- Observability 事件由 Dispatcher reporter 通过 Server API 写入独立 SQLite 观测库。
+- Observability 事件由 Dispatcher reporter 通过 Server API 写入同一 PostgreSQL 数据库中的观测表。
 - Project 文件和附件通过 filesystem 存储，元信息与 hint/project 关联存在主库中。
 
 ```mermaid
@@ -154,7 +154,7 @@ sequenceDiagram
     participant PCS as ProjectCreationService
     participant CAP as CapabilitiesService
     participant AI as AiProfileService
-    participant DB as SQLite
+    participant DB as PostgreSQL
     participant DISP as Dispatcher
     participant W as Worker Container
 

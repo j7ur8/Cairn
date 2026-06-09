@@ -5,9 +5,8 @@ state back to the server. Running two dispatchers against one server without
 coordination can launch duplicate containers. This module provides a
 lightweight at-most-one active dispatcher lock.
 
-Only the Cairn server process touches ``cairn.db``. Dispatcher replicas acquire,
-renew, inspect, and release the lock through HTTP endpoints, which keeps SQLite
-WAL/SHM state owned by a single process boundary.
+Dispatcher replicas acquire, renew, inspect, and release the lock through HTTP
+endpoints, keeping database concurrency centralized in the server.
 """
 from __future__ import annotations
 

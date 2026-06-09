@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sqlite3
+from typing import Any
 
 from cairn.server.observability.models import (
     CreateEventRequest,
@@ -19,15 +19,15 @@ from cairn.server.models_pkg.projects import DEFAULT_LLM_HIDDEN_EVENT_KINDS, nor
 from cairn.server.services import utcnow
 
 
-def row_to_execution(row: sqlite3.Row) -> LlmExecution:
+def row_to_execution(row: Any) -> LlmExecution:
     return LlmExecution(**dict(row))
 
 
-def row_to_event(row: sqlite3.Row) -> LlmExecutionEvent:
+def row_to_event(row: Any) -> LlmExecutionEvent:
     return LlmExecutionEvent(**dict(row))
 
 
-def create_execution(conn: sqlite3.Connection, project_id: str, body: CreateExecutionRequest) -> LlmExecution:
+def create_execution(conn: Any, project_id: str, body: CreateExecutionRequest) -> LlmExecution:
     now = utcnow()
     conn.execute(
         """
@@ -55,7 +55,7 @@ def create_execution(conn: sqlite3.Connection, project_id: str, body: CreateExec
     return row_to_execution(row)
 
 
-def list_executions(conn: sqlite3.Connection, project_id: str, limit: int) -> list[LlmExecution]:
+def list_executions(conn: Any, project_id: str, limit: int) -> list[LlmExecution]:
     rows = conn.execute(
         """
         SELECT
@@ -71,13 +71,13 @@ def list_executions(conn: sqlite3.Connection, project_id: str, limit: int) -> li
                 (SELECT MAX(ev.created_at) FROM llm_execution_events ev WHERE ev.execution_id = e.id),
                 e.last_event_at
             ) AS last_event_at,
-            MAX(
-                e.event_count,
+            GREATEST(
+                e.event_count::bigint,
                 (SELECT COUNT(*) FROM llm_execution_events ev WHERE ev.execution_id = e.id)
             ) AS event_count,
-            MAX(
-                e.bytes_written,
-                COALESCE((SELECT SUM(LENGTH(ev.content)) FROM llm_execution_events ev WHERE ev.execution_id = e.id), 0)
+            GREATEST(
+                e.bytes_written::bigint,
+                COALESCE((SELECT SUM(LENGTH(ev.content)) FROM llm_execution_events ev WHERE ev.execution_id = e.id), 0)::bigint
             ) AS bytes_written,
             e.returncode,
             e.timed_out,
@@ -95,7 +95,7 @@ def list_executions(conn: sqlite3.Connection, project_id: str, limit: int) -> li
 
 
 def append_event(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     execution_id: str,
     body: CreateEventRequest,
@@ -126,6 +126,7 @@ def append_event(
             execution_id, project_id, intent_id, task_type, worker, phase,
             event_kind, stream, content, truncated, redacted, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING sequence
         """,
         (
             execution_id,
@@ -154,14 +155,14 @@ def append_event(
     )
     row = conn.execute(
         "SELECT * FROM llm_execution_events WHERE sequence = ?",
-        (cursor.lastrowid,),
+        (cursor.fetchone()["sequence"],),
     ).fetchone()
     assert row is not None
     return row_to_event(row), False
 
 
 def append_events(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     execution_id: str,
     bodies: list[CreateEventRequest],
@@ -178,7 +179,7 @@ def append_events(
 
 
 def finish_execution(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     execution_id: str,
     body: FinishExecutionRequest,
@@ -221,8 +222,8 @@ def finish_execution(
 
 
 def _ensure_process_end_event(
-    conn: sqlite3.Connection,
-    execution: sqlite3.Row,
+    conn: Any,
+    execution: Any,
     body: FinishExecutionRequest,
     now: str,
 ) -> None:
@@ -271,7 +272,7 @@ def _ensure_process_end_event(
 
 
 def list_project_events(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     after: int,
     limit: int,
@@ -303,7 +304,7 @@ def list_project_events(
 
 
 def list_execution_events(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     execution_id: str,
     after: int,
@@ -336,7 +337,7 @@ def list_execution_events(
 
 
 def list_event_view(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     *,
     execution_id: str | None = None,
@@ -412,7 +413,7 @@ def list_event_view(
 
 
 def _latest_usage_activity(
-    conn: sqlite3.Connection,
+    conn: Any,
     where_sql: str,
     params: list[object],
 ) -> LlmUsageActivity | None:
@@ -472,6 +473,6 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
-def delete_project_observability(conn: sqlite3.Connection, project_id: str) -> None:
+def delete_project_observability(conn: Any, project_id: str) -> None:
     conn.execute("DELETE FROM llm_execution_events WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM llm_executions WHERE project_id = ?", (project_id,))

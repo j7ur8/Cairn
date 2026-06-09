@@ -22,7 +22,7 @@ Cairn 是一个事实图驱动的协作探索协议。它把问题抽象为 orig
 | 语言 | Python | `>=3.12` |
 | API | FastAPI | `>=0.115` |
 | Server | Uvicorn, Click | `uvicorn[standard]>=0.34`, `click>=8.1` |
-| 数据库 | SQLite | 标准库 `sqlite3`，WAL + migrations |
+| 数据库 | PostgreSQL | SQLAlchemy、Alembic、psycopg |
 | Dispatcher | Docker SDK, requests, tenacity | `docker>=7.1.0`, `requests>=2.32.3`, `tenacity>=8.2` |
 | 模型 | Pydantic v2 | `pydantic[email]>=2.7` |
 | 安全 | PyJWT, bcrypt, cryptography | JWT、密码 hash、secret 加密 |
@@ -36,9 +36,9 @@ cairn/src/cairn/
 ├── cli.py                         # CLI entrypoint
 ├── server/
 │   ├── app.py                     # FastAPI app
-│   ├── db.py                      # 连接/事务/诊断
-│   ├── db_schema.py               # 初始 schema
-│   ├── db_migrations.py           # migrations
+│   ├── db.py                      # PostgreSQL engine/session/Alembic/status
+│   ├── orm.py                     # SQLAlchemy ORM metadata
+│   ├── ../../migrations/          # Alembic migrations
 │   ├── services.py                # 图与 reason 状态通用服务
 │   ├── project_creation_service.py
 │   ├── ai_profile_service.py
@@ -215,7 +215,7 @@ stateDiagram-v2
 | `users.password_hash` | bcrypt hash | 不存明文密码 |
 | `ai_profiles.sk_ciphertext` | encrypted text | 优先读取加密列 |
 | `ai_profiles.sk` | legacy plaintext column | 兼容旧数据，写入路径倾向清空或加密 |
-| proxy username/password | SQLite | 用于 worker env 注入，应视为敏感 |
+| proxy username/password | PostgreSQL | 用于 worker env 注入，应视为敏感 |
 
 ## 7. API 端点
 
@@ -252,7 +252,7 @@ stateDiagram-v2
 ## 8. 错误处理策略
 
 - HTTP 层主要使用 FastAPI `HTTPException`，状态码包括 400/401/403/404/409/503。
-- SQLite `DatabaseError` 在 `server/app.py` 全局转换为 503 degraded JSON，并关闭 thread-local connection。
+- PostgreSQL `DatabaseUnavailable` / SQLAlchemy errors 在 `server/app.py` 全局转换为 503 degraded JSON。
 - Dispatcher client 将 HTTP 响应包装成 `ApiResult`；GET 网络失败和 5xx 使用 tenacity retry，POST 默认不重试以避免非幂等写入重复。
 - Worker 输出解析失败会转为 task outcome：parse_error/failed/rejected/timeout/cancelled/unhealthy，并写入 observability events。
 - Reason state 使用 failure count + backoff + block threshold 避免高频失败重试。
@@ -289,7 +289,7 @@ stateDiagram-v2
 测试文件约 29 个，覆盖：
 
 - API/resource routers：auth、projects/intents、capabilities、AI profiles、dispatcher lock、files、observability。
-- 数据库：migrations、hardening、WAL/diagnostics、secret encryption。
+- 数据库：Alembic migrations、PostgreSQL hardening、secret encryption。
 - Dispatcher：client retry、leader、health、metrics、worker selection、task type registry、worker CLI adapters。
 - 安全：path security、redaction、proxy settings。
 

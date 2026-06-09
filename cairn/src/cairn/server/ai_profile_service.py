@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
-from typing import Iterable
+from typing import Any, Iterable
 
 from fastapi import HTTPException
 
@@ -14,7 +13,7 @@ from cairn.server.models import (
 
 
 def load_project_ai_snapshots(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
 ) -> list[ProjectAiProfileSnapshot]:
     rows = conn.execute(
@@ -62,7 +61,7 @@ def task_ai_selections_from_snapshots(
 
 
 def persist_project_ai_selection(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     selection: AiProfileSelection,
     now: str,
@@ -80,7 +79,7 @@ def persist_project_ai_selection(
 
 
 def persist_project_ai_selections(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     selections: TaskAiProfileSelections,
     now: str,
@@ -122,7 +121,7 @@ def persist_project_ai_selections(
             profile = by_id[selection.primary_profile_id]
             conn.execute(
                 """
-                INSERT OR REPLACE INTO project_ai_profiles (
+                INSERT INTO project_ai_profiles (
                     project_id, profile_id, task_type, role, position,
                     snapshot_name, snapshot_worker_type, snapshot_provider,
                     snapshot_base_url, snapshot_model, snapshot_reasoning_type,
@@ -150,7 +149,7 @@ def persist_project_ai_selections(
             profile = by_id[profile_id]
             conn.execute(
                 """
-                INSERT OR REPLACE INTO project_ai_profiles (
+                INSERT INTO project_ai_profiles (
                     project_id, profile_id, task_type, role, position,
                     snapshot_name, snapshot_worker_type, snapshot_provider,
                     snapshot_base_url, snapshot_model, snapshot_reasoning_type,
@@ -220,7 +219,7 @@ def _selection_from_snapshots(
     )
 
 
-def _profile_models(conn: sqlite3.Connection, profile: sqlite3.Row) -> list[str]:
+def _profile_models(conn: Any, profile: Any) -> list[str]:
     rows = conn.execute(
         "SELECT model FROM ai_profile_models WHERE profile_id = ? ORDER BY model",
         (profile["id"],),
@@ -231,13 +230,13 @@ def _profile_models(conn: sqlite3.Connection, profile: sqlite3.Row) -> list[str]
     return models or [profile["model"]]
 
 
-def _selected_reasoning_type(profile: sqlite3.Row) -> str | None:
+def _selected_reasoning_type(profile: Any) -> str | None:
     return profile["model_reasoning_effort"] if "model_reasoning_effort" in profile.keys() else None
 
 
 def _selected_model(
-    conn: sqlite3.Connection,
-    profile: sqlite3.Row,
+    conn: Any,
+    profile: Any,
     selection: AiProfileSelection,
 ) -> str:
     model = selection.primary_model or profile["model"]

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import socket
-import sqlite3
 import time
 import urllib.error
 import urllib.parse
@@ -71,7 +70,7 @@ class _CatalogEntry:
     headers: dict[str, str]
 
 
-def _row_to_entry(row: sqlite3.Row) -> _CatalogEntry:
+def _row_to_entry(row: Any) -> _CatalogEntry:
     try:
         requires_ids = json.loads(row["requires_ids"] or "[]")
     except json.JSONDecodeError:
@@ -141,21 +140,21 @@ _SELECT_COLUMNS = (
 )
 
 
-def list_catalog(conn: sqlite3.Connection) -> list[CapabilityCatalogItem]:
+def list_catalog(conn: Any) -> list[CapabilityCatalogItem]:
     rows = conn.execute(
         f"SELECT {_SELECT_COLUMNS} FROM capability_catalog ORDER BY kind, id"
     ).fetchall()
     return [_row_to_entry(row).item for row in rows]
 
 
-def get_catalog_map(conn: sqlite3.Connection) -> dict[tuple[str, str], _CatalogEntry]:
+def get_catalog_map(conn: Any) -> dict[tuple[str, str], _CatalogEntry]:
     rows = conn.execute(
         f"SELECT {_SELECT_COLUMNS} FROM capability_catalog"
     ).fetchall()
     return {(row["kind"], row["id"]): _row_to_entry(row) for row in rows}
 
 
-def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: CapabilityAdminRequest) -> CapabilityCatalogItem:
+def upsert_user_capability(conn: Any, kind: str, body: CapabilityAdminRequest) -> CapabilityCatalogItem:
     if not body.id.strip():
         raise HTTPException(400, "id must not be empty")
     if kind not in ("mcp_server", "skill"):
@@ -277,7 +276,7 @@ def upsert_user_capability(conn: sqlite3.Connection, kind: str, body: Capability
     return _row_to_entry(row).item
 
 
-def delete_user_capability(conn: sqlite3.Connection, kind: str, capability_id: str) -> None:
+def delete_user_capability(conn: Any, kind: str, capability_id: str) -> None:
     row = conn.execute(
         "SELECT source FROM capability_catalog WHERE kind = ? AND id = ?",
         (kind, capability_id),
@@ -300,7 +299,7 @@ def delete_user_capability(conn: sqlite3.Connection, kind: str, capability_id: s
 
 
 def register_builtin_catalog(
-    conn: sqlite3.Connection, catalog: list[dict[str, Any]]
+    conn: Any, catalog: list[dict[str, Any]]
 ) -> list[CapabilityCatalogItem]:
     """Replace built-in rows with the dispatcher's catalog.
 
@@ -320,7 +319,7 @@ def register_builtin_catalog(
             continue
         conn.execute(
             """
-            INSERT OR REPLACE INTO capability_catalog (
+            INSERT INTO capability_catalog (
                 kind, id, name, description, task_types, available, detail,
                 source, requires_ids, required_skill_ids, use_when, activation_hint,
                 preferred_mcp_ids, probe_config, updated_at,
@@ -358,7 +357,7 @@ def register_builtin_catalog(
 # ---------------------------------------------------------------------------
 
 
-def _assert_no_skill_cycle(conn: sqlite3.Connection, root_id: str, requires: Iterable[str]) -> None:
+def _assert_no_skill_cycle(conn: Any, root_id: str, requires: Iterable[str]) -> None:
     """Reject a requires graph that would loop back to ``root_id``.
 
     Walk the full graph so an indirect cycle (a -> b -> a, written in
@@ -561,7 +560,7 @@ def _role_default_skills_for_task(
 
 
 def persist_project_capabilities_per_task(
-    conn: sqlite3.Connection,
+    conn: Any,
     project_id: str,
     per_task: TaskCapabilitiesMap,
     now: str,
@@ -614,7 +613,7 @@ def persist_project_capabilities_per_task(
 
 
 def load_project_capabilities_per_task(
-    conn: sqlite3.Connection, project_id: str
+    conn: Any, project_id: str
 ) -> TaskCapabilitiesMap:
     rows = conn.execute(
         """
@@ -801,7 +800,7 @@ def _probe_skill(entry: _CatalogEntry) -> CapabilityHealthEntry:
     )
 
 
-def probe_capability(conn: sqlite3.Connection, kind: str, capability_id: str) -> CapabilityHealthEntry:
+def probe_capability(conn: Any, kind: str, capability_id: str) -> CapabilityHealthEntry:
     row = conn.execute(
         f"SELECT {_SELECT_COLUMNS} FROM capability_catalog WHERE kind = ? AND id = ?",
         (kind, capability_id),
@@ -817,7 +816,7 @@ def probe_capability(conn: sqlite3.Connection, kind: str, capability_id: str) ->
 
 
 def probe_per_task(
-    conn: sqlite3.Connection,
+    conn: Any,
     per_task: TaskCapabilitiesMap,
     catalog: dict[tuple[str, str], _CatalogEntry],
 ) -> dict[str, list[CapabilityHealthEntry]]:
@@ -845,7 +844,7 @@ def probe_per_task(
 
 
 def persist_probe_result(
-    conn: sqlite3.Connection,
+    conn: Any,
     health: dict[str, list[CapabilityHealthEntry]],
 ) -> None:
     """Mirror the per-capability status into the catalog row for the UI."""

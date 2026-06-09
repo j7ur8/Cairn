@@ -16,8 +16,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sqlite3
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from cairn.server.observability import db as observability_db
 
@@ -81,7 +81,7 @@ def _cutoff_iso(hours: int) -> str:
     return cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def prune_older_than(conn: sqlite3.Connection, cutoff_iso: str) -> int:
+def prune_older_than(conn: Any, cutoff_iso: str) -> int:
     """Delete executions older than ``cutoff_iso`` and return the count.
 
     Kept for backward compat with prior tests / cron scripts. The

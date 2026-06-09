@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -21,18 +20,15 @@ class StaticCacheTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         from cairn.server import db
         from cairn.server.observability import db as obs_db
-        db._db_path = None
+        db.reset_for_tests()
         db.close_thread_conn()
         db.configure(Path(self.tmp.name) / "main.sqlite")
-        obs_db._db_path = None
         obs_db.configure(Path(self.tmp.name) / "obs.sqlite")
 
     def tearDown(self) -> None:
         from cairn.server import db
-        from cairn.server.observability import db as obs_db
         db.close_thread_conn()
-        db._db_path = None
-        obs_db._db_path = None
+        db.reset_for_tests()
         self.tmp.cleanup()
 
     def test_static_assets_are_no_store(self) -> None:
@@ -102,46 +98,37 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("preferred_mcp_ids: normalizeStringList(this.capabilityForm.preferred_mcp_ids),", html)
         self.assertNotIn("const payload = { ...this.capabilityForm };", html)
 
-    def test_health_reports_migration_errors(self) -> None:
+    def test_health_reports_postgres_status(self) -> None:
         from fastapi.testclient import TestClient
-        from cairn.server import db
         from cairn.server.app import app
 
-        with db.with_immediate_tx() as conn:
-            conn.execute(
-                "INSERT INTO migration_errors (version, sql, error) VALUES (?, ?, ?)",
-                ("v_bad", "SELECT bad", "boom"),
-            )
         with TestClient(app) as client:
             r = client.get("/health")
-        self.assertEqual(r.status_code, 503)
-        self.assertEqual(r.json()["status"], "degraded")
-        self.assertEqual(r.json()["migration_error"]["version"], "v_bad")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "ok")
+        self.assertEqual(r.json()["database"], "postgresql")
 
     def test_health_reports_database_errors_as_degraded(self) -> None:
         from fastapi.testclient import TestClient
         from cairn.server.app import app
 
-        @contextmanager
-        def broken_get_conn():
-            raise sqlite3.DatabaseError("database disk image is malformed")
-            yield
-
-        with patch("cairn.server.app.db.get_conn", broken_get_conn), TestClient(app) as client:
+        with patch("cairn.server.app.db.postgres_status", side_effect=RuntimeError("postgres unavailable")), TestClient(app) as client:
             r = client.get("/health")
         self.assertEqual(r.status_code, 503)
         body = r.json()
         self.assertEqual(body["status"], "degraded")
-        self.assertIn("database disk image is malformed", body["database_error"])
+        self.assertEqual(body["database"], "postgresql")
+        self.assertIn("postgres unavailable", body["database_error"])
 
     def test_route_database_errors_are_degraded_json(self) -> None:
         from fastapi.testclient import TestClient
+        from cairn.server.db import DatabaseUnavailable
         from cairn.server.app import app
         from cairn.server.security.jwt import issue_token
 
         @contextmanager
         def broken_get_conn():
-            raise sqlite3.DatabaseError("database disk image is malformed")
+            raise DatabaseUnavailable("postgres unavailable")
             yield
 
         headers = {
@@ -152,7 +139,8 @@ class StaticCacheTests(unittest.TestCase):
         self.assertEqual(r.status_code, 503)
         body = r.json()
         self.assertEqual(body["status"], "degraded")
-        self.assertIn("database disk image is malformed", body["database_error"])
+        self.assertEqual(body["database"], "postgresql")
+        self.assertIn("postgres unavailable", body["database_error"])
 
 
 if __name__ == "__main__":

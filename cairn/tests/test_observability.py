@@ -102,18 +102,21 @@ class MetricsTests(unittest.TestCase):
 
 class ObservabilityDbTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
         self.tmp.close()
+        from cairn.server import db
         from cairn.server.observability import db as obs_db
-        obs_db._db_path = None
+
+        db.reset_for_tests()
         obs_db.configure(Path(self.tmp.name))
         self.db = obs_db
+        self.main_db = db
 
     def tearDown(self) -> None:
-        self.db._db_path = None
+        self.main_db.reset_for_tests()
         os.unlink(self.tmp.name)
 
-    def test_batch_append_and_backup(self) -> None:
+    def test_batch_append_persists_events(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
@@ -142,26 +145,14 @@ class ObservabilityDbTests(unittest.TestCase):
             )
         self.assertEqual(dropped, 0)
         self.assertEqual(len(events), 2)
-        backup_path = Path(self.tmp.name).with_name("obs-backup.sqlite")
-        self.db.backup_to(backup_path)
-        import sqlite3
-        conn = sqlite3.connect(str(backup_path))
-        try:
-            count = conn.execute("SELECT COUNT(*) FROM llm_execution_events").fetchone()[0]
-        finally:
-            conn.close()
+        with self.db.get_conn() as conn:
+            count = conn.execute("SELECT COUNT(*) AS count FROM llm_execution_events").fetchone()["count"]
         self.assertEqual(count, 2)
 
-    def test_status_and_checkpoint_include_sqlite_diagnostics(self) -> None:
-        status = self.db.sqlite_status()
-        self.assertEqual(status["quick_check"], ["ok"])
-        self.assertNotIn("wal_checkpoint", status)
-        self.assertIn("wal_size_bytes", status)
-        self.assertIn("shm_size_bytes", status)
-        result = self.db.checkpoint_truncate()
-        self.assertIn("before", result)
-        self.assertIn("checkpoint", result)
-        self.assertIn("after", result)
+    def test_status_reports_postgres(self) -> None:
+        status = self.db.postgres_status()
+        self.assertEqual(status["database"], "postgresql")
+        self.assertEqual(self.db.quick_check(), ["ok"])
 
 
 class RequestIdMiddlewareTests(unittest.TestCase):
@@ -171,9 +162,8 @@ class RequestIdMiddlewareTests(unittest.TestCase):
         os.environ["CAIRN_PROJECT_FILES_ROOT"] = str(Path(tmp.name) / "pf")
         from cairn.server import db
         from cairn.server.observability import db as obs_db
-        db._db_path = None
+        db.reset_for_tests()
         db.configure(Path(tmp.name) / "main.sqlite")
-        obs_db._db_path = None
         obs_db.configure(Path(tmp.name) / "obs.sqlite")
         from fastapi.testclient import TestClient
         from cairn.server.app import app
