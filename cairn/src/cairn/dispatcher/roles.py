@@ -28,6 +28,7 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "name": role.name,
                 "description": role.description,
                 "task_types": role.task_types,
+                "default_skill_ids": list(role.default_skill_ids),
                 "available": True,
                 "prompt": prompt,
                 "detail": f"sha256:{_sha256(prompt)}",

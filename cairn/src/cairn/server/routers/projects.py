@@ -1,6 +1,4 @@
-import json
 import logging
-import sqlite3
 
 from fastapi import APIRouter, HTTPException
 
@@ -26,15 +24,11 @@ from cairn.server.models import (
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
-from cairn.server.capabilities_service import (
-    expand_task_capabilities,
-    get_catalog_map,
-    persist_project_capabilities_per_task,
-    persist_probe_result,
-    probe_per_task,
+from cairn.server.project_creation_service import (
+    ProjectCreationDraft,
+    create_project_from_draft,
+    proxy_summary_from_row,
 )
-from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
-from cairn.server.models_pkg.projects import hidden_kinds_from_visible
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -50,9 +44,8 @@ from cairn.server.services import (
     heartbeat_project_reason_or_409,
     intent_to_model,
     next_fact_id,
-    next_hint_id,
-    next_intent_id,
     next_project_id,
+    next_intent_id,
     project_meta_from_row,
     project_reason_from_row,
     reason_trigger_hash,
@@ -98,119 +91,23 @@ def list_projects():
         ]
 
 
-def _proxy_summary_from_row(row: sqlite3.Row) -> ProxySummary:
-    return ProxySummary(
-        id=row["id"],
-        name=row["name"],
-        type=row["type"],
-        host=row["host"],
-        port=row["port"],
-        has_auth=bool(row["username"] or row["password"]),
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
-
-
 @router.post("/projects", response_model=ProjectDetail, status_code=201)
 def create_project(body: CreateProjectRequest):
     with with_immediate_tx() as conn:
-        pid = next_project_id(conn)
-        now = utcnow()
-
-        proxy_summary: ProxySummary | None = None
-        if body.proxy_id:
-            proxy_row = conn.execute(
-                "SELECT * FROM proxies WHERE id = ?", (body.proxy_id,)
-            ).fetchone()
-            if proxy_row is None:
-                raise HTTPException(400, f"proxy_id references missing proxy: {body.proxy_id}")
-            proxy_summary = _proxy_summary_from_row(proxy_row)
-
-        try:
-            llm_hidden_event_kinds = hidden_kinds_from_visible(body.llm_visible_event_kinds)
-            conn.execute(
-                "INSERT INTO projects (id, title, status, created_at, proxy_id, llm_hidden_event_kinds) "
-                "VALUES (?, ?, 'active', ?, ?, ?)",
-                (pid, body.title, now, body.proxy_id, json.dumps(llm_hidden_event_kinds, ensure_ascii=False)),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise HTTPException(400, f"invalid proxy_id: {body.proxy_id}") from exc
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            ("origin", pid, body.origin),
-        )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            ("goal", pid, body.goal),
-        )
-
-        hints = []
-        if body.hints:
-            for h in body.hints:
-                hid = next_hint_id(conn, pid)
-                conn.execute(
-                    "INSERT INTO hints (id, project_id, content, creator, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (hid, pid, h.content, h.creator, now),
-                )
-                hints.append(Hint(id=hid, content=h.content, creator=h.creator, created_at=now))
-
-        catalog_map = get_catalog_map(conn)
-        expanded_per_task, _expand_warnings = expand_task_capabilities(
-            body.capabilities_per_task, catalog_map,
-        )
-        persist_project_capabilities_per_task(conn, pid, expanded_per_task, now)
-        # Probe every chosen capability right after the project is
-        # created so the operator can see red/yellow status before the
-        # dispatcher has a chance to fail at task-launch time. The
-        # probe never blocks project creation; results land in the
-        # catalog row for the UI.
-        health_per_task = probe_per_task(conn, expanded_per_task, catalog_map)
-        persist_probe_result(conn, health_per_task)
-
-        role_id = body.role.role_id if body.role is not None else body.role_id
-        if role_id:
-            role = conn.execute(
-                """
-                SELECT id, name, prompt, prompt_sha256
-                FROM role_catalog
-                WHERE id = ? AND available = 1
-                """,
-                (role_id,),
-            ).fetchone()
-            if role is None:
-                raise HTTPException(404, f"Role {role_id} not found or unavailable")
-            conn.execute(
-                """
-                INSERT INTO project_roles (
-                    project_id, role_id, role_name, role_prompt, role_prompt_sha256, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (pid, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
-            )
-        persist_project_ai_selections(
+        return create_project_from_draft(
             conn,
-            pid,
-            require_complete_ai_profile_selections(body.ai_profile_selections),
-            now,
-        )
-
-
-        return ProjectDetail(
-            project=ProjectMeta(
-                id=pid,
+            ProjectCreationDraft(
                 title=body.title,
+                origin=body.origin,
+                goal=body.goal,
+                hints=body.hints,
+                capabilities=body.capabilities,
+                ai_profiles=body.ai_profiles,
+                role_id=body.role_id,
+                proxy_id=body.proxy_id,
+                llm_visible_event_kinds=body.llm_visible_event_kinds,
                 status="active",
-                created_at=now,
-                reason=None,
-                llm_hidden_event_kinds=llm_hidden_event_kinds,
             ),
-            facts=[
-                Fact(id="origin", description=body.origin),
-                Fact(id="goal", description=body.goal),
-            ],
-            intents=[],
-            hints=hints,
-            proxy=proxy_summary,
         )
 
 
@@ -235,7 +132,7 @@ def get_project(project_id: str):
                 "SELECT * FROM proxies WHERE id = ?", (row["proxy_id"],)
             ).fetchone()
             if proxy_row is not None:
-                proxy_summary = _proxy_summary_from_row(proxy_row)
+                proxy_summary = proxy_summary_from_row(proxy_row)
 
         return ProjectDetail(
             project=project_meta_from_row(row),

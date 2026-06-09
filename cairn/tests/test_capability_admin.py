@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -164,7 +165,7 @@ class CapabilityAdminTests(unittest.TestCase):
             ))
         created = create_project(CreateProjectRequest(
             title="p", origin="o", goal="g",
-            capabilities_per_task={
+            capabilities={
                 "bootstrap": {
                     "mcp_server_ids": ["m"],
                     "skill_ids": ["s"],
@@ -184,7 +185,7 @@ class CapabilityAdminTests(unittest.TestCase):
                     "user_skill_ids": [],
                 },
             },
-            ai_profile_selections=self._create_profile(),
+            ai_profiles=self._create_profile(),
         ))
         pid = created.project.id
         with self.db.get_conn() as conn:
@@ -204,10 +205,75 @@ class CapabilityAdminTests(unittest.TestCase):
             origin="o",
             goal="g",
             llm_visible_event_kinds=["prompt", "agent_message"],
-            ai_profile_selections=self._create_profile(),
+            ai_profiles=self._create_profile(),
         ))
 
         self.assertEqual(project.project.llm_visible_event_kinds, ["prompt", "agent_message"])
+
+    def test_create_project_role_default_skill_snapshot(self) -> None:
+        from cairn.server.capabilities_service import (
+            expand_task_capabilities,
+            get_catalog_map,
+            load_project_capabilities_per_task,
+            persist_project_capabilities_per_task,
+            upsert_user_capability,
+        )
+        from cairn.server.models import (
+            CapabilityAdminRequest, CreateProjectRequest,
+            RegisterRoleCatalogItem, RegisterRoleCatalogRequest,
+        )
+        from cairn.server.routers.capabilities import register_role_catalog
+        from cairn.server.routers.projects import create_project
+
+        with self.db.get_conn() as conn:
+            upsert_user_capability(conn, "skill", CapabilityAdminRequest(
+                id="role-skill", name="Role Skill", task_types=["bootstrap", "explore"],
+                source_path="/tmp/role-skill",
+            ))
+        register_role_catalog(RegisterRoleCatalogRequest(roles=[
+            RegisterRoleCatalogItem(
+                id="role1", name="Role", prompt="prompt",
+                default_skill_ids=["role-skill"],
+            ),
+        ]))
+
+        project = create_project(CreateProjectRequest(
+            title="p", origin="o", goal="g",
+            role_id="role1",
+            ai_profiles=self._create_profile(),
+        ))
+
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT task_type, source FROM project_capability_snapshots
+                WHERE project_id = ? AND kind = 'skill' AND capability_id = 'role-skill'
+                ORDER BY task_type
+                """,
+                (project.project.id,),
+            ).fetchall()
+            per_task = load_project_capabilities_per_task(conn, project.project.id)
+
+        self.assertEqual(
+            [(row["task_type"], row["source"]) for row in rows],
+            [("bootstrap", "role_default"), ("explore", "role_default")],
+        )
+        self.assertEqual(per_task["bootstrap"].skill_ids, ["role-skill"])
+        self.assertEqual(per_task["bootstrap"].role_default_skill_ids, ["role-skill"])
+        self.assertEqual(per_task["bootstrap"].user_skill_ids, [])
+        with self.db.get_conn() as conn:
+            catalog = get_catalog_map(conn)
+            expanded, _ = expand_task_capabilities(per_task, catalog)
+            persist_project_capabilities_per_task(conn, project.project.id, expanded, "2026-06-09T00:00:00Z")
+            row = conn.execute(
+                """
+                SELECT source FROM project_capability_snapshots
+                WHERE project_id = ? AND task_type = 'bootstrap'
+                  AND kind = 'skill' AND capability_id = 'role-skill'
+                """,
+                (project.project.id,),
+            ).fetchone()
+        self.assertEqual(row["source"], "role_default")
         self.assertIn("usage", project.project.llm_hidden_event_kinds)
         with self.db.get_conn() as conn:
             row = conn.execute(
@@ -656,7 +722,7 @@ class McpRequiredSkillIdsTests(unittest.TestCase):
         )
         project = create_project(CreateProjectRequest(
             title="p", origin="o", goal="g",
-            capabilities_per_task={
+            capabilities={
                 "bootstrap": {
                     "mcp_server_ids": ["m"],
                     "user_mcp_server_ids": ["m"],
@@ -664,7 +730,7 @@ class McpRequiredSkillIdsTests(unittest.TestCase):
                 "explore": {"mcp_server_ids": [], "user_mcp_server_ids": []},
                 "reason": {"mcp_server_ids": [], "user_mcp_server_ids": []},
             },
-            ai_profile_selections=TaskAiProfileSelections(
+            ai_profiles=TaskAiProfileSelections(
                 bootstrap=selection, explore=selection, reason=selection,
             ),
         ))
@@ -716,10 +782,33 @@ class McpRequiredSkillIdsTests(unittest.TestCase):
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(capability_catalog)").fetchall()
             }
+            role_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(role_catalog)").fetchall()
+            }
         self.assertIn("required_skill_ids", cols)
         self.assertIn("use_when", cols)
         self.assertIn("activation_hint", cols)
         self.assertIn("preferred_mcp_ids", cols)
+        self.assertIn("default_skill_ids", role_cols)
+
+    def test_role_catalog_persists_default_skill_ids(self) -> None:
+        from cairn.server.models import RegisterRoleCatalogItem, RegisterRoleCatalogRequest
+        from cairn.server.routers.capabilities import register_role_catalog
+
+        items = register_role_catalog(RegisterRoleCatalogRequest(roles=[
+            RegisterRoleCatalogItem(
+                id="role1", name="Role", prompt="prompt",
+                default_skill_ids=["skill-a"],
+            ),
+        ]))
+
+        self.assertEqual(items[0].default_skill_ids, ["skill-a"])
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT default_skill_ids FROM role_catalog WHERE id = 'role1'"
+            ).fetchone()
+        self.assertEqual(row["default_skill_ids"], '["skill-a"]')
 
 
 class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):

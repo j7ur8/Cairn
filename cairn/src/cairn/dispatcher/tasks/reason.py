@@ -29,6 +29,7 @@ from cairn.dispatcher.tasks.common import (
     run_worker_process,
     write_graph_snapshot_reference,
 )
+from cairn.dispatcher.tasks.runner import project_capability_data, project_role_data
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.server.models import ProjectDetail
 
@@ -131,7 +132,7 @@ def run_reason_task(
             project.project.id,
             "reason",
             f"reason-{worker.name}-{uuid.uuid4().hex[:12]}",
-            _project_capability_data(client, project.project.id, reporter, "reason_execute"),
+            project_capability_data(client, project.project.id, reporter, "reason_execute"),
         )
         if capabilities.summary:
             reporter.emit_result("capabilities", capabilities.summary)
@@ -140,7 +141,7 @@ def run_reason_task(
         role = inject_project_role(
             project.project.id,
             "reason",
-            _project_role_data(client, project.project.id, reporter, "reason_execute"),
+            project_role_data(client, project.project.id, reporter, "reason_execute"),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)
@@ -438,29 +439,3 @@ def run_reason_task(
         reporter.finish(process_state_for_task_outcome(outcome), error_kind=None if outcome == "success" else outcome)
         lease.stop()
         best_effort_release_reason(client, project.project.id, worker.name, reason_run_id)
-
-
-def _project_capability_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_capabilities(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"capability selection fetch failed status={response.status_code}")
-    return None
-
-
-def _project_role_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_role(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"project role fetch failed status={response.status_code}")
-    return None

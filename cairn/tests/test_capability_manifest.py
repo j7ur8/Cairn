@@ -15,15 +15,25 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class CapabilityManifestTests(unittest.TestCase):
     def test_manifest_lists_selected_mcp_and_skills_without_secrets(self) -> None:
-        from cairn.dispatcher.tasks.bootstrap import _capability_manifest_payload
+        from cairn.dispatcher.tasks.runner import capability_manifest_payload
 
-        payload = _capability_manifest_payload(
+        payload = capability_manifest_payload(
             "proj_001",
             "bootstrap",
             {
-                "selection": {
-                    "mcp_server_ids": ["http-mcp", "kali"],
-                    "skill_ids": ["cypher-ctf", "missing-skill"],
+                "tasks": {
+                    "bootstrap": {
+                        "selected": {
+                            "mcp_server_ids": ["http-mcp", "kali"],
+                            "skill_ids": ["cypher-ctf", "missing-skill"],
+                        },
+                        "snapshots": [
+                            {"kind": "mcp_server", "capability_id": "http-mcp", "source": "selected"},
+                            {"kind": "mcp_server", "capability_id": "kali", "source": "selected"},
+                            {"kind": "skill", "capability_id": "cypher-ctf", "source": "selected"},
+                            {"kind": "skill", "capability_id": "missing-skill", "source": "selected"},
+                        ],
+                    },
                 },
                 "catalog": [
                     {
@@ -53,8 +63,10 @@ class CapabilityManifestTests(unittest.TestCase):
                         "task_types": ["bootstrap"],
                     },
                 ],
-                "unavailable_mcp_server_ids": ["old-mcp"],
-                "unavailable_skill_ids": ["missing-skill"],
+                "unavailable": {
+                    "mcp_server_ids": ["old-mcp"],
+                    "skill_ids": ["missing-skill"],
+                },
             },
         )
 
@@ -64,17 +76,17 @@ class CapabilityManifestTests(unittest.TestCase):
         self.assertFalse(payload["mcp_servers"][1]["enabled_for_task"])
         self.assertTrue(payload["skills"][0]["enabled_for_task"])
         self.assertFalse(payload["skills"][1]["available"])
-        self.assertEqual(payload["unavailable_mcp_server_ids"], ["old-mcp"])
-        self.assertEqual(payload["unavailable_skill_ids"], ["missing-skill"])
+        self.assertEqual(payload["unavailable"]["mcp_server_ids"], ["old-mcp"])
+        self.assertEqual(payload["unavailable"]["skill_ids"], ["missing-skill"])
         rendered = repr(payload)
         self.assertNotIn("should-not-appear", rendered)
         self.assertNotIn("Authorization", rendered)
         self.assertNotIn("TOKEN", rendered)
 
     def test_manifest_empty_when_selection_unavailable(self) -> None:
-        from cairn.dispatcher.tasks.bootstrap import _capability_manifest_payload
+        from cairn.dispatcher.tasks.runner import capability_manifest_payload
 
-        payload = _capability_manifest_payload("proj_002", "bootstrap", None)
+        payload = capability_manifest_payload("proj_002", "bootstrap", None)
 
         self.assertEqual(payload["mcp_servers"], [])
         self.assertEqual(payload["skills"], [])

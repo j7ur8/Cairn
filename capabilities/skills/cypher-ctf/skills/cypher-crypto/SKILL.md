@@ -1,6 +1,6 @@
 ---
 name: cypher-crypto
-description: Cryptography challenge methodology covering classical ciphers, symmetric/asymmetric cryptanalysis, hash length extension, padding oracle attacks, RSA vulnerabilities (small e, Wiener, Coppersmith), ECC, PRNG prediction, and side-channel reasoning.
+description: Cryptography challenge guidance covering classical ciphers, symmetric/asymmetric cryptanalysis, hash length extension, padding oracle attacks, RSA vulnerabilities (small e, Wiener, Coppersmith), ECC, PRNG prediction, and side-channel reasoning.
 version: 0.1.0
 finding_types: [CRYPTO_FINDING, VULN_CANDIDATE, EXPLOIT_RESULT]
 destructiveness: low
@@ -10,6 +10,8 @@ tags: [ctf, crypto, rsa, aes, ecc, oracle]
 # Cypher Cryptography Skill
 
 Use this skill for CTF crypto challenges, cryptographic vulnerability research, and protocol-level crypto analysis.
+
+Treat the attack families and tools below as optional references. Select them only when the ciphertext, oracle behavior, protocol design, and goal justify that path.
 
 ## Initial triage
 

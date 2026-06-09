@@ -14,7 +14,7 @@ import requests
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import catalog_payload as capability_catalog_payload
 from cairn.dispatcher.roles import catalog_payload as role_catalog_payload
-from cairn.dispatcher.ai_health import probe_snapshot
+from cairn.dispatcher.ai_health import probe_snapshot, run_profile_worker_healthcheck
 from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
 from cairn.dispatcher.leadership import DispatcherLeader, LeadershipLost
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
@@ -37,6 +37,7 @@ from cairn.observability.metrics import (
     WORKER_UNHEALTHY_SINCE,
 )
 from cairn.server.models import (
+    AiProfile,
     Intent,
     ProjectAiProfileSnapshot,
     ProjectDetail,
@@ -216,6 +217,8 @@ class DispatcherLoop:
             self._sync_ai_catalog_from_dispatch_yaml()
             self._ai_catalog_synced = True
             self.leader.heartbeat()
+        self._process_ai_profile_check_requests()
+        self.leader.heartbeat()
         self._reap_futures()
         self._reap_cleanup_futures()
         summaries = self.client.list_projects()
@@ -429,9 +432,8 @@ class DispatcherLoop:
             self.project_caches.set_ai_chains(project_id, None)
             return
         chains: dict[str, list[ProjectAiProfileSnapshot]] = {}
-        legacy = [snap for snap in snapshots if snap.task_type == "legacy"]
         for task_type in ("bootstrap", "explore", "reason"):
-            task_snaps = [snap for snap in snapshots if snap.task_type == task_type] or legacy
+            task_snaps = [snap for snap in snapshots if snap.task_type == task_type]
             ordered = sorted(
                 task_snaps,
                 key=lambda snap: (0 if snap.role == "primary" else 1, snap.position),
@@ -1470,6 +1472,67 @@ class DispatcherLoop:
             self.client.post_ai_health_report({"reports": reports})
         except Exception as exc:  # noqa: BLE001
             LOG.warning("ai catalog sync: health_report failed error=%s", exc)
+
+    def _process_ai_profile_check_requests(self) -> None:
+        try:
+            claimed = self.client.claim_ai_profile_check_request()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("ai profile check: claim failed error=%s", exc)
+            return
+        if not claimed.ok or not isinstance(claimed.data, dict) or not claimed.data:
+            return
+        request_id = str(claimed.data.get("id") or "")
+        profile_id = str(claimed.data.get("profile_id") or "")
+        if not request_id or not profile_id:
+            return
+        try:
+            response = self.client.list_ai_profiles()
+            if not response.ok or not isinstance(response.data, list):
+                self.client.complete_ai_profile_check_request(
+                    request_id, ok=False, message="unable to load ai profile catalog",
+                )
+                return
+            raw = next(
+                (item for item in response.data if isinstance(item, dict) and item.get("id") == profile_id),
+                None,
+            )
+            if raw is None:
+                self.client.complete_ai_profile_check_request(
+                    request_id, ok=False, message=f"ai profile not found: {profile_id}",
+                )
+                return
+            profile = AiProfile.model_validate(raw)
+            try:
+                cached_secret = self.client.get_ai_profile_secret(profile.id)
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("ai profile check: secret lookup failed profile_id=%s error=%s", profile.id, exc)
+                cached_secret = None
+            health = run_profile_worker_healthcheck(
+                profile,
+                config=self.config,
+                container_manager=self.container_manager,
+                cached_secret=cached_secret,
+                timeout_seconds=self.config.runtime.healthcheck_timeout,
+            )
+            message = health.message or ("ok" if health.ok else "worker healthcheck failed")
+            self.client.post_ai_health_report({
+                "reports": [{
+                    "profile_id": profile.id,
+                    "ok": health.ok,
+                    "message": message[:1000],
+                }],
+            })
+            self.client.complete_ai_profile_check_request(
+                request_id, ok=health.ok, message=message[:1000],
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("ai profile check failed profile_id=%s error=%s", profile_id, exc)
+            try:
+                self.client.complete_ai_profile_check_request(
+                    request_id, ok=False, message=str(exc)[:1000],
+                )
+            except Exception:  # noqa: BLE001
+                LOG.exception("ai profile check complete failed request_id=%s", request_id)
 
     def _build_ai_sync_payload(self) -> list[dict[str, object]]:
         """Translate ``dispatch.yaml`` workers into the sync payload.

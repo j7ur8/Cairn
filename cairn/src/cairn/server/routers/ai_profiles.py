@@ -15,23 +15,32 @@ from typing import Iterable
 
 import sqlite3
 from fastapi import APIRouter, HTTPException
+from cairn.server.security.deps import current_user_optional
+from fastapi import Depends
 
+from cairn.server.ai_profile_service import (
+    load_project_ai_snapshots,
+    persist_project_ai_selection,
+    persist_project_ai_selections,
+    require_complete_ai_profile_selections,
+    task_ai_selections_from_snapshots,
+)
 from cairn.server.db import get_conn, with_immediate_tx
 from cairn.server.security.secrets import decrypt_secret, encrypt_secret
 from cairn.server.models import (
     AiProfile,
+    AiProfileCheckCompleteRequest,
+    AiProfileCheckRequest,
+    AiProfileCheckTriggerResponse,
     AiProfileCreate,
     AiProfileHealthReportRequest,
     AiProfileModelsReportRequest,
-    AiProfileSelection,
     AiProfileSyncRequest,
     AiProfileSyncWorker,
     AiProfileUpdate,
     AiProfileWithHealth,
     HealthCheckResult,
-    ProjectAiProfileSnapshot,
     ProjectAiProfilesResponse,
-    TaskAiProfileSelections,
     canonical_auth_env,
     auth_env_warning,
 )
@@ -152,6 +161,10 @@ def _new_profile_id() -> str:
     return f"ai_{uuid.uuid4().hex[:12]}"
 
 
+def _new_check_request_id() -> str:
+    return f"aicheck_{uuid.uuid4().hex[:12]}"
+
+
 def _seed_id(worker_name: str) -> str:
     """Deterministic id for a worker-derived profile, idempotent on re-seed."""
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in worker_name)
@@ -164,6 +177,19 @@ def list_ai_profiles():
     with get_conn() as conn:
         rows = conn.execute(_profile_select_sql()).fetchall()
     return [_row_to_profile(row) for row in rows]
+
+
+def _row_to_check_request(row: sqlite3.Row) -> AiProfileCheckRequest:
+    return AiProfileCheckRequest(
+        id=row["id"],
+        profile_id=row["profile_id"],
+        status=row["status"],
+        requested_at=row["requested_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        requested_by=row["requested_by"] or "",
+        error_message=row["error_message"] or "",
+    )
 
 
 @router.post("/ai-profiles", response_model=AiProfileWithHealth, status_code=201)
@@ -301,6 +327,95 @@ def delete_ai_profile(profile_id: str):
         # full copy of the profile fields at selection time, so historical
         # projects still know what they were configured to use.
         conn.execute("DELETE FROM ai_profiles WHERE id = ?", (profile_id,))
+    return None
+
+
+@router.post("/ai-profiles/{profile_id}/check", response_model=AiProfileCheckTriggerResponse, status_code=202)
+def trigger_ai_profile_check(profile_id: str, user=Depends(current_user_optional)):
+    request_id = _new_check_request_id()
+    now = _utcnow()
+    requested_by = getattr(user, "email", None) or getattr(user, "id", None) or "unknown"
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"ai profile not found: {profile_id}")
+        existing = conn.execute(
+            """
+            SELECT *
+            FROM ai_profile_check_requests
+            WHERE profile_id = ?
+              AND status IN ('pending', 'running')
+            ORDER BY requested_at DESC
+            LIMIT 1
+            """,
+            (profile_id,),
+        ).fetchone()
+        if existing is not None:
+            current = _row_to_check_request(existing)
+            return AiProfileCheckTriggerResponse(request_id=current.id, status=current.status)
+        conn.execute(
+            """
+            INSERT INTO ai_profile_check_requests (
+                id, profile_id, status, requested_at, requested_by
+            ) VALUES (?, ?, 'pending', ?, ?)
+            """,
+            (request_id, profile_id, now, requested_by),
+        )
+        conn.commit()
+    return AiProfileCheckTriggerResponse(request_id=request_id, status="pending")
+
+
+@router.post("/ai-profiles/check-requests/claim", response_model=AiProfileCheckRequest | None)
+def claim_ai_profile_check_request():
+    now = _utcnow()
+    with with_immediate_tx() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM ai_profile_check_requests
+            WHERE status = 'pending'
+            ORDER BY requested_at ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            """
+            UPDATE ai_profile_check_requests
+            SET status = 'running', started_at = ?, error_message = ''
+            WHERE id = ?
+            """,
+            (now, row["id"]),
+        )
+        claimed = conn.execute(
+            "SELECT * FROM ai_profile_check_requests WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        conn.commit()
+    return _row_to_check_request(claimed)
+
+
+@router.post("/ai-profiles/check-requests/{request_id}/complete", status_code=204)
+def complete_ai_profile_check_request(request_id: str, body: AiProfileCheckCompleteRequest):
+    now = _utcnow()
+    status = "completed" if body.ok else "failed"
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM ai_profile_check_requests WHERE id = ?",
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, f"ai profile check request not found: {request_id}")
+        conn.execute(
+            """
+            UPDATE ai_profile_check_requests
+            SET status = ?, finished_at = ?, error_message = ?
+            WHERE id = ?
+            """,
+            (status, now, (body.message or "")[:1000], request_id),
+        )
+        conn.commit()
     return None
 
 
@@ -574,101 +689,6 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Project snapshot helpers (unchanged)
-# ---------------------------------------------------------------------------
-
-
-def _load_snapshots(conn: sqlite3.Connection, project_id: str) -> list[ProjectAiProfileSnapshot]:
-    rows = conn.execute(
-        """
-        SELECT profile_id, task_type, role, position,
-               snapshot_name, snapshot_worker_type, snapshot_provider,
-               snapshot_base_url, snapshot_model, snapshot_reasoning_type,
-               snapshot_api_key_env
-        FROM project_ai_profiles
-        WHERE project_id = ?
-        ORDER BY task_type, role, position
-        """,
-        (project_id,),
-    ).fetchall()
-    return [
-        ProjectAiProfileSnapshot(
-            profile_id=row["profile_id"],
-            task_type=row["task_type"],
-            role=row["role"],
-            position=row["position"],
-            snapshot_name=row["snapshot_name"],
-            snapshot_worker_type=row["snapshot_worker_type"],
-            snapshot_provider=row["snapshot_provider"],
-            snapshot_base_url=row["snapshot_base_url"],
-            snapshot_model=row["snapshot_model"],
-            snapshot_reasoning_type=row["snapshot_reasoning_type"] if "snapshot_reasoning_type" in row.keys() else None,
-            snapshot_api_key_env=row["snapshot_api_key_env"],
-        )
-        for row in rows
-    ]
-
-
-def _selection_from_snapshots(snapshots: Iterable[ProjectAiProfileSnapshot]) -> AiProfileSelection:
-    primary: str | None = None
-    primary_model: str | None = None
-    primary_reasoning_type: str | None = None
-    fallback: list[str] = []
-    for snap in snapshots:
-        if snap.role == "primary" and primary is None:
-            primary = snap.profile_id
-            primary_model = snap.snapshot_model
-            primary_reasoning_type = snap.snapshot_reasoning_type
-        elif snap.role == "fallback":
-            fallback.append(snap.profile_id)
-    return AiProfileSelection(
-        primary_profile_id=primary,
-        primary_model=primary_model,
-        primary_reasoning_type=primary_reasoning_type,
-        fallback_profile_ids=fallback,
-    )
-
-
-def _profile_models(conn: sqlite3.Connection, profile: sqlite3.Row) -> list[str]:
-    rows = conn.execute(
-        "SELECT model FROM ai_profile_models WHERE profile_id = ? ORDER BY model",
-        (profile["id"],),
-    ).fetchall()
-    models = [row["model"] for row in rows]
-    if profile["model"] and profile["model"] not in models:
-        models.insert(0, profile["model"])
-    return models or [profile["model"]]
-
-
-def _selected_reasoning_type(profile: sqlite3.Row) -> str | None:
-    return profile["model_reasoning_effort"] if "model_reasoning_effort" in profile.keys() else None
-
-
-def _selected_model(conn: sqlite3.Connection, profile: sqlite3.Row, selection: AiProfileSelection) -> str:
-    model = selection.primary_model or profile["model"]
-    allowed = set(_profile_models(conn, profile))
-    if model not in allowed:
-        raise HTTPException(
-            400,
-            f"primary_model {model!r} is not available for ai profile {profile['id']}",
-        )
-    return model
-
-
-def _task_selections_from_snapshots(snapshots: list[ProjectAiProfileSnapshot]) -> TaskAiProfileSelections:
-    by_task = {
-        task_type: [snap for snap in snapshots if snap.task_type == task_type]
-        for task_type in ("bootstrap", "explore", "reason")
-    }
-    legacy = [snap for snap in snapshots if snap.task_type == "legacy"]
-    return TaskAiProfileSelections(
-        bootstrap=_selection_from_snapshots(by_task["bootstrap"] or legacy),
-        explore=_selection_from_snapshots(by_task["explore"] or legacy),
-        reason=_selection_from_snapshots(by_task["reason"] or legacy),
-    )
-
-
 @router.get("/projects/{project_id}/ai-profiles", response_model=ProjectAiProfilesResponse)
 def get_project_ai_profiles(project_id: str):
     with get_conn() as conn:
@@ -678,9 +698,8 @@ def get_project_ai_profiles(project_id: str):
             _row_to_profile(row)
             for row in conn.execute(_profile_select_sql(order_by="p.id")).fetchall()
         ]
-        snapshots = _load_snapshots(conn, project_id)
-        selections = _task_selections_from_snapshots(snapshots)
-        selection = selections.explore
+        snapshots = load_project_ai_snapshots(conn, project_id)
+        selections = task_ai_selections_from_snapshots(snapshots)
         available_ids = {item.id for item in catalog if item.available}
         unavailable = sorted({
             snap.profile_id for snap in snapshots
@@ -688,136 +707,7 @@ def get_project_ai_profiles(project_id: str):
         })
         return ProjectAiProfilesResponse(
             catalog=catalog,
-            selection=selection,
             selections=selections,
             snapshots=snapshots,
             unavailable_profile_ids=unavailable,
         )
-
-
-def persist_project_ai_selection(
-    conn: sqlite3.Connection,
-    project_id: str,
-    selection: AiProfileSelection,
-    now: str,
-) -> None:
-    """Store the project AI selection as snapshots, replacing any prior one.
-
-    The catalog table is consulted for the current profile values; if a
-    referenced profile is missing, the request is rejected with 400 by the
-    caller before we reach this function.
-    """
-    persist_project_ai_selections(
-        conn,
-        project_id,
-        TaskAiProfileSelections(
-            bootstrap=selection,
-            explore=selection,
-            reason=selection,
-        ),
-        now,
-        task_types=("legacy",),
-    )
-
-
-def persist_project_ai_selections(
-    conn: sqlite3.Connection,
-    project_id: str,
-    selections: TaskAiProfileSelections,
-    now: str,
-    *,
-    task_types: tuple[str, ...] = ("bootstrap", "explore", "reason"),
-) -> None:
-    """Store task-specific AI profile snapshots for a project."""
-    selection_by_task = {
-        "bootstrap": selections.bootstrap,
-        "explore": selections.explore,
-        "reason": selections.reason,
-        "legacy": selections.explore,
-    }
-    referenced: list[str] = []
-    for task_type in task_types:
-        selection = selection_by_task[task_type]
-        if selection.primary_profile_id:
-            referenced.append(selection.primary_profile_id)
-        referenced.extend(selection.fallback_profile_ids)
-    referenced = list(dict.fromkeys(referenced))
-    rows = conn.execute(
-        f"SELECT * FROM ai_profiles WHERE id IN ({','.join('?' * len(referenced))})",
-        referenced,
-    ).fetchall() if referenced else []
-    by_id = {row["id"]: row for row in rows}
-    missing = [pid for pid in referenced if pid not in by_id]
-    if missing:
-        raise HTTPException(400, f"ai profile ids not found: {', '.join(missing)}")
-    unavailable = [pid for pid in referenced if not by_id[pid]["available"]]
-    if unavailable:
-        raise HTTPException(400, f"ai profile ids unavailable: {', '.join(unavailable)}")
-
-    conn.execute("DELETE FROM project_ai_profiles WHERE project_id = ?", (project_id,))
-    for task_type in task_types:
-        selection = selection_by_task[task_type]
-        if selection.primary_profile_id:
-            profile = by_id[selection.primary_profile_id]
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO project_ai_profiles (
-                    project_id, profile_id, task_type, role, position,
-                    snapshot_name, snapshot_worker_type, snapshot_provider,
-                    snapshot_base_url, snapshot_model, snapshot_reasoning_type,
-                    snapshot_api_key_env,
-                    created_at
-                ) VALUES (?, ?, ?, 'primary', 0, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    project_id, selection.primary_profile_id, task_type,
-                    profile["name"], profile["worker_type"], profile["provider"],
-                    profile["base_url"],
-                    _selected_model(conn, profile, selection),
-                    selection.primary_reasoning_type or _selected_reasoning_type(profile),
-                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]), now,
-                ),
-            )
-        for position, profile_id in enumerate(selection.fallback_profile_ids):
-            if profile_id == selection.primary_profile_id:
-                continue
-            profile = by_id[profile_id]
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO project_ai_profiles (
-                    project_id, profile_id, task_type, role, position,
-                    snapshot_name, snapshot_worker_type, snapshot_provider,
-                    snapshot_base_url, snapshot_model, snapshot_reasoning_type,
-                    snapshot_api_key_env,
-                    created_at
-                ) VALUES (?, ?, ?, 'fallback', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    project_id, profile_id, task_type, position,
-                    profile["name"], profile["worker_type"], profile["provider"],
-                    profile["base_url"], profile["model"],
-                    _selected_reasoning_type(profile),
-                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]), now,
-                ),
-            )
-
-
-def require_complete_ai_profile_selections(selections: TaskAiProfileSelections | None) -> TaskAiProfileSelections:
-    if selections is None:
-        raise HTTPException(400, "ai_profile_selections is required")
-    missing = [
-        field
-        for task_type in ("bootstrap", "explore", "reason")
-        for field, value in (
-            (f"{task_type}.primary_profile_id", getattr(selections, task_type).primary_profile_id),
-            (f"{task_type}.primary_model", getattr(selections, task_type).primary_model),
-            (f"{task_type}.primary_reasoning_type", getattr(selections, task_type).primary_reasoning_type),
-        )
-        if not value
-    ]
-    if missing:
-        raise HTTPException(
-            400,
-            f"ai_profile_selections missing required fields: {', '.join(missing)}",
-        )
-    return selections

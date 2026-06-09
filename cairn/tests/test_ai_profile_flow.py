@@ -112,16 +112,16 @@ class AiProfileFlowTests(unittest.TestCase):
             conn.commit()
 
         result = get_project_ai_profiles(pid)
-        self.assertEqual(result.selection.primary_profile_id, a.id)
-        self.assertEqual(result.selection.fallback_profile_ids, [b.id, c.id])
+        self.assertEqual(result.selections.explore.primary_profile_id, a.id)
+        self.assertEqual(result.selections.explore.fallback_profile_ids, [b.id, c.id])
         self.assertEqual(result.selections.bootstrap.primary_profile_id, a.id)
         self.assertEqual(result.selections.explore.primary_profile_id, a.id)
         self.assertEqual(result.selections.reason.primary_profile_id, a.id)
-        self.assertEqual(len(result.snapshots), 3)
+        self.assertEqual(len(result.snapshots), 9)
         self.assertEqual(result.unavailable_profile_ids, [])
 
-        primary_snapshot = next(s for s in result.snapshots if s.role == "primary")
-        self.assertEqual(primary_snapshot.task_type, "legacy")
+        primary_snapshot = next(s for s in result.snapshots if s.role == "primary" and s.task_type == "explore")
+        self.assertEqual(primary_snapshot.task_type, "explore")
         self.assertEqual(primary_snapshot.snapshot_model, "m1")
         self.assertEqual(primary_snapshot.snapshot_reasoning_type, "medium")
         self.assertEqual(primary_snapshot.snapshot_worker_type, "codex")
@@ -174,7 +174,7 @@ class AiProfileFlowTests(unittest.TestCase):
             conn.commit()
 
         result = get_project_ai_profiles(pid)
-        self.assertEqual(result.selection.primary_profile_id, explore.id)
+        self.assertEqual(result.selections.explore.primary_profile_id, explore.id)
         self.assertEqual(result.selections.bootstrap.primary_profile_id, boot.id)
         self.assertEqual(result.selections.explore.primary_profile_id, explore.id)
         self.assertEqual(result.selections.reason.primary_profile_id, reason.id)
@@ -414,7 +414,7 @@ class AiProfileFlowTests(unittest.TestCase):
         delete_ai_profile(a.id)
         result = get_project_ai_profiles(pid)
         # snapshot preserved, marked unavailable
-        self.assertEqual(len(result.snapshots), 1)
+        self.assertEqual(len(result.snapshots), 3)
         self.assertIn(a.id, result.unavailable_profile_ids)
 
     def test_primary_in_fallback_stripped(self) -> None:
@@ -441,10 +441,10 @@ class AiProfileFlowTests(unittest.TestCase):
             )
             conn.commit()
         result = get_project_ai_profiles(pid)
-        self.assertEqual(result.selection.primary_profile_id, a.id)
-        self.assertNotIn(a.id, result.selection.fallback_profile_ids)
+        self.assertEqual(result.selections.explore.primary_profile_id, a.id)
+        self.assertNotIn(a.id, result.selections.explore.fallback_profile_ids)
         self.assertEqual(
-            sum(1 for s in result.snapshots if s.role == "primary"), 1,
+            sum(1 for s in result.snapshots if s.role == "primary"), 3,
         )
 
     def test_no_selection_returns_empty(self) -> None:
@@ -452,8 +452,8 @@ class AiProfileFlowTests(unittest.TestCase):
 
         pid = self._create_project(title="P-empty")
         result = get_project_ai_profiles(pid)
-        self.assertEqual(result.selection.primary_profile_id, None)
-        self.assertEqual(result.selection.fallback_profile_ids, [])
+        self.assertEqual(result.selections.explore.primary_profile_id, None)
+        self.assertEqual(result.selections.explore.fallback_profile_ids, [])
         self.assertEqual(result.snapshots, [])
         self.assertEqual(result.unavailable_profile_ids, [])
 

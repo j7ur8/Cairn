@@ -25,13 +25,34 @@ from cairn.server.models import (
     CapabilityAdminRequest,
     CapabilityCatalogItem,
     CapabilityHealthEntry,
+    CapabilitySelection,
     TaskCapabilities,
+    TaskCapabilitySelectionMap,
     TaskCapabilitiesMap,
     task_capabilities_map,
 )
 from cairn.server.services import utcnow
 
 TASK_TYPES: tuple[str, ...] = ("bootstrap", "explore", "reason")
+
+
+def selected_capabilities_to_internal(
+    selections: TaskCapabilitySelectionMap | None,
+) -> TaskCapabilitiesMap:
+    """Convert public explicit selections into the internal expansion shape."""
+    out = task_capabilities_map(None)
+    if not isinstance(selections, dict):
+        return out
+    for task in TASK_TYPES:
+        selection = selections.get(task) or CapabilitySelection()
+        out[task] = TaskCapabilities.model_construct(
+            mcp_server_ids=list(selection.mcp_server_ids),
+            skill_ids=list(selection.skill_ids),
+            user_mcp_server_ids=list(selection.mcp_server_ids),
+            user_skill_ids=list(selection.skill_ids),
+            role_default_skill_ids=[],
+        )
+    return out
 
 PROBE_TIMEOUT_SECONDS = 1.5
 CHROME_DEVTOOLS_PROBE_TYPE = "chrome_devtools_http"
@@ -383,6 +404,7 @@ def _assert_no_skill_cycle(conn: sqlite3.Connection, root_id: str, requires: Ite
 def expand_task_capabilities(
     per_task: TaskCapabilitiesMap,
     catalog: dict[tuple[str, str], _CatalogEntry],
+    role_default_skill_ids: list[str] | None = None,
 ) -> tuple[TaskCapabilitiesMap, list[str]]:
     """Validate ids and expand requires in-place.
 
@@ -395,9 +417,21 @@ def expand_task_capabilities(
     for task in TASK_TYPES:
         selection = per_task.get(task) or TaskCapabilities()
         mcp_ids = list(selection.user_mcp_server_ids or selection.mcp_server_ids)
-        skill_ids = list(selection.user_skill_ids or selection.skill_ids)
+        if selection.user_skill_ids:
+            skill_ids = list(selection.user_skill_ids)
+        elif selection.role_default_skill_ids:
+            skill_ids = [
+                sid for sid in selection.skill_ids
+                if sid not in selection.role_default_skill_ids
+            ]
+        else:
+            skill_ids = list(selection.skill_ids)
         user_mcp = list(mcp_ids)
         user_skill = list(skill_ids)
+        role_default_skills = _role_default_skills_for_task(role_default_skill_ids or [], task, catalog)
+        role_default_skills.extend(
+            sid for sid in selection.role_default_skill_ids if sid not in role_default_skills
+        )
 
         # Validate primary ids. Keep the error per id rather than the
         # whole task so the UI can highlight just the bad rows.
@@ -417,7 +451,7 @@ def expand_task_capabilities(
                 continue
             keep_mcp.append(cid)
         keep_skill: list[str] = []
-        for cid in skill_ids:
+        for cid in list(dict.fromkeys(skill_ids + role_default_skills)):
             entry = catalog.get(("skill", cid))
             if entry is None:
                 errors.append(f"{task}: skill {cid} not in catalog")
@@ -500,8 +534,30 @@ def expand_task_capabilities(
             skill_ids=list(dict.fromkeys(keep_skill + auto_added)),
             user_mcp_server_ids=user_mcp,
             user_skill_ids=user_skill,
+            role_default_skill_ids=[
+                sid for sid in role_default_skills
+                if sid in keep_skill or sid in auto_added
+            ],
         )
     return expanded, errors
+
+
+def _role_default_skills_for_task(
+    skill_ids: list[str],
+    task: str,
+    catalog: dict[tuple[str, str], _CatalogEntry],
+) -> list[str]:
+    out: list[str] = []
+    for sid in skill_ids:
+        if sid in out:
+            continue
+        entry = catalog.get(("skill", sid))
+        if entry is None or not entry.item.available:
+            continue
+        if task not in entry.item.task_types:
+            continue
+        out.append(sid)
+    return out
 
 
 def persist_project_capabilities_per_task(
@@ -540,7 +596,12 @@ def persist_project_capabilities_per_task(
                 (project_id, task, cid, position, now),
             )
         for position, cid in enumerate(selection.skill_ids):
-            source = "required" if cid not in (selection.user_skill_ids or []) else "selected"
+            if cid in (selection.user_skill_ids or []):
+                source = "selected"
+            elif cid in (selection.role_default_skill_ids or []):
+                source = "role_default"
+            else:
+                source = "required"
             conn.execute(
                 """
                 INSERT INTO project_capability_snapshots (
@@ -579,6 +640,8 @@ def load_project_capabilities_per_task(
             out[task].skill_ids.append(cid)
             if row["source"] == "selected":
                 out[task].user_skill_ids.append(cid)
+            elif row["source"] == "role_default":
+                out[task].role_default_skill_ids.append(cid)
     return out
 
 

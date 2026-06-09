@@ -1,6 +1,6 @@
 ---
 name: cypher-blockchain
-description: Blockchain and smart contract exploitation methodology covering reentrancy, integer overflow/underflow, access control, flash loan attacks, oracle manipulation, MEV, delegatecall injection, and Solidity/Vyper audit patterns.
+description: Blockchain and smart contract exploitation guidance covering reentrancy, integer overflow/underflow, access control, flash loan attacks, oracle manipulation, MEV, delegatecall injection, and Solidity/Vyper audit patterns.
 version: 0.1.0
 finding_types: [REPO_FINDING, VULN_CANDIDATE, EXPLOIT_RESULT, SECRET_LEAK]
 destructiveness: low
@@ -10,6 +10,8 @@ tags: [ctf, blockchain, solidity, smart-contract, evm]
 # Cypher Blockchain / Smart Contract Skill
 
 Use this skill for CTF blockchain/Web3 challenges, smart contract auditing, DeFi exploit reproduction, and EVM-based vulnerability research.
+
+Treat the vulnerability patterns, tool commands, and exploit templates below as optional references. Select them only when the observed contract behavior, chain state, and goal justify that path.
 
 ## Initial triage
 
@@ -42,7 +44,7 @@ Use this skill for CTF blockchain/Web3 challenges, smart contract auditing, DeFi
 | **Tenderly / Phalcon** | Transaction simulation and debugging |
 | **Etherscan/DethCode** | Source verification |
 
-## Common vulnerability patterns
+## Vulnerability pattern examples
 
 ### 1. Reentrancy
 
@@ -154,7 +156,7 @@ function attack() external {
 - **Missing nonce**: Same signature used twice → double-spend
 - **`ecrecover` returns 0**: When signature is invalid, returns `address(0)` — if not checked, `address(0)` may have special privileges
 
-## Exploit development template (Foundry)
+## Exploit development reference (Foundry)
 
 ```solidity
 // SPDX-License-Identifier: UNLICENSED

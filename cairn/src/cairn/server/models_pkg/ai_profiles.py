@@ -252,7 +252,7 @@ class TaskAiProfileSelections(BaseModel):
 
 class ProjectAiProfileSnapshot(BaseModel):
     profile_id: str
-    task_type: str = "legacy"  # validated by TaskTypeRegistry below
+    task_type: str
 
     @field_validator("task_type")
     @classmethod
@@ -276,7 +276,6 @@ class ProjectAiProfileSnapshot(BaseModel):
 
 class ProjectAiProfilesResponse(BaseModel):
     catalog: list[AiProfile]
-    selection: AiProfileSelection
     selections: TaskAiProfileSelections = Field(default_factory=TaskAiProfileSelections)
     snapshots: list[ProjectAiProfileSnapshot] = Field(default_factory=list)
     unavailable_profile_ids: list[str] = Field(default_factory=list)
@@ -379,3 +378,24 @@ class AiProfileModelsReport(BaseModel):
 
 class AiProfileModelsReportRequest(BaseModel):
     reports: list[AiProfileModelsReport] = Field(default_factory=list)
+
+
+class AiProfileCheckRequest(BaseModel):
+    id: str
+    profile_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    requested_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    requested_by: str = ""
+    error_message: str = ""
+
+
+class AiProfileCheckTriggerResponse(BaseModel):
+    request_id: str
+    status: Literal["pending", "running"]
+
+
+class AiProfileCheckCompleteRequest(BaseModel):
+    ok: bool
+    message: str = ""

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cairn.server.models_pkg.ai_profiles import AiProfileSelection, TaskAiProfileSelections
 from cairn.server.models_pkg.capabilities import (  # noqa: F401
     CapabilitySelection,
+    TaskCapabilitySelectionMap,
     TaskCapabilitiesMap,
+    task_capability_selection_map,
     task_capabilities_map,
 )
 from cairn.server.models_pkg.projects import (
@@ -20,66 +22,23 @@ from cairn.server.models_pkg.projects import (
     normalize_llm_event_kinds,
 )
 
-class CapabilitySelection(BaseModel):
-    mcp_server_ids: list[str] = Field(default_factory=list)
-    skill_ids: list[str] = Field(default_factory=list)
-
-    @field_validator("mcp_server_ids", "skill_ids")
-    @classmethod
-    def validate_ids(cls, value: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            text = item.strip()
-            if not text:
-                raise ValueError("capability ids must not be empty")
-            if text in seen:
-                continue
-            seen.add(text)
-            cleaned.append(text)
-        return cleaned
-
-
-class ProjectRoleSelection(BaseModel):
-    role_id: str
-
-    @field_validator("role_id")
-    @classmethod
-    def validate_role_id(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("role_id must not be empty")
-        return text
-
-
 class CreateProjectRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     title: str
     origin: str
     goal: str
     hints: list[CreateHintInline] | None = None
-    # Per-task capability selection. ``capabilities`` is retained as a
-    # backwards-compatible alias: the router treats the top-level
-    # mcp_server_ids / skill_ids as the ``explore`` stage so legacy
-    # callers and tests keep working.
-    capabilities_per_task: TaskCapabilitiesMap | None = None
-    capabilities: CapabilitySelection | None = None
-    role: ProjectRoleSelection | None = None
+    capabilities: TaskCapabilitySelectionMap | None = None
     role_id: str | None = None
     proxy_id: str | None = None
-    ai_profile_selections: TaskAiProfileSelections | None = None
+    ai_profiles: TaskAiProfileSelections | None = None
     llm_visible_event_kinds: list[str] | None = None
 
     @model_validator(mode="after")
-    def _merge_capabilities(self) -> "CreateProjectRequest":
-        # Always normalize to a per-task map before the router reads
-        # the request. ``task_capabilities_map(None)`` returns empty
-        # defaults for every task type.
-        if self.capabilities_per_task is None and self.capabilities is not None:
-            self.capabilities_per_task = task_capabilities_map(
-                {"explore": self.capabilities.model_dump()}
-            )
-        if self.capabilities_per_task is None:
-            self.capabilities_per_task = task_capabilities_map(None)
+    def _normalize_defaults(self) -> "CreateProjectRequest":
+        if self.capabilities is None:
+            self.capabilities = task_capability_selection_map(None)
         if self.llm_visible_event_kinds is None:
             self.llm_visible_event_kinds = list(LLM_EVENT_KIND_OPTIONS)
             self.llm_visible_event_kinds.remove("usage")
@@ -316,17 +275,15 @@ class ReopenResponse(BaseModel):
 
 
 class ReplayRunCreateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     title: str
     origin: str
     goal: str
     hints: list[CreateHintInline] | None = None
-    # Replay's per-task capability selection. When omitted the router
-    # reuses the source project's existing snapshot rows so the
-    # replay is functionally identical to the original run.
-    capabilities_per_task: TaskCapabilitiesMap | None = None
-    capabilities: CapabilitySelection | None = None
+    capabilities: TaskCapabilitySelectionMap | None = None
     role_id: str | None = None
-    ai_profile_selections: TaskAiProfileSelections | None = None
+    ai_profiles: TaskAiProfileSelections | None = None
     llm_visible_event_kinds: list[str] | None = None
 
     @field_validator("llm_visible_event_kinds")

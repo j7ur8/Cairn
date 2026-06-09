@@ -70,6 +70,38 @@ class StaticCacheTests(unittest.TestCase):
             html,
         )
 
+    def test_capabilities_save_uses_per_task_payload_once(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(html.count("async saveCapabilities()"), 1)
+        self.assertIn("const body = { capabilities: this.selectedCapabilitiesForPayload(this.capabilities.tasks) };", html)
+        self.assertIn("tasks: this.taskCapabilitiesFromServerTasks(data.tasks)", html)
+        self.assertNotIn("capabilities_per_task", html)
+        self.assertNotIn("ai_profile_selections", html)
+
+    def test_project_capability_picker_hides_role_default_top_level_skills(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("roleDefaultTopLevelSkillIds()", html)
+        self.assertIn("return ['cypher-ctf', 'cypher-pentest', 'cypher-vuln-research'];", html)
+        self.assertIn("selectableCapabilitiesForTask(task, items)", html)
+        self.assertIn("sanitizeUserSkillIdsForProjectPayload(ids)", html)
+        self.assertIn("selectableCapabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'skill')", html)
+        self.assertIn("selectableCapabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'skill')", html)
+        self.assertIn("skill_ids: this.sanitizeUserSkillIdsForProjectPayload(entry.user_skill_ids || []),", html)
+
+    def test_capability_admin_save_builds_kind_specific_payload(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("const normalizeStringList = (value) => {", html)
+        self.assertIn("args: normalizeStringList(this.capabilityForm.args),", html)
+        self.assertIn("required_skill_ids: normalizeStringList(this.capabilityForm.required_skill_ids),", html)
+        self.assertIn("preferred_mcp_ids: normalizeStringList(this.capabilityForm.preferred_mcp_ids),", html)
+        self.assertNotIn("const payload = { ...this.capabilityForm };", html)
+
     def test_health_reports_migration_errors(self) -> None:
         from fastapi.testclient import TestClient
         from cairn.server import db

@@ -544,6 +544,7 @@ class RoleConfig(BaseModel):
     description: str = ""
     prompt: str | None = None
     source_path: str | None = None
+    default_skill_ids: list[str] = Field(default_factory=list)
 
     @field_validator("id", "name", "prompt", "source_path")
     @classmethod
@@ -577,6 +578,21 @@ class RoleConfig(BaseModel):
             raise ValueError("task_types must be unique")
         _check_known_task_types(value)
         return value
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            if any(ch.isspace() for ch in key) or "/" in key or "\\" in key:
+                raise ValueError("default_skill_ids must not contain whitespace, '/', or '\\'")
+            seen.add(key)
+            deduped.append(key)
+        return deduped
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> "RoleConfig":
@@ -755,6 +771,18 @@ class DispatchConfig(BaseModel):
             raise ValueError("roles ids must be unique")
         if self.runtime.max_project_workers > self.runtime.max_workers:
             raise ValueError("max_project_workers cannot exceed max_workers")
+        return self
+
+    @model_validator(mode="after")
+    def validate_role_default_skills(self) -> "DispatchConfig":
+        declared_skill_ids = {skill.id for skill in self.capabilities.skills}
+        for role in self.roles:
+            for skill_id in role.default_skill_ids:
+                if skill_id not in declared_skill_ids:
+                    raise ValueError(
+                        f"role {role.id} default_skill_ids references skill {skill_id!r} "
+                        f"but that id is not declared in capabilities.skills"
+                    )
         return self
 
     @classmethod

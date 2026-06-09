@@ -96,16 +96,21 @@ def inject_project_capabilities(
     if not selection_data:
         return CapabilityInjection("", "no capability selection available", [], [], [], WorkerExecutionContext())
 
-    # Newer server builds return a per-task map. Older clients still
-    # send a flat ``selection`` block; fall back to that so legacy
-    # replay data keeps working.
-    per_task = selection_data.get("per_task") if isinstance(selection_data.get("per_task"), dict) else None
-    if per_task and isinstance(per_task.get(task_type), dict):
-        selection = per_task[task_type]
-    else:
-        selection = selection_data.get("selection") if isinstance(selection_data.get("selection"), dict) else {}
-    selected_mcp = _string_list(selection.get("mcp_server_ids"))
-    selected_skills = _string_list(selection.get("skill_ids"))
+    tasks = selection_data.get("tasks") if isinstance(selection_data.get("tasks"), dict) else {}
+    task_state = tasks.get(task_type) if isinstance(tasks.get(task_type), dict) else {}
+    snapshots = task_state.get("snapshots") if isinstance(task_state.get("snapshots"), list) else []
+    selected_mcp = [
+        str(item.get("capability_id") or "").strip()
+        for item in snapshots
+        if isinstance(item, dict) and item.get("kind") == "mcp_server"
+    ]
+    selected_skills = [
+        str(item.get("capability_id") or "").strip()
+        for item in snapshots
+        if isinstance(item, dict) and item.get("kind") == "skill"
+    ]
+    selected_mcp = [item for item in selected_mcp if item]
+    selected_skills = [item for item in selected_skills if item]
     mcp_by_id = {item.id: item for item in config.capabilities.mcp_servers}
     skill_by_id = {item.id: item for item in config.capabilities.skills}
     errors: list[str] = []
@@ -463,7 +468,7 @@ def _instructions(
             lines.append("")
     if skills:
         lines.extend(["## Skills", f"Directory root: {skill_root}", ""])
-        lines.append("When your agent runtime exposes a native Skill tool and routing conditions match, invoke the matching skill first. If native skill invocation is unavailable, read the listed SKILL.md path and follow that workflow.")
+        lines.append("When your agent runtime exposes a native Skill tool and routing conditions match, invoke the matching skill first. If native skill invocation is unavailable, read the listed SKILL.md path for domain guidance. Treat procedures and examples as optional heuristics, adapting them to the current goal, evidence, scope, and constraints.")
         lines.append("")
         for item in skills:
             path = f"{skill_root}/{item.id}"
@@ -476,7 +481,7 @@ def _instructions(
             if item.activation_hint:
                 _append_text(lines, "Instruction", item.activation_hint)
             else:
-                lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md first and follow its workflow.")
+                lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md for domain guidance and adapt any procedures or examples to the current evidence, scope, and constraints.")
             lines.append("")
     lines.extend(
         [

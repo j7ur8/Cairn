@@ -1,6 +1,6 @@
 ---
 name: cypher-pwn
-description: Binary exploitation methodology covering stack buffer overflows, heap exploitation, format string attacks, integer overflows, ROP/JOP chains, ret2libc, GOT/PLT overwrites, and modern binary defenses (ASLR/NX/PIE/Canary/RELRO).
+description: Binary exploitation guidance covering stack buffer overflows, heap exploitation, format string attacks, integer overflows, ROP/JOP chains, ret2libc, GOT/PLT overwrites, and modern binary defenses (ASLR/NX/PIE/Canary/RELRO).
 version: 0.1.0
 cwe: [CWE-120, CWE-122, CWE-134, CWE-190, CWE-787, CWE-416, CWE-843]
 finding_types: [BINARY_FINDING, EXPLOIT_PRIMITIVE, EXPLOIT_RESULT, SESSION, BLOCKER]
@@ -11,6 +11,8 @@ tags: [ctf, pwn, binary, exploitation, rop, heap]
 # Cypher Pwn / Binary Exploitation Skill
 
 Use this skill for CTF pwn challenges, binary exploitation research, and vulnerability assessment of compiled binaries.
+
+Treat the techniques, commands, and exploit snippets below as optional references. Select them only when binary protections, crash evidence, target architecture, and the goal justify that path.
 
 ## Initial triage
 

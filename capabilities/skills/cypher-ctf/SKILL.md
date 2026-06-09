@@ -10,9 +10,9 @@ Use this skill when the project looks like a CTF challenge, cyber range, HTB/THM
 
 ## Sub-skill delegation
 
-When a challenge category is identified, load the corresponding specialist skill for detailed methodology:
+When a challenge category is identified, use the corresponding specialist skill as a reference for domain signals, hypotheses, and techniques:
 
-Specialist skills are bundled under this skill's `skills/` directory. Read `skills/<sub-skill-id>/SKILL.md` before applying a specialist workflow.
+Specialist skills are bundled under this skill's `skills/` directory. Read `skills/<sub-skill-id>/SKILL.md` for guidance, then adapt its examples to the observed evidence and current goal.
 
 | Category | Sub-skill | Key role |
 |----------|-----------|----------|
@@ -29,7 +29,7 @@ Specialist skills are bundled under this skill's `skills/` directory. Read `skil
 A CTF task is complete only when one of these is confirmed:
 
 - The requested `flag{...}` / platform-specific flag is recovered.
-- The platform submit API returns success.
+- The platform flag submit API returns success.
 - The requested shell / user / root proof is confirmed.
 - A Markdown WriteUp is saved at `/mnt/project/reports/writeup.md`.
 - A reusable solve/exploit script is saved under `/mnt/project/exploit/solve.*` whenever the path can be scripted.
@@ -45,9 +45,9 @@ A CTF task is complete only when one of these is confirmed:
 - Save reverse / pwn / crypto intermediate files to `/mnt/project/vuln-research/`.
 - If using a long-running listener, use `tmux` and record the session in `/mnt/project/cleanup/actions.md`.
 
-## Required WriteUp content
+## WriteUp content
 
-`/mnt/project/reports/writeup.md` must include:
+`/mnt/project/reports/writeup.md` should include the evidence needed to reproduce and verify the solve:
 
 - Challenge summary and detected category.
 - Attachment/service inventory used for the solve.
@@ -56,16 +56,18 @@ A CTF task is complete only when one of these is confirmed:
 - Final flag/proof and where it was obtained.
 - Script path, or a clear reason no script is possible.
 
-## Fast triage
+## Decision framework
 
-1. Read Origin, Goal, Hints, and `/mnt/attachments`.
-2. Identify category: web / pwn / reverse / crypto / forensics / stego / misc / full-box.
-3. Load the appropriate specialist sub-skill(s) from this skill's `skills/` directory.
-4. Build one narrow path to the goal before broadening.
-5. Prefer exact reproducibility over broad speculation.
-6. If a path fails, write a `BLOCKER` fact with the decisive negative evidence.
+Use this framework to form and revise the solve strategy; do not treat it as a fixed execution order.
 
-## Common lanes
+- Read Origin, Goal, Hints, and `/mnt/attachments` to establish the current hypothesis.
+- Identify the most likely category: web / pwn / reverse / crypto / forensics / stego / misc / full-box.
+- Load specialist sub-skill guidance only when its signals match the target.
+- Build a narrow path to the goal when evidence supports one, then broaden if the path fails.
+- Prefer exact reproducibility over broad speculation.
+- If a path fails, write a `BLOCKER` fact with the decisive negative evidence.
+
+## Optional lanes
 
 - `recon`: asset and attachment inventory.
 - `web_exploit`: endpoint, auth, upload, SSRF, SQLi, command injection, deserialization, SSTI.

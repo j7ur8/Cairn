@@ -310,10 +310,15 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
     def _selection(self):
         return {
-            "per_task": {
-                "bootstrap": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
-                "explore": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
-                "reason": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
+            "tasks": {
+                task: {
+                    "selected": {"mcp_server_ids": ["m"], "skill_ids": ["s"]},
+                    "snapshots": [
+                        {"kind": "mcp_server", "capability_id": "m", "source": "selected"},
+                        {"kind": "skill", "capability_id": "s", "source": "selected"},
+                    ],
+                }
+                for task in ("bootstrap", "explore", "reason")
             }
         }
 
@@ -373,8 +378,13 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             )
         )
         selection = {
-            "per_task": {
-                "explore": {"mcp_server_ids": [], "skill_ids": ["cypher-ctf"]},
+            "tasks": {
+                "explore": {
+                    "selected": {"mcp_server_ids": [], "skill_ids": ["cypher-ctf"]},
+                    "snapshots": [
+                        {"kind": "skill", "capability_id": "cypher-ctf", "source": "selected"},
+                    ],
+                },
             }
         }
 
@@ -423,8 +433,13 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             )
         )
         selection = {
-            "per_task": {
-                "explore": {"mcp_server_ids": [], "skill_ids": ["cypher-pentest"]},
+            "tasks": {
+                "explore": {
+                    "selected": {"mcp_server_ids": [], "skill_ids": ["cypher-pentest"]},
+                    "snapshots": [
+                        {"kind": "skill", "capability_id": "cypher-pentest", "source": "selected"},
+                    ],
+                },
             }
         }
 

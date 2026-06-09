@@ -30,7 +30,7 @@ class DbHardeningTests(unittest.TestCase):
         self.db._db_path = None
         os.unlink(self.tmp.name)
 
-    def _project_ai_profile_selections(self):
+    def _project_ai_profiles(self):
         from cairn.server.models import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
         from cairn.server.routers.ai_profiles import create_ai_profile
 
@@ -129,7 +129,7 @@ class DbHardeningTests(unittest.TestCase):
                 title="p",
                 origin="o",
                 goal="g",
-                ai_profile_selections=self._project_ai_profile_selections(),
+                ai_profiles=self._project_ai_profiles(),
             )
         )
         intent = create_intent(
@@ -181,7 +181,7 @@ class DbHardeningTests(unittest.TestCase):
                 title="p",
                 origin="o",
                 goal="g",
-                ai_profile_selections=self._project_ai_profile_selections(),
+                ai_profiles=self._project_ai_profiles(),
             )
         )
         results: list[str] = []

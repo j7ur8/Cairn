@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cairn.server.task_types import TASK_TYPE_REGISTRY
 
@@ -32,6 +32,7 @@ class TaskCapabilities(BaseModel):
     skill_ids: list[str] = Field(default_factory=list)
     user_mcp_server_ids: list[str] = Field(default_factory=list)
     user_skill_ids: list[str] = Field(default_factory=list)
+    role_default_skill_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -56,7 +57,7 @@ class TaskCapabilities(BaseModel):
 
     @model_validator(mode="after")
     def _dedupe(self) -> "TaskCapabilities":
-        for field in ("mcp_server_ids", "skill_ids", "user_mcp_server_ids", "user_skill_ids"):
+        for field in ("mcp_server_ids", "skill_ids", "user_mcp_server_ids", "user_skill_ids", "role_default_skill_ids"):
             value = getattr(self, field) or []
             seen: set[str] = set()
             deduped: list[str] = []
@@ -85,6 +86,7 @@ def task_capabilities_map(values: dict[str, dict[str, list[str]]] | None) -> Tas
             skill_ids=list(payload.get("skill_ids") or []),
             user_mcp_server_ids=list(payload.get("user_mcp_server_ids") or []),
             user_skill_ids=list(payload.get("user_skill_ids") or []),
+            role_default_skill_ids=list(payload.get("role_default_skill_ids") or []),
         )
     return out
 
@@ -223,17 +225,69 @@ class CapabilityAdminResponse(BaseModel):
     health: dict[str, list[CapabilityHealthEntry]] = Field(default_factory=dict)
 
 
+class CapabilitySelection(BaseModel):
+    """User-selected capabilities for one task type."""
+
+    mcp_server_ids: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("mcp_server_ids", "skill_ids")
+    @classmethod
+    def validate_ids(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = (item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            cleaned.append(text)
+        return cleaned
+
+
+TaskCapabilitySelectionMap = dict[str, CapabilitySelection]
+
+
+def task_capability_selection_map(
+    values: dict[str, dict[str, list[str]]] | dict[str, CapabilitySelection] | None,
+) -> TaskCapabilitySelectionMap:
+    out: TaskCapabilitySelectionMap = {}
+    for task in ("bootstrap", "explore", "reason"):
+        payload = values.get(task) if isinstance(values, dict) else None
+        if isinstance(payload, CapabilitySelection):
+            out[task] = payload
+        elif isinstance(payload, dict):
+            out[task] = CapabilitySelection(
+                mcp_server_ids=list(payload.get("mcp_server_ids") or []),
+                skill_ids=list(payload.get("skill_ids") or []),
+            )
+        else:
+            out[task] = CapabilitySelection()
+    return out
+
+
+class ProjectCapabilitySnapshotItem(BaseModel):
+    kind: Literal["mcp_server", "skill"]
+    capability_id: str
+    source: Literal["selected", "required", "role_default"]
+
+
+class ProjectCapabilityTaskState(BaseModel):
+    selected: CapabilitySelection = Field(default_factory=CapabilitySelection)
+    snapshots: list[ProjectCapabilitySnapshotItem] = Field(default_factory=list)
+
+
 class ProjectCapabilitiesResponse(BaseModel):
     catalog: list[CapabilityCatalogItem]
-    per_task: TaskCapabilitiesMap = Field(default_factory=task_capabilities_map)
-    legacy: CapabilitySelection | None = None
+    tasks: dict[str, ProjectCapabilityTaskState] = Field(default_factory=dict)
     health: dict[str, list[CapabilityHealthEntry]] = Field(default_factory=dict)
-    unavailable_mcp_server_ids: list[str] = Field(default_factory=list)
-    unavailable_skill_ids: list[str] = Field(default_factory=list)
+    unavailable: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ProjectCapabilitiesUpdateRequest(BaseModel):
-    per_task: TaskCapabilitiesMap
+    model_config = {"extra": "forbid"}
+
+    capabilities: TaskCapabilitySelectionMap
 
 
 
@@ -246,6 +300,7 @@ class RoleCatalogItem(BaseModel):
     name: str
     description: str = ""
     task_types: list[str] = Field(default_factory=list)
+    default_skill_ids: list[str] = Field(default_factory=list)
 
     @field_validator("task_types")
     @classmethod
@@ -267,6 +322,19 @@ class RoleCatalogItem(BaseModel):
             seen.add(v)
             deduped.append(v)
         return deduped
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
     available: bool = True
     prompt_sha256: str = ""
     detail: str = ""
@@ -277,6 +345,7 @@ class RegisterRoleCatalogItem(BaseModel):
     name: str
     description: str = ""
     task_types: list[str] = Field(default_factory=list)
+    default_skill_ids: list[str] = Field(default_factory=list)
 
     @field_validator("task_types")
     @classmethod
@@ -297,6 +366,19 @@ class RegisterRoleCatalogItem(BaseModel):
                 continue
             seen.add(v)
             deduped.append(v)
+        return deduped
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
         return deduped
     available: bool = True
     prompt: str
@@ -326,29 +408,3 @@ class ProjectRole(BaseModel):
 
 class ProjectRoleResponse(BaseModel):
     role: ProjectRole | None = None
-
-class CapabilitySelection(BaseModel):
-    """Legacy flat project capability selection.
-
-    Kept around so existing tests and the legacy `capabilities` field
-    on CreateProjectRequest can still build. The router now stores
-    selections as per-task snapshots and the flat shape is mapped to
-    the ``explore`` task on the way in.
-    """
-
-    mcp_server_ids: list[str] = Field(default_factory=list)
-    skill_ids: list[str] = Field(default_factory=list)
-
-    @field_validator("mcp_server_ids", "skill_ids")
-    @classmethod
-    def validate_ids(cls, value: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            text = (item or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            cleaned.append(text)
-        return cleaned
-

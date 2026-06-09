@@ -25,6 +25,7 @@ from cairn.dispatcher.tasks.common import (
     write_conclude_result_with_fact_id,
     write_graph_snapshot_reference,
 )
+from cairn.dispatcher.tasks.runner import project_capability_data, project_role_data
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.server.models import Intent, ProjectDetail
 
@@ -122,7 +123,7 @@ def run_explore_task(
             project.project.id,
             "explore",
             f"explore-{intent.id}",
-            _project_capability_data(client, project.project.id, reporter, "explore_execute"),
+            project_capability_data(client, project.project.id, reporter, "explore_execute"),
         )
         if capabilities.summary:
             reporter.emit_result("capabilities", capabilities.summary)
@@ -132,7 +133,7 @@ def run_explore_task(
         role = inject_project_role(
             project.project.id,
             "explore",
-            _project_role_data(client, project.project.id, reporter, "explore_execute"),
+            project_role_data(client, project.project.id, reporter, "explore_execute"),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)
@@ -508,29 +509,3 @@ def _run_process(
         reporter=reporter,
         trace_format=trace_format,
     )
-
-
-def _project_capability_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_capabilities(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"capability selection fetch failed status={response.status_code}")
-    return None
-
-
-def _project_role_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_role(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"project role fetch failed status={response.status_code}")
-    return None

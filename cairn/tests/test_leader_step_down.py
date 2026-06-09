@@ -16,7 +16,38 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 
 class LeaderStepDownTests(unittest.TestCase):
     def _client(self):
-        from tests.test_dispatcher_leader import FakeClient
+        from cairn.dispatcher.protocol.client import ApiResult
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.ApiResult = ApiResult
+                self.holder: str | None = None
+                self.fail_current = False
+                self.release_calls = 0
+                self.current_calls = 0
+
+            def dispatcher_lock_acquire(self, name: str, holder: str, ttl_seconds: float):
+                if self.holder is None or self.holder == holder:
+                    self.holder = holder
+                    return self.ApiResult(200, {"acquired": True, "holder": holder, "held": True})
+                return self.ApiResult(200, {"acquired": False, "holder": self.holder, "held": False})
+
+            def dispatcher_lock_heartbeat(self, name: str, holder: str):
+                held = self.holder == holder
+                return self.ApiResult(200, {"held": held, "holder": holder if held else None})
+
+            def dispatcher_lock_release(self, name: str, holder: str):
+                self.release_calls += 1
+                if self.holder == holder:
+                    self.holder = None
+                    return self.ApiResult(200, {"released": True})
+                return self.ApiResult(200, {"released": False})
+
+            def dispatcher_lock_current(self, name: str):
+                self.current_calls += 1
+                if self.fail_current:
+                    return self.ApiResult(503, {"status": "degraded"})
+                return self.ApiResult(200, {"holder": self.holder, "held": self.holder is not None})
 
         return FakeClient()
 

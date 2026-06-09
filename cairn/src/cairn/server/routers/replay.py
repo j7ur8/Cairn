@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import shutil
 from pathlib import Path
 
@@ -17,23 +16,14 @@ from cairn.server.models import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
-from cairn.server.capabilities_service import (
-    expand_task_capabilities,
-    get_catalog_map,
-    load_project_capabilities_per_task,
-    persist_project_capabilities_per_task,
-    persist_probe_result,
-    probe_per_task,
-    task_capabilities_map,
-)
-from cairn.server.routers.ai_profiles import persist_project_ai_selections, require_complete_ai_profile_selections
-from cairn.server.models_pkg.projects import hidden_kinds_from_visible, parse_llm_hidden_event_kinds
+from cairn.server.capabilities_service import load_project_capabilities_per_task
+from cairn.server.models_pkg.projects import CreateHintInline, hidden_kinds_from_visible, parse_llm_hidden_event_kinds
+from cairn.server.project_creation_service import ProjectCreationDraft, create_project_from_draft
 from cairn.server.services import (
     build_intents,
     check_project_completed,
     get_completion_intent_or_409,
     get_project_or_404,
-    next_hint_id,
     next_intent_id,
     next_project_id,
     project_meta_from_row,
@@ -80,18 +70,33 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
             )
         )
 
-        conn.execute(
-            "INSERT INTO projects (id, title, status, created_at, llm_hidden_event_kinds) "
-            "VALUES (?, ?, 'stopped', ?, ?)",
-            (replay_project_id, body.title, now, json.dumps(llm_hidden_event_kinds, ensure_ascii=False)),
-        )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            ("origin", replay_project_id, body.origin),
-        )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            ("goal", replay_project_id, body.goal),
+        capability_snapshots = None
+        if body.capabilities is None:
+            # Replay keeps the source project's snapshots when the operator
+            # does not pass an explicit per-task capability map.
+            capability_snapshots = load_project_capabilities_per_task(conn, project_id)
+        rewritten_hints = [
+            CreateHintInline(
+                content=_rewrite_attachment_refs(hint.content, project_id, replay_project_id),
+                creator=hint.creator,
+            )
+            for hint in body.hints or []
+        ]
+        create_project_from_draft(
+            conn,
+            ProjectCreationDraft(
+                project_id=replay_project_id,
+                title=body.title,
+                origin=body.origin,
+                goal=body.goal,
+                hints=rewritten_hints,
+                capabilities=body.capabilities,
+                capability_snapshots=capability_snapshots,
+                ai_profiles=body.ai_profiles,
+                role_id=body.role_id,
+                llm_hidden_event_kinds=llm_hidden_event_kinds,
+                status="stopped",
+            ),
         )
         conn.execute(
             """
@@ -119,70 +124,6 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
                 """,
                 (run_id, index, source_intent["id"], source_intent["to_fact_id"]),
             )
-
-        for hint in body.hints or []:
-            hid = next_hint_id(conn, replay_project_id)
-            content = _rewrite_attachment_refs(hint.content, project_id, replay_project_id)
-            conn.execute(
-                "INSERT INTO hints (id, project_id, content, creator, created_at) VALUES (?, ?, ?, ?, ?)",
-                (hid, replay_project_id, content, hint.creator, now),
-            )
-
-        # Per-task capability selection. The replay must keep the
-        # same capabilities as the source project when the operator
-        # does not pass an explicit per_task map, so we hydrate from
-        # the source project's existing snapshots first.
-        per_task = body.capabilities_per_task
-        if per_task is None:
-            per_task = load_project_capabilities_per_task(conn, project_id)
-            # Treat any pre-per-task 'legacy' rows as the explore stage
-            # so the replay doesn't lose the original selection.
-            has_legacy = any(
-                row["task_type"] == "legacy"
-                for row in conn.execute(
-                    "SELECT task_type FROM project_capability_snapshots "
-                    "WHERE project_id = ? AND task_type = 'legacy' LIMIT 1",
-                    (project_id,),
-                ).fetchall()
-            )
-            if has_legacy and body.capabilities is None:
-                per_task = task_capabilities_map(None)
-                legacy_rows = conn.execute(
-                    "SELECT kind, capability_id FROM project_capability_snapshots "
-                    "WHERE project_id = ? AND task_type = 'legacy'",
-                    (project_id,),
-                ).fetchall()
-                explore = per_task["explore"]
-                for row in legacy_rows:
-                    if row["kind"] == "mcp_server" and row["capability_id"] not in explore.mcp_server_ids:
-                        explore.mcp_server_ids.append(row["capability_id"])
-                        explore.user_mcp_server_ids.append(row["capability_id"])
-                    elif row["kind"] == "skill" and row["capability_id"] not in explore.skill_ids:
-                        explore.skill_ids.append(row["capability_id"])
-                        explore.user_skill_ids.append(row["capability_id"])
-        elif body.capabilities is not None:
-            # Caller used the legacy flat payload; merge into explore.
-            legacy = task_capabilities_map({"explore": body.capabilities.model_dump()})
-            for task in ("bootstrap", "explore", "reason"):
-                per_task[task].mcp_server_ids = legacy["explore"].mcp_server_ids
-                per_task[task].skill_ids = legacy["explore"].skill_ids
-                per_task[task].user_mcp_server_ids = legacy["explore"].user_mcp_server_ids
-                per_task[task].user_skill_ids = legacy["explore"].user_skill_ids
-        catalog_map = get_catalog_map(conn)
-        expanded, _ = expand_task_capabilities(per_task, catalog_map)
-        persist_project_capabilities_per_task(conn, replay_project_id, expanded, now)
-        health_per_task = probe_per_task(conn, expanded, catalog_map)
-        persist_probe_result(conn, health_per_task)
-
-        if body.role_id:
-            _insert_role_snapshot(conn, replay_project_id, body.role_id, now)
-
-        persist_project_ai_selections(
-            conn,
-            replay_project_id,
-            require_complete_ai_profile_selections(body.ai_profile_selections),
-            now,
-        )
 
     try:
         _copy_project_attachments(project_id, replay_project_id)
@@ -347,27 +288,6 @@ def _extract_replay_route(conn, project_id: str, completion_source_ids: list[str
     for source_id in completion_source_ids:
         visit_fact(source_id)
     return route
-
-
-def _insert_role_snapshot(conn, project_id: str, role_id: str, now: str) -> None:
-    role = conn.execute(
-        """
-        SELECT id, name, prompt, prompt_sha256
-        FROM role_catalog
-        WHERE id = ? AND available = 1
-        """,
-        (role_id,),
-    ).fetchone()
-    if role is None:
-        raise HTTPException(404, f"Role {role_id} not found or unavailable")
-    conn.execute(
-        """
-        INSERT INTO project_roles (
-            project_id, role_id, role_name, role_prompt, role_prompt_sha256, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (project_id, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
-    )
 
 
 def _copy_project_attachments(source_project_id: str, replay_project_id: str) -> Path | None:

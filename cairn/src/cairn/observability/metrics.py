@@ -7,14 +7,42 @@ when the process is reloaded in long-running test harnesses.
 """
 from __future__ import annotations
 
-from prometheus_client import (
-    CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
-    generate_latest,
-)
-from prometheus_client.exposition import CONTENT_TYPE_LATEST
+try:
+    from prometheus_client import (
+        CollectorRegistry,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
+    )
+    from prometheus_client.exposition import CONTENT_TYPE_LATEST
+except ImportError:  # pragma: no cover - exercised only without optional dependency
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
+
+    class CollectorRegistry:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _NoopMetric:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def labels(self, *args, **kwargs):
+            return self
+
+        def inc(self, *args, **kwargs) -> None:
+            return None
+
+        def set(self, *args, **kwargs) -> None:
+            return None
+
+        def observe(self, *args, **kwargs) -> None:
+            return None
+
+    Counter = Gauge = Histogram = _NoopMetric
+
+    def generate_latest(registry) -> bytes:
+        return b""
 
 
 REGISTRY = CollectorRegistry(auto_describe=True)

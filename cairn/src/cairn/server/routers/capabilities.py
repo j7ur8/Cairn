@@ -30,6 +30,7 @@ from cairn.server.capabilities_service import (
     probe_capability,
     probe_per_task,
     register_builtin_catalog,
+    selected_capabilities_to_internal,
     upsert_user_capability,
 )
 from cairn.server.db import get_conn, with_immediate_tx
@@ -38,6 +39,9 @@ from cairn.server.models import (
     CapabilityAdminResponse,
     CapabilityCatalogItem,
     CapabilityHealthEntry,
+    CapabilitySelection,
+    ProjectCapabilitySnapshotItem,
+    ProjectCapabilityTaskState,
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectRole,
@@ -46,7 +50,6 @@ from cairn.server.models import (
     RegisterRoleCatalogRequest,
     RoleCatalogItem,
     TaskCapabilitiesMap,
-    task_capabilities_map,
 )
 from cairn.server.services import check_project_hint_writable, get_project_or_404, utcnow
 
@@ -121,29 +124,15 @@ def get_project_capabilities(project_id: str):
         catalog = list_catalog(conn)
         catalog_map = get_catalog_map(conn)
         per_task = load_project_capabilities_per_task(conn, project_id)
-        catalog_ids = {
-            (item.kind, item.id)
-            for item in catalog
-            if item.available and item.source == "builtin"
-        }
-        unavailable_mcp: list[str] = []
-        unavailable_skill: list[str] = []
-        for task, selection in per_task.items():
-            for cid in selection.mcp_server_ids:
-                if ("mcp_server", cid) not in catalog_ids:
-                    unavailable_mcp.append(cid)
-            for cid in selection.skill_ids:
-                if ("skill", cid) not in catalog_ids:
-                    unavailable_skill.append(cid)
+        unavailable = _unavailable_capabilities(catalog, per_task)
         health = probe_per_task(conn, per_task, catalog_map)
         with with_immediate_tx() as conn2:
             persist_probe_result(conn2, health)
         return ProjectCapabilitiesResponse(
             catalog=catalog,
-            per_task=per_task,
+            tasks=_project_capability_tasks(per_task),
             health=health,
-            unavailable_mcp_server_ids=sorted(set(unavailable_mcp)),
-            unavailable_skill_ids=sorted(set(unavailable_skill)),
+            unavailable=unavailable,
         )
 
 
@@ -157,7 +146,8 @@ def update_project_capabilities(
     with with_immediate_tx() as conn:
         check_project_hint_writable(conn, project_id)
         catalog_map = get_catalog_map(conn)
-        expanded, errors = expand_task_capabilities(body.per_task, catalog_map)
+        selected = selected_capabilities_to_internal(body.capabilities)
+        expanded, errors = expand_task_capabilities(selected, catalog_map)
         if errors:
             # Don't 500 on bad ids: the UI shows them as warnings. Missing
             # rows are silently dropped by expand_task_capabilities.
@@ -170,8 +160,9 @@ def update_project_capabilities(
         persist_probe_result(conn, health)
         return ProjectCapabilitiesResponse(
             catalog=catalog,
-            per_task=expanded,
+            tasks=_project_capability_tasks(expanded),
             health=health,
+            unavailable=_unavailable_capabilities(catalog, expanded),
         )
 
 
@@ -193,8 +184,8 @@ def register_role_catalog(body: RegisterRoleCatalogRequest):
                 """
                 INSERT INTO role_catalog (
                     id, name, description, prompt, prompt_sha256, task_types,
-                    available, detail, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    default_skill_ids, available, detail, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.id,
@@ -203,6 +194,7 @@ def register_role_catalog(body: RegisterRoleCatalogRequest):
                     prompt,
                     digest,
                     json.dumps(item.task_types, ensure_ascii=False),
+                    json.dumps(item.default_skill_ids, ensure_ascii=False),
                     1 if item.available else 0,
                     item.detail,
                     now,
@@ -221,7 +213,7 @@ def get_project_role(project_id: str):
 def _role_catalog(conn) -> list[RoleCatalogItem]:
     rows = conn.execute(
         """
-        SELECT id, name, description, prompt_sha256, task_types, available, detail
+        SELECT id, name, description, prompt_sha256, task_types, default_skill_ids, available, detail
         FROM role_catalog
         ORDER BY id
         """
@@ -232,12 +224,17 @@ def _role_catalog(conn) -> list[RoleCatalogItem]:
             task_types = json.loads(row["task_types"])
         except json.JSONDecodeError:
             task_types = []
+        try:
+            default_skill_ids = json.loads(row["default_skill_ids"] or "[]")
+        except (json.JSONDecodeError, KeyError):
+            default_skill_ids = []
         items.append(
             RoleCatalogItem(
                 id=row["id"],
                 name=row["name"],
                 description=row["description"],
                 task_types=task_types,
+                default_skill_ids=default_skill_ids,
                 available=bool(row["available"]),
                 prompt_sha256=row["prompt_sha256"],
                 detail=row["detail"],
@@ -258,3 +255,59 @@ def _project_role(conn, project_id: str) -> ProjectRole | None:
     if row is None:
         return None
     return ProjectRole(**dict(row))
+
+
+def _project_capability_tasks(per_task: TaskCapabilitiesMap) -> dict[str, ProjectCapabilityTaskState]:
+    tasks: dict[str, ProjectCapabilityTaskState] = {}
+    for task, selection in per_task.items():
+        snapshots: list[ProjectCapabilitySnapshotItem] = []
+        for cid in selection.mcp_server_ids:
+            snapshots.append(ProjectCapabilitySnapshotItem(
+                kind="mcp_server",
+                capability_id=cid,
+                source="selected",
+            ))
+        for cid in selection.skill_ids:
+            if cid in (selection.user_skill_ids or []):
+                source = "selected"
+            elif cid in (selection.role_default_skill_ids or []):
+                source = "role_default"
+            else:
+                source = "required"
+            snapshots.append(ProjectCapabilitySnapshotItem(
+                kind="skill",
+                capability_id=cid,
+                source=source,
+            ))
+        tasks[task] = ProjectCapabilityTaskState(
+            selected=CapabilitySelection(
+                mcp_server_ids=list(selection.user_mcp_server_ids or []),
+                skill_ids=list(selection.user_skill_ids or []),
+            ),
+            snapshots=snapshots,
+        )
+    return tasks
+
+
+def _unavailable_capabilities(
+    catalog: list[CapabilityCatalogItem],
+    per_task: TaskCapabilitiesMap,
+) -> dict[str, list[str]]:
+    available_ids = {
+        (item.kind, item.id)
+        for item in catalog
+        if item.available
+    }
+    unavailable_mcp: list[str] = []
+    unavailable_skill: list[str] = []
+    for selection in per_task.values():
+        for cid in selection.mcp_server_ids:
+            if ("mcp_server", cid) not in available_ids:
+                unavailable_mcp.append(cid)
+        for cid in selection.skill_ids:
+            if ("skill", cid) not in available_ids:
+                unavailable_skill.append(cid)
+    return {
+        "mcp_server_ids": sorted(set(unavailable_mcp)),
+        "skill_ids": sorted(set(unavailable_skill)),
+    }

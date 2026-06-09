@@ -1,6 +1,6 @@
 ---
 name: cypher-reverse
-description: Reverse engineering methodology covering static analysis (Ghidra/IDA/radare2), dynamic debugging (gdb/lldb/x64dbg), deobfuscation, unpacking, anti-debug bypass, and symbol recovery for ELF/PE/Mach-O targets.
+description: Reverse engineering guidance covering static analysis (Ghidra/IDA/radare2), dynamic debugging (gdb/lldb/x64dbg), deobfuscation, unpacking, anti-debug bypass, and symbol recovery for ELF/PE/Mach-O targets.
 version: 0.1.0
 finding_types: [BINARY_FINDING, EXPLOIT_PRIMITIVE, REPO_FINDING, BLOCKER]
 destructiveness: low
@@ -10,6 +10,8 @@ tags: [ctf, reverse, disassembly, deobfuscation, unpacking]
 # Cypher Reverse Engineering Skill
 
 Use this skill for CTF reverse challenges, malware analysis, binary auditing, and understanding compiled/protected code.
+
+Treat the tools and patterns below as optional references. Select them only when binary format, runtime evidence, protection signals, and the goal justify that path.
 
 ## Initial triage
 
@@ -64,7 +66,7 @@ pf <format> @<addr> # print formatted data
 - Custom comparison: XOR with key, then compare → extract key, reverse XOR
 - Timing-based: compare one char at a time, early exit on wrong char → side-channel brute-force
 
-### Obfuscation techniques
+### Obfuscation references
 | Technique | Recognition | Bypass |
 |-----------|------------|--------|
 | XOR string encoding | Repeated XOR loops with a key byte | Extract key, decode all strings |

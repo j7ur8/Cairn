@@ -22,15 +22,17 @@ The CTF specialist skills are bundled under `cypher-ctf/skills/`, and pentest AD
 | Web Vulnerability Research | Web vulnerability research |
 | Container / Cloud | Container and cloud research |
 
-## Core loop
+## Research loop
 
-1. Inventory the target: language, framework, build system, entrypoints, tests, binaries.
-2. Prove what runs now before trusting comments or stale code.
-3. Trace untrusted input to sensitive sink.
-4. Build the smallest reproducible trigger.
-5. Confirm impact and constraints.
-6. Save PoC, logs, crash samples, root-cause notes, and patch suggestions.
-7. Before completion, write the final Markdown vulnerability research report to `/mnt/project/reports/vulnerability-research-report.md`.
+Use this loop to keep research evidence-driven; revisit earlier steps when new facts invalidate the current hypothesis.
+
+- Inventory the target: language, framework, build system, entrypoints, tests, binaries.
+- Prove what runs now before trusting comments or stale code.
+- Trace untrusted input to sensitive sink before adapting exploit techniques.
+- Build the smallest reproducible trigger.
+- Confirm impact and constraints.
+- Save PoC, logs, crash samples, root-cause notes, and patch suggestions.
+- Before completion, write the final Markdown vulnerability research report to `/mnt/project/reports/vulnerability-research-report.md`.
 
 ## Evidence layout
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 import time
 from dataclasses import dataclass
 
@@ -29,6 +28,11 @@ from cairn.dispatcher.tasks.common import (
     run_healthcheck,
     run_worker_process,
     write_conclude_result_with_fact_id,
+)
+from cairn.dispatcher.tasks.runner import (
+    capability_manifest_payload,
+    project_capability_data,
+    project_role_data,
 )
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.server.models import Intent, ProjectDetail
@@ -125,10 +129,10 @@ def run_bootstrap_task(
             reporter.emit_error("bootstrap_healthcheck", "error", healthcheck.result.stderr)
             return outcome
 
-        capability_data = _project_capability_data(client, project.project.id, reporter, "bootstrap_start")
+        capability_data = project_capability_data(client, project.project.id, reporter, "bootstrap_start")
         reporter.emit_capability_manifest(
             "bootstrap_start",
-            _capability_manifest_payload(project.project.id, "bootstrap", capability_data),
+            capability_manifest_payload(project.project.id, "bootstrap", capability_data),
         )
 
         capabilities = inject_project_capabilities(
@@ -148,7 +152,7 @@ def run_bootstrap_task(
         role = inject_project_role(
             project.project.id,
             "bootstrap",
-            _project_role_data(client, project.project.id, reporter, "bootstrap"),
+            project_role_data(client, project.project.id, reporter, "bootstrap"),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)
@@ -512,106 +516,6 @@ def _bootstrap_prompt_replacements(project: ProjectDetail) -> dict[str, str]:
         "goal": facts.get("goal", ""),
         "hints": format_hints(hints),
     }
-
-
-def _capability_manifest_payload(
-    project_id: str,
-    task_type: str,
-    capability_data: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if not capability_data:
-        return {
-            "summary": "Project capabilities before bootstrap: no capability selection available",
-            "project_id": project_id,
-            "task_type": task_type,
-            "mcp_servers": [],
-            "skills": [],
-            "unavailable_mcp_server_ids": [],
-            "unavailable_skill_ids": [],
-        }
-
-    per_task = capability_data.get("per_task") if isinstance(capability_data.get("per_task"), dict) else None
-    if per_task and isinstance(per_task.get(task_type), dict):
-        selection = per_task[task_type]
-    else:
-        selection = capability_data.get("selection") if isinstance(capability_data.get("selection"), dict) else {}
-    catalog = capability_data.get("catalog") if isinstance(capability_data.get("catalog"), list) else []
-    mcp_ids = _string_list(selection.get("mcp_server_ids"))
-    skill_ids = _string_list(selection.get("skill_ids"))
-    by_key = {
-        (item.get("kind"), item.get("id")): item
-        for item in catalog
-        if isinstance(item, dict)
-    }
-    mcp_servers = [_manifest_item("mcp_server", capability_id, by_key, task_type) for capability_id in mcp_ids]
-    skills = [_manifest_item("skill", capability_id, by_key, task_type) for capability_id in skill_ids]
-    unavailable_mcp = _string_list(capability_data.get("unavailable_mcp_server_ids"))
-    unavailable_skills = _string_list(capability_data.get("unavailable_skill_ids"))
-    return {
-        "summary": f"Project capabilities before bootstrap: {len(mcp_servers)} MCP servers, {len(skills)} skills",
-        "project_id": project_id,
-        "task_type": task_type,
-        "mcp_servers": mcp_servers,
-        "skills": skills,
-        "unavailable_mcp_server_ids": unavailable_mcp,
-        "unavailable_skill_ids": unavailable_skills,
-    }
-
-
-def _manifest_item(
-    kind: str,
-    capability_id: str,
-    catalog: dict[tuple[Any, Any], dict[str, Any]],
-    task_type: str,
-) -> dict[str, Any]:
-    item = catalog.get((kind, capability_id)) or {}
-    task_types = _string_list(item.get("task_types"))
-    return {
-        "id": capability_id,
-        "name": _string_value(item.get("name")) or capability_id,
-        "detail": _string_value(item.get("detail")) or "",
-        "task_types": task_types,
-        "available": bool(item.get("available", False)),
-        "enabled_for_task": task_type in task_types,
-    }
-
-
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str) and item]
-
-
-def _string_value(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def _project_capability_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_capabilities(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"capability selection fetch failed status={response.status_code}")
-    return None
-
-
-def _project_role_data(
-    client: CairnClient,
-    project_id: str,
-    reporter: ExecutionReporter,
-    phase: str,
-) -> dict | None:
-    response = client.get_project_role(project_id)
-    if response.ok and isinstance(response.data, dict):
-        return response.data
-    reporter.emit_error(phase, "error", f"project role fetch failed status={response.status_code}")
-    return None
 
 
 def _write_bootstrap_complete_result(

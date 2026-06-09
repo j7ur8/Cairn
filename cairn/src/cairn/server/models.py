@@ -32,7 +32,6 @@ from cairn.server.models_pkg.projects import (  # noqa: F401
     ProjectSummary,
 )
 from cairn.server.models_pkg.intents import (  # noqa: F401
-    CapabilitySelection,
     CompleteRequest,
     ConcludeRequest,
     ConcludeResponse,
@@ -40,7 +39,6 @@ from cairn.server.models_pkg.intents import (  # noqa: F401
     CreateIntentRequest,
     CreateProjectRequest,
     HeartbeatRequest,
-    ProjectRoleSelection,
     ReasonClaimRequest,
     ReasonFinishRequest,
     ReasonState,
@@ -57,17 +55,22 @@ from cairn.server.models_pkg.capabilities import (  # noqa: F401
     CapabilityAdminResponse,
     CapabilityCatalogItem,
     CapabilityHealthEntry,
+    CapabilitySelection,
     CapabilitySource,
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
+    ProjectCapabilitySnapshotItem,
+    ProjectCapabilityTaskState,
     ProjectRole,
     ProjectRoleResponse,
     RegisterCapabilityCatalogRequest,
     RegisterRoleCatalogItem,
     RegisterRoleCatalogRequest,
     RoleCatalogItem,
+    TaskCapabilitySelectionMap,
     TaskCapabilities,
     TaskCapabilitiesMap,
+    task_capability_selection_map,
     task_capabilities_map,
 )
 from cairn.server.models_pkg.proxies import (  # noqa: F401
@@ -79,6 +82,9 @@ from cairn.server.models_pkg.proxies import (  # noqa: F401
 from cairn.server.models_pkg.ai_profiles import (  # noqa: F401
     AiProfile,
     AiProfileBase,
+    AiProfileCheckCompleteRequest,
+    AiProfileCheckRequest,
+    AiProfileCheckTriggerResponse,
     AiProfileCreate,
     AiProfileHealthReport,
     AiProfileHealthReportRequest,

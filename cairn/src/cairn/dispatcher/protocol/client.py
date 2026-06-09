@@ -8,7 +8,14 @@ import threading
 from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+try:
+    from tenacity import wait_exponential_jitter
+except ImportError:  # pragma: no cover - compatibility for older tenacity
+    from tenacity import wait_exponential
+
+    def wait_exponential_jitter(*, initial: float, max: float):
+        return wait_exponential(multiplier=initial, max=max)
 
 from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, ReasonState, Settings
 
@@ -147,16 +154,10 @@ class CairnClient:
         )
 
     def get_reason_state(self, project_id: str) -> ApiResult:
-        try:
-            response = self._get(f"/projects/{project_id}/reason/state")
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/projects/%s/reason/state error=%s", project_id, exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            raw = response.json()
-            data = ReasonState.model_validate(raw) if raw is not None else None
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        result = self._get_json_result(f"/projects/{project_id}/reason/state")
+        if result.ok and isinstance(result.data, dict):
+            result.data = ReasonState.model_validate(result.data)
+        return result
 
     def finish_reason(
         self,
@@ -238,84 +239,35 @@ class CairnClient:
         )
 
     def get_project_capabilities(self, project_id: str) -> ApiResult:
-        try:
-            response = self._get(f"/projects/{project_id}/capabilities")
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/projects/%s/capabilities error=%s", project_id, exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._get_json_result(f"/projects/{project_id}/capabilities")
 
     def get_project_ai_profiles(self, project_id: str) -> ApiResult:
-        try:
-            response = self._get(f"/projects/{project_id}/ai-profiles")
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/projects/%s/ai-profiles error=%s", project_id, exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._get_json_result(f"/projects/{project_id}/ai-profiles")
 
     def list_ai_profiles(self) -> ApiResult:
-        try:
-            response = self._get("/ai-profiles")
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/ai-profiles error=%s", exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._get_json_result("/ai-profiles")
 
     def sync_ai_profiles(self, body: dict[str, Any]) -> ApiResult:
-        try:
-            response = self._session().post(
-                self._url("/ai-profiles/sync"),
-                json=body, timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=POST path=/ai-profiles/sync error=%s", exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._request_json("POST", "/ai-profiles/sync", json=body)
 
     def post_ai_health_report(self, body: dict[str, Any]) -> ApiResult:
-        try:
-            response = self._session().post(
-                self._url("/ai-profiles/health-report"),
-                json=body, timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=POST path=/ai-profiles/health-report error=%s", exc)
-            return ApiResult(status_code=0, text=str(exc))
-        return ApiResult(status_code=response.status_code, text=response.text)
+        return self._request_json("POST", "/ai-profiles/health-report", json=body)
 
     def post_ai_models_report(self, body: dict[str, Any]) -> ApiResult:
-        try:
-            response = self._session().post(
-                self._url("/ai-profiles/models-report"),
-                json=body, timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=POST path=/ai-profiles/models-report error=%s", exc)
-            return ApiResult(status_code=0, text=str(exc))
-        return ApiResult(status_code=response.status_code, text=response.text)
+        return self._request_json("POST", "/ai-profiles/models-report", json=body)
+
+    def claim_ai_profile_check_request(self) -> ApiResult:
+        return self._request_json("POST", "/ai-profiles/check-requests/claim", json={})
+
+    def complete_ai_profile_check_request(self, request_id: str, *, ok: bool, message: str = "") -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/ai-profiles/check-requests/{request_id}/complete",
+            json={"ok": ok, "message": message},
+        )
 
     def get_project_role(self, project_id: str) -> ApiResult:
-        try:
-            response = self._get(f"/projects/{project_id}/role")
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/projects/%s/role error=%s", project_id, exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._get_json_result(f"/projects/{project_id}/role")
 
     def register_capability_catalog(self, catalog: list[dict[str, Any]]) -> ApiResult:
         return self._request_json(
@@ -353,15 +305,7 @@ class CairnClient:
         )
 
     def dispatcher_lock_current(self, name: str) -> ApiResult:
-        try:
-            response = self._get("/dispatcher-lock/current", params={"name": name})
-        except requests.RequestException as exc:
-            LOG.warning("request failed method=GET path=/dispatcher-lock/current error=%s", exc)
-            return ApiResult(status_code=0, text=str(exc))
-        data: Any | None = None
-        if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
-        return ApiResult(status_code=response.status_code, data=data, text=response.text)
+        return self._get_json_result("/dispatcher-lock/current", params={"name": name})
 
     def create_llm_execution(
         self,
@@ -432,6 +376,14 @@ class CairnClient:
             json=body,
         )
 
+    def _get_json_result(self, path: str, **kwargs: Any) -> ApiResult:
+        try:
+            response = self._get(path, **kwargs)
+        except requests.RequestException as exc:
+            LOG.warning("request failed method=GET path=%s error=%s", path, exc)
+            return ApiResult(status_code=0, text=str(exc))
+        return self._api_result_from_response(response)
+
     def _request_json(self, method: str, path: str, json: dict[str, Any]) -> ApiResult:
         try:
             response = self._session().request(
@@ -443,9 +395,22 @@ class CairnClient:
         except requests.RequestException as exc:
             LOG.warning("request failed method=%s path=%s error=%s", method, path, exc)
             return ApiResult(status_code=0, text=str(exc))
+        return self._api_result_from_response(response)
+
+    def _api_result_from_response(self, response: requests.Response) -> ApiResult:
         data: Any | None = None
+        if response.status_code == 204 or not response.content:
+            return ApiResult(status_code=response.status_code, data=data, text=response.text)
         if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError as exc:
+                LOG.warning(
+                    "json response parse failed status=%s url=%s error=%s",
+                    response.status_code,
+                    response.url,
+                    exc,
+                )
         return ApiResult(status_code=response.status_code, data=data, text=response.text)
 
     @retry(

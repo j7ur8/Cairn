@@ -1,6 +1,6 @@
 ---
 name: cypher-forensics
-description: Digital forensics methodology covering memory analysis (Volatility3), disk forensics, file carving and recovery, steganography detection, network traffic analysis, log analysis, and timeline reconstruction.
+description: Digital forensics guidance covering memory analysis (Volatility3), disk forensics, file carving and recovery, steganography detection, network traffic analysis, log analysis, and timeline reconstruction.
 version: 0.1.0
 finding_types: [FORENSIC_ARTIFACT, BINARY_FINDING, EXPLOIT_RESULT]
 destructiveness: low
@@ -10,6 +10,8 @@ tags: [ctf, forensics, memory, stego, network, file-carving]
 # Cypher Forensics Skill
 
 Use this skill for CTF forensics challenges, memory dump analysis, disk image investigation, network packet capture analysis, steganography challenges, and log-based investigations.
+
+Treat the tools and patterns below as optional references. Select them only when the artifact type, observed evidence, and goal justify that path.
 
 ## Memory forensics (Volatility3)
 
@@ -124,7 +126,7 @@ audacity → Spectrogram view        # GUI: check for hidden text/images in freq
 - **Video frames**: hidden frames, pixel-level LSB in specific frames
 - **Whitespace stego**: tabs/spaces encoding, zero-width Unicode characters
 
-### CTF stego checklist
+### CTF stego reference checks
 1. `strings <file> | grep -i flag` — quick win
 2. `exiftool <file>` — metadata flag
 3. `binwalk <file>` — embedded/appended files

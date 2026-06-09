@@ -8,6 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -86,7 +87,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
     def _snap(self, **overrides):
         from cairn.server.models import ProjectAiProfileSnapshot
         defaults = dict(
-            profile_id="p1", role="primary", position=0,
+            profile_id="p1", task_type="bootstrap", role="primary", position=0,
             snapshot_name="n", snapshot_worker_type="codex",
             snapshot_provider="", snapshot_base_url="",
             snapshot_model="m", snapshot_api_key_env="CAIRN_TEST_KEY_PRESENT",
@@ -196,7 +197,239 @@ class HealthCheckSnapshotTests(unittest.TestCase):
             self.assertTrue(result.ok, [c.message for c in result.checks])
         finally:
             httpd.shutdown()
+            httpd.server_close()
             thread.join(timeout=2)
+
+    def test_probe_profile_reuses_snapshot_health_logic(self) -> None:
+        from cairn.dispatcher.ai_health import probe_profile
+        from cairn.server.models import AiProfile
+
+        cfg = _make_config(_codex())
+        profile = AiProfile(
+            id="ai_test",
+            name="p",
+            description="",
+            worker_type="codex",
+            provider="",
+            base_url="",
+            model="m",
+            api_key_env="CAIRN_TEST_KEY_PRESENT",
+            available=True,
+            detail="",
+            healthcheck_timeout=1.0,
+            model_reasoning_effort=None,
+            warnings=[],
+            seeded_from_worker=None,
+            last_health_ok=None,
+            last_health_message="",
+            last_health_at=None,
+            models=["m"],
+            created_at="2026-06-09T00:00:00Z",
+            updated_at="2026-06-09T00:00:00Z",
+        )
+        result = probe_profile(profile, config=cfg)
+        self.assertTrue(result.ok, [c.message for c in result.checks])
+        self.assertEqual(
+            {c.name for c in result.checks},
+            {"api_key_env_present", "base_url_reachable", "worker_type_declared"},
+        )
+
+    def test_profile_worker_healthcheck_uses_profile_overlay(self) -> None:
+        from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
+        from cairn.dispatcher.runtime.process import ProcessResult
+        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.server.models import AiProfile
+
+        class _H(BaseHTTPRequestHandler):
+            def do_HEAD(self):  # noqa: N802
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args, **kwargs):  # silence
+                return
+
+        httpd = HTTPServer(("127.0.0.1", 0), _H)
+        port = httpd.server_address[1]
+        thread = Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        profile_base_url = f"http://127.0.0.1:{port}/v1"
+        cfg = _make_config(_codex(model="base-model", base_url="https://base.example/v1", api_key="base-key"))
+        profile = AiProfile(
+            id="ai_test",
+            name="p",
+            description="",
+            worker_type="codex",
+            provider="",
+            base_url=profile_base_url,
+            model="profile-model",
+            api_key_env="OPENAI_API_KEY",
+            available=True,
+            detail="",
+            healthcheck_timeout=2.0,
+            model_reasoning_effort=None,
+            warnings=[],
+            seeded_from_worker=None,
+            last_health_ok=None,
+            last_health_message="",
+            last_health_at=None,
+            models=["profile-model"],
+            created_at="2026-06-09T00:00:00Z",
+            updated_at="2026-06-09T00:00:00Z",
+        )
+        captured = {}
+
+        class _ContainerManager:
+            removed = False
+
+            def create_startup_container(self):
+                return "startup-container"
+
+            def remove_container(self, container_name, force=False):
+                self.removed = container_name == "startup-container" and force
+
+        def fake_run_healthcheck(container_manager, container_name, worker, command, *, timeout_seconds, tty):
+            captured["container_name"] = container_name
+            captured["env"] = dict(worker.env)
+            captured["command"] = list(command)
+            captured["timeout_seconds"] = timeout_seconds
+            captured["tty"] = tty
+            return HealthcheckRun(ProcessResult(returncode=0, stdout="pong\n", stderr=""), duration_ms=42)
+
+        cm = _ContainerManager()
+        try:
+            with patch("cairn.dispatcher.ai_health.run_healthcheck", fake_run_healthcheck):
+                result = run_profile_worker_healthcheck(
+                    profile,
+                    config=cfg,
+                    container_manager=cm,
+                    cached_secret="profile-secret",
+                    timeout_seconds=3,
+                )
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(captured["env"]["CODEX_MODEL"], "profile-model")
+        self.assertEqual(captured["env"]["CODEX_BASE_URL"], profile_base_url)
+        self.assertEqual(captured["env"]["OPENAI_API_KEY"], "profile-secret")
+        self.assertIn("profile-model", captured["command"])
+        self.assertEqual(captured["timeout_seconds"], 3)
+        self.assertTrue(captured["tty"])
+        self.assertTrue(cm.removed)
+
+    def test_profile_worker_healthcheck_defaults_to_runtime_timeout(self) -> None:
+        from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
+        from cairn.dispatcher.runtime.process import ProcessResult
+        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.server.models import AiProfile
+
+        cfg = _make_config(_codex())
+        cfg.runtime.healthcheck_timeout = 7
+        profile = AiProfile(
+            id="ai_test",
+            name="p",
+            description="",
+            worker_type="codex",
+            provider="",
+            base_url="",
+            model="m",
+            api_key_env="OPENAI_API_KEY",
+            available=True,
+            detail="",
+            healthcheck_timeout=1.0,
+            model_reasoning_effort=None,
+            warnings=[],
+            seeded_from_worker=None,
+            last_health_ok=None,
+            last_health_message="",
+            last_health_at=None,
+            models=["m"],
+            created_at="2026-06-09T00:00:00Z",
+            updated_at="2026-06-09T00:00:00Z",
+        )
+        captured = {}
+
+        class _ContainerManager:
+            def create_startup_container(self):
+                return "startup-container"
+
+            def remove_container(self, container_name, force=False):
+                return None
+
+        def fake_run_healthcheck(*args, **kwargs):
+            captured["timeout_seconds"] = kwargs["timeout_seconds"]
+            return HealthcheckRun(ProcessResult(returncode=0, stdout="pong", stderr=""), duration_ms=10)
+
+        with patch("cairn.dispatcher.ai_health.run_healthcheck", fake_run_healthcheck):
+            result = run_profile_worker_healthcheck(
+                profile,
+                config=cfg,
+                container_manager=_ContainerManager(),
+                cached_secret="profile-secret",
+            )
+
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(captured["timeout_seconds"], 7)
+
+    def test_profile_worker_healthcheck_failure_message_is_actionable(self) -> None:
+        from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
+        from cairn.dispatcher.runtime.process import ProcessResult
+        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.server.models import AiProfile
+
+        cfg = _make_config(_codex())
+        profile = AiProfile(
+            id="ai_test",
+            name="p",
+            description="",
+            worker_type="codex",
+            provider="",
+            base_url="",
+            model="m",
+            api_key_env="OPENAI_API_KEY",
+            available=True,
+            detail="",
+            healthcheck_timeout=1.0,
+            model_reasoning_effort=None,
+            warnings=[],
+            seeded_from_worker=None,
+            last_health_ok=None,
+            last_health_message="",
+            last_health_at=None,
+            models=["m"],
+            created_at="2026-06-09T00:00:00Z",
+            updated_at="2026-06-09T00:00:00Z",
+        )
+
+        class _ContainerManager:
+            def create_startup_container(self):
+                return "startup-container"
+
+            def remove_container(self, container_name, force=False):
+                return None
+
+        def fake_run_healthcheck(*args, **kwargs):
+            return HealthcheckRun(
+                ProcessResult(returncode=124, stdout="", stderr="request timed out", timed_out=True),
+                duration_ms=1001,
+            )
+
+        with patch("cairn.dispatcher.ai_health.run_healthcheck", fake_run_healthcheck):
+            result = run_profile_worker_healthcheck(
+                profile,
+                config=cfg,
+                container_manager=_ContainerManager(),
+                cached_secret="profile-secret",
+                timeout_seconds=1,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertIn("code=124", result.message)
+        self.assertIn("duration_ms=1001", result.message)
+        self.assertIn("timed_out=true", result.message)
+        self.assertIn("stderr=request timed out", result.message)
 
 
 class DispatcherTaskAiSelectionTests(unittest.TestCase):
@@ -878,6 +1111,32 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         ok = AiProfileCreate(name="x", worker_type="codex", model="m",
                              api_key_env="K", healthcheck_timeout=2.5)
         self.assertEqual(ok.healthcheck_timeout, 2.5)
+
+    def test_check_request_lifecycle(self) -> None:
+        from cairn.server.routers.ai_profiles import (
+            claim_ai_profile_check_request,
+            complete_ai_profile_check_request,
+            create_ai_profile,
+            trigger_ai_profile_check,
+        )
+        from cairn.server.models import AiProfileCheckCompleteRequest, AiProfileCreate
+
+        created = create_ai_profile(AiProfileCreate(
+            name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",
+        ))
+        queued = trigger_ai_profile_check(created.id, user=None)
+        self.assertEqual(queued.status, "pending")
+
+        claimed = claim_ai_profile_check_request()
+        self.assertIsNotNone(claimed)
+        assert claimed is not None
+        self.assertEqual(claimed.profile_id, created.id)
+        self.assertEqual(claimed.status, "running")
+
+        complete_ai_profile_check_request(
+            claimed.id,
+            AiProfileCheckCompleteRequest(ok=True, message="ok"),
+        )
 
 
 if __name__ == "__main__":
