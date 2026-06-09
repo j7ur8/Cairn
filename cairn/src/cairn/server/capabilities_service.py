@@ -352,6 +352,13 @@ def register_builtin_catalog(
     return list_catalog(conn)
 
 
+def sync_catalog_from_yaml(conn: Any) -> list[CapabilityCatalogItem]:
+    from cairn.server.yaml_config import list_yaml_capabilities
+
+    payload = [item.model_dump() for item in list_yaml_capabilities()]
+    return register_builtin_catalog(conn, payload)
+
+
 # ---------------------------------------------------------------------------
 # Per-task selection expansion
 # ---------------------------------------------------------------------------

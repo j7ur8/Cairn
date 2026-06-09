@@ -237,10 +237,11 @@ class CapabilityAdminTests(unittest.TestCase):
             ),
         ]))
 
+        ai_profiles = self._create_profile()
         project = create_project(CreateProjectRequest(
             title="p", origin="o", goal="g",
             role_id="role1",
-            ai_profiles=self._create_profile(),
+            ai_profiles=ai_profiles,
         ))
 
         with self.db.get_conn() as conn:
@@ -280,10 +281,26 @@ class CapabilityAdminTests(unittest.TestCase):
                 "SELECT llm_hidden_event_kinds FROM projects WHERE id = ?",
                 (project.project.id,),
             ).fetchone()
+            execution_rows = conn.execute(
+                """
+                SELECT task_type, config_json
+                FROM worker_execution_configs
+                WHERE project_id = ?
+                ORDER BY task_type
+                """,
+                (project.project.id,),
+            ).fetchall()
         hidden = json.loads(row["llm_hidden_event_kinds"])
         self.assertNotIn("prompt", hidden)
         self.assertNotIn("agent_message", hidden)
         self.assertIn("usage", hidden)
+        self.assertEqual([row["task_type"] for row in execution_rows], ["bootstrap", "explore", "reason"])
+        bootstrap_config = json.loads(execution_rows[0]["config_json"])
+        self.assertEqual(bootstrap_config["task_type"], "bootstrap")
+        self.assertEqual(bootstrap_config["ai_profiles"][0]["profile_id"], ai_profiles.bootstrap.primary_profile_id)
+        self.assertEqual(bootstrap_config["capabilities"]["skill_ids"], ["role-skill"])
+        self.assertIn("settings", bootstrap_config)
+        self.assertIsNone(bootstrap_config["proxy"])
 
     def test_requires_auto_expands_in_same_task(self) -> None:
         from cairn.server.capabilities_service import (

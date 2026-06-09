@@ -34,7 +34,7 @@ class DbMigrationTests(unittest.TestCase):
     def test_alembic_version_records_head(self) -> None:
         with self.db.get_conn() as conn:
             row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        self.assertEqual(row["version_num"], "0002_intent_partial_uniques")
+        self.assertEqual(row["version_num"], "0003_worker_execution_configs")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -47,6 +47,7 @@ class DbMigrationTests(unittest.TestCase):
             "idx_project_capabilities_project_kind",
             "idx_replay_steps_run_status",
             "idx_project_reason_state_retry",
+            "idx_worker_execution_configs_project_task",
         }
         with self.db.get_conn() as conn:
             rows = conn.execute(

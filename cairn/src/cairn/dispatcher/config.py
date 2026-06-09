@@ -330,11 +330,17 @@ class McpServerCapabilityConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
     bearer_token_env: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
     healthcheck_timeout: float = Field(default=1.0, gt=0, le=30)
     source_path: str | None = None
     probe_config: dict[str, Any] = Field(default_factory=dict)
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
     description: str = ""
+    detail: str = ""
+    available: bool = True
+    last_probe_status: str | None = None
+    last_probe_at: str | None = None
+    last_probe_message: str = ""
     # Skills that the dispatcher must auto-inject whenever a project
     # task selects this MCP. Mirrors skill.requires_ids in the opposite
     # direction: an MCP declares which skills it needs. Each id must be
@@ -446,6 +452,13 @@ class SkillCapabilityConfig(BaseModel):
     use_when: list[str] = Field(default_factory=list)
     preferred_mcp_ids: list[str] = Field(default_factory=list)
     activation_hint: str = ""
+    detail: str = ""
+    available: bool = True
+    requires_ids: list[str] = Field(default_factory=list)
+    probe_config: dict[str, Any] = Field(default_factory=dict)
+    last_probe_status: str | None = None
+    last_probe_at: str | None = None
+    last_probe_message: str = ""
 
     @field_validator("id", "name", "source_path")
     @classmethod
@@ -480,7 +493,7 @@ class SkillCapabilityConfig(BaseModel):
         _check_known_task_types(value)
         return value
 
-    @field_validator("use_when", "preferred_mcp_ids")
+    @field_validator("use_when", "preferred_mcp_ids", "requires_ids")
     @classmethod
     def validate_string_list(cls, value: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -524,6 +537,13 @@ class CapabilitiesConfig(BaseModel):
                         f"mcp_server {mcp.id} requires skill {required_skill_id!r} "
                         f"but that id is not declared in capabilities.skills"
                     )
+        for skill in self.skills:
+            for required_skill_id in skill.requires_ids:
+                if required_skill_id not in declared_skill_ids:
+                    raise ValueError(
+                        f"skill {skill.id} requires skill {required_skill_id!r} "
+                        f"but that id is not declared in capabilities.skills"
+                    )
         declared_mcp_ids = set(mcp_ids)
         for skill in self.skills:
             for preferred_mcp_id in skill.preferred_mcp_ids:
@@ -545,6 +565,8 @@ class RoleConfig(BaseModel):
     prompt: str | None = None
     source_path: str | None = None
     default_skill_ids: list[str] = Field(default_factory=list)
+    detail: str = ""
+    available: bool = True
 
     @field_validator("id", "name", "prompt", "source_path")
     @classmethod
@@ -667,6 +689,8 @@ class WorkerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    display_name: str | None = None
+    description: str = ""
     type: WorkerType
     task_types: list[TaskType]
     max_running: int = Field(gt=0)
@@ -674,6 +698,14 @@ class WorkerConfig(BaseModel):
     models: list[str] = Field(default_factory=list)
     model_reasoning_effort: ReasoningEffort | None = None
     env: dict[str, str] = Field(default_factory=dict)
+    available: bool = True
+    detail: str = ""
+    healthcheck_timeout: float | None = None
+    last_health_ok: bool | None = None
+    last_health_message: str = ""
+    last_health_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     @field_validator("task_types")
     @classmethod
@@ -717,6 +749,8 @@ class DispatchConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     server: str
+    server_settings: dict[str, Any] = Field(default_factory=dict)
+    proxies: list[dict[str, Any]] = Field(default_factory=list)
     runtime: RuntimeConfig
     tasks: TasksConfig
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)

@@ -41,7 +41,7 @@ class ProjectRow(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active", server_default="active")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    proxy_id: Mapped[str | None] = mapped_column(Text, ForeignKey("proxies.id", ondelete="SET NULL"))
+    proxy_id: Mapped[str | None] = mapped_column(Text)
     llm_hidden_event_kinds: Mapped[str] = mapped_column(Text, nullable=False, default='["usage"]', server_default='["usage"]')
     reason_worker: Mapped[str | None] = mapped_column(Text)
     reason_run_id: Mapped[str | None] = mapped_column(Text)
@@ -335,6 +335,18 @@ class ProjectAiProfileRow(Base):
     snapshot_model: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot_api_key_env: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot_reasoning_type: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WorkerExecutionConfigRow(Base):
+    __tablename__ = "worker_execution_configs"
+    __table_args__ = (Index("idx_worker_execution_configs_project_task", "project_id", "task_type"),)
+
+    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    task_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    capabilities_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 

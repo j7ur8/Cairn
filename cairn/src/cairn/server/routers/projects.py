@@ -29,6 +29,7 @@ from cairn.server.project_creation_service import (
     create_project_from_draft,
     proxy_summary_from_row,
 )
+from cairn.server.yaml_config import get_yaml_proxy
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -128,11 +129,20 @@ def get_project(project_id: str):
 
         proxy_summary: ProxySummary | None = None
         if row["proxy_id"]:
-            proxy_row = conn.execute(
-                "SELECT * FROM proxies WHERE id = ?", (row["proxy_id"],)
-            ).fetchone()
-            if proxy_row is not None:
-                proxy_summary = proxy_summary_from_row(proxy_row)
+            try:
+                proxy = get_yaml_proxy(row["proxy_id"])
+                proxy_summary = ProxySummary(
+                    id=proxy.id,
+                    name=proxy.name,
+                    type=proxy.type,
+                    host=proxy.host,
+                    port=proxy.port,
+                    has_auth=proxy.has_auth,
+                    created_at=proxy.created_at,
+                    updated_at=proxy.updated_at,
+                )
+            except HTTPException:
+                proxy_summary = None
 
         return ProjectDetail(
             project=project_meta_from_row(row),

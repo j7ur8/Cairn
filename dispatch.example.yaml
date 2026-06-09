@@ -80,3 +80,6 @@ workers:
     CODEX_MODEL: gpt-5.4
     CODEX_BASE_URL: https://seuapi.20250731.xyz
     OPENAI_API_KEY: ${OPENAI_API_KEY}
+server_settings:
+  intent_timeout: 90
+  reason_timeout: 300

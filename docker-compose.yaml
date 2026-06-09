@@ -52,8 +52,13 @@ services:
       CAIRN_ATTACHMENTS_ROOT: ${PWD}/datas/attachments
       CAIRN_PROJECT_FILES_ROOT: ${PWD}/datas/project-files
       CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
+      CAIRN_DISPATCH_CONFIG_PATH: /cairn/dispatch.yaml
+      CAIRN_CAPABILITIES_CONFIG_PATH: /cairn/dispatch.capabilities.yaml
+      CAIRN_DISPATCHER_RELOAD_URL: http://cairn-dispatcher:9100/reload
     volumes:
       - ${PWD}/datas:${PWD}/datas
+      - ./dispatch.yaml:/cairn/dispatch.yaml
+      - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -95,7 +100,7 @@ services:
       # Hardcoded absolute path; the value lives in .env so a
       # different host can override without editing this file.
       CAIRN_DISPATCHER_DATAS_ROOT: ${CAIRN_DISPATCHER_DATAS_ROOT}
-      CAIRN_DISPATCHER_HEALTH_ADDR: 127.0.0.1:9100
+      CAIRN_DISPATCHER_HEALTH_ADDR: 0.0.0.0:9100
       UV_CACHE_DIR: /tmp/uv-cache
       XDG_CACHE_HOME: /tmp/.cache
     # SECURITY: the dispatcher still needs the Docker socket to launch

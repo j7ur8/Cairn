@@ -20,7 +20,6 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from cairn.server.capabilities_service import (
-    delete_user_capability,
     expand_task_capabilities,
     get_catalog_map,
     list_catalog,
@@ -31,6 +30,7 @@ from cairn.server.capabilities_service import (
     probe_per_task,
     register_builtin_catalog,
     selected_capabilities_to_internal,
+    sync_catalog_from_yaml,
     upsert_user_capability,
 )
 from cairn.server.db import get_conn, with_immediate_tx
@@ -52,37 +52,46 @@ from cairn.server.models import (
     TaskCapabilitiesMap,
 )
 from cairn.server.services import check_project_hint_writable, get_project_or_404, utcnow
+from cairn.server.yaml_config import (
+    delete_yaml_capability,
+    list_yaml_capabilities,
+    list_yaml_roles,
+    replace_yaml_roles,
+    upsert_yaml_capability,
+)
 
 router = APIRouter(tags=["capabilities"])
 
 
 @router.get("/capabilities/catalog", response_model=list[CapabilityCatalogItem])
 def get_capability_catalog():
-    with get_conn() as conn:
-        return list_catalog(conn)
+    with with_immediate_tx() as conn:
+        sync_catalog_from_yaml(conn)
+    return list_yaml_capabilities()
 
 
 @router.post("/capabilities/catalog", response_model=list[CapabilityCatalogItem])
 def register_capability_catalog(body: RegisterCapabilityCatalogRequest):
-    payload = [item.model_dump() for item in body.catalog]
+    payload = [item.model_dump() for item in list_yaml_capabilities()]
     with with_immediate_tx() as conn:
         return register_builtin_catalog(conn, payload)
 
 
 @router.get("/capabilities/admin", response_model=CapabilityAdminResponse)
 def list_admin_capabilities():
-    with get_conn() as conn:
-        catalog = list_catalog(conn)
-        health: dict[str, list[CapabilityHealthEntry]] = {}
-        for item in catalog:
-            if item.last_probe_status:
-                health[item.id] = [
-                    CapabilityHealthEntry(
-                        capability_id=item.id,
-                        status=item.last_probe_status,
-                        message=item.last_probe_message,
-                    )
-                ]
+    with with_immediate_tx() as conn:
+        sync_catalog_from_yaml(conn)
+    catalog = list_yaml_capabilities()
+    health: dict[str, list[CapabilityHealthEntry]] = {}
+    for item in catalog:
+        if item.last_probe_status:
+            health[item.id] = [
+                CapabilityHealthEntry(
+                    capability_id=item.id,
+                    status=item.last_probe_status,
+                    message=item.last_probe_message,
+                )
+            ]
     return CapabilityAdminResponse(catalog=catalog, health=health)
 
 
@@ -93,13 +102,16 @@ def list_admin_capabilities():
 def upsert_admin_capability(kind: str, capability_id: str, body: CapabilityAdminRequest):
     body.id = capability_id
     with with_immediate_tx() as conn:
-        return upsert_user_capability(conn, kind, body)
+        item = upsert_yaml_capability(kind, capability_id, body)
+        sync_catalog_from_yaml(conn)
+        return item
 
 
 @router.delete("/capabilities/admin/{kind}/{capability_id}", status_code=204)
 def delete_admin_capability(kind: str, capability_id: str):
     with with_immediate_tx() as conn:
-        delete_user_capability(conn, kind, capability_id)
+        delete_yaml_capability(kind, capability_id)
+        sync_catalog_from_yaml(conn)
 
 
 @router.post(
@@ -119,15 +131,15 @@ def probe_admin_capability(kind: str, capability_id: str):
     response_model=ProjectCapabilitiesResponse,
 )
 def get_project_capabilities(project_id: str):
-    with get_conn() as conn:
+    with with_immediate_tx() as conn:
+        sync_catalog_from_yaml(conn)
         get_project_or_404(conn, project_id)
         catalog = list_catalog(conn)
         catalog_map = get_catalog_map(conn)
         per_task = load_project_capabilities_per_task(conn, project_id)
         unavailable = _unavailable_capabilities(catalog, per_task)
         health = probe_per_task(conn, per_task, catalog_map)
-        with with_immediate_tx() as conn2:
-            persist_probe_result(conn2, health)
+        persist_probe_result(conn, health)
         return ProjectCapabilitiesResponse(
             catalog=catalog,
             tasks=_project_capability_tasks(per_task),
@@ -144,6 +156,7 @@ def update_project_capabilities(
     project_id: str, body: ProjectCapabilitiesUpdateRequest
 ):
     with with_immediate_tx() as conn:
+        sync_catalog_from_yaml(conn)
         check_project_hint_writable(conn, project_id)
         catalog_map = get_catalog_map(conn)
         selected = selected_capabilities_to_internal(body.capabilities)
@@ -168,12 +181,14 @@ def update_project_capabilities(
 
 @router.get("/roles/catalog", response_model=list[RoleCatalogItem])
 def get_role_catalog():
-    with get_conn() as conn:
-        return _role_catalog(conn)
+    return list_yaml_roles()
 
 
 @router.post("/roles/catalog", response_model=list[RoleCatalogItem])
 def register_role_catalog(body: RegisterRoleCatalogRequest):
+    # Keep the legacy role snapshot table in sync for execution-path
+    # compatibility; the UI/global source remains dispatch.capabilities.yaml.
+    roles = replace_yaml_roles(body.roles)
     with with_immediate_tx() as conn:
         now = utcnow()
         conn.execute("DELETE FROM role_catalog")
@@ -200,7 +215,7 @@ def register_role_catalog(body: RegisterRoleCatalogRequest):
                     now,
                 ),
             )
-        return _role_catalog(conn)
+    return roles
 
 
 @router.get("/projects/{project_id}/role", response_model=ProjectRoleResponse)

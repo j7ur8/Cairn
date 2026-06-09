@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from contextlib import contextmanager
 from typing import Any, Generator, Iterable
 
@@ -43,6 +44,11 @@ def configure(url: str | os.PathLike[str] | None = None, *, run_migrations: bool
         return
     if legacy_test_path:
         _database_url = database_url()
+        if _engine is not None:
+            _engine.dispose()
+            _engine = None
+            _SessionLocal = None
+        _configure_legacy_test_yaml(url)
     elif url is not None:
         candidate = str(url)
         _database_url = candidate
@@ -77,6 +83,74 @@ def reset_for_tests() -> None:
     _SessionLocal = None
     _database_url = None
     _db_path = object()
+
+
+def _configure_legacy_test_yaml(url: str | os.PathLike[str] | None) -> None:
+    if url is None:
+        return
+    base_dir = os.path.dirname(os.fspath(url))
+    if not base_dir:
+        return
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    dispatch_src = os.path.join(repo_root, "dispatch.yaml")
+    caps_src = os.path.join(repo_root, "dispatch.capabilities.yaml")
+    dispatch_dst = os.path.join(base_dir, "dispatch.yaml")
+    caps_dst = os.path.join(base_dir, "dispatch.capabilities.yaml")
+    if os.path.exists(dispatch_src):
+        shutil.copyfile(dispatch_src, dispatch_dst)
+        _write_test_dispatch_yaml(dispatch_dst)
+        os.environ["CAIRN_DISPATCH_CONFIG_PATH"] = dispatch_dst
+    if os.path.exists(caps_src):
+        shutil.copyfile(caps_src, caps_dst)
+        _write_test_capabilities_yaml(caps_dst)
+        os.environ["CAIRN_CAPABILITIES_CONFIG_PATH"] = caps_dst
+    os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
+    os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
+    os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
+
+
+def _write_test_dispatch_yaml(path: str) -> None:
+    from pathlib import Path
+
+    Path(path).write_text(
+        """
+server: http://cairn-server:8000
+common_env: {}
+runtime:
+  interval: 3
+  max_workers: 8
+  max_running_projects: 3
+  max_project_workers: 4
+  healthcheck_timeout: 20
+  prompt_group: cypher
+tasks:
+  bootstrap:
+    timeout: 300
+    conclude_timeout: 90
+  reason:
+    timeout: 300
+    max_intents: 2
+  explore:
+    timeout: 300
+    conclude_timeout: 90
+container:
+  image: cairn-worker-container:mcp-camoufox
+  network_mode: cairn
+  completed_action: stop
+workers: []
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_test_capabilities_yaml(path: str) -> None:
+    from pathlib import Path
+
+    Path(path).write_text(
+        "capabilities:\n  mcp_servers: []\n  skills: []\nroles: []\n",
+        encoding="utf-8",
+    )
 
 
 def engine() -> Engine:

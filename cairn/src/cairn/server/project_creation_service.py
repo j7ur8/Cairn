@@ -13,6 +13,7 @@ from cairn.server.capabilities_service import (
     persist_probe_result,
     probe_per_task,
     selected_capabilities_to_internal,
+    sync_catalog_from_yaml,
 )
 from cairn.server.models import Fact, Hint, ProjectDetail, ProjectMeta, ProxySummary
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
@@ -26,6 +27,8 @@ from cairn.server.ai_profile_service import (
     require_complete_ai_profile_selections,
 )
 from cairn.server.services import next_hint_id, next_project_id, utcnow
+from cairn.server.execution_config_service import persist_worker_execution_configs
+from cairn.server.yaml_config import get_yaml_proxy, get_yaml_role_snapshot
 
 
 @dataclass(slots=True)
@@ -59,13 +62,22 @@ def create_project_from_draft(
 
     proxy_summary: ProxySummary | None = None
     if draft.proxy_id:
-        proxy_row = conn.execute(
-            "SELECT * FROM proxies WHERE id = ?",
-            (draft.proxy_id,),
-        ).fetchone()
-        if proxy_row is None:
-            raise HTTPException(400, f"proxy_id references missing proxy: {draft.proxy_id}")
-        proxy_summary = proxy_summary_from_row(proxy_row)
+        try:
+            proxy = get_yaml_proxy(draft.proxy_id)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(400, f"proxy_id not found: {draft.proxy_id}") from exc
+            raise
+        proxy_summary = ProxySummary(
+            id=proxy.id,
+            name=proxy.name,
+            type=proxy.type,
+            host=proxy.host,
+            port=proxy.port,
+            has_auth=proxy.has_auth,
+            created_at=proxy.created_at,
+            updated_at=proxy.updated_at,
+        )
 
     try:
         conn.execute(
@@ -111,6 +123,7 @@ def create_project_from_draft(
         if draft.capability_snapshots is not None
         else selected_capabilities_to_internal(draft.capabilities)
     )
+    sync_catalog_from_yaml(conn)
     catalog_map = get_catalog_map(conn)
     expanded_per_task, _expand_warnings = expand_task_capabilities(
         selected_per_task,
@@ -130,6 +143,7 @@ def create_project_from_draft(
         require_complete_ai_profile_selections(draft.ai_profiles),
         now,
     )
+    persist_worker_execution_configs(conn, pid, proxy_id=draft.proxy_id, now=now)
 
     return ProjectDetail(
         project=ProjectMeta(
@@ -166,14 +180,7 @@ def proxy_summary_from_row(row: Any) -> ProxySummary:
 def _load_role(conn: Any, role_id: str | None) -> Any | None:
     if not role_id:
         return None
-    role = conn.execute(
-        """
-        SELECT id, name, prompt, prompt_sha256, default_skill_ids
-        FROM role_catalog
-        WHERE id = ? AND available = 1
-        """,
-        (role_id,),
-    ).fetchone()
+    role = get_yaml_role_snapshot(role_id)
     if role is None:
         raise HTTPException(404, f"Role {role_id} not found or unavailable")
     return role
@@ -182,13 +189,7 @@ def _load_role(conn: Any, role_id: str | None) -> Any | None:
 def _role_default_skill_ids(role: Any | None) -> list[str]:
     if role is None:
         return []
-    try:
-        raw = json.loads(role["default_skill_ids"] or "[]")
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(raw, list):
-        return []
-    return [str(item).strip() for item in raw if str(item).strip()]
+    return [str(item).strip() for item in role["default_skill_ids"] if str(item).strip()]
 
 
 def _insert_role_snapshot(

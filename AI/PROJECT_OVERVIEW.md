@@ -32,7 +32,8 @@ Cairn 是一个基于事实图的通用问题求解引擎，以 penetration test
 project-root/
 ├── README.md                  # 项目定位、架构说明、启动方式
 ├── Dockerfile                 # 应用镜像
-├── dispatch.yaml              # Dispatcher worker/capability 配置
+├── dispatch.example.yaml      # dispatch.yaml 脱敏模板；真实 dispatch.yaml 为本地敏感运行文件
+├── dispatch.capabilities.example.yaml # capabilities/roles 脱敏模板
 ├── cairn/
 │   ├── pyproject.toml         # Python 包与依赖
 │   ├── src/cairn/

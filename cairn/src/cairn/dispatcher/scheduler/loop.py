@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -109,6 +110,7 @@ class DispatcherLoop:
                 current_holder=lambda: self.leader.current_holder(),
                 last_tick_at=lambda: self._last_tick_at,
             ),
+            reload_handler=self._reload_from_health_server,
         )
         self.health_server.start()
         bearer_token_env_keys = tuple(
@@ -144,6 +146,7 @@ class DispatcherLoop:
         # invalidation contract.
         self.project_caches = ProjectCaches()
         self._ai_overlay_cache = AIOverlayCache()
+        self._reload_lock = threading.Lock()
 
     def close(self) -> None:
         if self.futures:
@@ -296,6 +299,47 @@ class DispatcherLoop:
         if not response.ok:
             raise RuntimeError(f"failed to register role catalog status={response.status_code}: {response.text}")
         LOG.info("registered role catalog roles=%s", len(self.config.roles))
+
+    def _reload_from_health_server(self, authorization: str | None) -> dict[str, object]:
+        expected = os.environ.get("CAIRN_API_TOKEN", "")
+        if expected and authorization != f"Bearer {expected}":
+            raise PermissionError("invalid reload token")
+        with self._reload_lock:
+            next_config = DispatchConfig.load(self.config_path)
+            bearer_token_env_keys = tuple(
+                mcp.bearer_token_env
+                for mcp in next_config.capabilities.mcp_servers
+                if mcp.transport == "http" and mcp.bearer_token_env
+            )
+            next_container_manager = ContainerManager(
+                next_config.container,
+                bearer_token_env_keys=bearer_token_env_keys,
+                proxy_resolver=self._resolve_proxy_env,
+            )
+            old_container_manager = self.container_manager
+            old_executor = self.executor
+            old_cleanup_executor = self.cleanup_executor
+            self.config = next_config
+            self.client.close()
+            self.client._base_url = next_config.server.rstrip("/")  # noqa: SLF001 - reloads existing client wiring.
+            self.container_manager = next_container_manager
+            self.executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
+            self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, next_config.runtime.max_workers)))
+            self.project_caches.clear_all()
+            self._ai_overlay_cache.invalidate()
+            self.worker_unhealthy_until.clear()
+            self.worker_rejected_until.clear()
+            self._settings_checked = False
+            self._capability_catalog_registered = False
+            self._role_catalog_registered = False
+            self._ai_catalog_synced = False
+            try:
+                old_container_manager.close()
+            finally:
+                old_executor.shutdown(wait=False, cancel_futures=False)
+                old_cleanup_executor.shutdown(wait=False, cancel_futures=False)
+        LOG.info("dispatcher config reloaded workers=%s", len(self.config.workers))
+        return {"ok": True, "workers": len(self.config.workers)}
 
     def _dispatch_available(self, summaries: list[ProjectSummary]) -> None:
         if len(self.futures) >= self.config.runtime.max_workers:

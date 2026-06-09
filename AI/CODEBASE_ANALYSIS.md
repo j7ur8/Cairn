@@ -213,9 +213,9 @@ stateDiagram-v2
 | 字段 | 存储 | 说明 |
 |------|------|------|
 | `users.password_hash` | bcrypt hash | 不存明文密码 |
-| `ai_profiles.sk_ciphertext` | encrypted text | 优先读取加密列 |
-| `ai_profiles.sk` | legacy plaintext column | 兼容旧数据，写入路径倾向清空或加密 |
-| proxy username/password | PostgreSQL | 用于 worker env 注入，应视为敏感 |
+| `dispatch.yaml` AI profile `env.*API_KEY/*AUTH_TOKEN` | local YAML | 本地运行事实源，不应提交 |
+| `ai_profiles.sk_ciphertext` | encrypted text | 兼容 DB 镜像，仅服务旧查询/check request |
+| proxy username/password | `dispatch.yaml` | 用于 worker env 注入，应视为敏感 |
 
 ## 7. API 端点
 
@@ -263,8 +263,10 @@ stateDiagram-v2
 
 | 配置 | 来源 |
 |------|------|
-| Server DB path | CLI `--db-path`，默认 `~/.local/share/cairn/cairn.db` |
-| Observability DB path | CLI `--observability-db-path` |
+| Database | `CAIRN_DATABASE_URL`，仅支持 PostgreSQL |
+| Runtime dispatch facts | `dispatch.yaml`，本地敏感文件，模板为 `dispatch.example.yaml` |
+| Capability/role facts | `dispatch.capabilities.yaml`，模板为 `dispatch.capabilities.example.yaml` |
+| Execution snapshots | PostgreSQL `worker_execution_configs` |
 | Dispatcher config | `--config dispatch.yaml` |
 | API token | `CAIRN_API_TOKEN` |
 | JWT secret | `CAIRN_JWT_SECRET` |

@@ -5,6 +5,25 @@
 
 # 更新日志
 
+## 2026-06-09 YAML Bind Mount And Capability Transaction Fix
+
+- 修复 Docker 单文件 bind mount 下写入 `dispatch.yaml` / `dispatch.capabilities.yaml` 的 `OSError: [Errno 16] Device or resource busy`：YAML 写入优先原子替换，遇到 `EBUSY` 时回退为原地覆盖写入。
+- 修复 `GET /projects/{project_id}/capabilities` 在 PostgreSQL 下的事务自锁：项目详情读取能力时不再卡住 pending，能力探测结果在同一事务内持久化。
+- 新增 `cairn/tests/test_yaml_config.py` 覆盖 bind mount `EBUSY` 回退；扩展 capability admin 测试，断言项目创建会写入 bootstrap/explore/reason 三条 `worker_execution_configs`。
+- 顺序执行 `CAIRN_DATABASE_URL='postgresql+psycopg://cairn:cairn@localhost:5432/cairn' CAIRN_DISABLE_DISPATCHER_RELOAD=1 uv run --project cairn python -m unittest discover -s cairn/tests`，结果 `327 tests OK`。
+- 使用 `docker compose up -d --build cairn-server cairn-dispatcher` 验证本地栈：`cairn-postgres`、`cairn-server`、`cairn-dispatcher` 均 healthy，`/health` 返回 Alembic revision `0003_worker_execution_configs`。
+- 使用本机 `chrome-devtools` MCP 完成真实浏览器回归：登录、AI Profiles Check、Capabilities Probe、Proxy CRUD、Server Settings 保存、Create Project、项目详情、Execution Log 均可操作；`GET /projects/proj_001/capabilities` 返回 200；`worker_execution_configs` 对 `proj_001` 写入 bootstrap/explore/reason 三行。
+- 仍可观察到 `codex` startup healthcheck 因上游 429 被标记 unhealthy；按当前人工确认这是预期行为，不作为功能阻塞。
+
+## 2026-06-09 YAML Dispatch Facts And Execution Snapshots
+
+- 配置事实源收敛为 3 类：`dispatch.yaml` 管理 server settings、proxies、AI Profiles；`dispatch.capabilities.yaml` 管理 capabilities/roles；PostgreSQL `worker_execution_configs` 保存项目创建/回放时的执行配置快照。
+- 新增 YAML 配置服务与 dispatcher `/reload` 热加载入口；UI 修改 AI Profiles、Proxies、Settings、Capabilities、Roles 后会写 YAML 并触发 dispatcher reload。
+- 新增 `worker_execution_configs` Alembic revision `0003_worker_execution_configs`，项目创建时保存 bootstrap/explore/reason 的 AI、capability、proxy、settings 快照。
+- 真实运行配置 `dispatch.yaml`、`dispatch.capabilities.yaml` 已改为本地敏感文件，不再跟踪；新增 `dispatch.example.yaml`、`dispatch.capabilities.example.yaml` 作为模板。
+- Python 单元测试 `CAIRN_DATABASE_URL='postgresql+psycopg://cairn:cairn@localhost:5432/cairn' CAIRN_DISABLE_DISPATCHER_RELOAD=1 uv run --project cairn python -m unittest discover -s cairn/tests` 已通过，结果为 `325 tests OK`。
+- 注意：兼容执行路径仍同步 `project_ai_profiles` / `project_capability_snapshots` 与最小 AI profile DB 镜像；`worker_execution_configs` 已作为统一快照表落地，后续可继续把 dispatcher 读取路径完全切到该表。
+
 ## 2026-06-09 PostgreSQL Migration And Browser Verification
 
 - 全量移除运行时 SQLite 路径：删除旧 `db_schema.py`、`db_migrations.py`、`sqlite_diagnostics.py`，新增 PostgreSQL-only `server/db.py`、SQLAlchemy ORM metadata `server/orm.py`、Alembic 配置与 `0001/0002` migrations。

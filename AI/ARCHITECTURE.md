@@ -190,7 +190,8 @@ sequenceDiagram
 - 拦截点：`server/app.py` 的全局 dependency `_enforce_auth`。
 - 公开路径：`/`、`/auth/login`、`/auth/refresh`、`/auth/me`、`/health`、`/metrics`、`/static/*`。
 - 权限模型：当前主要是登录用户级保护，用户模型有 `role` 字段，但 API 多数只区分“已认证/未认证”和 active 状态。
-- Secret 处理：AI profile `sk` 使用加密列 `sk_ciphertext`，读取时优先解密列，保留旧 plaintext 列兼容路径。
+- Secret 处理：AI profile 运行配置写入本地 `dispatch.yaml`；兼容 DB 镜像的 `sk_ciphertext` 仅服务旧查询、check request 与测试路径。
+- 全局事实源：`dispatch.yaml` 保存 server settings、proxies、AI Profiles；`dispatch.capabilities.yaml` 保存 capabilities/roles；`worker_execution_configs` 保存项目创建/回放时的执行配置快照。
 
 ## 7. 回归测试架构约束
 

@@ -5,11 +5,13 @@ from typing import Any, Iterable
 from fastapi import HTTPException
 
 from cairn.server.models import (
+    AiProfile,
     AiProfileSelection,
     ProjectAiProfileSnapshot,
     TaskAiProfileSelections,
     canonical_auth_env,
 )
+from cairn.server.yaml_config import list_yaml_ai_profiles
 
 
 def load_project_ai_snapshots(
@@ -98,19 +100,11 @@ def persist_project_ai_selections(
             referenced.append(selection.primary_profile_id)
         referenced.extend(selection.fallback_profile_ids)
     referenced = list(dict.fromkeys(referenced))
-    rows = (
-        conn.execute(
-            f"SELECT * FROM ai_profiles WHERE id IN ({','.join('?' * len(referenced))})",
-            referenced,
-        ).fetchall()
-        if referenced
-        else []
-    )
-    by_id = {row["id"]: row for row in rows}
+    by_id = {profile.id: profile for profile in list_yaml_ai_profiles()}
     missing = [pid for pid in referenced if pid not in by_id]
     if missing:
         raise HTTPException(400, f"ai profile ids not found: {', '.join(missing)}")
-    unavailable = [pid for pid in referenced if not by_id[pid]["available"]]
+    unavailable = [pid for pid in referenced if not by_id[pid].available]
     if unavailable:
         raise HTTPException(400, f"ai profile ids unavailable: {', '.join(unavailable)}")
 
@@ -133,13 +127,13 @@ def persist_project_ai_selections(
                     project_id,
                     selection.primary_profile_id,
                     task_type,
-                    profile["name"],
-                    profile["worker_type"],
-                    profile["provider"],
-                    profile["base_url"],
+                    profile.name,
+                    profile.worker_type,
+                    profile.provider,
+                    profile.base_url,
                     _selected_model(conn, profile, selection),
                     selection.primary_reasoning_type or _selected_reasoning_type(profile),
-                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]),
+                    _normalized_api_key_env(profile.worker_type, profile.api_key_env),
                     now,
                 ),
             )
@@ -162,13 +156,13 @@ def persist_project_ai_selections(
                     profile_id,
                     task_type,
                     position,
-                    profile["name"],
-                    profile["worker_type"],
-                    profile["provider"],
-                    profile["base_url"],
-                    profile["model"],
+                    profile.name,
+                    profile.worker_type,
+                    profile.provider,
+                    profile.base_url,
+                    profile.model,
                     _selected_reasoning_type(profile),
-                    _normalized_api_key_env(profile["worker_type"], profile["api_key_env"]),
+                    _normalized_api_key_env(profile.worker_type, profile.api_key_env),
                     now,
                 ),
             )
@@ -219,32 +213,28 @@ def _selection_from_snapshots(
     )
 
 
-def _profile_models(conn: Any, profile: Any) -> list[str]:
-    rows = conn.execute(
-        "SELECT model FROM ai_profile_models WHERE profile_id = ? ORDER BY model",
-        (profile["id"],),
-    ).fetchall()
-    models = [row["model"] for row in rows]
-    if profile["model"] and profile["model"] not in models:
-        models.insert(0, profile["model"])
-    return models or [profile["model"]]
+def _profile_models(conn: Any, profile: AiProfile) -> list[str]:
+    models = list(profile.models)
+    if profile.model and profile.model not in models:
+        models.insert(0, profile.model)
+    return models or [profile.model]
 
 
-def _selected_reasoning_type(profile: Any) -> str | None:
-    return profile["model_reasoning_effort"] if "model_reasoning_effort" in profile.keys() else None
+def _selected_reasoning_type(profile: AiProfile) -> str | None:
+    return profile.model_reasoning_effort
 
 
 def _selected_model(
     conn: Any,
-    profile: Any,
+    profile: AiProfile,
     selection: AiProfileSelection,
 ) -> str:
-    model = selection.primary_model or profile["model"]
+    model = selection.primary_model or profile.model
     allowed = set(_profile_models(conn, profile))
     if model not in allowed:
         raise HTTPException(
             400,
-            f"primary_model {model!r} is not available for ai profile {profile['id']}",
+            f"primary_model {model!r} is not available for ai profile {profile.id}",
         )
     return model
 

@@ -4,3 +4,5 @@ __pycache__/
 .playwright-cli/
 datas/
 .env
+dispatch.yaml
+dispatch.capabilities.yaml

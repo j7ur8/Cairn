@@ -55,10 +55,18 @@ class DispatcherHealthState:
 
 
 class DispatcherHealthServer:
-    def __init__(self, host: str, port: int, state: DispatcherHealthState):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        state: DispatcherHealthState,
+        *,
+        reload_handler: Callable[[str | None], dict[str, object]] | None = None,
+    ):
         self.host = host
         self.port = port
         self.state = state
+        self.reload_handler = reload_handler
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -73,6 +81,7 @@ class DispatcherHealthServer:
         if self._server is not None:
             return
         state = self.state
+        reload_handler = self.reload_handler
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802 - stdlib API
@@ -88,6 +97,28 @@ class DispatcherHealthServer:
                     body, content_type = render_metrics()
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(404)
+                self.end_headers()
+
+            def do_POST(self) -> None:  # noqa: N802 - stdlib API
+                if self.path == "/reload" and reload_handler is not None:
+                    auth = self.headers.get("Authorization")
+                    try:
+                        payload = reload_handler(auth)
+                        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        status = 200
+                    except PermissionError as exc:
+                        body = json.dumps({"ok": False, "error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                        status = 403
+                    except Exception as exc:  # noqa: BLE001
+                        body = json.dumps({"ok": False, "error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                        status = 400
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
