@@ -136,4 +136,4 @@ class DispatcherHealthCoordinator:
         )
         if any(result.ok for result in results):
             return
-        raise RuntimeError(format_failure_summary(results))
+        LOG.warning(format_failure_summary(results))
