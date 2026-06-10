@@ -15,7 +15,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class YamlConfigWriteTests(unittest.TestCase):
     def test_atomic_write_falls_back_for_single_file_bind_mount_busy(self) -> None:
-        from cairn.server.yaml_config import _atomic_write_yaml
+        from cairn.server.config.files import _atomic_write_yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "dispatch.capabilities.yaml"
@@ -30,7 +30,7 @@ class YamlConfigWriteTests(unittest.TestCase):
             )
 
     def test_atomic_write_reraises_non_busy_replace_errors(self) -> None:
-        from cairn.server.yaml_config import _atomic_write_yaml
+        from cairn.server.config.files import _atomic_write_yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "dispatch.yaml"

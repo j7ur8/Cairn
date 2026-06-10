@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -13,18 +12,12 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
+from helpers import reset_postgres_db
+
 
 class DispatcherLockApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        from cairn.server import db
-        from cairn.server.observability import db as obs_db
-
-        db._db_path = None
-        db.close_thread_conn()
-        db.configure(Path(self.tmp.name) / "main.sqlite")
-        obs_db._db_path = None
-        obs_db.configure(Path(self.tmp.name) / "obs.sqlite")
+        reset_postgres_db()
 
         from cairn.server.security.jwt import issue_token
 
@@ -34,12 +27,7 @@ class DispatcherLockApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         from cairn.server import db
-        from cairn.server.observability import db as obs_db
-
-        db.close_thread_conn()
-        db._db_path = None
-        obs_db._db_path = None
-        self.tmp.cleanup()
+        db.reset_for_tests()
 
     def client(self):
         from fastapi.testclient import TestClient

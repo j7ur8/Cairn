@@ -1,8 +1,7 @@
 """Task type registry.
 
-Replaces the previous ``Literal["bootstrap", "explore", "reason",
-"legacy"]`` scattered across Pydantic models with a single source
-of truth. New task types register themselves at import time via
+Keeps the built-in task type names in one place. New task types
+register themselves at import time via
 :func:`register`; the rest of the system reads
 :data:`TASK_TYPE_REGISTRY` to validate user input.
 
@@ -81,9 +80,14 @@ class TaskTypeRegistry:
 
 
 TASK_TYPE_REGISTRY = TaskTypeRegistry()
+BUILTIN_TASK_TYPES: tuple[tuple[str, str], ...] = (
+    ("bootstrap", "Initial project setup: scaffold the project graph."),
+    ("explore", "Generate a new intent / fact chain."),
+    ("reason", "Maintain the project's reason / trigger state."),
+)
 
 
-def register_task_type(
+def _register_task_type(
     name: str,
     *,
     description: str = "",
@@ -94,7 +98,7 @@ def register_task_type(
 
     Used as a decorator-free helper:
 
-        _ = register_task_type("bootstrap", description="...")
+        _ = _register_task_type("bootstrap", description="...")
     """
     return TASK_TYPE_REGISTRY.register(
         TaskTypeSpec(
@@ -107,19 +111,13 @@ def register_task_type(
 
 
 def _register_builtins() -> None:
-    """Register the four task types cairn ships with.
+    """Register the task types cairn ships with.
 
     Imported eagerly so :data:`TASK_TYPE_REGISTRY.names()` is
-    non-empty by the time the first model validation runs. The
-    four entries mirror the legacy ``Literal[...]`` set.
+    non-empty by the time the first model validation runs.
     """
-    for name, description in (
-        ("bootstrap", "Initial project setup: scaffold the project graph."),
-        ("explore", "Generate a new intent / fact chain."),
-        ("reason", "Maintain the project's reason / trigger state."),
-        ("legacy", "Backwards-compatible alias for projects created before task types existed."),
-    ):
-        register_task_type(name, description=description)
+    for name, description in BUILTIN_TASK_TYPES:
+        _register_task_type(name, description=description)
 
 
 _register_builtins()
@@ -128,3 +126,15 @@ _register_builtins()
 def is_known_task_type(name: str) -> bool:
     """Helper for Pydantic ``field_validator`` and dispatcher side checks."""
     return TASK_TYPE_REGISTRY.is_valid(name)
+
+
+def builtin_task_type_names() -> tuple[str, ...]:
+    return tuple(name for name, _description in BUILTIN_TASK_TYPES)
+
+
+def default_worker_task_type_names() -> tuple[str, ...]:
+    return builtin_task_type_names()
+
+
+def default_capability_task_type_names() -> tuple[str, ...]:
+    return tuple(name for name in builtin_task_type_names() if name != "reason")

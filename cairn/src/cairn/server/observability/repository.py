@@ -16,6 +16,7 @@ from cairn.server.observability.models import (
 )
 from cairn.server.observability.redaction import redact_content, truncate_content
 from cairn.server.models_pkg.projects import DEFAULT_LLM_HIDDEN_EVENT_KINDS, normalize_llm_event_kinds
+from cairn.server.repositories import sql
 from cairn.server.services import utcnow
 
 
@@ -29,13 +30,17 @@ def row_to_event(row: Any) -> LlmExecutionEvent:
 
 def create_execution(conn: Any, project_id: str, body: CreateExecutionRequest) -> LlmExecution:
     now = utcnow()
-    conn.execute(
+    sql.execute(
+        conn,
         """
         INSERT INTO llm_executions (
             id, project_id, intent_id, task_type, worker, process_state,
             started_at, ended_at, last_event_at, event_count, bytes_written,
             returncode, timed_out, error_kind, produced_fact_id, created_intent_ids
-        ) VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, NULL, 0, 0, NULL, 0, NULL, NULL, NULL)
+        ) VALUES (
+            :id, :project_id, :intent_id, :task_type, :worker, 'running',
+            :started_at, NULL, NULL, 0, 0, NULL, 0, NULL, NULL, NULL
+        )
         ON CONFLICT(id) DO UPDATE SET
             project_id = excluded.project_id,
             intent_id = excluded.intent_id,
@@ -48,15 +53,23 @@ def create_execution(conn: Any, project_id: str, body: CreateExecutionRequest) -
             timed_out = 0,
             error_kind = NULL
         """,
-        (body.id, project_id, body.intent_id, body.task_type, body.worker, now),
+        {
+            "id": body.id,
+            "project_id": project_id,
+            "intent_id": body.intent_id,
+            "task_type": body.task_type,
+            "worker": body.worker,
+            "started_at": now,
+        },
     )
-    row = conn.execute("SELECT * FROM llm_executions WHERE id = ?", (body.id,)).fetchone()
+    row = sql.fetchone(conn, "SELECT * FROM llm_executions WHERE id = :id", {"id": body.id})
     assert row is not None
     return row_to_execution(row)
 
 
 def list_executions(conn: Any, project_id: str, limit: int) -> list[LlmExecution]:
-    rows = conn.execute(
+    rows = sql.fetchall(
+        conn,
         """
         SELECT
             e.id,
@@ -85,12 +98,12 @@ def list_executions(conn: Any, project_id: str, limit: int) -> list[LlmExecution
             e.produced_fact_id,
             e.created_intent_ids
         FROM llm_executions e
-        WHERE e.project_id = ?
+        WHERE e.project_id = :project_id
         ORDER BY started_at DESC, id DESC
-        LIMIT ?
+        LIMIT :limit
         """,
-        (project_id, limit),
-    ).fetchall()
+        {"project_id": project_id, "limit": limit},
+    )
     return [row_to_execution(row) for row in rows]
 
 
@@ -101,10 +114,11 @@ def append_event(
     body: CreateEventRequest,
     settings: ObservabilitySettings,
 ) -> tuple[LlmExecutionEvent | None, bool]:
-    execution = conn.execute(
-        "SELECT * FROM llm_executions WHERE id = ? AND project_id = ?",
-        (execution_id, project_id),
-    ).fetchone()
+    execution = sql.fetchone(
+        conn,
+        "SELECT * FROM llm_executions WHERE id = :execution_id AND project_id = :project_id",
+        {"execution_id": execution_id, "project_id": project_id},
+    )
     if execution is None:
         return None, True
 
@@ -120,43 +134,50 @@ def append_event(
         byte_count = len(content.encode("utf-8"))
 
     now = utcnow()
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         INSERT INTO llm_execution_events (
             execution_id, project_id, intent_id, task_type, worker, phase,
             event_kind, stream, content, truncated, redacted, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            :execution_id, :project_id, :intent_id, :task_type, :worker, :phase,
+            :event_kind, :stream, :content, :truncated, :redacted, :created_at
+        )
         RETURNING sequence
         """,
-        (
-            execution_id,
-            project_id,
-            execution["intent_id"],
-            execution["task_type"],
-            execution["worker"],
-            body.phase,
-            body.event_kind,
-            body.stream,
-            content,
-            1 if truncated else 0,
-            1 if redacted else 0,
-            now,
-        ),
+        {
+            "execution_id": execution_id,
+            "project_id": project_id,
+            "intent_id": execution["intent_id"],
+            "task_type": execution["task_type"],
+            "worker": execution["worker"],
+            "phase": body.phase,
+            "event_kind": body.event_kind,
+            "stream": body.stream,
+            "content": content,
+            "truncated": 1 if truncated else 0,
+            "redacted": 1 if redacted else 0,
+            "created_at": now,
+        },
     )
-    conn.execute(
+    sql.execute(
+        conn,
         """
         UPDATE llm_executions
-        SET last_event_at = ?,
+        SET last_event_at = :last_event_at,
             event_count = event_count + 1,
-            bytes_written = bytes_written + ?
-        WHERE id = ?
+            bytes_written = bytes_written + :byte_count
+        WHERE id = :execution_id
         """,
-        (now, byte_count, execution_id),
+        {"last_event_at": now, "byte_count": byte_count, "execution_id": execution_id},
     )
-    row = conn.execute(
-        "SELECT * FROM llm_execution_events WHERE sequence = ?",
-        (cursor.fetchone()["sequence"],),
-    ).fetchone()
+    inserted = cursor.mappings().fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT * FROM llm_execution_events WHERE sequence = :sequence",
+        {"sequence": inserted["sequence"]},
+    )
     assert row is not None
     return row_to_event(row), False
 
@@ -188,34 +209,36 @@ def finish_execution(
     created_intent_ids = None
     if body.created_intent_ids is not None:
         created_intent_ids = json.dumps(body.created_intent_ids, ensure_ascii=False)
-    conn.execute(
+    sql.execute(
+        conn,
         """
         UPDATE llm_executions
-        SET process_state = ?,
-            ended_at = ?,
-            returncode = ?,
-            timed_out = ?,
-            error_kind = ?,
-            produced_fact_id = COALESCE(?, produced_fact_id),
-            created_intent_ids = COALESCE(?, created_intent_ids)
-        WHERE id = ? AND project_id = ?
+        SET process_state = :process_state,
+            ended_at = :ended_at,
+            returncode = :returncode,
+            timed_out = :timed_out,
+            error_kind = :error_kind,
+            produced_fact_id = COALESCE(:produced_fact_id, produced_fact_id),
+            created_intent_ids = COALESCE(:created_intent_ids, created_intent_ids)
+        WHERE id = :execution_id AND project_id = :project_id
         """,
-        (
-            body.process_state,
-            now,
-            body.returncode,
-            1 if body.timed_out else 0,
-            body.error_kind,
-            body.produced_fact_id,
-            created_intent_ids,
-            execution_id,
-            project_id,
-        ),
+        {
+            "process_state": body.process_state,
+            "ended_at": now,
+            "returncode": body.returncode,
+            "timed_out": 1 if body.timed_out else 0,
+            "error_kind": body.error_kind,
+            "produced_fact_id": body.produced_fact_id,
+            "created_intent_ids": created_intent_ids,
+            "execution_id": execution_id,
+            "project_id": project_id,
+        },
     )
-    row = conn.execute(
-        "SELECT * FROM llm_executions WHERE id = ? AND project_id = ?",
-        (execution_id, project_id),
-    ).fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT * FROM llm_executions WHERE id = :execution_id AND project_id = :project_id",
+        {"execution_id": execution_id, "project_id": project_id},
+    )
     if row is not None:
         _ensure_process_end_event(conn, row, body, now)
     return row_to_execution(row) if row is not None else None
@@ -227,14 +250,15 @@ def _ensure_process_end_event(
     body: FinishExecutionRequest,
     now: str,
 ) -> None:
-    existing = conn.execute(
+    existing = sql.fetchone(
+        conn,
         """
         SELECT 1 FROM llm_execution_events
-        WHERE execution_id = ? AND event_kind = 'process_end'
+        WHERE execution_id = :execution_id AND event_kind = 'process_end'
         LIMIT 1
         """,
-        (execution["id"],),
-    ).fetchone()
+        {"execution_id": execution["id"]},
+    )
     if existing is not None:
         return
     content = (
@@ -242,32 +266,37 @@ def _ensure_process_end_event(
         f"timed_out={body.timed_out} error_kind={body.error_kind or ''}"
     )
     byte_count = len(content.encode("utf-8"))
-    conn.execute(
+    sql.execute(
+        conn,
         """
         INSERT INTO llm_execution_events (
             execution_id, project_id, intent_id, task_type, worker, phase,
             event_kind, stream, content, truncated, redacted, created_at
-        ) VALUES (?, ?, ?, ?, ?, 'finish', 'process_end', 'system', ?, 0, 0, ?)
+        ) VALUES (
+            :execution_id, :project_id, :intent_id, :task_type, :worker,
+            'finish', 'process_end', 'system', :content, 0, 0, :created_at
+        )
         """,
-        (
-            execution["id"],
-            execution["project_id"],
-            execution["intent_id"],
-            execution["task_type"],
-            execution["worker"],
-            content,
-            now,
-        ),
+        {
+            "execution_id": execution["id"],
+            "project_id": execution["project_id"],
+            "intent_id": execution["intent_id"],
+            "task_type": execution["task_type"],
+            "worker": execution["worker"],
+            "content": content,
+            "created_at": now,
+        },
     )
-    conn.execute(
+    sql.execute(
+        conn,
         """
         UPDATE llm_executions
-        SET last_event_at = ?,
+        SET last_event_at = :last_event_at,
             event_count = event_count + 1,
-            bytes_written = bytes_written + ?
-        WHERE id = ?
+            bytes_written = bytes_written + :byte_count
+        WHERE id = :execution_id
         """,
-        (now, byte_count, execution["id"]),
+        {"last_event_at": now, "byte_count": byte_count, "execution_id": execution["id"]},
     )
 
 
@@ -280,26 +309,28 @@ def list_project_events(
     tail: bool = False,
 ) -> list[LlmExecutionEvent]:
     if tail:
-        rows = conn.execute(
+        rows = sql.fetchall(
+            conn,
             """
             SELECT * FROM llm_execution_events
-            WHERE project_id = ?
+            WHERE project_id = :project_id
             ORDER BY sequence DESC
-            LIMIT ?
+            LIMIT :limit
             """,
-            (project_id, limit),
-        ).fetchall()
+            {"project_id": project_id, "limit": limit},
+        )
         rows = list(reversed(rows))
         return [row_to_event(row) for row in rows]
-    rows = conn.execute(
+    rows = sql.fetchall(
+        conn,
         """
         SELECT * FROM llm_execution_events
-        WHERE project_id = ? AND sequence > ?
+        WHERE project_id = :project_id AND sequence > :after
         ORDER BY sequence ASC
-        LIMIT ?
+        LIMIT :limit
         """,
-        (project_id, after, limit),
-    ).fetchall()
+        {"project_id": project_id, "after": after, "limit": limit},
+    )
     return [row_to_event(row) for row in rows]
 
 
@@ -313,26 +344,28 @@ def list_execution_events(
     tail: bool = False,
 ) -> list[LlmExecutionEvent]:
     if tail:
-        rows = conn.execute(
+        rows = sql.fetchall(
+            conn,
             """
             SELECT * FROM llm_execution_events
-            WHERE project_id = ? AND execution_id = ?
+            WHERE project_id = :project_id AND execution_id = :execution_id
             ORDER BY sequence DESC
-            LIMIT ?
+            LIMIT :limit
             """,
-            (project_id, execution_id, limit),
-        ).fetchall()
+            {"project_id": project_id, "execution_id": execution_id, "limit": limit},
+        )
         rows = list(reversed(rows))
         return [row_to_event(row) for row in rows]
-    rows = conn.execute(
+    rows = sql.fetchall(
+        conn,
         """
         SELECT * FROM llm_execution_events
-        WHERE project_id = ? AND execution_id = ? AND sequence > ?
+        WHERE project_id = :project_id AND execution_id = :execution_id AND sequence > :after
         ORDER BY sequence ASC
-        LIMIT ?
+        LIMIT :limit
         """,
-        (project_id, execution_id, after, limit),
-    ).fetchall()
+        {"project_id": project_id, "execution_id": execution_id, "after": after, "limit": limit},
+    )
     return [row_to_event(row) for row in rows]
 
 
@@ -346,23 +379,25 @@ def list_event_view(
     include_low_signal: bool = False,
     hidden_event_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> EventViewResponse:
-    where = ["project_id = ?"]
-    params: list[object] = [project_id]
+    where = ["project_id = :project_id"]
+    params: dict[str, object] = {"project_id": project_id}
     if execution_id:
-        where.append("execution_id = ?")
-        params.append(execution_id)
+        where.append("execution_id = :execution_id")
+        params["execution_id"] = execution_id
     if after > 0:
-        where.append("sequence > ?")
-        params.append(after)
+        where.append("sequence > :after")
+        params["after"] = after
     where_sql = " AND ".join(where)
 
-    max_row = conn.execute(
+    max_row = sql.fetchone(
+        conn,
         f"SELECT MAX(sequence) AS last_sequence FROM llm_execution_events WHERE {where_sql}",
         params,
-    ).fetchone()
+    )
     last_sequence = int(max_row["last_sequence"] or after) if max_row is not None else after
 
-    stat_rows = conn.execute(
+    stat_rows = sql.fetchall(
+        conn,
         f"""
         SELECT event_kind, COUNT(*) AS count
         FROM llm_execution_events
@@ -370,28 +405,32 @@ def list_event_view(
         GROUP BY event_kind
         """,
         params,
-    ).fetchall()
+    )
     by_kind = {str(row["event_kind"]): int(row["count"]) for row in stat_rows}
 
     event_where = list(where)
-    event_params = list(params)
+    event_params = dict(params)
     hidden_kinds = normalize_llm_event_kinds(
         hidden_event_kinds if hidden_event_kinds is not None else list(DEFAULT_LLM_HIDDEN_EVENT_KINDS)
     )
     if not include_low_signal:
         if hidden_kinds:
-            placeholders = ", ".join("?" for _ in hidden_kinds)
-            event_where.append(f"event_kind NOT IN ({placeholders})")
-            event_params.extend(hidden_kinds)
-    rows = conn.execute(
+            placeholders: list[str] = []
+            for index, kind in enumerate(hidden_kinds):
+                key = f"hidden_kind_{index}"
+                placeholders.append(f":{key}")
+                event_params[key] = kind
+            event_where.append(f"event_kind NOT IN ({', '.join(placeholders)})")
+    rows = sql.fetchall(
+        conn,
         f"""
         SELECT * FROM llm_execution_events
         WHERE {" AND ".join(event_where)}
         ORDER BY sequence DESC
-        LIMIT ?
+        LIMIT :limit
         """,
-        [*event_params, limit],
-    ).fetchall()
+        {**event_params, "limit": limit},
+    )
     primary_events = [row_to_event(row) for row in rows]
 
     hidden_by_kind: dict[str, int] = {}
@@ -415,16 +454,18 @@ def list_event_view(
 def _latest_usage_activity(
     conn: Any,
     where_sql: str,
-    params: list[object],
+    params: dict[str, object],
 ) -> LlmUsageActivity | None:
-    usage_count_row = conn.execute(
+    usage_count_row = sql.fetchone(
+        conn,
         f"SELECT COUNT(*) AS count FROM llm_execution_events WHERE {where_sql} AND event_kind = 'usage'",
         params,
-    ).fetchone()
+    )
     usage_count = int(usage_count_row["count"] or 0) if usage_count_row is not None else 0
     if usage_count <= 0:
         return None
-    row = conn.execute(
+    row = sql.fetchone(
+        conn,
         f"""
         SELECT * FROM llm_execution_events
         WHERE {where_sql} AND event_kind = 'usage'
@@ -432,7 +473,7 @@ def _latest_usage_activity(
         LIMIT 1
         """,
         params,
-    ).fetchone()
+    )
     if row is None:
         return None
     payload = _parse_json_object(str(row["content"] or ""))
@@ -474,5 +515,13 @@ def _optional_int(value: object) -> int | None:
 
 
 def delete_project_observability(conn: Any, project_id: str) -> None:
-    conn.execute("DELETE FROM llm_execution_events WHERE project_id = ?", (project_id,))
-    conn.execute("DELETE FROM llm_executions WHERE project_id = ?", (project_id,))
+    sql.execute(
+        conn,
+        "DELETE FROM llm_execution_events WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )
+    sql.execute(
+        conn,
+        "DELETE FROM llm_executions WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )

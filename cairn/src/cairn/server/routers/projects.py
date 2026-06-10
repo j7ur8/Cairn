@@ -2,20 +2,12 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from cairn.server.db import get_conn, with_immediate_tx
-from cairn.server.observability import db as observability_db
+from cairn.server import db
 from cairn.server.observability.repository import delete_project_observability
-from cairn.server.models import (
+from cairn.server.models_pkg.intents import (
     CompleteRequest,
     CreateProjectRequest,
-    Fact,
-    Hint,
     HeartbeatRequest,
-    Intent,
-    ProjectDetail,
-    ProjectMeta,
-    ProjectSummary,
-    ProxySummary,
     ReopenRequest,
     ReopenResponse,
     ReasonClaimRequest,
@@ -24,12 +16,16 @@ from cairn.server.models import (
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
+from cairn.server.models_pkg.projects import Fact, Hint, Intent, ProjectDetail, ProjectMeta, ProjectSummary
+from cairn.server.models_pkg.proxies import ProxySummary
 from cairn.server.project_creation_service import (
     ProjectCreationDraft,
     create_project_from_draft,
     proxy_summary_from_row,
 )
-from cairn.server.yaml_config import get_yaml_proxy
+from cairn.server.repositories.intents import IntentRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.services import (
     build_intents,
     check_project_completed,
@@ -62,19 +58,10 @@ LOG = logging.getLogger(__name__)
 
 @router.get("/projects", response_model=list[ProjectSummary])
 def list_projects():
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         expire_workers(conn)
         expire_reason_leases(conn)
-        rows = conn.execute("""
-            SELECT p.*,
-                (SELECT COUNT(*) FROM facts WHERE project_id = p.id) AS fact_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id) AS intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count,
-                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count
-            FROM projects p
-            ORDER BY p.created_at
-        """).fetchall()
+        rows = ProjectRepository(conn).list_with_counts()
         return [
             ProjectSummary(
                 id=row["id"],
@@ -94,7 +81,7 @@ def list_projects():
 
 @router.post("/projects", response_model=ProjectDetail, status_code=201)
 def create_project(body: CreateProjectRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         return create_project_from_draft(
             conn,
             ProjectCreationDraft(
@@ -114,18 +101,14 @@ def create_project(body: CreateProjectRequest):
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail)
 def get_project(project_id: str):
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         expire_workers(conn, project_id)
         expire_reason_leases(conn, project_id)
         row = get_project_or_404(conn, project_id)
+        projects = ProjectRepository(conn)
 
-        facts = conn.execute(
-            "SELECT * FROM facts WHERE project_id = ?", (project_id,)
-        ).fetchall()
-        hints = conn.execute(
-            "SELECT * FROM hints WHERE project_id = ? ORDER BY created_at",
-            (project_id,),
-        ).fetchall()
+        facts = projects.get_facts(project_id)
+        hints = projects.get_hints(project_id)
 
         proxy_summary: ProxySummary | None = None
         if row["proxy_id"]:
@@ -155,11 +138,11 @@ def get_project(project_id: str):
 
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         get_project_or_404(conn, project_id)
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        ProjectRepository(conn).delete(project_id)
     try:
-        with observability_db.get_conn() as obs_conn:
+        with db.session_scope() as obs_conn:
             delete_project_observability(obs_conn, project_id)
     except Exception as exc:
         LOG.warning("observability cleanup failed project=%s error=%s", project_id, exc)
@@ -167,19 +150,15 @@ def delete_project(project_id: str):
 
 @router.put("/projects/{project_id}/title", response_model=ProjectMeta)
 def update_project_title(project_id: str, body: UpdateProjectTitleRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         get_project_or_404(conn, project_id)
-        conn.execute(
-            "UPDATE projects SET title = ? WHERE id = ?",
-            (body.title, project_id),
-        )
-        updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        updated = ProjectRepository(conn).update_title(project_id, body.title)
         return project_meta_from_row(updated)
 
 
 @router.put("/projects/{project_id}/status", response_model=ProjectMeta)
 def update_project_status(project_id: str, body: UpdateProjectStatusRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         expire_reason_leases(conn, project_id)
         row = get_project_or_404(conn, project_id)
         current_status = row["status"]
@@ -188,23 +167,18 @@ def update_project_status(project_id: str, body: UpdateProjectStatusRequest):
         if current_status == body.status:
             return project_meta_from_row(row)
 
-        conn.execute(
-            "UPDATE projects SET status = ? WHERE id = ?",
-            (body.status, project_id),
-        )
+        projects = ProjectRepository(conn)
+        projects.update_status(project_id, body.status)
         if body.status == "stopped":
-            conn.execute(
-                "UPDATE intents SET worker = NULL WHERE project_id = ? AND concluded_at IS NULL",
-                (project_id,),
-            )
+            projects.release_open_intents(project_id)
             clear_project_reason(conn, project_id)
-        updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        updated = projects.get(project_id)
         return project_meta_from_row(updated)
 
 
 @router.post("/projects/{project_id}/reason/claim", response_model=ProjectMeta)
 def claim_project_reason(project_id: str, body: ReasonClaimRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         now = utcnow()
         updated = claim_project_reason_or_409(
             conn,
@@ -223,7 +197,7 @@ def claim_project_reason(project_id: str, body: ReasonClaimRequest):
 
 @router.post("/projects/{project_id}/reason/heartbeat", response_model=ProjectMeta)
 def heartbeat_project_reason(project_id: str, body: HeartbeatRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         now = utcnow()
         updated = heartbeat_project_reason_or_409(conn, project_id, body.worker, now, body.run_id)
         return project_meta_from_row(updated)
@@ -231,21 +205,21 @@ def heartbeat_project_reason(project_id: str, body: HeartbeatRequest):
 
 @router.post("/projects/{project_id}/reason/release", response_model=ProjectMeta)
 def release_project_reason(project_id: str, body: HeartbeatRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         updated = release_project_reason_or_409(conn, project_id, body.worker, body.run_id)
         return project_meta_from_row(updated)
 
 
 @router.get("/projects/{project_id}/reason/state", response_model=ReasonState | None)
 def get_reason_state(project_id: str):
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         get_project_or_404(conn, project_id)
         return get_project_reason_state(conn, project_id)
 
 
 @router.post("/projects/{project_id}/reason/finish", response_model=ProjectMeta)
 def finish_project_reason(project_id: str, body: ReasonFinishRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         now = utcnow()
         updated = finish_project_reason_or_409(
             conn,
@@ -266,7 +240,7 @@ def finish_project_reason(project_id: str, body: ReasonFinishRequest):
 
 @router.post("/projects/{project_id}/complete", response_model=Intent)
 def complete_project(project_id: str, body: CompleteRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         check_project_active(conn, project_id)
         expire_reason_leases(conn, project_id)
         validate_facts_exist(conn, project_id, body.from_)
@@ -275,28 +249,15 @@ def complete_project(project_id: str, body: CompleteRequest):
         now = utcnow()
         iid = next_intent_id(conn, project_id)
 
-        conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, 'goal', ?, ?, ?, ?, ?, ?)",
-            (iid, project_id, body.description, body.worker, body.worker, now, now, now),
+        IntentRepository(conn).insert_completed_goal(
+            project_id=project_id,
+            intent_id=iid,
+            source_fact_ids=body.from_,
+            description=body.description,
+            worker=body.worker,
+            now=now,
         )
-        for fid in body.from_:
-            conn.execute(
-                "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
-                (iid, project_id, fid),
-            )
-        conn.execute(
-            """
-            UPDATE projects
-            SET status = 'completed',
-                reason_worker = NULL,
-                reason_run_id = NULL,
-                reason_trigger = NULL,
-                reason_started_at = NULL,
-                reason_last_heartbeat_at = NULL
-            WHERE id = ?
-            """,
-            (project_id,),
-        )
+        ProjectRepository(conn).complete(project_id)
 
         return Intent(
             id=iid,
@@ -313,16 +274,13 @@ def complete_project(project_id: str, body: CompleteRequest):
 
 @router.post("/projects/{project_id}/reopen", response_model=ReopenResponse)
 def reopen_project(project_id: str, body: ReopenRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         expire_reason_leases(conn, project_id)
         check_project_completed(conn, project_id)
         completion = get_completion_intent_or_409(conn, project_id)
+        intents = IntentRepository(conn)
 
-        source_rows = conn.execute(
-            "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
-            (completion["id"], project_id),
-        ).fetchall()
-        source_ids = [row["fact_id"] for row in source_rows]
+        source_ids = intents.source_fact_ids(project_id, completion["id"])
         if not source_ids:
             raise HTTPException(409, "Completion intent is missing its source facts")
 
@@ -332,34 +290,22 @@ def reopen_project(project_id: str, body: ReopenRequest):
         description = body.description
         creator = body.creator
 
-        conn.execute(
-            "DELETE FROM intents WHERE id = ? AND project_id = ?",
-            (completion["id"], project_id),
+        intents.delete_intent(project_id, completion["id"])
+        intents.insert_fact(project_id, fact_id, description)
+        intents.insert_concluded(
+            project_id=project_id,
+            intent_id=intent_id,
+            to_fact_id=fact_id,
+            source_fact_ids=source_ids,
+            description="external_feedback",
+            creator=creator,
+            now=now,
         )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            (fact_id, project_id, description),
-        )
-        conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (intent_id, project_id, fact_id, "external_feedback", creator, creator, now, now, now),
-        )
-        for source_id in source_ids:
-            conn.execute(
-                "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
-                (intent_id, project_id, source_id),
-            )
         clear_project_reason(conn, project_id)
-        conn.execute(
-            "UPDATE projects SET status = 'active' WHERE id = ?",
-            (project_id,),
-        )
+        projects = ProjectRepository(conn)
+        updated_project = projects.reopen(project_id)
 
-        updated_project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-        updated_intent = conn.execute(
-            "SELECT * FROM intents WHERE id = ? AND project_id = ?",
-            (intent_id, project_id),
-        ).fetchone()
+        updated_intent = intents.get_intent(project_id, intent_id)
         assert updated_project is not None
         assert updated_intent is not None
         return ReopenResponse(

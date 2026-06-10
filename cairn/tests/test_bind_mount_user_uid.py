@@ -28,7 +28,7 @@ class _ContainerConfigHarness:
 
     @staticmethod
     def _build(user=None):
-        from cairn.dispatcher.config import BindMountConfig, ContainerConfig
+        from cairn.shared.dispatch_config import BindMountConfig, ContainerConfig
 
         return ContainerConfig(
             image="cairn/test:latest",
@@ -71,7 +71,7 @@ class ContainerConfigUserSchemaTests(unittest.TestCase, _ContainerConfigHarness)
         self.assertEqual(cfg.user, "1000")
 
     def test_empty_string_rejected(self):
-        from cairn.dispatcher.config import ContainerConfig, BindMountConfig
+        from cairn.shared.dispatch_config import ContainerConfig, BindMountConfig
 
         with self.assertRaises(ValidationError):
             ContainerConfig(
@@ -120,7 +120,7 @@ class _DockerMock:
 
 class ContainerUserRuntimeTests(unittest.TestCase):
     def _make_manager(self, user, exec_user=None, dispatcher_id="default"):
-        from cairn.dispatcher.config import BindMountConfig, ContainerConfig
+        from cairn.shared.dispatch_config import BindMountConfig, ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(
@@ -299,6 +299,15 @@ class EnsureWorldWritableDirEpermTests(unittest.TestCase):
 
 
 _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE = """\
+system:
+  database:
+    url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+  auth:
+    jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+    dispatcher_api_token: test-dispatcher-token
+  paths:
+    datas_root: "$HOST_DATAS"
+
 server: "http://127.0.0.1:8000"
 
 runtime:
@@ -377,16 +386,14 @@ workers:
 """
 
 
-class BindMountHostPathInterpolationTests(unittest.TestCase):
-    """End-to-end: dispatch.yaml ``host_path`` is interpolated at load time.
+class BindMountHostPathConfigTests(unittest.TestCase):
+    """End-to-end: dispatch.yaml ``host_path`` values are used directly.
 
     Background: the dispatcher runs inside a container, so a relative
     path in ``host_path`` would resolve to the image's baked-in
-    ``/cairn/datas/...`` and the bind mount silently degrades to an
-    empty overlay. docker-compose passes the real host path through
-    ``CAIRN_DISPATCHER_DATAS_ROOT`` (or any other env var); the
-    interpolation must substitute it and must leave the ``{project_id}``
-    template in place for the runtime to expand per project.
+    ``/cairn/datas/...`` and the bind mount silently degrades to an empty
+    overlay. The real host path is now stored directly in dispatch.yaml;
+    ``{project_id}`` remains a runtime template for per-project isolation.
     """
 
     def setUp(self) -> None:
@@ -395,21 +402,19 @@ class BindMountHostPathInterpolationTests(unittest.TestCase):
         self.datas_dir.mkdir()
         self.config_path = self.tmp / "dispatch.yaml"
         self.config_path.write_text(
-            _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", "${HOST_DATAS}"),
+            _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", str(self.datas_dir)),
             encoding="utf-8",
         )
-        # Snapshot env so each test can mutate it safely.
-        self._env_snapshot = os.environ.copy()
-
+        (self.tmp / "dispatch.capabilities.yaml").write_text(
+            "capabilities:\n  mcp_servers: []\n  skills: []\nroles: []\n",
+            encoding="utf-8",
+        )
     def tearDown(self) -> None:
-        os.environ.clear()
-        os.environ.update(self._env_snapshot)
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_host_path_interpolates_env_var(self) -> None:
-        os.environ["HOST_DATAS"] = str(self.datas_dir)
-        from cairn.dispatcher.config import DispatchConfig
+    def test_host_path_uses_yaml_value(self) -> None:
+        from cairn.shared.dispatch_config import DispatchConfig
 
         cfg = DispatchConfig.load(self.config_path)
         mounts = {m.name: m for m in cfg.container.bind_mounts}
@@ -426,14 +431,6 @@ class BindMountHostPathInterpolationTests(unittest.TestCase):
             f"{expected_root}/project-files/{{project_id}}",
         )
 
-    def test_host_path_missing_env_var_raises(self) -> None:
-        os.environ.pop("HOST_DATAS", None)
-        from cairn.dispatcher.config import DispatchConfig
-
-        with self.assertRaises(ValueError) as ctx:
-            DispatchConfig.load(self.config_path)
-        self.assertIn("HOST_DATAS", str(ctx.exception))
-
     def test_host_path_preserves_project_id_template(self) -> None:
         """``{project_id}`` must NOT be consumed by env interpolation.
 
@@ -441,8 +438,7 @@ class BindMountHostPathInterpolationTests(unittest.TestCase):
         ``ContainerManager._render_bind_mounts_for``. Consuming it during
         config load would break per-project isolation.
         """
-        os.environ["HOST_DATAS"] = str(self.datas_dir)
-        from cairn.dispatcher.config import DispatchConfig
+        from cairn.shared.dispatch_config import DispatchConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = DispatchConfig.load(self.config_path)

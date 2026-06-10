@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cairn.dispatcher.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
+from cairn.shared.dispatch_config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 
 if TYPE_CHECKING:
@@ -52,8 +52,7 @@ def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
                 "command": item.command,
                 "args": _runtime_mcp_args(item, ""),
                 "url": item.url,
-                "bearer_token_env": item.bearer_token_env,
-                "headers": {},
+                "headers": dict(item.headers),
                 "probe_config": dict(item.probe_config),
                 # Skills the dispatcher must auto-inject when this MCP
                 # is selected. Carried through the catalog register
@@ -254,19 +253,15 @@ def _mcp_config_detail(item: McpServerCapabilityConfig, capability_root: str) ->
 
     For ``stdio``: emit ``{command, args, env}`` (Claude Code / Codex will
     fork the subprocess). For ``http``: emit ``{type: "http", url, headers}``
-    with the bearer token resolved inline (Claude Code does not dereference
-    env vars in mcp.json headers). The token is read from the dispatcher's
-    ``os.environ`` at call time and is not cached on the config object.
+    with headers copied directly from ``dispatch.capabilities.yaml``.
     """
     if item.transport == "http":
         detail: dict[str, Any] = {"type": "http", "url": _render_capability_path(item.url, capability_root)}
-        if item.bearer_token_env:
-            token = os.environ.get(item.bearer_token_env)
-            if token:
-                # Read the token here, inline; do not store on the item. The
-                # returned dict is consumed immediately by json.dumps in
-                # _mcp_json and released after the task ends.
-                detail["headers"] = {"Authorization": f"Bearer {token}"}
+        if item.headers:
+            detail["headers"] = {
+                key: _render_capability_path(value, capability_root)
+                for key, value in item.headers.items()
+            }
         return detail
     return {
         "command": _render_capability_path(item.command, capability_root),
@@ -279,11 +274,8 @@ def _mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[s
     """Adapter-facing context detail.
 
     Contains only the schema-level fields the worker adapter needs to
-    construct its argv. The resolved bearer token (if any) is intentionally
-    NOT included — it lives in mcp.json's ``headers`` only, and is read
-    at mcp.json write time via ``_mcp_config_detail``. The adapter either
-    uses ``bearer_token_env`` to ask the agent to read the env (Codex) or
-    does not need a token at all (Claude reads mcp.json directly).
+    construct its argv. HTTP headers come directly from YAML and are
+    forwarded to adapters that support header configuration.
     """
     detail: dict[str, Any] = {
         "id": item.id,
@@ -291,8 +283,11 @@ def _mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[s
     }
     if item.transport == "http":
         detail["url"] = _render_capability_path(item.url, capability_root)
-        if item.bearer_token_env:
-            detail["bearer_token_env"] = item.bearer_token_env
+        if item.headers:
+            detail["headers"] = {
+                key: _render_capability_path(value, capability_root)
+                for key, value in item.headers.items()
+            }
     else:
         detail["command"] = _render_capability_path(item.command, capability_root)
         if item.args:

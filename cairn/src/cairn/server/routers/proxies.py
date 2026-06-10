@@ -3,20 +3,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from cairn.server.models import (
+from cairn.server import db
+from cairn.server.models_pkg.proxies import (
     ProxyConfig,
     ProxyCreate,
     ProxySummary,
     ProxyUpdate,
 )
-from cairn.server.yaml_config import (
+from cairn.server.repositories import sql
+from cairn.server.config.proxies import (
     create_yaml_proxy,
     delete_yaml_proxy,
     get_yaml_proxy,
     list_yaml_proxies,
     update_yaml_proxy,
 )
-from cairn.server.db import get_conn
 
 router = APIRouter(tags=["proxies"])
 
@@ -47,7 +48,10 @@ def delete_proxy(proxy_id: str):
         delete_yaml_proxy(proxy_id)
     except HTTPException:
         raise
-    with get_conn() as conn:
-        conn.execute("UPDATE projects SET proxy_id = NULL WHERE proxy_id = ?", (proxy_id,))
-        conn.commit()
+    with db.session_scope() as conn:
+        sql.execute(
+            conn,
+            "UPDATE projects SET proxy_id = NULL WHERE proxy_id = :proxy_id",
+            {"proxy_id": proxy_id},
+        )
     return None

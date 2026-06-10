@@ -1,5 +1,4 @@
 import asyncio
-import os
 import json
 import time
 from contextlib import asynccontextmanager
@@ -34,6 +33,7 @@ from cairn.server.routers import (
     auth,
     capabilities,
     dispatcher_lock,
+    execution_configs,
     export,
     files,
     hints,
@@ -42,10 +42,12 @@ from cairn.server.routers import (
     proxies,
     replay,
     settings,
+    task_types,
     ai_profiles,
 )
 from cairn.server.security.deps import current_user_optional
 from cairn.server.security.users import bootstrap_superuser_if_configured
+from cairn.server.runtime_config import system_config
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -105,8 +107,10 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    runtime = system_config()
     configure_logging(
-        level=os.environ.get("CAIRN_LOG_LEVEL", "INFO"),
+        level=runtime.server.log_level,
+        fmt=runtime.server.log_format,
         component="cairn.server",
     )
     db.configure()
@@ -122,9 +126,13 @@ async def lifespan(app: FastAPI):
     # manual operation there.
     retention_stop = asyncio.Event()
     retention_task: asyncio.Task | None = None
-    if os.environ.get("CAIRN_DISABLE_RETENTION_LOOP") != "1":
+    if runtime.server.retention_loop_enabled:
         retention_task = asyncio.create_task(
-            retention_loop(retention_stop), name="cairn-retention"
+            retention_loop(
+                retention_stop,
+                interval_seconds=runtime.server.retention_interval_seconds,
+            ),
+            name="cairn-retention",
         )
     try:
         yield
@@ -235,6 +243,7 @@ def health() -> Response:
 
 app.include_router(auth.router)
 app.include_router(settings.router)
+app.include_router(task_types.router)
 app.include_router(ai_profiles.router)
 app.include_router(proxies.router)
 app.include_router(projects.router)
@@ -245,6 +254,7 @@ app.include_router(export.router)
 app.include_router(files.router)
 app.include_router(replay.router)
 app.include_router(capabilities.router)
+app.include_router(execution_configs.router)
 app.include_router(dispatcher_lock.router)
 app.include_router(observability_routers.router)
 

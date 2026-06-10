@@ -3,7 +3,7 @@ and observability redaction).
 
 Covers:
 - ``ProxyConfig`` / ``ProxyCreate`` schema validation
-- ``_proxy_config_to_env`` for socks5 / http / https with and without auth
+- ``proxy_config_to_env`` for socks5 / http / https with and without auth
 - ``BUILTIN_PATTERNS`` redaction of HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / SOCKS5_PROXY
 - ``DispatcherLoop._resolve_project_proxy`` populates the cache and tolerates
   ``LookupError`` / ``RequestException``
@@ -16,10 +16,7 @@ Covers:
 """
 from __future__ import annotations
 
-import os
-import sqlite3
 import sys
-import tempfile
 import unittest
 from cairn.dispatcher.scheduler.project_cache import ProjectCaches
 from datetime import datetime, timezone
@@ -37,7 +34,7 @@ def _ts() -> str:
 
 def _make_proxy(**overrides: Any):
     """Factory for a fully-populated :class:`ProxyConfig`."""
-    from cairn.server.models import ProxyConfig
+    from cairn.server.models_pkg.proxies import ProxyConfig
 
     ts = _ts()
     base = dict(
@@ -60,13 +57,13 @@ class ProxyConfigSchemaTests(unittest.TestCase):
     """``ProxyConfig`` / ``ProxyCreate`` / ``ProxyUpdate`` schema basics."""
 
     def test_create_requires_name(self) -> None:
-        from cairn.server.models import ProxyCreate
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(type="socks5", host="h", port=1080)
 
     def test_create_port_must_be_in_range(self) -> None:
-        from cairn.server.models import ProxyCreate
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(name="x", type="socks5", host="h", port=0)
@@ -74,13 +71,13 @@ class ProxyConfigSchemaTests(unittest.TestCase):
             ProxyCreate(name="x", type="socks5", host="h", port=70000)
 
     def test_create_type_must_be_known(self) -> None:
-        from cairn.server.models import ProxyCreate
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(name="x", type="ftp", host="h", port=21)
 
     def test_summary_strips_credentials(self) -> None:
-        from cairn.server.models import ProxySummary
+        from cairn.server.models_pkg.proxies import ProxySummary
 
         ts = _ts()
         s = ProxySummary(
@@ -94,36 +91,36 @@ class ProxyConfigSchemaTests(unittest.TestCase):
 
 
 class ProxyConfigToEnvTests(unittest.TestCase):
-    """``_proxy_config_to_env`` translates a :class:`ProxyConfig` into env vars."""
+    """``proxy_config_to_env`` translates a :class:`ProxyConfig` into env vars."""
 
     def setUp(self) -> None:
-        from cairn.dispatcher.scheduler.loop import _proxy_config_to_env
-        self._proxy_config_to_env = _proxy_config_to_env
+        from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
+        self.proxy_config_to_env = proxy_config_to_env
 
     def test_socks5_with_auth(self) -> None:
-        env = self._proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username="u", password="p"))
+        env = self.proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username="u", password="p"))
         self.assertEqual(env["ALL_PROXY"], "socks5://u:p@1.2.3.4:1080")
         self.assertNotIn("HTTP_PROXY", env)
         self.assertNotIn("HTTPS_PROXY", env)
         self.assertIn("cairn-server", env["NO_PROXY"])
 
     def test_socks5_without_auth(self) -> None:
-        env = self._proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username=None, password=None, has_auth=False))
+        env = self.proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username=None, password=None, has_auth=False))
         self.assertEqual(env["ALL_PROXY"], "socks5://1.2.3.4:1080")
         self.assertNotIn("user@", env["ALL_PROXY"])
 
     def test_http_with_auth_uses_user_pass(self) -> None:
-        env = self._proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password="p"))
+        env = self.proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password="p"))
         self.assertEqual(env["HTTP_PROXY"], "http://u:p@h:80")
         self.assertEqual(env["HTTPS_PROXY"], "http://u:p@h:80")
 
     def test_https_uses_http_scheme_for_legacy_clients(self) -> None:
-        env = self._proxy_config_to_env(_make_proxy(type="https", host="h", port=443, username=None, password=None, has_auth=False))
+        env = self.proxy_config_to_env(_make_proxy(type="https", host="h", port=443, username=None, password=None, has_auth=False))
         self.assertEqual(env["HTTP_PROXY"], "http://h:443")
         self.assertEqual(env["HTTPS_PROXY"], "http://h:443")
 
     def test_username_only_keeps_at_sign(self) -> None:
-        env = self._proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password=None, has_auth=True))
+        env = self.proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password=None, has_auth=True))
         self.assertEqual(env["HTTP_PROXY"], "http://u@h:80")
 
 
@@ -162,7 +159,7 @@ class ResolverCacheTests(unittest.TestCase):
     """``DispatcherLoop._resolve_project_proxy`` populates cache and tolerates errors."""
 
     def _make_project(self, project_id: str = "p1", proxy=None):
-        from cairn.server.models import ProjectDetail, ProjectMeta
+        from cairn.server.models_pkg.projects import ProjectDetail, ProjectMeta
 
         project = ProjectMeta(
             id=project_id, title="t", origin="o", goal="g",
@@ -171,7 +168,7 @@ class ResolverCacheTests(unittest.TestCase):
         return ProjectDetail(project=project, facts=[], intents=[], hints=[], proxy=proxy)
 
     def _make_proxy_summary(self, proxy_id: str = "px1"):
-        from cairn.server.models import ProxySummary
+        from cairn.server.models_pkg.proxies import ProxySummary
 
         ts = _ts()
         return ProxySummary(
@@ -273,7 +270,7 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
     """``ContainerManager`` accepts the ``proxy_resolver`` callable and merges."""
 
     def test_proxy_resolver_none_returns_empty_env(self) -> None:
-        from cairn.dispatcher.config import ContainerConfig
+        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
@@ -282,7 +279,7 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
         self.assertEqual(mgr._proxy_environment("p1"), {})
 
     def test_proxy_resolver_returning_dict_is_merged(self) -> None:
-        from cairn.dispatcher.config import ContainerConfig
+        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
@@ -291,7 +288,7 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
         self.assertEqual(mgr._proxy_environment("p1"), {"HTTP_PROXY": "http://h:80"})
 
     def test_proxy_resolver_returning_none_yields_empty(self) -> None:
-        from cairn.dispatcher.config import ContainerConfig
+        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
@@ -301,26 +298,23 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
 
 
 class ProxyDatabaseTests(unittest.TestCase):
-    """Server schema: proxies table + ON DELETE SET NULL on projects.proxy_id."""
+    """Server proxy CRUD persists in dispatch.yaml."""
 
     def setUp(self) -> None:
-        # Initialize a temporary DB and import the modules that depend on it.
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-        self.tmp.close()
-        from cairn.server import db
-        db._db_path = None  # isolate this test module from previous configure() calls
-        db.configure(Path(self.tmp.name))
-        # Re-importing after configure() gives a clean module state
+        from helpers import TempYamlConfig, reset_postgres_db
+
+        self.yaml = TempYamlConfig()
+        self.yaml.__enter__()
+        self.db = reset_postgres_db()
         from cairn.server.routers import proxies as proxies_router
         self.proxies_router = proxies_router
 
     def tearDown(self) -> None:
-        from cairn.server import db
-        db._db_path = None
-        os.unlink(self.tmp.name)
+        self.db.reset_for_tests()
+        self.yaml.__exit__(None, None, None)
 
     def test_create_and_get_proxy(self) -> None:
-        from cairn.server.models import ProxyCreate
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
         created = self.proxies_router.create_proxy(body)
@@ -330,7 +324,7 @@ class ProxyDatabaseTests(unittest.TestCase):
         self.assertEqual(fetched.password, "p")
 
     def test_list_proxies_returns_summaries_without_credentials(self) -> None:
-        from cairn.server.models import ProxyCreate
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
         self.proxies_router.create_proxy(body)
@@ -340,41 +334,48 @@ class ProxyDatabaseTests(unittest.TestCase):
         # summary model does not expose credentials
         self.assertNotIn("password", summaries[0].model_dump())
 
-    def test_delete_proxy_cascades_to_project(self) -> None:
-        from cairn.server import db
-        from cairn.server.models import ProxyCreate
-        from cairn.server.routers import projects as projects_router
-        from cairn.server.models import CreateProjectRequest
+    def test_delete_proxy_removes_yaml_entry(self) -> None:
+        from cairn.server.models_pkg.proxies import ProxyCreate
 
-        # Seed a proxy and a project that references it
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080)
         created = self.proxies_router.create_proxy(body)
-        with db.get_conn() as conn:
-            conn.execute(
-                "INSERT INTO projects (id, title, status, created_at, proxy_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                ("proj1", "t1", "active", _ts(), created.id),
-            )
-
-        # Sanity: project row carries the FK
-        with db.get_conn() as conn:
-            row = conn.execute("SELECT proxy_id FROM projects WHERE id = 'proj1'").fetchone()
-            self.assertEqual(row["proxy_id"], created.id)
-
-        # Delete the proxy — ON DELETE SET NULL should null out projects.proxy_id
         self.proxies_router.delete_proxy(created.id)
-
-        with db.get_conn() as conn:
-            row = conn.execute("SELECT proxy_id FROM projects WHERE id = 'proj1'").fetchone()
-            self.assertIsNone(row["proxy_id"])
+        self.assertEqual(self.proxies_router.list_proxies(), [])
 
     def test_create_project_with_invalid_proxy_id_returns_400(self) -> None:
         from fastapi import HTTPException
         from cairn.server.routers import projects as projects_router
-        from cairn.server.models import CreateProjectRequest
+        from cairn.server.models_pkg.ai_profiles import (
+            AiProfileCreate,
+            AiProfileSelection,
+            TaskAiProfileSelections,
+        )
+        from cairn.server.models_pkg.intents import CreateProjectRequest
+        from cairn.server.routers.ai_profiles import create_ai_profile
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="p",
+            worker_type="codex",
+            model="m",
+            api_key_env="OPENAI_API_KEY",
+            sk="test-key",
+        ))
+        selection = AiProfileSelection(
+            primary_profile_id=profile.id,
+            primary_model="m",
+            primary_reasoning_type="medium",
+        )
 
         body = CreateProjectRequest(
-            title="t", origin="o", goal="g", proxy_id="proxy_does_not_exist",
+            title="t",
+            origin="o",
+            goal="g",
+            proxy_id="proxy_does_not_exist",
+            ai_profiles=TaskAiProfileSelections(
+                bootstrap=selection,
+                explore=selection,
+                reason=selection,
+            ),
         )
         with self.assertRaises(HTTPException) as cm:
             projects_router.create_project(body)
@@ -385,7 +386,7 @@ class ProjectDetailProxySummaryTests(unittest.TestCase):
     """``ProjectDetail.proxy`` is ``ProxySummary | None`` (no creds leak)."""
 
     def test_proxy_field_default_none(self) -> None:
-        from cairn.server.models import ProjectDetail, ProjectMeta
+        from cairn.server.models_pkg.projects import ProjectDetail, ProjectMeta
 
         project = ProjectMeta(
             id="p1", title="t", origin="o", goal="g", status="active",

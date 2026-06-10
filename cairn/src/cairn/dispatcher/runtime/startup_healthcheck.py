@@ -4,7 +4,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.tasks.common import run_healthcheck
 from cairn.dispatcher.workers.registry import get_driver

@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 
 
 @dataclass(slots=True)

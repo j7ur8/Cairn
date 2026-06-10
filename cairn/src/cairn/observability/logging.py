@@ -7,8 +7,8 @@ Two formatters are bundled:
   * ``HumanFormatter`` — the existing ``[time] LEVEL module message``
     text format, kept for local development.
 
-The default format is JSON when ``CAIRN_LOG_FORMAT=json`` is set in
-the environment, otherwise text. Both formats include the current
+The default format is text unless the caller passes ``fmt="json"``.
+Both formats include the current
 ``trace_id`` so logs can be correlated across HTTP requests, the
 dispatcher loop, and the worker container pipeline.
 """
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from typing import Any
 
@@ -87,13 +86,12 @@ def configure_logging(
 ) -> None:
     """Install the root handler.
 
-    ``fmt`` defaults to ``CAIRN_LOG_FORMAT`` env var, or ``text`` if
-    unset. The handler also installs a :class:`TraceIdFilter` so every
-    record carries ``trace_id``.
+    ``fmt`` defaults to ``text``. The handler also installs a
+    :class:`TraceIdFilter` so every record carries ``trace_id``.
     """
     global _configured
     if fmt is None:
-        fmt = os.environ.get("CAIRN_LOG_FORMAT", "text").lower()
+        fmt = "text"
     handler = logging.StreamHandler()
     if fmt == "json":
         handler.setFormatter(JsonFormatter())

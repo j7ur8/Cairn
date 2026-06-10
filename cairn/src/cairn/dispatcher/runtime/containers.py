@@ -14,7 +14,7 @@ import docker
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container
 
-from cairn.dispatcher.config import ContainerConfig
+from cairn.shared.dispatch_config import ContainerConfig
 from cairn.dispatcher.runtime.process import ManagedProcess
 
 LOG = logging.getLogger(__name__)
@@ -32,29 +32,14 @@ class ContainerManager:
     def __init__(
         self,
         config: ContainerConfig,
-        bearer_token_env_keys: tuple[str, ...] = (),
         proxy_resolver: Callable[[str], dict[str, str] | None] | None = None,
     ):
         self._config = config
-        self._bearer_token_env_keys = tuple(dict.fromkeys(bearer_token_env_keys))  # dedupe, keep order
         self._proxy_resolver = proxy_resolver
         self._client = docker.from_env()
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
         self._logged_mount_mismatches: set[tuple[str, str]] = set()
-
-    def _bearer_token_environment(self) -> dict[str, str]:
-        """Resolve bearer-token env var references to actual values from the
-        dispatcher's ``os.environ``. Only includes vars that are set, so a
-        missing var (which would have failed ``DispatchConfig.load()`` anyway)
-        is silently dropped here.
-        """
-        env: dict[str, str] = {}
-        for name in self._bearer_token_env_keys:
-            value = os.environ.get(name)
-            if value is not None:
-                env[name] = value
-        return env
 
     def _proxy_environment(self, project_id: str) -> dict[str, str]:
         """Resolve the per-project proxy at container-launch time.
@@ -96,7 +81,6 @@ class ContainerManager:
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
         try:
             volumes = self._docker_volumes(project_id)
-            env = self._bearer_token_environment() or None
             container = self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -105,7 +89,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
-                environment={**(env or {}), **self._proxy_environment(project_id)} or None,
+                environment=self._proxy_environment(project_id) or None,
                 user=self._config.user,
                 labels=self._container_labels(project_id),
             )
@@ -140,7 +124,6 @@ class ContainerManager:
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self._config.image)
         try:
             volumes = self._docker_volumes(self._STARTUP_PROJECT_ID)
-            env = self._bearer_token_environment() or None
             self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
@@ -149,7 +132,7 @@ class ContainerManager:
                 network_mode=self._config.network_mode,
                 cap_add=self._config.cap_add or None,
                 volumes=volumes or None,
-                environment={**(env or {}), **self._proxy_environment(self._STARTUP_PROJECT_ID)} or None,
+                environment=self._proxy_environment(self._STARTUP_PROJECT_ID) or None,
                 user=self._config.user,
                 labels=self._container_labels(self._STARTUP_PROJECT_ID, startup=True),
             )

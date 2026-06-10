@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,42 +11,50 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
+from helpers import reset_postgres_db
+
 
 class IntentRouterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-        self.tmp.close()
-        from cairn.server import db
-
-        db._db_path = None
-        db.close_thread_conn()
-        db.configure(Path(self.tmp.name))
-        self.db = db
+        self.db = reset_postgres_db()
 
     def tearDown(self) -> None:
-        self.db.close_thread_conn()
-        self.db._db_path = None
-        os.unlink(self.tmp.name)
+        self.db.reset_for_tests()
 
     def _create_project(self) -> None:
-        with self.db.get_conn() as conn:
-            conn.execute(
-                "INSERT INTO projects (id, title, status, created_at) VALUES (?, ?, ?, ?)",
-                ("proj_t", "T", "active", "2026-06-06T00:00:00Z"),
+        from cairn.server.repositories import sql
+
+        with self.db.session_scope() as conn:
+            sql.execute(
+                conn,
+                """
+                INSERT INTO projects (id, title, status, created_at)
+                VALUES (:id, :title, :status, :created_at)
+                """,
+                {
+                    "id": "proj_t",
+                    "title": "T",
+                    "status": "active",
+                    "created_at": "2026-06-06T00:00:00Z",
+                },
             )
-            conn.execute(
-                "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-                ("origin", "proj_t", "origin"),
+            sql.execute(
+                conn,
+                """
+                INSERT INTO facts (id, project_id, description)
+                VALUES (:id, :project_id, :description)
+                """,
+                {"id": "origin", "project_id": "proj_t", "description": "origin"},
             )
 
     def test_cross_module_response_models_rebuild(self) -> None:
-        from cairn.server.models import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
+        from cairn.server.models_pkg.intents import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
 
         for model in (ConcludeResponse, ReopenResponse, ReplayRunCreateResponse):
             model.model_rebuild(raise_errors=True)
 
     def test_conclude_returns_response_model(self) -> None:
-        from cairn.server.models import ConcludeRequest, CreateIntentRequest
+        from cairn.server.models_pkg.intents import ConcludeRequest, CreateIntentRequest
         from cairn.server.routers import intents
 
         self._create_project()

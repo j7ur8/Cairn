@@ -1,14 +1,17 @@
 from fastapi import APIRouter
 
-from cairn.server.db import get_conn, with_immediate_tx
-from cairn.server.models import (
+from cairn.server import db
+from cairn.server.models_pkg.intents import (
     ConcludeRequest,
     ConcludeResponse,
     CreateIntentRequest,
-    Fact,
     HeartbeatRequest,
+)
+from cairn.server.models_pkg.projects import (
+    Fact,
     Intent,
 )
+from cairn.server.repositories.intents import IntentRepository
 from cairn.server.services import (
     claim_open_intent_or_409,
     check_project_active,
@@ -32,7 +35,7 @@ router = APIRouter(tags=["intents"])
     status_code=201,
 )
 def create_intent(project_id: str, body: CreateIntentRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         check_project_active(conn, project_id)
         validate_facts_exist(conn, project_id, body.from_)
         validate_goal_not_in_sources(body.from_)
@@ -41,23 +44,15 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         now = utcnow()
         iid = next_intent_id(conn, project_id)
         claimed = body.worker is not None
-        conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL)",
-            (
-                iid,
-                project_id,
-                body.description,
-                body.creator,
-                body.worker,
-                now if claimed else None,
-                now,
-            ),
+        IntentRepository(conn).insert_open(
+            project_id=project_id,
+            intent_id=iid,
+            source_fact_ids=body.from_,
+            description=body.description,
+            creator=body.creator,
+            worker=body.worker,
+            now=now,
         )
-        for fid in body.from_:
-            conn.execute(
-                "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
-                (iid, project_id, fid),
-            )
 
         return Intent(
             id=iid,
@@ -77,7 +72,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
     response_model=Intent,
 )
 def heartbeat(project_id: str, intent_id: str, body: HeartbeatRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         check_project_active(conn, project_id)
 
         now = utcnow()
@@ -90,7 +85,7 @@ def heartbeat(project_id: str, intent_id: str, body: HeartbeatRequest):
     response_model=Intent,
 )
 def release(project_id: str, intent_id: str, body: HeartbeatRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         check_project_active(conn, project_id)
         row = release_open_intent_or_409(conn, project_id, intent_id, body.worker)
         return intent_to_model(conn, row, project_id)
@@ -101,16 +96,13 @@ def release(project_id: str, intent_id: str, body: HeartbeatRequest):
     response_model=ConcludeResponse,
 )
 def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
-    with with_immediate_tx() as conn:
+    with db.session_scope() as conn:
         check_project_active(conn, project_id)
 
         now = utcnow()
         fid = next_fact_id(conn, project_id)
 
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            (fid, project_id, body.description),
-        )
+        IntentRepository(conn).insert_fact(project_id, fid, body.description)
         updated = conclude_open_intent_or_409(conn, project_id, intent_id, body.worker, fid, now)
 
         return ConcludeResponse(

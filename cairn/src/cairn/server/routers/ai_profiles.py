@@ -16,15 +16,15 @@ from fastapi import APIRouter, HTTPException
 from cairn.server.security.deps import current_user_optional
 from fastapi import Depends
 
+from cairn.server import db
 from cairn.server.ai_profile_service import (
-    load_project_ai_snapshots,
-    persist_project_ai_selection,
-    persist_project_ai_selections,
-    require_complete_ai_profile_selections,
     task_ai_selections_from_snapshots,
 )
-from cairn.server.db import get_conn, with_immediate_tx
-from cairn.server.models import (
+from cairn.server.execution_config_service import (
+    execution_ai_snapshots,
+    load_worker_execution_configs,
+)
+from cairn.server.models_pkg.ai_profiles import (
     AiProfile,
     AiProfileCheckCompleteRequest,
     AiProfileCheckRequest,
@@ -32,25 +32,22 @@ from cairn.server.models import (
     AiProfileCreate,
     AiProfileHealthReportRequest,
     AiProfileModelsReportRequest,
-    AiProfileSyncRequest,
-    AiProfileSyncWorker,
     AiProfileUpdate,
     AiProfileWithHealth,
     HealthCheckResult,
     ProjectAiProfilesResponse,
 )
-from cairn.server.yaml_config import (
+from cairn.server.repositories import sql
+from cairn.server.config.ai_profiles import (
     create_yaml_ai_profile,
     delete_yaml_ai_profile,
     get_yaml_ai_profile,
     list_yaml_ai_profiles,
-    sync_yaml_ai_profiles,
     update_yaml_ai_profile_health,
     update_yaml_ai_profile_models,
     update_yaml_ai_profile,
     yaml_ai_profile_secret,
 )
-from cairn.server.security.secrets import decrypt_secret, encrypt_secret
 
 
 router = APIRouter(tags=["ai-profiles"])
@@ -71,100 +68,6 @@ def list_ai_profiles():
     return list_yaml_ai_profiles()
 
 
-def _sync_profile_db_mirror(conn: Any, profile: AiProfile, *, sk: str | None = None) -> None:
-    now = _utcnow()
-    plaintext = _secret_for_storage(profile.sk if sk is None else sk)
-    ciphertext = encrypt_secret(plaintext) if plaintext else ""
-    conn.execute(
-        """
-        INSERT INTO ai_profiles (
-            id, name, description, worker_type, provider, base_url, model,
-            api_key_env, available, detail, healthcheck_timeout,
-            seeded_from_worker, model_reasoning_effort, sk, sk_ciphertext,
-            created_at, updated_at, last_health_ok, last_health_message, last_health_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (id) DO UPDATE SET
-            name = EXCLUDED.name,
-            description = EXCLUDED.description,
-            worker_type = EXCLUDED.worker_type,
-            provider = EXCLUDED.provider,
-            base_url = EXCLUDED.base_url,
-            model = EXCLUDED.model,
-            api_key_env = EXCLUDED.api_key_env,
-            available = EXCLUDED.available,
-            detail = EXCLUDED.detail,
-            healthcheck_timeout = EXCLUDED.healthcheck_timeout,
-            seeded_from_worker = EXCLUDED.seeded_from_worker,
-            model_reasoning_effort = EXCLUDED.model_reasoning_effort,
-            sk = EXCLUDED.sk,
-            sk_ciphertext = EXCLUDED.sk_ciphertext,
-            updated_at = EXCLUDED.updated_at,
-            last_health_ok = EXCLUDED.last_health_ok,
-            last_health_message = EXCLUDED.last_health_message,
-            last_health_at = EXCLUDED.last_health_at
-        """,
-        (
-            profile.id,
-            profile.name,
-            profile.description,
-            profile.worker_type,
-            profile.provider,
-            profile.base_url,
-            profile.model,
-            profile.api_key_env,
-            1 if profile.available else 0,
-            profile.detail,
-            profile.healthcheck_timeout,
-            profile.seeded_from_worker,
-            profile.model_reasoning_effort,
-            ciphertext,
-            profile.created_at or now,
-            now,
-            None if profile.last_health_ok is None else (1 if profile.last_health_ok else 0),
-            profile.last_health_message,
-            profile.last_health_at,
-        ),
-    )
-    conn.execute("DELETE FROM ai_profile_models WHERE profile_id = ?", (profile.id,))
-    for model in profile.models:
-        conn.execute(
-            "INSERT INTO ai_profile_models (profile_id, model, updated_at) VALUES (?, ?, ?)",
-            (profile.id, model, now),
-        )
-
-
-def _sync_all_profile_db_mirrors(conn: Any, profiles: list[AiProfile]) -> None:
-    ids = [profile.id for profile in profiles]
-    for profile in profiles:
-        _sync_profile_db_mirror(conn, profile)
-    if ids:
-        placeholders = ", ".join(f":id{i}" for i in range(len(ids)))
-        params = {f"id{i}": value for i, value in enumerate(ids)}
-        conn.execute(f"DELETE FROM ai_profile_models WHERE profile_id NOT IN ({placeholders})", params)
-        conn.execute(f"DELETE FROM ai_profiles WHERE id NOT IN ({placeholders})", params)
-    else:
-        conn.execute("DELETE FROM ai_profile_models")
-        conn.execute("DELETE FROM ai_profiles")
-
-
-def _db_profile_secret(conn: Any, profile_id: str) -> str | None:
-    row = conn.execute("SELECT sk_ciphertext, sk FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone()
-    if row is None:
-        return None
-    if row["sk_ciphertext"]:
-        return decrypt_secret(row["sk_ciphertext"])
-    return row["sk"] or None
-
-
-def _secret_for_storage(value: str | None) -> str:
-    text = (value or "").strip()
-    if not text:
-        return ""
-    if text.startswith("${") and text.endswith("}"):
-        return ""
-    return text
-
-
 def _row_to_check_request(row: Any) -> AiProfileCheckRequest:
     return AiProfileCheckRequest(
         id=row["id"],
@@ -181,9 +84,6 @@ def _row_to_check_request(row: Any) -> AiProfileCheckRequest:
 @router.post("/ai-profiles", response_model=AiProfileWithHealth, status_code=201)
 def create_ai_profile(body: AiProfileCreate):
     profile = create_yaml_ai_profile(body)
-    with get_conn() as conn:
-        _sync_profile_db_mirror(conn, profile, sk=profile.sk)
-        conn.commit()
     dump = profile.model_dump()
     dump["sk"] = profile.sk  # exclude=True stripped it; restore for re-wrap
     return AiProfileWithHealth(
@@ -199,30 +99,12 @@ def get_ai_profile(profile_id: str):
 
 @router.get("/ai-profiles/{profile_id}/secret")
 def get_ai_profile_secret(profile_id: str) -> dict[str, str | None]:
-    """Return the raw ``sk`` value for a profile. Dispatcher-only.
-
-    The general-purpose ``GET /ai-profiles/{id}`` masks the value behind
-    ``sk_set`` / ``sk_preview``; the dispatcher needs the actual token
-    at task-launch time to inject it into the worker container env.
-    Returns ``{"value": "<sk or null>"}``; ``null`` means the column is
-    empty (operator relies on the host env). 404 for unknown ids.
-    """
-    try:
-        value = yaml_ai_profile_secret(profile_id)
-    except HTTPException:
-        with get_conn() as conn:
-            value = _db_profile_secret(conn, profile_id)
-        if value is None:
-            raise
-    return {"value": value}
+    return {"value": yaml_ai_profile_secret(profile_id)}
 
 
 @router.put("/ai-profiles/{profile_id}", response_model=AiProfileWithHealth)
 def update_ai_profile(profile_id: str, body: AiProfileUpdate):
     profile = update_yaml_ai_profile(profile_id, body)
-    with get_conn() as conn:
-        _sync_profile_db_mirror(conn, profile, sk=profile.sk)
-        conn.commit()
     dump = profile.model_dump()
     dump["sk"] = profile.sk  # exclude=True stripped it; restore for re-wrap
     return AiProfileWithHealth(
@@ -234,9 +116,6 @@ def update_ai_profile(profile_id: str, body: AiProfileUpdate):
 @router.delete("/ai-profiles/{profile_id}", status_code=204)
 def delete_ai_profile(profile_id: str):
     delete_yaml_ai_profile(profile_id)
-    with get_conn() as conn:
-        conn.execute("DELETE FROM ai_profiles WHERE id = ?", (profile_id,))
-        conn.commit()
     return None
 
 
@@ -245,40 +124,46 @@ def trigger_ai_profile_check(profile_id: str, user=Depends(current_user_optional
     request_id = _new_check_request_id()
     now = _utcnow()
     requested_by = getattr(user, "email", None) or getattr(user, "id", None) or "unknown"
-    with get_conn() as conn:
-        profile = get_yaml_ai_profile(profile_id)
-        _sync_profile_db_mirror(conn, profile, sk=profile.sk)
-        existing = conn.execute(
+    with db.session_scope() as conn:
+        get_yaml_ai_profile(profile_id)
+        existing = sql.fetchone(
+            conn,
             """
             SELECT *
             FROM ai_profile_check_requests
-            WHERE profile_id = ?
+            WHERE profile_id = :profile_id
               AND status IN ('pending', 'running')
             ORDER BY requested_at DESC
             LIMIT 1
             """,
-            (profile_id,),
-        ).fetchone()
+            {"profile_id": profile_id},
+        )
         if existing is not None:
             current = _row_to_check_request(existing)
             return AiProfileCheckTriggerResponse(request_id=current.id, status=current.status)
-        conn.execute(
+        sql.execute(
+            conn,
             """
             INSERT INTO ai_profile_check_requests (
                 id, profile_id, status, requested_at, requested_by
-            ) VALUES (?, ?, 'pending', ?, ?)
+            ) VALUES (:id, :profile_id, 'pending', :requested_at, :requested_by)
             """,
-            (request_id, profile_id, now, requested_by),
+            {
+                "id": request_id,
+                "profile_id": profile_id,
+                "requested_at": now,
+                "requested_by": requested_by,
+            },
         )
-        conn.commit()
     return AiProfileCheckTriggerResponse(request_id=request_id, status="pending")
 
 
 @router.post("/ai-profiles/check-requests/claim", response_model=AiProfileCheckRequest | None)
 def claim_ai_profile_check_request():
     now = _utcnow()
-    with with_immediate_tx() as conn:
-        row = conn.execute(
+    with db.session_scope() as conn:
+        row = sql.fetchone(
+            conn,
             """
             SELECT *
             FROM ai_profile_check_requests
@@ -286,22 +171,23 @@ def claim_ai_profile_check_request():
             ORDER BY requested_at ASC
             LIMIT 1
             """
-        ).fetchone()
+        )
         if row is None:
             return None
-        conn.execute(
+        sql.execute(
+            conn,
             """
             UPDATE ai_profile_check_requests
-            SET status = 'running', started_at = ?, error_message = ''
-            WHERE id = ?
+            SET status = 'running', started_at = :started_at, error_message = ''
+            WHERE id = :id
             """,
-            (now, row["id"]),
+            {"started_at": now, "id": row["id"]},
         )
-        claimed = conn.execute(
-            "SELECT * FROM ai_profile_check_requests WHERE id = ?",
-            (row["id"],),
-        ).fetchone()
-        conn.commit()
+        claimed = sql.fetchone(
+            conn,
+            "SELECT * FROM ai_profile_check_requests WHERE id = :id",
+            {"id": row["id"]},
+        )
     return _row_to_check_request(claimed)
 
 
@@ -309,38 +195,29 @@ def claim_ai_profile_check_request():
 def complete_ai_profile_check_request(request_id: str, body: AiProfileCheckCompleteRequest):
     now = _utcnow()
     status = "completed" if body.ok else "failed"
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT id FROM ai_profile_check_requests WHERE id = ?",
-            (request_id,),
-        ).fetchone()
+    with db.session_scope() as conn:
+        row = sql.fetchone(
+            conn,
+            "SELECT id FROM ai_profile_check_requests WHERE id = :id",
+            {"id": request_id},
+        )
         if row is None:
             raise HTTPException(404, f"ai profile check request not found: {request_id}")
-        conn.execute(
+        sql.execute(
+            conn,
             """
             UPDATE ai_profile_check_requests
-            SET status = ?, finished_at = ?, error_message = ?
-            WHERE id = ?
+            SET status = :status, finished_at = :finished_at, error_message = :error_message
+            WHERE id = :id
             """,
-            (status, now, (body.message or "")[:1000], request_id),
+            {
+                "status": status,
+                "finished_at": now,
+                "error_message": (body.message or "")[:1000],
+                "id": request_id,
+            },
         )
-        conn.commit()
     return None
-
-
-# ---------------------------------------------------------------------------
-# Sync + health report
-# ---------------------------------------------------------------------------
-
-
-@router.post("/ai-profiles/sync", response_model=list[AiProfileWithHealth])
-def sync_ai_profiles(body: AiProfileSyncRequest):
-    """Compatibility endpoint: dispatcher sync now writes dispatch.yaml."""
-    profiles = sync_yaml_ai_profiles(body.workers)
-    with get_conn() as conn:
-        _sync_all_profile_db_mirrors(conn, profiles)
-        conn.commit()
-    return list_ai_profiles_with_health()
 
 
 @router.post("/ai-profiles/health-report", status_code=204)
@@ -356,10 +233,6 @@ def post_health_report(body: AiProfileHealthReportRequest):
     now = _utcnow()
     for report in body.reports:
         update_yaml_ai_profile_health(report.profile_id, ok=report.ok, message=report.message or "")
-    with get_conn() as conn:
-        for profile in list_yaml_ai_profiles():
-            _sync_profile_db_mirror(conn, profile, sk=profile.sk)
-        conn.commit()
     return None
 
 
@@ -383,7 +256,7 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
     ``last_health_*`` columns into a ``HealthCheckResult`` payload so the
     UI can render a single "health" badge per row.
     """
-    from cairn.server.models import HealthCheckItem
+    from cairn.server.models_pkg.ai_profiles import HealthCheckItem
     profiles = list_yaml_ai_profiles()
     result: list[AiProfileWithHealth] = []
     for profile in profiles:
@@ -406,11 +279,12 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
 
 @router.get("/projects/{project_id}/ai-profiles", response_model=ProjectAiProfilesResponse)
 def get_project_ai_profiles(project_id: str):
-    with get_conn() as conn:
-        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+    with db.session_scope() as conn:
+        if sql.fetchone(conn, "SELECT 1 FROM projects WHERE id = :project_id", {"project_id": project_id}) is None:
             raise HTTPException(404, f"project not found: {project_id}")
+        configs = load_worker_execution_configs(conn, project_id)
         catalog = list_yaml_ai_profiles()
-        snapshots = load_project_ai_snapshots(conn, project_id)
+        snapshots = execution_ai_snapshots(configs)
         selections = task_ai_selections_from_snapshots(snapshots)
         available_ids = {item.id for item in catalog if item.available}
         unavailable = sorted({

@@ -14,7 +14,6 @@ Exercises the real FastAPI app via ``TestClient`` so the global
 """
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import unittest
@@ -23,36 +22,29 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
+from helpers import TempYamlConfig, reset_postgres_db
+
 
 class AuthTestHarness:
     def __init__(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
-        self._main_db = Path(self._tmpdir.name) / "cairn.sqlite"
-        self._obs_db = Path(self._tmpdir.name) / "observability.sqlite"
         self._attachments_root = Path(self._tmpdir.name) / "attachments"
         self._project_files_root = Path(self._tmpdir.name) / "project-files"
-        os.environ["CAIRN_JWT_SECRET"] = "test-secret-do-not-use-in-prod"
-        os.environ["CAIRN_API_TOKEN"] = ""
-        os.environ.pop("CAIRN_INITIAL_ADMIN_EMAIL", None)
-        os.environ.pop("CAIRN_INITIAL_ADMIN_PASSWORD", None)
-        # The files router reads its roots at import time, so the env
-        # vars must be set before the router module is imported.
-        os.environ["CAIRN_ATTACHMENTS_ROOT"] = str(self._attachments_root)
-        os.environ["CAIRN_PROJECT_FILES_ROOT"] = str(self._project_files_root)
+        self._yaml = TempYamlConfig()
+        self._yaml.dispatch["system"]["auth"]["jwt_secret"] = "test-secret-do-not-use-in-prod"
+        self._yaml.dispatch["system"]["auth"]["dispatcher_api_token"] = ""
+        self._yaml.dispatch["system"]["paths"]["attachments_root"] = str(self._attachments_root)
+        self._yaml.dispatch["system"]["paths"]["project_files_root"] = str(self._project_files_root)
+        self._yaml.__enter__()
 
         from cairn.server import db
-        db._db_path = None
-        db.configure(self._main_db)
-
-        from cairn.server.observability import db as obs_db
-        obs_db._db_path = None
-        obs_db.configure(self._obs_db)
+        reset_postgres_db()
+        self.db = db
 
     def close(self) -> None:
         from cairn.server import db
-        from cairn.server.observability import db as obs_db
-        db._db_path = None
-        obs_db._db_path = None
+        db.reset_for_tests()
+        self._yaml.__exit__(None, None, None)
         self._tmpdir.cleanup()
 
     def client(self):
@@ -62,9 +54,9 @@ class AuthTestHarness:
 
     def reset_users(self) -> None:
         from cairn.server import db
-        with db.get_conn() as conn:
-            conn.execute("DELETE FROM users")
-            conn.commit()
+        from cairn.server.repositories import sql
+        with db.session_scope() as conn:
+            sql.execute(conn, "DELETE FROM users")
 
 
 class AuthSurfaceTests(unittest.TestCase):

@@ -3,14 +3,15 @@ remote_support:
   dnslog:
     url: ''
   ssh:
-    host: ${CAIRN_REMOTE_SSH_HOST:-}
+    host: ''
     port: 22
-    username: ${CAIRN_REMOTE_SSH_USERNAME:-}
-    password: ${CAIRN_REMOTE_SSH_PASSWORD:-}
+    username: ''
+    password: ''
 capabilities:
   mcp_servers:
   - id: kali-server-mcp
     name: Kali Server MCP
+    transport: stdio
     description: Kali Linux MCP server exposing authorized Kali tool execution through
       a local stdio bridge.
     command: /usr/local/bin/kali-mcp-stdio
@@ -32,6 +33,7 @@ capabilities:
     - explore
   - id: metasploit-mcp
     name: Metasploit MCP
+    transport: stdio
     description: Metasploit Framework MCP server for module search, session handling,
       and RPC-backed framework operations.
     command: /usr/local/bin/metasploit-mcp-stdio
@@ -57,6 +59,7 @@ capabilities:
     - explore
   - id: chrome-devtools-host
     name: Host Chrome DevTools MCP
+    transport: stdio
     description: Connects to a host-managed Google Chrome instance started with remote
       debugging enabled on port 9222. Requires the host browser to be running before
       Cairn task execution.

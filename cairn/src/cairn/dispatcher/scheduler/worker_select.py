@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 
 
 def choose_worker(candidates: list[WorkerConfig], running_counts: dict[str, int]) -> list[WorkerConfig]:

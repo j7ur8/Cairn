@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import inject_project_capabilities
 from cairn.dispatcher.roles import inject_project_role
 from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
@@ -25,9 +25,9 @@ from cairn.dispatcher.tasks.common import (
     write_conclude_result_with_fact_id,
     write_graph_snapshot_reference,
 )
-from cairn.dispatcher.tasks.runner import project_capability_data, project_role_data
+from cairn.dispatcher.tasks.runner import project_capability_data, project_execution_config, project_role_data
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import Intent, ProjectDetail
+from cairn.shared.protocol_models import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -116,6 +116,7 @@ def run_explore_task(
             reporter.emit_error("explore_healthcheck", "error", healthcheck.result.stderr)
             return outcome
 
+        execution_config = project_execution_config(client, project.project.id, "explore", reporter, "explore_execute")
         capabilities = inject_project_capabilities(
             config,
             container_manager,
@@ -123,7 +124,7 @@ def run_explore_task(
             project.project.id,
             "explore",
             f"explore-{intent.id}",
-            project_capability_data(client, project.project.id, reporter, "explore_execute"),
+            project_capability_data(execution_config),
         )
         if capabilities.summary:
             reporter.emit_result("capabilities", capabilities.summary)
@@ -133,7 +134,7 @@ def run_explore_task(
         role = inject_project_role(
             project.project.id,
             "explore",
-            project_role_data(client, project.project.id, reporter, "explore_execute"),
+            project_role_data(execution_config),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)

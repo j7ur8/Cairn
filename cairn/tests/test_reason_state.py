@@ -6,12 +6,13 @@ os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-3
 
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
+
+from helpers import reset_postgres_db
 
 
 class ReasonContractTests(unittest.TestCase):
@@ -71,28 +72,29 @@ class ReasonContractTests(unittest.TestCase):
 
 class ReasonStateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-        self.tmp.close()
-        from cairn.server import db
-
-        db._db_path = None
-        db.configure(Path(self.tmp.name))
-        self.db = db
+        self.db = reset_postgres_db()
 
     def tearDown(self) -> None:
-        self.db._db_path = None
-        os.unlink(self.tmp.name)
+        self.db.reset_for_tests()
 
     def _create_project(self) -> str:
-        with self.db.get_conn() as conn:
-            conn.execute(
-                "INSERT INTO projects (id, title, status, created_at) VALUES ('proj_t', 'T', 'active', '2026-06-04T00:00:00Z')"
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            sql.execute(
+                conn,
+                """
+                INSERT INTO projects (id, title, status, created_at)
+                VALUES ('proj_t', 'T', 'active', '2026-06-04T00:00:00Z')
+                """,
             )
-            conn.execute(
-                "INSERT INTO facts (id, project_id, description) VALUES ('origin', 'proj_t', 'o')"
+            sql.execute(
+                conn,
+                "INSERT INTO facts (id, project_id, description) VALUES ('origin', 'proj_t', 'o')",
             )
-            conn.execute(
-                "INSERT INTO facts (id, project_id, description) VALUES ('goal', 'proj_t', 'g')"
+            sql.execute(
+                conn,
+                "INSERT INTO facts (id, project_id, description) VALUES ('goal', 'proj_t', 'g')",
             )
         return "proj_t"
 
@@ -106,7 +108,7 @@ class ReasonStateServiceTests(unittest.TestCase):
         project_id = self._create_project()
         trigger = "facts:19->21"
         trigger_hash = reason_trigger_hash(trigger)
-        with self.db.get_conn() as conn:
+        with self.db.session_scope() as conn:
             finish_project_reason_or_409(
                 conn,
                 project_id,
@@ -143,7 +145,7 @@ class ReasonStateServiceTests(unittest.TestCase):
         project_id = self._create_project()
         trigger = "facts:19->21"
         trigger_hash = reason_trigger_hash(trigger)
-        with self.db.get_conn() as conn:
+        with self.db.session_scope() as conn:
             finish_project_reason_or_409(
                 conn,
                 project_id,
@@ -214,7 +216,7 @@ class ReasonStateServiceTests(unittest.TestCase):
         project_id = self._create_project()
         trigger = "facts:2->3"
         trigger_hash = reason_trigger_hash(trigger)
-        with self.db.get_conn() as conn:
+        with self.db.session_scope() as conn:
             claim_project_reason_or_409(
                 conn,
                 project_id,

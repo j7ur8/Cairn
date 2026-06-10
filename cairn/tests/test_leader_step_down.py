@@ -133,13 +133,10 @@ class LeaderStepDownTests(unittest.TestCase):
         loop._publish_tick_metrics = MagicMock()
         loop.run_startup_healthchecks = MagicMock()
         loop._validate_server_settings = MagicMock()
-        loop._register_capability_catalog = MagicMock()
-        loop._register_role_catalog = MagicMock()
-        loop._sync_ai_catalog_from_dispatch_yaml = MagicMock()
 
         DispatcherLoop._run_leader_iteration(loop, once=True)
 
-        self.assertGreaterEqual(loop.leader.heartbeat.call_count, 5)
+        self.assertGreaterEqual(loop.leader.heartbeat.call_count, 3)
 
 
 if __name__ == "__main__":

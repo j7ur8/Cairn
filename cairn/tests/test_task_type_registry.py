@@ -14,21 +14,19 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 
 class TaskTypeRegistryTests(unittest.TestCase):
     def test_builtin_task_types_registered(self) -> None:
-        from cairn.server.task_types import TASK_TYPE_REGISTRY
+        from cairn.shared.task_types import TASK_TYPE_REGISTRY
         self.assertIn("bootstrap", TASK_TYPE_REGISTRY.names())
         self.assertIn("explore", TASK_TYPE_REGISTRY.names())
         self.assertIn("reason", TASK_TYPE_REGISTRY.names())
-        self.assertIn("legacy", TASK_TYPE_REGISTRY.names())
+        self.assertNotIn("legacy", TASK_TYPE_REGISTRY.names())
 
-    def test_register_new_task_type(self) -> None:
-        from cairn.server.task_types import TASK_TYPE_REGISTRY, register_task_type
-        register_task_type("custom_test", description="custom")
-        self.assertTrue(TASK_TYPE_REGISTRY.is_valid("custom_test"))
-        self.assertEqual(TASK_TYPE_REGISTRY.get("custom_test").description, "custom")
+    def test_task_type_registry_is_builtin_scoped(self) -> None:
+        from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names
+        self.assertEqual(TASK_TYPE_REGISTRY.names(), builtin_task_type_names())
 
     def test_project_snapshot_rejects_unknown_task_type(self) -> None:
         from pydantic import ValidationError
-        from cairn.server.models import ProjectAiProfileSnapshot
+        from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
         with self.assertRaises(ValidationError):
             ProjectAiProfileSnapshot(
                 profile_id="ai1",

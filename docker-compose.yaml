@@ -37,26 +37,8 @@ services:
     container_name: cairn-server
     ports:
       - "8000:8000"
-    # ${PWD} resolves to the directory containing this docker-compose.yaml.
-    # Both the server and the dispatcher need to agree on the same host
-    # path so the server can list files written by worker bind mounts.
-    #
-    # env_file: shares CAIRN_JWT_SECRET and the optional
-    # CAIRN_INITIAL_ADMIN_* with the dispatcher. Both containers must
-    # agree on the same secret; otherwise the dispatcher's API token
-    # would be rejected with 401 by the server.
-    env_file:
-      - .env
-    environment:
-      CAIRN_DATABASE_URL: ${CAIRN_DATABASE_URL:-postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn}
-      CAIRN_ATTACHMENTS_ROOT: ${PWD}/datas/attachments
-      CAIRN_PROJECT_FILES_ROOT: ${PWD}/datas/project-files
-      CAIRN_WORKER_ATTACHMENTS_ROOT: /mnt/attachments
-      CAIRN_DISPATCH_CONFIG_PATH: /cairn/dispatch.yaml
-      CAIRN_CAPABILITIES_CONFIG_PATH: /cairn/dispatch.capabilities.yaml
-      CAIRN_DISPATCHER_RELOAD_URL: http://cairn-dispatcher:9100/reload
     volumes:
-      - ${PWD}/datas:${PWD}/datas
+      - /Users/jmac/Documents/GitHub/Cairn/datas:/Users/jmac/Documents/GitHub/Cairn/datas
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml
     depends_on:
@@ -82,25 +64,7 @@ services:
       dockerfile: Dockerfile
     image: cairn-app
     container_name: cairn-dispatcher
-    # Pull ${ENV_VAR} substitutions (DEEPSEEK_AUTH_TOKEN, etc.) from the
-    # project-root .env file. The file must NEVER be committed; see
-    # .gitignore and .dockerignore. SSH defaults in dispatch.yaml use
-    # ${VAR:-} so the dispatcher still starts when these are unset.
-    #
-    # CAIRN_DISPATCHER_DATAS_ROOT is the *host* path to the shared datas
-    # directory. dispatch.yaml uses it in bind_mounts[*].host_path so the
-    # Docker daemon can actually resolve the bind mount (the dispatcher
-    # itself runs in a container, so a path relative to dispatch.yaml
-    # would resolve to the image's baked-in datas, which is invisible to
-    # the host's Docker daemon).
-    env_file:
-      - .env
     environment:
-      CAIRN_DATABASE_URL: ${CAIRN_DATABASE_URL:-postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn}
-      # Hardcoded absolute path; the value lives in .env so a
-      # different host can override without editing this file.
-      CAIRN_DISPATCHER_DATAS_ROOT: ${CAIRN_DISPATCHER_DATAS_ROOT}
-      CAIRN_DISPATCHER_HEALTH_ADDR: 0.0.0.0:9100
       UV_CACHE_DIR: /tmp/uv-cache
       XDG_CACHE_HOME: /tmp/.cache
     # SECURITY: the dispatcher still needs the Docker socket to launch
@@ -116,7 +80,7 @@ services:
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
-      - ${PWD}/datas:${PWD}/datas
+      - /Users/jmac/Documents/GitHub/Cairn/datas:/Users/jmac/Documents/GitHub/Cairn/datas
     depends_on:
       cairn-postgres:
         condition: service_healthy

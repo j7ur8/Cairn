@@ -4,8 +4,7 @@ import logging
 
 from fastapi import APIRouter, Query
 
-from cairn.server import db as main_db
-from cairn.server.observability import db
+from cairn.server import db
 from cairn.server.observability.models import (
     CreateEventRequest,
     CreateEventResponse,
@@ -30,6 +29,7 @@ from cairn.server.observability.repository import (
     list_project_events,
 )
 from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
+from cairn.server.repositories import sql
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}", tags=["llm-execution-log"])
@@ -44,7 +44,7 @@ def _limit(value: int) -> int:
 
 @router.get("/llm-executions", response_model=ExecutionListResponse)
 def get_llm_executions(project_id: str, limit: int = Query(default=200, ge=1)):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         return ExecutionListResponse(executions=list_executions(conn, project_id, _limit(limit)))
 
 
@@ -55,7 +55,7 @@ def get_project_llm_events(
     limit: int = Query(default=200, ge=1),
     tail: bool = Query(default=False),
 ):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         return EventListResponse(events=list_project_events(conn, project_id, after, _limit(limit), tail=tail))
 
 
@@ -67,15 +67,16 @@ def get_project_llm_event_view(
     limit: int = Query(default=300, ge=1),
     include_low_signal: bool = Query(default=False),
 ):
-    with main_db.get_conn() as main_conn:
-        row = main_conn.execute(
-            "SELECT llm_hidden_event_kinds FROM projects WHERE id = ?",
-            (project_id,),
-        ).fetchone()
+    with db.session_scope() as main_conn:
+        row = sql.fetchone(
+            main_conn,
+            "SELECT llm_hidden_event_kinds FROM projects WHERE id = :project_id",
+            {"project_id": project_id},
+        )
         hidden_event_kinds = parse_llm_hidden_event_kinds(
             row["llm_hidden_event_kinds"] if row is not None else None
         )
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         return list_event_view(
             conn,
             project_id,
@@ -95,33 +96,33 @@ def get_execution_llm_events(
     limit: int = Query(default=200, ge=1),
     tail: bool = Query(default=False),
 ):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         return EventListResponse(events=list_execution_events(conn, project_id, execution_id, after, _limit(limit), tail=tail))
 
 
 @router.post("/llm-executions", response_model=CreateExecutionResponse, status_code=201)
 def post_llm_execution(project_id: str, body: CreateExecutionRequest):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         return CreateExecutionResponse(execution=create_execution(conn, project_id, body))
 
 
 @router.post("/llm-executions/{execution_id}/events", response_model=CreateEventResponse, status_code=201)
 def post_llm_event(project_id: str, execution_id: str, body: CreateEventRequest):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         event, dropped = append_event(conn, project_id, execution_id, body, SETTINGS)
         return CreateEventResponse(event=event, dropped=dropped)
 
 
 @router.post("/llm-executions/{execution_id}/events/batch", response_model=CreateEventsBatchResponse, status_code=201)
 def post_llm_events_batch(project_id: str, execution_id: str, body: CreateEventsBatchRequest):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         events, dropped = append_events(conn, project_id, execution_id, body.events, SETTINGS)
         return CreateEventsBatchResponse(events=events, dropped=dropped)
 
 
 @router.post("/llm-executions/{execution_id}/finish", response_model=CreateExecutionResponse)
 def post_llm_execution_finish(project_id: str, execution_id: str, body: FinishExecutionRequest):
-    with db.get_conn() as conn:
+    with db.session_scope() as conn:
         execution = finish_execution(conn, project_id, execution_id, body)
         if execution is None:
             execution = create_execution(

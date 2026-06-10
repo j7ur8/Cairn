@@ -21,7 +21,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 
 LOG = logging.getLogger(__name__)

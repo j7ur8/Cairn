@@ -1,10 +1,10 @@
 """Health checks for AI profile snapshots and catalog profiles.
 
-Lives on the dispatcher side because the *auth env var* and the *base URL*
-are operator-side secrets / network endpoints that the server cannot see.
+Lives on the dispatcher side because base URL reachability and worker
+healthcheck commands require the dispatcher/container network context.
 The snapshot/catalog probes are intentionally lightweight and side-effect free:
 
-* api key env: ``os.environ.get(name)`` must be set and non-empty.
+* api key: a profile secret must be present in YAML / execution config.
 * base url: TCP connect to (host, port). 4xx/5xx responses are still
   treated as "reachable" — we only care that the endpoint is up.
 * worker type: must be declared in ``dispatch.yaml`` ``workers`` with
@@ -18,18 +18,17 @@ bootstrap/explore/reason task preflight semantics.
 from __future__ import annotations
 
 import logging
-import os
 import socket
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urlparse
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.ai_overlay import compute_ai_overlay
 from cairn.dispatcher.tasks.common import run_healthcheck
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import (
+from cairn.shared.protocol_models import (
     AiProfile,
     CANONICAL_AUTH_ENV,
     HealthCheckItem,
@@ -77,28 +76,27 @@ def _probe_http_url(url: str, timeout: float) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _check_auth_env(env_name: str) -> HealthCheckItem:
-    name = "api_key_env_present"
+def _check_auth_configured(env_name: str, secret: str | None) -> HealthCheckItem:
+    name = "api_key_configured"
     if not env_name:
         return HealthCheckItem(name=name, ok=False, message="api_key_env is empty")
-    value = os.environ.get(env_name)
-    if value is None:
+    if secret is None:
         guidance = ""
         canonical = CANONICAL_AUTH_ENV.get("codex") if env_name == "OPENAI_API_KEY" else CANONICAL_AUTH_ENV.get("claudecode") if env_name == "ANTHROPIC_AUTH_TOKEN" else None
         if canonical is not None:
             guidance = (
-                f"; define {canonical} directly in .env / compose on the dispatcher host"
+                f"; define {canonical} directly in dispatch.yaml worker env"
             )
         return HealthCheckItem(
             name=name, ok=False,
-            message=f"env var '{env_name}' is not set on the dispatcher host{guidance}",
+            message=f"secret for '{env_name}' is not configured{guidance}",
         )
-    if not value.strip():
+    if not secret.strip():
         return HealthCheckItem(
             name=name, ok=False,
-            message=f"env var '{env_name}' is set but empty",
+            message=f"secret for '{env_name}' is configured but empty",
         )
-    return HealthCheckItem(name=name, ok=True, message=f"env var '{env_name}' resolved")
+    return HealthCheckItem(name=name, ok=True, message=f"secret configured for '{env_name}'")
 
 
 def _check_base_url(base_url: str, timeout: float) -> HealthCheckItem:
@@ -133,12 +131,13 @@ def probe_snapshot(
     snapshot: ProjectAiProfileSnapshot,
     *,
     config: DispatchConfig,
+    cached_secret: str | None = None,
     timeout: float | None = None,
 ) -> HealthCheckResult:
     """Run the full health check on a stored AI profile snapshot."""
     effective_timeout = timeout if timeout is not None else 1.0
     checks = [
-        _check_auth_env(snapshot.snapshot_api_key_env),
+        _check_auth_configured(snapshot.snapshot_api_key_env, cached_secret),
         _check_base_url(snapshot.snapshot_base_url, effective_timeout),
         _check_worker_type(snapshot.snapshot_worker_type, config.workers),
     ]
@@ -155,7 +154,7 @@ def probe_profile(
     """Run the health check against a catalog profile row."""
     effective_timeout = timeout if timeout is not None else float(profile.healthcheck_timeout or 1.0)
     checks = [
-        _check_auth_env(profile.api_key_env),
+        _check_auth_configured(profile.api_key_env, profile.sk),
         _check_base_url(profile.base_url, effective_timeout),
         _check_worker_type(profile.worker_type, config.workers),
     ]
@@ -180,7 +179,7 @@ def run_profile_worker_healthcheck(
     """
     effective_timeout = float(profile.healthcheck_timeout or 1.0)
     preflight_checks = [
-        _check_auth_env_or_secret(profile.api_key_env, cached_secret),
+        _check_auth_configured(profile.api_key_env, cached_secret),
         _check_base_url(profile.base_url, effective_timeout),
         _check_worker_type(profile.worker_type, config.workers),
     ]
@@ -280,16 +279,6 @@ def _profile_to_snapshot(profile: AiProfile) -> ProjectAiProfileSnapshot:
         snapshot_reasoning_type=profile.model_reasoning_effort,
         snapshot_api_key_env=profile.api_key_env,
     )
-
-
-def _check_auth_env_or_secret(env_name: str, cached_secret: str | None) -> HealthCheckItem:
-    if cached_secret:
-        return HealthCheckItem(
-            name="api_key_env_present",
-            ok=True,
-            message=f"profile secret resolved for '{env_name}'",
-        )
-    return _check_auth_env(env_name)
 
 
 def _choose_profile_worker(

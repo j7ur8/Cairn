@@ -10,14 +10,26 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
+SYSTEM_YAML = """
+system:
+  database:
+    url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+  auth:
+    jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+    dispatcher_api_token: test-dispatcher-token
+  paths:
+    datas_root: /tmp/cairn-test
+"""
+
+
 class DispatchSidecarConfigTests(unittest.TestCase):
     def test_capabilities_sidecar_merges_into_dispatch_config(self) -> None:
-        from cairn.dispatcher.config import DispatchConfig
+        from cairn.shared.dispatch_config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "dispatch.yaml").write_text(
-                """
+                SYSTEM_YAML + """
 server: http://server
 runtime:
   interval: 3
@@ -50,6 +62,7 @@ capabilities:
   mcp_servers:
     - id: mcp1
       name: MCP
+      transport: stdio
       description: desc
       command: echo
       args: []
@@ -73,14 +86,14 @@ remote_support:
         self.assertTrue(cfg.remote_support.enabled)
 
     def test_role_default_skill_ids_resolve(self) -> None:
-        from cairn.dispatcher.config import DispatchConfig
+        from cairn.shared.dispatch_config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "skill").mkdir()
             (root / "role.md").write_text("role prompt", encoding="utf-8")
             (root / "dispatch.yaml").write_text(
-                """
+                SYSTEM_YAML + """
 server: http://server
 runtime:
   interval: 3
@@ -97,11 +110,6 @@ container:
   image: img
   network_mode: bridge
   completed_action: stop
-capabilities:
-  skills:
-    - id: skill1
-      name: Skill
-      source_path: ./skill
 workers:
   - name: mock
     type: mock
@@ -109,6 +117,17 @@ workers:
     max_running: 1
     task_types: [bootstrap, explore, reason]
     env: {}
+""".strip(),
+                encoding="utf-8",
+            )
+            (root / "dispatch.capabilities.yaml").write_text(
+                """
+capabilities:
+  mcp_servers: []
+  skills:
+    - id: skill1
+      name: Skill
+      source_path: ./skill
 roles:
   - id: role1
     name: Role
@@ -122,14 +141,14 @@ roles:
         self.assertEqual(cfg.roles[0].default_skill_ids, ["skill1"])
 
     def test_role_default_skill_ids_must_resolve(self) -> None:
-        from cairn.dispatcher.config import DispatchConfig
+        from cairn.shared.dispatch_config import DispatchConfig
         from pydantic import ValidationError
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "role.md").write_text("role prompt", encoding="utf-8")
             (root / "dispatch.yaml").write_text(
-                """
+                SYSTEM_YAML + """
 server: http://server
 runtime:
   interval: 3
@@ -153,6 +172,14 @@ workers:
     max_running: 1
     task_types: [bootstrap, explore, reason]
     env: {}
+""".strip(),
+                encoding="utf-8",
+            )
+            (root / "dispatch.capabilities.yaml").write_text(
+                """
+capabilities:
+  mcp_servers: []
+  skills: []
 roles:
   - id: role1
     name: Role
@@ -167,27 +194,9 @@ roles:
         self.assertIn("missing-skill", str(ctx.exception))
 
     def test_repo_capability_routing_metadata_loads_from_sidecar(self) -> None:
-        from cairn.dispatcher.config import DispatchConfig
+        from cairn.shared.dispatch_config import DispatchConfig
 
-        old_env = {
-            key: os.environ.get(key)
-            for key in (
-                "CAIRN_DISPATCHER_DATAS_ROOT",
-                "ANTHROPIC_AUTH_TOKEN",
-                "OPENAI_API_KEY",
-            )
-        }
-        os.environ["CAIRN_DISPATCHER_DATAS_ROOT"] = "/tmp/cairn-test"
-        os.environ["ANTHROPIC_AUTH_TOKEN"] = "test"
-        os.environ["OPENAI_API_KEY"] = "test"
-        try:
-            cfg = DispatchConfig.load(_REPO / "dispatch.yaml")
-        finally:
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+        cfg = DispatchConfig.load(_REPO / "dispatch.yaml")
 
         mcp_by_id = {item.id: item for item in cfg.capabilities.mcp_servers}
         skill_by_id = {item.id: item for item in cfg.capabilities.skills}

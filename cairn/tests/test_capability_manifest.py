@@ -94,7 +94,7 @@ class CapabilityManifestTests(unittest.TestCase):
 
     def test_dispatcher_catalog_payload_carries_probe_and_routing_fields(self) -> None:
         from cairn.dispatcher.capabilities import catalog_payload
-        from cairn.dispatcher.config import (
+        from cairn.shared.dispatch_config import (
             McpServerCapabilityConfig, SkillCapabilityConfig,
         )
         config = SimpleNamespace(
@@ -103,6 +103,7 @@ class CapabilityManifestTests(unittest.TestCase):
                     McpServerCapabilityConfig(
                         id="kali-server-mcp",
                         name="Kali",
+                        transport="stdio",
                         command="/usr/local/bin/kali-mcp-stdio",
                         args=["--stdio"],
                         probe_config={"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
@@ -152,7 +153,7 @@ class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
 
     def test_payload_includes_required_skill_ids(self) -> None:
         from cairn.dispatcher.capabilities import catalog_payload
-        from cairn.dispatcher.config import (
+        from cairn.shared.dispatch_config import (
             McpServerCapabilityConfig, SkillCapabilityConfig,
         )
         from types import SimpleNamespace
@@ -162,6 +163,7 @@ class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
                     McpServerCapabilityConfig(
                         id="camoufox-reverse",
                         name="Camoufox",
+                        transport="stdio",
                         command="camoufox-reverse-mcp",
                         args=["--stdio"],
                         required_skill_ids=["cypher-js-reverse"],
@@ -186,7 +188,7 @@ class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
 class CapabilityInstructionRenderingTests(unittest.TestCase):
     def test_execute_instructions_render_dynamic_routing_metadata(self) -> None:
         from cairn.dispatcher.capabilities import _instructions
-        from cairn.dispatcher.config import McpServerCapabilityConfig, SkillCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         text = _instructions(
             "/tmp/cap/mcp.json",
@@ -195,6 +197,7 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
                 McpServerCapabilityConfig(
                     id="chrome-devtools-host",
                     name="Host Chrome DevTools MCP",
+                    transport="stdio",
                     command="chrome-devtools-mcp",
                     args=["--browserUrl=http://host.docker.internal:9222"],
                     required_skill_ids=["js-reverse-automation"],
@@ -226,13 +229,14 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
 
     def test_reason_instructions_render_metadata_without_paths(self) -> None:
         from cairn.dispatcher.capabilities import _reason_instructions
-        from cairn.dispatcher.config import McpServerCapabilityConfig, SkillCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         text = _reason_instructions(
             [
                 McpServerCapabilityConfig(
                     id="chrome-devtools-host",
                     name="Host Chrome DevTools MCP",
+                    transport="stdio",
                     command="chrome-devtools-mcp",
                     required_skill_ids=["js-reverse-automation"],
                     use_when=["Browser runtime inspection is required."],

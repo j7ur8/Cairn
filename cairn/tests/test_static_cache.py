@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
+import json
 import unittest
 from pathlib import Path
-from contextlib import contextmanager
 from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -14,22 +13,16 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
+from helpers import reset_postgres_db
+
 
 class StaticCacheTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        from cairn.server import db
-        from cairn.server.observability import db as obs_db
-        db.reset_for_tests()
-        db.close_thread_conn()
-        db.configure(Path(self.tmp.name) / "main.sqlite")
-        obs_db.configure(Path(self.tmp.name) / "obs.sqlite")
+        reset_postgres_db()
 
     def tearDown(self) -> None:
         from cairn.server import db
-        db.close_thread_conn()
         db.reset_for_tests()
-        self.tmp.cleanup()
 
     def test_static_assets_are_no_store(self) -> None:
         from fastapi.testclient import TestClient
@@ -120,24 +113,15 @@ class StaticCacheTests(unittest.TestCase):
         self.assertEqual(body["database"], "postgresql")
         self.assertIn("postgres unavailable", body["database_error"])
 
-    def test_route_database_errors_are_degraded_json(self) -> None:
-        from fastapi.testclient import TestClient
+    def test_database_unavailable_handler_returns_degraded_json(self) -> None:
+        import asyncio
+
         from cairn.server.db import DatabaseUnavailable
-        from cairn.server.app import app
-        from cairn.server.security.jwt import issue_token
+        from cairn.server.app import database_unavailable_handler
 
-        @contextmanager
-        def broken_get_conn():
-            raise DatabaseUnavailable("postgres unavailable")
-            yield
-
-        headers = {
-            "Authorization": f"Bearer {issue_token('test-service', extra_claims={'role': 'service'})}",
-        }
-        with patch("cairn.server.routers.settings.get_conn", broken_get_conn), TestClient(app) as client:
-            r = client.get("/settings", headers=headers)
+        r = asyncio.run(database_unavailable_handler(None, DatabaseUnavailable("postgres unavailable")))
         self.assertEqual(r.status_code, 503)
-        body = r.json()
+        body = json.loads(r.body)
         self.assertEqual(body["status"], "degraded")
         self.assertEqual(body["database"], "postgresql")
         self.assertIn("postgres unavailable", body["database_error"])

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import os
-import re
-import shutil
 from contextlib import contextmanager
-from typing import Any, Generator, Iterable
+from typing import Any, Generator
 
 from alembic import command
 from alembic.config import Config
@@ -13,12 +11,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from cairn.server.orm import Base, CounterRow, SettingRow
-DEFAULT_DATABASE_URL_ENV = "CAIRN_DATABASE_URL"
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 _database_url: str | None = None
-_db_path: object | None = object()
+_pool_size: int | None = None
+_max_overflow: int | None = None
+_pool_timeout: float | None = None
 
 
 class DatabaseUnavailable(RuntimeError):
@@ -26,131 +25,64 @@ class DatabaseUnavailable(RuntimeError):
 
 
 def database_url() -> str:
-    url = _database_url or os.environ.get(DEFAULT_DATABASE_URL_ENV, "").strip()
+    if _database_url:
+        url = _database_url
+    else:
+        from cairn.server.runtime_config import system_config
+        url = system_config().database.url
     if not url:
-        raise DatabaseUnavailable(f"{DEFAULT_DATABASE_URL_ENV} is required")
+        raise DatabaseUnavailable("dispatch.yaml system.database.url is required")
     if url.startswith("sqlite"):
         raise DatabaseUnavailable("SQLite URLs are not supported; configure PostgreSQL")
     return url
 
 
 def configure(url: str | os.PathLike[str] | None = None, *, run_migrations: bool = True) -> None:
-    global _engine, _SessionLocal, _database_url, _db_path
-    legacy_test_path = False
+    global _engine, _SessionLocal, _database_url, _pool_size, _max_overflow, _pool_timeout
     if url is not None:
         candidate = str(url)
-        legacy_test_path = not candidate.startswith(("postgresql://", "postgresql+"))
-    if _engine is not None and not legacy_test_path:
-        return
-    if legacy_test_path:
-        _database_url = database_url()
-        if _engine is not None:
-            _engine.dispose()
-            _engine = None
-            _SessionLocal = None
-        _configure_legacy_test_yaml(url)
-    elif url is not None:
-        candidate = str(url)
+        if not candidate.startswith(("postgresql://", "postgresql+")):
+            raise DatabaseUnavailable("configure() requires a PostgreSQL URL")
         _database_url = candidate
+    if _engine is not None:
+        return
     resolved = database_url()
     if _engine is None:
+        if _pool_size is None or _max_overflow is None or _pool_timeout is None:
+            if _database_url:
+                _pool_size = 5
+                _max_overflow = 10
+                _pool_timeout = 30
+            else:
+                from cairn.server.runtime_config import system_config
+                database = system_config().database
+                _pool_size = database.pool_size
+                _max_overflow = database.max_overflow
+                _pool_timeout = database.pool_timeout
         _engine = create_engine(
             resolved,
             pool_pre_ping=True,
-            pool_size=int(os.environ.get("CAIRN_DB_POOL_SIZE", "5")),
-            max_overflow=int(os.environ.get("CAIRN_DB_MAX_OVERFLOW", "10")),
-            pool_timeout=float(os.environ.get("CAIRN_DB_POOL_TIMEOUT", "30")),
+            pool_size=_pool_size,
+            max_overflow=_max_overflow,
+            pool_timeout=_pool_timeout,
             future=True,
         )
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False, future=True)
-    if legacy_test_path:
-        drop_all_for_tests()
-        Base.metadata.create_all(engine())
-        seed_defaults()
-        _db_path = url
-        return
     if run_migrations:
         upgrade_head()
         seed_defaults()
-    _db_path = url if legacy_test_path else object()
 
 
 def reset_for_tests() -> None:
-    global _engine, _SessionLocal, _database_url, _db_path
+    global _engine, _SessionLocal, _database_url, _pool_size, _max_overflow, _pool_timeout
     if _engine is not None:
         _engine.dispose()
     _engine = None
     _SessionLocal = None
     _database_url = None
-    _db_path = object()
-
-
-def _configure_legacy_test_yaml(url: str | os.PathLike[str] | None) -> None:
-    if url is None:
-        return
-    base_dir = os.path.dirname(os.fspath(url))
-    if not base_dir:
-        return
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-    dispatch_src = os.path.join(repo_root, "dispatch.yaml")
-    caps_src = os.path.join(repo_root, "dispatch.capabilities.yaml")
-    dispatch_dst = os.path.join(base_dir, "dispatch.yaml")
-    caps_dst = os.path.join(base_dir, "dispatch.capabilities.yaml")
-    if os.path.exists(dispatch_src):
-        shutil.copyfile(dispatch_src, dispatch_dst)
-        _write_test_dispatch_yaml(dispatch_dst)
-        os.environ["CAIRN_DISPATCH_CONFIG_PATH"] = dispatch_dst
-    if os.path.exists(caps_src):
-        shutil.copyfile(caps_src, caps_dst)
-        _write_test_capabilities_yaml(caps_dst)
-        os.environ["CAIRN_CAPABILITIES_CONFIG_PATH"] = caps_dst
-    os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
-    os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
-    os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
-
-
-def _write_test_dispatch_yaml(path: str) -> None:
-    from pathlib import Path
-
-    Path(path).write_text(
-        """
-server: http://cairn-server:8000
-common_env: {}
-runtime:
-  interval: 3
-  max_workers: 8
-  max_running_projects: 3
-  max_project_workers: 4
-  healthcheck_timeout: 20
-  prompt_group: cypher
-tasks:
-  bootstrap:
-    timeout: 300
-    conclude_timeout: 90
-  reason:
-    timeout: 300
-    max_intents: 2
-  explore:
-    timeout: 300
-    conclude_timeout: 90
-container:
-  image: cairn-worker-container:mcp-camoufox
-  network_mode: cairn
-  completed_action: stop
-workers: []
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_test_capabilities_yaml(path: str) -> None:
-    from pathlib import Path
-
-    Path(path).write_text(
-        "capabilities:\n  mcp_servers: []\n  skills: []\nroles: []\n",
-        encoding="utf-8",
-    )
+    _pool_size = None
+    _max_overflow = None
+    _pool_timeout = None
 
 
 def engine() -> Engine:
@@ -228,76 +160,3 @@ def postgres_status() -> dict[str, Any]:
 
 def close_thread_conn() -> None:
     return None
-
-
-class RowAdapter(dict[str, Any]):
-    def keys(self):  # type: ignore[override]
-        return super().keys()
-
-
-class ResultAdapter:
-    def __init__(self, result):
-        self._result = result
-        self.rowcount = result.rowcount
-
-    def fetchone(self) -> RowAdapter | None:
-        row = self._result.mappings().fetchone()
-        return RowAdapter(row) if row is not None else None
-
-    def fetchall(self) -> list[RowAdapter]:
-        return [RowAdapter(row) for row in self._result.mappings().fetchall()]
-
-
-class SessionSqlAdapter:
-    """Temporary SQLAlchemy-backed adapter while routers move to ORM calls."""
-
-    def __init__(self, session: Session):
-        self.session = session
-
-    def execute(self, sql: str, params: Iterable[Any] | dict[str, Any] = ()) -> ResultAdapter:
-        sql, bound = _translate_sql(sql, params)
-        return ResultAdapter(self.session.execute(text(sql), bound))
-
-    def commit(self) -> None:
-        self.session.commit()
-
-    def rollback(self) -> None:
-        self.session.rollback()
-
-
-def _translate_sql(sql: str, params: Iterable[Any] | dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    normalized = _normalize_sql(sql)
-    if isinstance(params, dict):
-        return normalized, params
-    values = list(params)
-    bound = {f"p{i}": value for i, value in enumerate(values)}
-    for i in range(len(values)):
-        normalized = normalized.replace("?", f":p{i}", 1)
-    return normalized, bound
-
-
-def _normalize_sql(sql: str) -> str:
-    normalized = sql.strip()
-    normalized = normalized.replace("WHERE rowid = 1", "WHERE id = 1")
-    normalized = normalized.replace("ORDER BY rowid", "ORDER BY fact_id")
-    normalized = normalized.replace("INSERT OR IGNORE INTO scoped_counters", "INSERT INTO scoped_counters")
-    if normalized.startswith("INSERT INTO scoped_counters") and "ON CONFLICT" not in normalized:
-        normalized += " ON CONFLICT (project_id, kind) DO NOTHING"
-    normalized = normalized.replace("INSERT OR IGNORE INTO counters", "INSERT INTO counters")
-    if normalized.startswith("INSERT INTO counters") and "ON CONFLICT" not in normalized:
-        normalized += " ON CONFLICT (name) DO NOTHING"
-    normalized = re.sub(r"\bTRUE\b", "true", normalized)
-    normalized = re.sub(r"\bFALSE\b", "false", normalized)
-    return normalized
-
-
-@contextmanager
-def get_conn() -> Generator[SessionSqlAdapter, None, None]:
-    with session_scope() as session:
-        yield SessionSqlAdapter(session)
-
-
-@contextmanager
-def with_immediate_tx() -> Generator[SessionSqlAdapter, None, None]:
-    with get_conn() as conn:
-        yield conn

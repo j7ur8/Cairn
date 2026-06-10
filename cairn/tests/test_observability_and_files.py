@@ -15,24 +15,21 @@ from fastapi import HTTPException
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
+from helpers import TempYamlConfig, reset_postgres_db
+
 
 class ObservabilityRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
-        self.tmp.close()
         from cairn.server import db
-        from cairn.server.observability import db as obs_db
 
-        db.reset_for_tests()
-        obs_db.configure(Path(self.tmp.name))
-        self.main_db = db
-        self.conn_cm = obs_db.get_conn()
+        reset_postgres_db()
+        self.db = db
+        self.conn_cm = db.session_scope()
         self.conn = self.conn_cm.__enter__()
 
     def tearDown(self) -> None:
         self.conn_cm.__exit__(None, None, None)
-        self.main_db.reset_for_tests()
-        os.unlink(self.tmp.name)
+        self.db.reset_for_tests()
 
     def test_recreating_execution_preserves_existing_event_counters(self) -> None:
         from cairn.server.observability.models import (
@@ -74,9 +71,16 @@ class ObservabilityRepositoryTests(unittest.TestCase):
 
         create_execution(self.conn, project_id, body)
 
-        self.conn.execute(
-            "UPDATE llm_executions SET event_count = 0, bytes_written = 0, last_event_at = NULL WHERE id = ?",
-            ("exec_1",),
+        from cairn.server.repositories import sql
+
+        sql.execute(
+            self.conn,
+            """
+            UPDATE llm_executions
+            SET event_count = 0, bytes_written = 0, last_event_at = NULL
+            WHERE id = :id
+            """,
+            {"id": "exec_1"},
         )
 
         executions = list_executions(self.conn, project_id, 10)
@@ -328,37 +332,42 @@ class ObservabilityRepositoryTests(unittest.TestCase):
 
 class ProjectFilesRouterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_file = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
-        self.db_file.close()
         self.tmpdir = tempfile.TemporaryDirectory()
         self.project_root = Path(self.tmpdir.name) / "project-files"
         self.attachments_root = Path(self.tmpdir.name) / "attachments"
+        self.yaml = TempYamlConfig()
+        self.yaml.dispatch["system"]["paths"]["project_files_root"] = str(self.project_root)
+        self.yaml.dispatch["system"]["paths"]["attachments_root"] = str(self.attachments_root)
+        self.yaml.__enter__()
 
         from cairn.server import db
 
-        db.reset_for_tests()
-        db.configure(Path(self.db_file.name))
+        reset_postgres_db()
         self.db = db
-        with db.get_conn() as conn:
-            conn.execute(
-                "INSERT INTO projects (id, title, status, created_at) VALUES (?, ?, 'active', ?)",
-                ("proj_files", "Files", "2026-06-05T00:00:00Z"),
+        with db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            sql.execute(
+                conn,
+                """
+                INSERT INTO projects (id, title, status, created_at)
+                VALUES (:id, :title, 'active', :created_at)
+                """,
+                {
+                    "id": "proj_files",
+                    "title": "Files",
+                    "created_at": "2026-06-05T00:00:00Z",
+                },
             )
 
         from cairn.server.routers import files
 
         self.files_router = files
-        self.old_project_root = files._PROJECT_FILES_ROOT
-        self.old_attachments_root = files._ATTACHMENTS_ROOT
-        files._PROJECT_FILES_ROOT = self.project_root
-        files._ATTACHMENTS_ROOT = self.attachments_root
 
     def tearDown(self) -> None:
-        self.files_router._PROJECT_FILES_ROOT = self.old_project_root
-        self.files_router._ATTACHMENTS_ROOT = self.old_attachments_root
         self.db.reset_for_tests()
+        self.yaml.__exit__(None, None, None)
         self.tmpdir.cleanup()
-        os.unlink(self.db_file.name)
 
     def test_project_files_lists_runtime_outputs_and_attachments(self) -> None:
         (self.project_root / "proj_files" / "reports").mkdir(parents=True)

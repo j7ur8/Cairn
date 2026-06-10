@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from cairn.server.task_types import TASK_TYPE_REGISTRY
+from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names
 
 
 
@@ -34,27 +34,6 @@ class TaskCapabilities(BaseModel):
     user_skill_ids: list[str] = Field(default_factory=list)
     role_default_skill_ids: list[str] = Field(default_factory=list)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _wire_compat_user_fields(cls, data):
-        """Mirror the merged ids into ``user_*`` fields when missing.
-
-        Old clients send the flat ``mcp_server_ids`` / ``skill_ids``
-        lists without the user/explicit vs. auto/required split. Treat
-        the merged set as the user picks so the server can still tell
-        ``user_*`` from the auto-expanded set in the persisted
-        snapshot. Runs in ``before`` mode so internal construction
-        (where the caller already separates user vs. auto) is not
-        touched.
-        """
-        if not isinstance(data, dict):
-            return data
-        if not data.get("user_mcp_server_ids") and data.get("mcp_server_ids"):
-            data = {**data, "user_mcp_server_ids": list(data["mcp_server_ids"])}
-        if not data.get("user_skill_ids") and data.get("skill_ids"):
-            data = {**data, "user_skill_ids": list(data["skill_ids"])}
-        return data
-
     @model_validator(mode="after")
     def _dedupe(self) -> "TaskCapabilities":
         for field in ("mcp_server_ids", "skill_ids", "user_mcp_server_ids", "user_skill_ids", "role_default_skill_ids"):
@@ -77,7 +56,7 @@ TaskCapabilitiesMap = dict[str, TaskCapabilities]
 def task_capabilities_map(values: dict[str, dict[str, list[str]]] | None) -> TaskCapabilitiesMap:
     """Build a per-task map with empty defaults when the caller omits a stage."""
     out: TaskCapabilitiesMap = {}
-    for task in ("bootstrap", "explore", "reason"):
+    for task in builtin_task_type_names():
         payload = values.get(task) if isinstance(values, dict) else None
         if payload is None:
             payload = {}
@@ -116,14 +95,11 @@ class CapabilityCatalogItem(BaseModel):
     detail: str = ""
     # Mirror the admin write fields so the Settings UI can show and
     # edit a row's current configuration without a second round-trip.
-    # These fields are optional: the legacy /capabilities/catalog
-    # endpoint still returns just the public fields.
     source_path: str | None = None
     transport: str | None = None
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     url: str | None = None
-    bearer_token_env: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     last_probe_status: Literal["ok", "warn", "error"] | None = None
     last_probe_at: str | None = None
@@ -216,7 +192,6 @@ class CapabilityAdminRequest(BaseModel):
     command: str | None = None  # mcp_server stdio only
     args: list[str] = Field(default_factory=list)  # mcp_server stdio only
     url: str | None = None  # mcp_server http only
-    bearer_token_env: str | None = None  # mcp_server http only
     headers: dict[str, str] = Field(default_factory=dict)  # mcp_server http only
 
 
@@ -252,7 +227,7 @@ def task_capability_selection_map(
     values: dict[str, dict[str, list[str]]] | dict[str, CapabilitySelection] | None,
 ) -> TaskCapabilitySelectionMap:
     out: TaskCapabilitySelectionMap = {}
-    for task in ("bootstrap", "explore", "reason"):
+    for task in builtin_task_type_names():
         payload = values.get(task) if isinstance(values, dict) else None
         if isinstance(payload, CapabilitySelection):
             out[task] = payload
@@ -289,10 +264,6 @@ class ProjectCapabilitiesUpdateRequest(BaseModel):
 
     capabilities: TaskCapabilitySelectionMap
 
-
-
-class RegisterCapabilityCatalogRequest(BaseModel):
-    catalog: list[CapabilityCatalogItem]
 
 
 class RoleCatalogItem(BaseModel):
@@ -338,63 +309,6 @@ class RoleCatalogItem(BaseModel):
     available: bool = True
     prompt_sha256: str = ""
     detail: str = ""
-
-
-class RegisterRoleCatalogItem(BaseModel):
-    id: str
-    name: str
-    description: str = ""
-    task_types: list[str] = Field(default_factory=list)
-    default_skill_ids: list[str] = Field(default_factory=list)
-
-    @field_validator("task_types")
-    @classmethod
-    def validate_task_types(cls, value: list[str]) -> list[str]:
-        if not value:
-            return value
-        unknown = [v for v in value if not TASK_TYPE_REGISTRY.is_valid(v)]
-        if unknown:
-            raise ValueError(
-                f"unknown task_types: {unknown}; "
-                f"known: {', '.join(TASK_TYPE_REGISTRY.names())}"
-            )
-        # Dedupe while preserving order.
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for v in value:
-            if v in seen:
-                continue
-            seen.add(v)
-            deduped.append(v)
-        return deduped
-
-    @field_validator("default_skill_ids")
-    @classmethod
-    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for item in value or []:
-            key = (item or "").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            deduped.append(key)
-        return deduped
-    available: bool = True
-    prompt: str
-    detail: str = ""
-
-    @field_validator("id", "name", "prompt")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-
-class RegisterRoleCatalogRequest(BaseModel):
-    roles: list[RegisterRoleCatalogItem]
 
 
 class ProjectRole(BaseModel):

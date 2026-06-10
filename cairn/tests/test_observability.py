@@ -3,17 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
-os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
-os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
+from helpers import TempYamlConfig, reset_postgres_db
 
 
 class TraceIdTests(unittest.TestCase):
@@ -102,19 +99,13 @@ class MetricsTests(unittest.TestCase):
 
 class ObservabilityDbTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
-        self.tmp.close()
         from cairn.server import db
-        from cairn.server.observability import db as obs_db
 
-        db.reset_for_tests()
-        obs_db.configure(Path(self.tmp.name))
-        self.db = obs_db
-        self.main_db = db
+        reset_postgres_db()
+        self.db = db
 
     def tearDown(self) -> None:
-        self.main_db.reset_for_tests()
-        os.unlink(self.tmp.name)
+        self.db.reset_for_tests()
 
     def test_batch_append_persists_events(self) -> None:
         from cairn.server.observability.models import (
@@ -127,7 +118,7 @@ class ObservabilityDbTests(unittest.TestCase):
             create_execution,
         )
 
-        with self.db.get_conn() as conn:
+        with self.db.session_scope() as conn:
             create_execution(
                 conn,
                 "proj_001",
@@ -145,35 +136,36 @@ class ObservabilityDbTests(unittest.TestCase):
             )
         self.assertEqual(dropped, 0)
         self.assertEqual(len(events), 2)
-        with self.db.get_conn() as conn:
-            count = conn.execute("SELECT COUNT(*) AS count FROM llm_execution_events").fetchone()["count"]
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            row = sql.fetchone(conn, "SELECT COUNT(*) AS count FROM llm_execution_events")
+            assert row is not None
+            count = row["count"]
         self.assertEqual(count, 2)
 
     def test_status_reports_postgres(self) -> None:
         status = self.db.postgres_status()
         self.assertEqual(status["database"], "postgresql")
-        self.assertEqual(self.db.quick_check(), ["ok"])
+        self.assertTrue(status["ok"])
 
 
 class RequestIdMiddlewareTests(unittest.TestCase):
     def _build(self):
-        tmp = tempfile.TemporaryDirectory()
-        os.environ["CAIRN_ATTACHMENTS_ROOT"] = str(Path(tmp.name) / "att")
-        os.environ["CAIRN_PROJECT_FILES_ROOT"] = str(Path(tmp.name) / "pf")
-        from cairn.server import db
-        from cairn.server.observability import db as obs_db
-        db.reset_for_tests()
-        db.configure(Path(tmp.name) / "main.sqlite")
-        obs_db.configure(Path(tmp.name) / "obs.sqlite")
+        yaml_cfg = TempYamlConfig()
+        yaml_cfg.__enter__()
+        reset_postgres_db()
         from fastapi.testclient import TestClient
         from cairn.server.app import app
-        return TestClient(app), tmp
+        return TestClient(app), yaml_cfg
 
     def test_request_id_round_trip(self) -> None:
-        client, tmp = self._build()
-        r = client.get("/metrics")  # public, easy to assert against
-        self.assertIn("x-request-id", r.headers)
-        # Set a custom id; the response echoes it back.
-        r2 = client.get("/metrics", headers={"X-Request-Id": "trace-from-test"})
-        self.assertEqual(r2.headers["x-request-id"], "trace-from-test")
-        tmp.cleanup()
+        client, yaml_cfg = self._build()
+        try:
+            r = client.get("/metrics")  # public, easy to assert against
+            self.assertIn("x-request-id", r.headers)
+            # Set a custom id; the response echoes it back.
+            r2 = client.get("/metrics", headers={"X-Request-Id": "trace-from-test"})
+            self.assertEqual(r2.headers["x-request-id"], "trace-from-test")
+        finally:
+            yaml_cfg.__exit__(None, None, None)

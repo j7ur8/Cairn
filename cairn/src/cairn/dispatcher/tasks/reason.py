@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import inject_project_capabilities
 from cairn.dispatcher.roles import inject_project_role
 from cairn.dispatcher.contracts import parse_json_output, validate_reason_payload
@@ -29,9 +29,9 @@ from cairn.dispatcher.tasks.common import (
     run_worker_process,
     write_graph_snapshot_reference,
 )
-from cairn.dispatcher.tasks.runner import project_capability_data, project_role_data
+from cairn.dispatcher.tasks.runner import project_capability_data, project_execution_config, project_role_data
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import ProjectDetail
+from cairn.shared.protocol_models import ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -125,6 +125,7 @@ def run_reason_task(
             reason_finish_error = preview(healthcheck.result.stderr)
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
+        execution_config = project_execution_config(client, project.project.id, "reason", reporter, "reason_execute")
         capabilities = inject_project_capabilities(
             config,
             container_manager,
@@ -132,7 +133,7 @@ def run_reason_task(
             project.project.id,
             "reason",
             f"reason-{worker.name}-{uuid.uuid4().hex[:12]}",
-            project_capability_data(client, project.project.id, reporter, "reason_execute"),
+            project_capability_data(execution_config),
         )
         if capabilities.summary:
             reporter.emit_result("capabilities", capabilities.summary)
@@ -141,7 +142,7 @@ def run_reason_task(
         role = inject_project_role(
             project.project.id,
             "reason",
-            project_role_data(client, project.project.id, reporter, "reason_execute"),
+            project_role_data(execution_config),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)

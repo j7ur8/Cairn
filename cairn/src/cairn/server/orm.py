@@ -1,17 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import (
-    BigInteger,
-    CheckConstraint,
-    Float,
-    ForeignKey,
-    ForeignKeyConstraint,
-    Index,
-    Integer,
-    Text,
-    UniqueConstraint,
-    text,
-)
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -133,91 +122,6 @@ class ScopedCounterRow(Base):
     value: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
-class CapabilityCatalogRow(Base):
-    __tablename__ = "capability_catalog"
-
-    kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    task_types: Mapped[str] = mapped_column(Text, nullable=False)
-    available: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
-    detail: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False, default="builtin", server_default="builtin")
-    requires_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-    probe_config: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
-    last_probe_status: Mapped[str | None] = mapped_column(Text)
-    last_probe_at: Mapped[str | None] = mapped_column(Text)
-    last_probe_message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    source_path: Mapped[str | None] = mapped_column(Text)
-    transport: Mapped[str | None] = mapped_column(Text)
-    command: Mapped[str | None] = mapped_column(Text)
-    args: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-    url: Mapped[str | None] = mapped_column(Text)
-    bearer_token_env: Mapped[str | None] = mapped_column(Text)
-    headers: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
-    required_skill_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-    use_when: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-    activation_hint: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    preferred_mcp_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-
-
-class ProjectCapabilityRow(Base):
-    __tablename__ = "project_capabilities"
-    __table_args__ = (Index("idx_project_capabilities_project_kind", "project_id", "kind"),)
-
-    project_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    capability_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
-class ProjectCapabilitySnapshotRow(Base):
-    __tablename__ = "project_capability_snapshots"
-    __table_args__ = (Index("idx_project_capability_snapshots_project_task", "project_id", "task_type"),)
-
-    project_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    task_type: Mapped[str] = mapped_column(Text, primary_key=True)
-    kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    capability_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    source: Mapped[str] = mapped_column(Text, nullable=False, default="selected", server_default="selected")
-    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
-class RoleCatalogRow(Base):
-    __tablename__ = "role_catalog"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    prompt_sha256: Mapped[str] = mapped_column(Text, nullable=False)
-    task_types: Mapped[str] = mapped_column(Text, nullable=False)
-    available: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
-    detail: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    default_skill_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-
-
-class ProjectRoleRow(Base):
-    __tablename__ = "project_roles"
-
-    project_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    role_id: Mapped[str] = mapped_column(Text, nullable=False)
-    role_name: Mapped[str] = mapped_column(Text, nullable=False)
-    role_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    role_prompt_sha256: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
 class ReplayRunRow(Base):
     __tablename__ = "replay_runs"
 
@@ -287,57 +191,6 @@ class ProjectReasonStateRow(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class AiProfileRow(Base):
-    __tablename__ = "ai_profiles"
-    __table_args__ = (
-        CheckConstraint("worker_type IN ('codex','claudecode')", name="ck_ai_profiles_worker_type"),
-        Index("idx_ai_profiles_seeded_from_worker", "seeded_from_worker"),
-    )
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    worker_type: Mapped[str] = mapped_column(Text, nullable=False)
-    provider: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    base_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    model: Mapped[str] = mapped_column(Text, nullable=False)
-    api_key_env: Mapped[str] = mapped_column(Text, nullable=False)
-    available: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
-    detail: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    seeded_from_worker: Mapped[str | None] = mapped_column(Text)
-    healthcheck_timeout: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1.0")
-    last_health_ok: Mapped[int | None] = mapped_column(Integer)
-    last_health_message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    last_health_at: Mapped[str | None] = mapped_column(Text)
-    model_reasoning_effort: Mapped[str | None] = mapped_column(Text)
-    sk: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    sk_ciphertext: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-
-
-class ProjectAiProfileRow(Base):
-    __tablename__ = "project_ai_profiles"
-    __table_args__ = (
-        CheckConstraint("role IN ('primary','fallback')", name="ck_project_ai_profiles_role"),
-        Index("idx_project_ai_profiles_project_task_role_position", "project_id", "task_type", "role", "position"),
-    )
-
-    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
-    task_type: Mapped[str] = mapped_column(Text, primary_key=True, default="legacy", server_default="legacy")
-    profile_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    role: Mapped[str] = mapped_column(Text, primary_key=True)
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot_name: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_worker_type: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_provider: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    snapshot_base_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    snapshot_model: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_api_key_env: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot_reasoning_type: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
 class WorkerExecutionConfigRow(Base):
     __tablename__ = "worker_execution_configs"
     __table_args__ = (Index("idx_worker_execution_configs_project_task", "project_id", "task_type"),)
@@ -350,15 +203,6 @@ class WorkerExecutionConfigRow(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class AiProfileModelRow(Base):
-    __tablename__ = "ai_profile_models"
-    __table_args__ = (Index("idx_ai_profile_models_profile_id", "profile_id"),)
-
-    profile_id: Mapped[str] = mapped_column(Text, ForeignKey("ai_profiles.id", ondelete="CASCADE"), primary_key=True)
-    model: Mapped[str] = mapped_column(Text, primary_key=True)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
 class AiProfileCheckRequestRow(Base):
     __tablename__ = "ai_profile_check_requests"
     __table_args__ = (
@@ -367,7 +211,7 @@ class AiProfileCheckRequestRow(Base):
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    profile_id: Mapped[str] = mapped_column(Text, ForeignKey("ai_profiles.id", ondelete="CASCADE"), nullable=False)
+    profile_id: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     requested_at: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[str | None] = mapped_column(Text)

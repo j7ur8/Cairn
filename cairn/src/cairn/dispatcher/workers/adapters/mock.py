@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from cairn.dispatcher.config import WorkerConfig, resolve_mock_behavior
+from cairn.shared.dispatch_config import WorkerConfig, resolve_mock_behavior
 from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
 
 _SCRIPT = """

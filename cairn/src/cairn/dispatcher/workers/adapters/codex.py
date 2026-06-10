@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
 
 
@@ -150,12 +150,14 @@ class CodexDriver(RegexSessionDriver):
                 if not isinstance(url, str) or not url:
                     continue
                 args.extend(["-c", f"{prefix}.url={json.dumps(url)}"])
-                bearer_env = server.get("bearer_token_env")
-                if isinstance(bearer_env, str) and bearer_env:
-                    args.extend([
-                        "-c",
-                        f"{prefix}.bearer_token_env_var={json.dumps(bearer_env)}",
-                    ])
+                headers = server.get("headers")
+                if isinstance(headers, dict):
+                    for key, value in headers.items():
+                        if isinstance(key, str) and key:
+                            args.extend([
+                                "-c",
+                                f"{prefix}.headers.{key}={json.dumps(str(value))}",
+                            ])
                 continue
             # stdio (default)
             command = server.get("command")

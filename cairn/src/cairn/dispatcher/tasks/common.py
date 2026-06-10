@@ -5,7 +5,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.observability.reporter import DisabledExecutionReporter, ExecutionReporter
 from cairn.dispatcher.observability.trace import make_trace_parser
 from cairn.dispatcher.protocol.client import CairnClient

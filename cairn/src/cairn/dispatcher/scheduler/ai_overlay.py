@@ -5,22 +5,21 @@ should I inject into the worker container for this snapshot?". The
 answer is a function of:
 
   * the snapshot itself (model, base_url, api_key_env, reasoning)
-  * the worker's host env (whether the api_key_env resolves) or the
-    cached secret from the AI selection sync
+  * the cached secret from the AI selection sync
   * the project's proxy (if any)
 
-The host env rarely changes mid-run and the proxy is project-stable,
-so the result is cacheable for a short window. Without the cache the
-scheduler would re-read the dispatcher env (or, worse, re-fetch the
-profile secret) on every tick of every active project.
+The proxy is project-stable and the secret cache changes only when the
+server refreshes project execution config, so the result is cacheable
+for a short window.
 """
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass, field
 
-from cairn.server.models import ProjectAiProfileSnapshot, ProxyConfig
+from cairn.shared.protocol_models import ProjectAiProfileSnapshot
+from cairn.shared.protocol_models import ProxyConfig
+from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
 
 
 OVERLAY_TTL_SECONDS = 60.0
@@ -30,32 +29,19 @@ def compute_ai_overlay(
     snapshot: ProjectAiProfileSnapshot,
     *,
     cached_secret: str | None = None,
-    env: dict[str, str] | None = None,
     proxy_config: ProxyConfig | None = None,
 ) -> dict[str, str]:
     """Translate a snapshot into the env-var overlay for the worker.
 
-    Resolution order for the auth token:
-
-    1. ``cached_secret`` (the value pulled from ``/ai-profiles/{id}/secret``
-       at sync time). This is the source of truth once the dispatcher
-       has populated the AI selection cache.
-    2. The dispatch process environment via
-       ``os.environ[snapshot_api_key_env]`` — fallback for profiles
-       whose secret is empty (e.g. seeded profiles that ran the first
-       sync before the env var was set).
-
-    Either way the worker container only ever receives the value,
-    never the env-var name.
+    ``cached_secret`` is the value pulled from the server-side execution
+    config cache. The worker container receives the value under the
+    canonical runtime env var name.
     """
     overlay: dict[str, str] = {}
     if snapshot.snapshot_api_key_env:
         token: str | None = None
         if cached_secret:
             token = cached_secret
-        if not token:
-            env_source = env if env is not None else os.environ
-            token = env_source.get(snapshot.snapshot_api_key_env)
         if token:
             overlay[snapshot.snapshot_api_key_env] = token
     if snapshot.snapshot_reasoning_type:
@@ -73,33 +59,8 @@ def compute_ai_overlay(
         if snapshot.snapshot_provider:
             overlay["ANTHROPIC_PROVIDER"] = snapshot.snapshot_provider
     if proxy_config is not None:
-        overlay.update(_proxy_config_to_env(proxy_config))
+        overlay.update(proxy_config_to_env(proxy_config))
     return overlay
-
-
-def _proxy_config_to_env(cfg: ProxyConfig) -> dict[str, str]:
-    """Translate a :class:`ProxyConfig` into the env vars a worker
-    container needs in order to route traffic through the proxy.
-
-    Duplicate of the helper in ``scheduler/loop.py``; keeping the
-    overlay module standalone avoids a circular import.
-    """
-    userpass = ""
-    if cfg.username and cfg.password:
-        userpass = f"{cfg.username}:{cfg.password}@"
-    elif cfg.username:
-        userpass = f"{cfg.username}@"
-    no_proxy = "localhost,127.0.0.1,cairn-server,cairn"
-    if cfg.type == "socks5":
-        return {
-            "ALL_PROXY": f"socks5://{userpass}{cfg.host}:{cfg.port}",
-            "NO_PROXY": no_proxy,
-        }
-    return {
-        "HTTP_PROXY": f"http://{userpass}{cfg.host}:{cfg.port}",
-        "HTTPS_PROXY": f"http://{userpass}{cfg.host}:{cfg.port}",
-        "NO_PROXY": no_proxy,
-    }
 
 
 @dataclass(slots=True)

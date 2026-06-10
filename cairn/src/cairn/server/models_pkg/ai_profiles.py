@@ -2,135 +2,24 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from cairn.server.task_types import TASK_TYPE_REGISTRY
+from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names
+from cairn.shared.protocol_models import (
+    CANONICAL_AUTH_ENV,
+    AiProfile,
+    AiProfileBase,
+    HealthCheckItem,
+    HealthCheckResult,
+    ProjectAiProfileSnapshot,
+    ReasoningType,
+    auth_env_warning,
+    canonical_auth_env,
+)
 
 class AiWorkerType:
     codex = "codex"
     claudecode = "claudecode"
-
-
-class HealthCheckItem(BaseModel):
-    name: str
-    ok: bool
-    message: str = ""
-
-
-class HealthCheckResult(BaseModel):
-    ok: bool
-    checks: list[HealthCheckItem] = Field(default_factory=list)
-
-
-# Canonical auth-var name per worker type. Kept in sync with
-# ``cairn.dispatcher.config.WORKER_ENV_KEYS``; the server only needs the
-# *names* to surface warnings, not the worker-side config object.
-CANONICAL_AUTH_ENV: dict[str, str] = {
-    "codex": "OPENAI_API_KEY",
-    "claudecode": "ANTHROPIC_AUTH_TOKEN",
-}
-
-
-def canonical_auth_env(worker_type: str) -> str:
-    return CANONICAL_AUTH_ENV.get(worker_type, "")
-
-
-def auth_env_warning(worker_type: str, api_key_env: str) -> str | None:
-    canonical = canonical_auth_env(worker_type)
-    if canonical is None or not api_key_env:
-        return None
-    if api_key_env.strip() == canonical:
-        return None
-    return (
-        f"auth env var '{api_key_env}' differs from the canonical "
-        f"'{canonical}' for worker_type '{worker_type}'. AI Profile "
-        f"stores the worker runtime env name, so the dispatcher host "
-        f"must also provide '{canonical}' directly."
-    )
-
-
-class AiProfileBase(BaseModel):
-    name: str
-    description: str = ""
-    worker_type: Literal["codex", "claudecode"]
-    provider: str = ""
-    base_url: str = ""
-    model: str
-    api_key_env: str = ""
-    available: bool = True
-    detail: str = ""
-    healthcheck_timeout: float = 1.0
-    model_reasoning_effort: ReasoningType | None = None
-    warnings: list[str] = Field(default_factory=list)
-    # ``seeded_from_worker`` is set when the row was derived from a
-    # ``dispatch.yaml`` worker by the sync endpoint. It is read-only on
-    # the wire: callers cannot override it via POST/PUT.
-    seeded_from_worker: str | None = None
-    last_health_ok: bool | None = None
-    last_health_message: str = ""
-    last_health_at: str | None = None
-    models: list[str] = Field(default_factory=list)
-    # Raw secret. Excluded from JSON responses; the read shape exposes
-    # only ``sk_set`` / ``sk_preview`` so the form can show whether a
-    # key is on file without revealing it. The dispatcher secret
-    # endpoint reads this column directly from the database, never via the
-    # serialized model. ``sk`` stays on the input shape so the Add /
-    # Edit form can populate it.
-    sk: str = Field(default="", exclude=True)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def sk_set(self) -> bool:
-        return bool(self.sk.strip())
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def sk_preview(self) -> str:
-        raw = self.sk.strip()
-        if not raw:
-            return ""
-        if len(raw) <= 4:
-            return "***"
-        return f"***{raw[-4:]}"
-
-    @field_validator("name", "model")
-    @classmethod
-    def validate_required_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-    @field_validator("provider", "base_url", "description", "detail")
-    @classmethod
-    def validate_optional_text(cls, value: str) -> str:
-        return (value or "").strip()
-
-    @field_validator("healthcheck_timeout")
-    @classmethod
-    def validate_healthcheck_timeout(cls, value: float) -> float:
-        if value <= 0 or value > 30.0:
-            raise ValueError("healthcheck_timeout must be in (0, 30] seconds")
-        return float(value)
-
-    @field_validator("models")
-    @classmethod
-    def validate_models(cls, value: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            text = item.strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            cleaned.append(text)
-        return cleaned
-
-
-class AiProfile(AiProfileBase):
-    id: str
-    created_at: str
-    updated_at: str
 
 
 class AiProfileCreate(AiProfileBase):
@@ -250,28 +139,40 @@ class TaskAiProfileSelections(BaseModel):
     reason: AiProfileSelection = Field(default_factory=AiProfileSelection)
 
 
-class ProjectAiProfileSnapshot(BaseModel):
-    profile_id: str
-    task_type: str
+def ai_selections_from_snapshots(
+    snapshots: list[ProjectAiProfileSnapshot],
+) -> TaskAiProfileSelections:
+    by_task = {
+        task_type: [snap for snap in snapshots if snap.task_type == task_type]
+        for task_type in builtin_task_type_names()
+    }
+    return TaskAiProfileSelections(
+        bootstrap=_selection_from_task_snapshots(by_task["bootstrap"]),
+        explore=_selection_from_task_snapshots(by_task["explore"]),
+        reason=_selection_from_task_snapshots(by_task["reason"]),
+    )
 
-    @field_validator("task_type")
-    @classmethod
-    def validate_task_type(cls, value: str) -> str:
-        if not TASK_TYPE_REGISTRY.is_valid(value):
-            raise ValueError(
-                f"unknown task_type: {value!r}; "
-                f"known: {', '.join(TASK_TYPE_REGISTRY.names())}"
-            )
-        return value
-    role: Literal["primary", "fallback"]
-    position: int
-    snapshot_name: str
-    snapshot_worker_type: Literal["codex", "claudecode"]
-    snapshot_provider: str = ""
-    snapshot_base_url: str = ""
-    snapshot_model: str
-    snapshot_reasoning_type: ReasoningType | None = None
-    snapshot_api_key_env: str
+
+def _selection_from_task_snapshots(
+    snapshots: list[ProjectAiProfileSnapshot],
+) -> AiProfileSelection:
+    primary: str | None = None
+    primary_model: str | None = None
+    primary_reasoning_type: ReasoningType | None = None
+    fallback: list[str] = []
+    for snap in snapshots:
+        if snap.role == "primary" and primary is None:
+            primary = snap.profile_id
+            primary_model = snap.snapshot_model
+            primary_reasoning_type = snap.snapshot_reasoning_type
+        elif snap.role == "fallback":
+            fallback.append(snap.profile_id)
+    return AiProfileSelection(
+        primary_profile_id=primary,
+        primary_model=primary_model,
+        primary_reasoning_type=primary_reasoning_type,
+        fallback_profile_ids=fallback,
+    )
 
 
 class ProjectAiProfilesResponse(BaseModel):
@@ -285,51 +186,6 @@ class AiProfileWithHealth(AiProfile):
     """An ``AiProfile`` plus the health check that produced its state."""
 
     health: HealthCheckResult | None = None
-
-
-class AiProfileSyncRequest(BaseModel):
-    """Body for ``POST /ai-profiles/sync``.
-
-    The dispatcher sends its ``workers[*].env`` already translated: model
-    and base_url come from the canonical env var names, ``api_key_env``
-    is the *name* of the auth env var (not its value).
-    """
-
-    workers: list["AiProfileSyncWorker"]
-
-
-class AiProfileSyncWorker(BaseModel):
-    name: str
-    # ``worker_type`` is intentionally ``str`` here: the router filters
-    # down to the supported set (``codex`` / ``claudecode``) and drops
-    # anything else with a debug log. This keeps the wire format loose
-    # so a future ``pi`` / ``mock`` rollout does not require a schema
-    # change in lock-step with the dispatcher.
-    worker_type: str
-    model: str
-    base_url: str = ""
-    api_key_env: str
-    provider: str = ""
-    models: list[str] = Field(default_factory=list)
-    model_reasoning_effort: ReasoningType | None = None
-    # Resolved secret the dispatcher already pulled out of its host
-    # env at sync time. Optional: a missing value means "leave whatever
-    # the operator already has in the DB", so re-syncs never wipe a
-    # value the operator typed into the Add/Edit form.
-    sk: str | None = Field(default=None, exclude=True)
-
-    @field_validator("models")
-    @classmethod
-    def validate_models(cls, value: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            text = item.strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            cleaned.append(text)
-        return cleaned
 
 
 class AiProfileHealthReport(BaseModel):

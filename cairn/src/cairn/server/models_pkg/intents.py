@@ -21,6 +21,7 @@ from cairn.server.models_pkg.projects import (
     ProjectMeta,
     normalize_llm_event_kinds,
 )
+from cairn.shared.protocol_models import ReasonState
 
 class CreateProjectRequest(BaseModel):
     model_config = {"extra": "forbid"}
@@ -178,20 +179,6 @@ class ReasonFinishRequest(BaseModel):
         if value is None:
             return None
         return value.strip()
-
-
-class ReasonState(BaseModel):
-    project_id: str
-    trigger: str
-    trigger_hash: str
-    fact_count: int
-    hint_count: int
-    open_intent_count: int
-    outcome: str
-    failure_count: int
-    last_error: str
-    next_retry_at: str | None = None
-    updated_at: str
 
 
 class ConcludeRequest(BaseModel):

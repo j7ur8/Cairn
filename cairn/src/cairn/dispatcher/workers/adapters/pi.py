@@ -4,7 +4,7 @@ import json
 from pathlib import PurePosixPath
 from typing import Any
 
-from cairn.dispatcher.config import WorkerConfig
+from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.workers.base import DriverResult, WorkerDriver, WorkerExecutionContext
 
 

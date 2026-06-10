@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cairn.dispatcher.config import DispatchConfig, RoleConfig, TaskType
+from cairn.shared.dispatch_config import DispatchConfig, RoleConfig, TaskType
 
 
 @dataclass(slots=True)

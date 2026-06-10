@@ -11,7 +11,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class ClaudeCodeDriverCommandTests(unittest.TestCase):
     def _worker(self):
-        from cairn.dispatcher.config import WorkerConfig
+        from cairn.shared.dispatch_config import WorkerConfig
         return WorkerConfig(
             name="claude",
             type="claudecode",
@@ -112,7 +112,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
 
 class CodexDriverCommandTests(unittest.TestCase):
     def _worker(self):
-        from cairn.dispatcher.config import WorkerConfig
+        from cairn.shared.dispatch_config import WorkerConfig
         return WorkerConfig(
             name="codex",
             type="codex",
@@ -182,7 +182,7 @@ class CodexDriverCommandTests(unittest.TestCase):
                 "id": "kali",
                 "transport": "http",
                 "url": "https://example.test/mcp",
-                "bearer_token_env": "MCP_TOKEN",
+                "headers": {"Authorization": "Bearer tk-1"},
             }],
         )
         argv = CodexDriver().build_conclude(
@@ -195,7 +195,7 @@ class CodexDriverCommandTests(unittest.TestCase):
         self.assertNotIn("--add-dir", argv)
         self.assertNotIn("/tmp/cairn-capabilities/proj/skills", argv)
         self.assertIn('mcp_servers.kali.url="https://example.test/mcp"', joined)
-        self.assertIn('mcp_servers.kali.bearer_token_env_var="MCP_TOKEN"', joined)
+        self.assertIn('mcp_servers.kali.headers.Authorization="Bearer tk-1"', joined)
 
     def test_build_execute_keeps_add_dir_for_skill_access(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver

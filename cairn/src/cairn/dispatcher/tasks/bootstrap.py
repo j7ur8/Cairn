@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.capabilities import inject_project_capabilities
 from cairn.dispatcher.roles import inject_project_role
 from cairn.dispatcher.contracts import (
@@ -32,10 +32,11 @@ from cairn.dispatcher.tasks.common import (
 from cairn.dispatcher.tasks.runner import (
     capability_manifest_payload,
     project_capability_data,
+    project_execution_config,
     project_role_data,
 )
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import Intent, ProjectDetail
+from cairn.shared.protocol_models import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -129,7 +130,8 @@ def run_bootstrap_task(
             reporter.emit_error("bootstrap_healthcheck", "error", healthcheck.result.stderr)
             return outcome
 
-        capability_data = project_capability_data(client, project.project.id, reporter, "bootstrap_start")
+        execution_config = project_execution_config(client, project.project.id, "bootstrap", reporter, "bootstrap_start")
+        capability_data = project_capability_data(execution_config)
         reporter.emit_capability_manifest(
             "bootstrap_start",
             capability_manifest_payload(project.project.id, "bootstrap", capability_data),
@@ -152,7 +154,7 @@ def run_bootstrap_task(
         role = inject_project_role(
             project.project.id,
             "bootstrap",
-            project_role_data(client, project.project.id, reporter, "bootstrap"),
+            project_role_data(execution_config),
         )
         if role.summary:
             reporter.emit_result("role", role.summary)

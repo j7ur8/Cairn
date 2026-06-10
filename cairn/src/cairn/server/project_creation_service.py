@@ -6,29 +6,27 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
-from cairn.server.capabilities_service import (
-    expand_task_capabilities,
-    get_catalog_map,
-    persist_project_capabilities_per_task,
-    persist_probe_result,
-    probe_per_task,
-    selected_capabilities_to_internal,
-    sync_catalog_from_yaml,
-)
-from cairn.server.models import Fact, Hint, ProjectDetail, ProjectMeta, ProxySummary
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
 from cairn.server.models_pkg.capabilities import (
     TaskCapabilitiesMap,
     TaskCapabilitySelectionMap,
 )
-from cairn.server.models_pkg.projects import CreateHintInline, hidden_kinds_from_visible
+from cairn.server.models_pkg.projects import (
+    CreateHintInline,
+    Fact,
+    Hint,
+    ProjectDetail,
+    ProjectMeta,
+    hidden_kinds_from_visible,
+)
+from cairn.server.models_pkg.proxies import ProxySummary
 from cairn.server.ai_profile_service import (
-    persist_project_ai_selections,
     require_complete_ai_profile_selections,
 )
+from cairn.server.repositories import sql
 from cairn.server.services import next_hint_id, next_project_id, utcnow
 from cairn.server.execution_config_service import persist_worker_execution_configs
-from cairn.server.yaml_config import get_yaml_proxy, get_yaml_role_snapshot
+from cairn.server.config.proxies import get_yaml_proxy
 
 
 @dataclass(slots=True)
@@ -80,70 +78,73 @@ def create_project_from_draft(
         )
 
     try:
-        conn.execute(
+        sql.execute(
+            conn,
             """
             INSERT INTO projects (
                 id, title, status, created_at, proxy_id, llm_hidden_event_kinds
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                :id, :title, :status, :created_at, :proxy_id, :llm_hidden_event_kinds
+            )
             """,
-            (
-                pid,
-                draft.title,
-                draft.status,
-                now,
-                draft.proxy_id,
-                json.dumps(hidden_event_kinds, ensure_ascii=False),
-            ),
+            {
+                "id": pid,
+                "title": draft.title,
+                "status": draft.status,
+                "created_at": now,
+                "proxy_id": draft.proxy_id,
+                "llm_hidden_event_kinds": json.dumps(hidden_event_kinds, ensure_ascii=False),
+            },
         )
     except Exception as exc:
         raise HTTPException(400, f"invalid project create request: {exc}") from exc
 
-    conn.execute(
-        "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-        ("origin", pid, draft.origin),
+    sql.execute(
+        conn,
+        """
+        INSERT INTO facts (id, project_id, description)
+        VALUES (:id, :project_id, :description)
+        """,
+        {"id": "origin", "project_id": pid, "description": draft.origin},
     )
-    conn.execute(
-        "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-        ("goal", pid, draft.goal),
+    sql.execute(
+        conn,
+        """
+        INSERT INTO facts (id, project_id, description)
+        VALUES (:id, :project_id, :description)
+        """,
+        {"id": "goal", "project_id": pid, "description": draft.goal},
     )
 
     hints: list[Hint] = []
     for hint in draft.hints or []:
         hid = next_hint_id(conn, pid)
-        conn.execute(
-            "INSERT INTO hints (id, project_id, content, creator, created_at) VALUES (?, ?, ?, ?, ?)",
-            (hid, pid, hint.content, hint.creator, now),
+        sql.execute(
+            conn,
+            """
+            INSERT INTO hints (id, project_id, content, creator, created_at)
+            VALUES (:id, :project_id, :content, :creator, :created_at)
+            """,
+            {
+                "id": hid,
+                "project_id": pid,
+                "content": hint.content,
+                "creator": hint.creator,
+                "created_at": now,
+            },
         )
         hints.append(Hint(id=hid, content=hint.content, creator=hint.creator, created_at=now))
 
-    role = _load_role(conn, draft.role_id)
-    role_default_skill_ids = _role_default_skill_ids(role)
-    selected_per_task = (
-        draft.capability_snapshots
-        if draft.capability_snapshots is not None
-        else selected_capabilities_to_internal(draft.capabilities)
-    )
-    sync_catalog_from_yaml(conn)
-    catalog_map = get_catalog_map(conn)
-    expanded_per_task, _expand_warnings = expand_task_capabilities(
-        selected_per_task,
-        catalog_map,
-        role_default_skill_ids=role_default_skill_ids,
-    )
-    persist_project_capabilities_per_task(conn, pid, expanded_per_task, now)
-    health_per_task = probe_per_task(conn, expanded_per_task, catalog_map)
-    persist_probe_result(conn, health_per_task)
-
-    if role is not None:
-        _insert_role_snapshot(conn, pid, role, now)
-
-    persist_project_ai_selections(
+    ai_profiles = require_complete_ai_profile_selections(draft.ai_profiles)
+    persist_worker_execution_configs(
         conn,
         pid,
-        require_complete_ai_profile_selections(draft.ai_profiles),
-        now,
+        proxy_id=draft.proxy_id,
+        capabilities=draft.capabilities,
+        ai_profiles=ai_profiles,
+        role_id=draft.role_id,
+        now=now,
     )
-    persist_worker_execution_configs(conn, pid, proxy_id=draft.proxy_id, now=now)
 
     return ProjectDetail(
         project=ProjectMeta(
@@ -174,35 +175,4 @@ def proxy_summary_from_row(row: Any) -> ProxySummary:
         has_auth=bool(row["username"] or row["password"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-    )
-
-
-def _load_role(conn: Any, role_id: str | None) -> Any | None:
-    if not role_id:
-        return None
-    role = get_yaml_role_snapshot(role_id)
-    if role is None:
-        raise HTTPException(404, f"Role {role_id} not found or unavailable")
-    return role
-
-
-def _role_default_skill_ids(role: Any | None) -> list[str]:
-    if role is None:
-        return []
-    return [str(item).strip() for item in role["default_skill_ids"] if str(item).strip()]
-
-
-def _insert_role_snapshot(
-    conn: Any,
-    project_id: str,
-    role: Any,
-    now: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO project_roles (
-            project_id, role_id, role_name, role_prompt, role_prompt_sha256, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (project_id, role["id"], role["name"], role["prompt"], role["prompt_sha256"], now),
     )

@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from cairn.server.db import get_conn, with_immediate_tx
+from cairn.server import db
+from cairn.server.repositories import sql
 
 router = APIRouter(prefix="/dispatcher-lock", tags=["dispatcher-lock"])
 
@@ -45,15 +46,20 @@ class DispatcherLockResponse(BaseModel):
 @router.post("/acquire", response_model=DispatcherLockResponse)
 def acquire(body: DispatcherLockAcquireRequest) -> DispatcherLockResponse:
     now = _utcnow()
-    with with_immediate_tx() as conn:
-        row = conn.execute(
-            "SELECT holder, heartbeat_at FROM dispatcher_locks WHERE name = ?",
-            (body.name,),
-        ).fetchone()
+    with db.session_scope() as conn:
+        row = sql.fetchone(
+            conn,
+            "SELECT holder, heartbeat_at FROM dispatcher_locks WHERE name = :name",
+            {"name": body.name},
+        )
         if row is None:
-            conn.execute(
-                "INSERT INTO dispatcher_locks (name, holder, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?)",
-                (body.name, body.holder, now, now),
+            sql.execute(
+                conn,
+                """
+                INSERT INTO dispatcher_locks (name, holder, acquired_at, heartbeat_at)
+                VALUES (:name, :holder, :acquired_at, :heartbeat_at)
+                """,
+                {"name": body.name, "holder": body.holder, "acquired_at": now, "heartbeat_at": now},
             )
             return DispatcherLockResponse(
                 name=body.name,
@@ -64,9 +70,14 @@ def acquire(body: DispatcherLockAcquireRequest) -> DispatcherLockResponse:
             )
         current_holder = row["holder"]
         if current_holder == body.holder:
-            conn.execute(
-                "UPDATE dispatcher_locks SET heartbeat_at = ? WHERE name = ? AND holder = ?",
-                (now, body.name, body.holder),
+            sql.execute(
+                conn,
+                """
+                UPDATE dispatcher_locks
+                SET heartbeat_at = :heartbeat_at
+                WHERE name = :name AND holder = :holder
+                """,
+                {"heartbeat_at": now, "name": body.name, "holder": body.holder},
             )
             return DispatcherLockResponse(
                 name=body.name,
@@ -77,9 +88,14 @@ def acquire(body: DispatcherLockAcquireRequest) -> DispatcherLockResponse:
             )
         heartbeat_at = _parse_iso(row["heartbeat_at"])
         if time.time() - heartbeat_at > body.ttl_seconds:
-            conn.execute(
-                "UPDATE dispatcher_locks SET holder = ?, acquired_at = ?, heartbeat_at = ? WHERE name = ?",
-                (body.holder, now, now, body.name),
+            sql.execute(
+                conn,
+                """
+                UPDATE dispatcher_locks
+                SET holder = :holder, acquired_at = :acquired_at, heartbeat_at = :heartbeat_at
+                WHERE name = :name
+                """,
+                {"holder": body.holder, "acquired_at": now, "heartbeat_at": now, "name": body.name},
             )
             return DispatcherLockResponse(
                 name=body.name,
@@ -100,10 +116,15 @@ def acquire(body: DispatcherLockAcquireRequest) -> DispatcherLockResponse:
 @router.post("/heartbeat", response_model=DispatcherLockResponse)
 def heartbeat(body: DispatcherLockRequest) -> DispatcherLockResponse:
     now = _utcnow()
-    with with_immediate_tx() as conn:
-        cur = conn.execute(
-            "UPDATE dispatcher_locks SET heartbeat_at = ? WHERE name = ? AND holder = ?",
-            (now, body.name, body.holder),
+    with db.session_scope() as conn:
+        cur = sql.execute(
+            conn,
+            """
+            UPDATE dispatcher_locks
+            SET heartbeat_at = :heartbeat_at
+            WHERE name = :name AND holder = :holder
+            """,
+            {"heartbeat_at": now, "name": body.name, "holder": body.holder},
         )
     held = cur.rowcount == 1
     return DispatcherLockResponse(
@@ -116,10 +137,11 @@ def heartbeat(body: DispatcherLockRequest) -> DispatcherLockResponse:
 
 @router.post("/release", response_model=DispatcherLockResponse)
 def release(body: DispatcherLockRequest) -> DispatcherLockResponse:
-    with with_immediate_tx() as conn:
-        cur = conn.execute(
-            "DELETE FROM dispatcher_locks WHERE name = ? AND holder = ?",
-            (body.name, body.holder),
+    with db.session_scope() as conn:
+        cur = sql.execute(
+            conn,
+            "DELETE FROM dispatcher_locks WHERE name = :name AND holder = :holder",
+            {"name": body.name, "holder": body.holder},
         )
     return DispatcherLockResponse(
         name=body.name,
@@ -130,11 +152,12 @@ def release(body: DispatcherLockRequest) -> DispatcherLockResponse:
 
 @router.get("/current", response_model=DispatcherLockResponse)
 def current(name: str = "dispatcher") -> DispatcherLockResponse:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT holder, heartbeat_at FROM dispatcher_locks WHERE name = ?",
-            (name,),
-        ).fetchone()
+    with db.session_scope() as conn:
+        row = sql.fetchone(
+            conn,
+            "SELECT holder, heartbeat_at FROM dispatcher_locks WHERE name = :name",
+            {"name": name},
+        )
     if row is None:
         return DispatcherLockResponse(name=name)
     return DispatcherLockResponse(

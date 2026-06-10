@@ -27,7 +27,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from cairn.server.models import ProjectAiProfileSnapshot, ProxyConfig
+from cairn.shared.protocol_models import ProjectAiProfileSnapshot
+from cairn.shared.protocol_models import ProxyConfig
 
 
 class ProjectCaches:

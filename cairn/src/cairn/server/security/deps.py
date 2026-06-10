@@ -2,7 +2,7 @@
 
 The pattern matches the rest of Cairn: synchronous repository calls, the
 ``current_user`` dependency reads the ``Authorization: Bearer ...`` header,
-verifies the JWT against ``CAIRN_JWT_SECRET``, looks up the user in
+verifies the JWT against ``dispatch.yaml`` ``system.auth.jwt_secret``, looks up the user in
 PostgreSQL, and returns the public view. Active-user enforcement is the
 default; ``current_active_superuser`` adds the superuser check.
 
@@ -46,7 +46,7 @@ def _credentials_to_user(
     sub = claims.get("sub")
     if not sub:
         return None
-    # Service-account tokens (e.g. the dispatcher's CAIRN_API_TOKEN) are
+    # Service-account tokens (e.g. the dispatcher's configured API token) are
     # identified by a "role" claim of "service". They do not correspond
     # to a row in the users table, but they are still valid callers and
     # are represented as a synthetic superuser-equivalent user for the

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 import json
-import os
 import re
 from importlib import resources
 from pathlib import Path
@@ -11,7 +10,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
-from cairn.server.task_types import TASK_TYPE_REGISTRY, is_known_task_type
+from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names, is_known_task_type
 
 
 def _check_known_task_types(value: list[str]) -> list[str]:
@@ -309,27 +308,23 @@ class McpServerCapabilityConfig(BaseModel):
 
     Two transports are supported:
 
-    - ``stdio`` (default, back-compat): the MCP server runs as a local subprocess
+    - ``stdio``: the MCP server runs as a local subprocess
       inside the worker container, addressed by ``command`` / ``args`` / ``env``.
     - ``http``: the agent connects to a remote MCP server over HTTP. The server
       is typically reached via ``host.docker.internal`` (macOS/Windows Docker
       Desktop) or a user-defined alias (Linux Docker Engine: ``--add-host``).
-      Auth is bearer-token-in-env (``bearer_token_env`` names an env var that
-      must be set in ``os.environ`` at ``DispatchConfig.load()`` time and is
-      passed through to the worker container so Codex / Claude can resolve it
-      at call time).
+      Auth is configured directly in ``headers``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     name: str
-    transport: Literal["stdio", "http"] = "stdio"
+    transport: Literal["stdio", "http"]
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
-    bearer_token_env: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     healthcheck_timeout: float = Field(default=1.0, gt=0, le=30)
     source_path: str | None = None
@@ -351,7 +346,7 @@ class McpServerCapabilityConfig(BaseModel):
     use_when: list[str] = Field(default_factory=list)
     activation_hint: str = ""
 
-    @field_validator("id", "name", "command", "source_path", "url", "bearer_token_env")
+    @field_validator("id", "name", "command", "source_path", "url")
     @classmethod
     def validate_required_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -382,18 +377,9 @@ class McpServerCapabilityConfig(BaseModel):
                 raise ValueError(
                     f"mcp_server {self.id}: http transport requires 'url'"
                 )
-            if self.bearer_token_env and self.bearer_token_env not in os.environ:
-                raise ValueError(
-                    f"mcp_server {self.id}: bearer_token_env references ${self.bearer_token_env} "
-                    f"but that env var is not set in the dispatcher process"
-                )
         else:
             raise ValueError(
                 f"mcp_server {self.id}: transport must be 'stdio' or 'http', got {self.transport!r}"
-            )
-        if self.transport != "http" and self.bearer_token_env is not None:
-            raise ValueError(
-                f"mcp_server {self.id}: bearer_token_env is only valid for http transport"
             )
         return self
 
@@ -447,7 +433,7 @@ class SkillCapabilityConfig(BaseModel):
     id: str
     name: str
     source_path: str
-    task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore", "reason"])
+    task_types: list[TaskType] = Field(default_factory=lambda: list(builtin_task_type_names()))
     description: str = ""
     use_when: list[str] = Field(default_factory=list)
     preferred_mcp_ids: list[str] = Field(default_factory=list)
@@ -560,7 +546,7 @@ class RoleConfig(BaseModel):
 
     id: str
     name: str
-    task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore", "reason"])
+    task_types: list[TaskType] = Field(default_factory=lambda: list(builtin_task_type_names()))
     description: str = ""
     prompt: str | None = None
     source_path: str | None = None
@@ -685,6 +671,113 @@ class RuntimeConfig(BaseModel):
     prompt_group: str = Field(min_length=1)
 
 
+class SystemDatabaseConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    pool_size: int = Field(default=5, gt=0)
+    max_overflow: int = Field(default=10, ge=0)
+    pool_timeout: float = Field(default=30, gt=0)
+
+    @field_validator("url")
+    @classmethod
+    def validate_postgresql_url(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("database.url must not be empty")
+        if not text.startswith(("postgresql://", "postgresql+")):
+            raise ValueError("database.url must be a PostgreSQL URL")
+        return text
+
+
+class SystemAuthConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jwt_secret: str
+    dispatcher_api_token: str = ""
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("auth.jwt_secret must not be empty")
+        return text
+
+
+class SystemInitialAdminConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = ""
+    password: str = ""
+
+
+class SystemPathsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    datas_root: str
+    attachments_root: str | None = None
+    project_files_root: str | None = None
+    worker_attachments_root: str = "/mnt/attachments"
+
+    @field_validator("datas_root", "attachments_root", "project_files_root", "worker_attachments_root")
+    @classmethod
+    def validate_path_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("path values must not be empty")
+        return text
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_attachments_root(self) -> str:
+        return self.attachments_root or str(Path(self.datas_root) / "attachments")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_project_files_root(self) -> str:
+        return self.project_files_root or str(Path(self.datas_root) / "project-files")
+
+
+class SystemDispatcherConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reload_url: str = "http://cairn-dispatcher:9100/reload"
+    reload_enabled: bool = True
+    health_addr: str = "127.0.0.1:9100"
+    leader_ttl_seconds: float = Field(default=15, gt=0)
+
+
+class SystemServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
+    retention_loop_enabled: bool = True
+    retention_interval_seconds: int = Field(default=6 * 60 * 60, ge=60)
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        text = value.strip().upper()
+        if not text:
+            raise ValueError("server.log_level must not be empty")
+        return text
+
+
+class SystemConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    database: SystemDatabaseConfig
+    auth: SystemAuthConfig
+    initial_admin: SystemInitialAdminConfig = Field(default_factory=SystemInitialAdminConfig)
+    paths: SystemPathsConfig
+    dispatcher: SystemDispatcherConfig = Field(default_factory=SystemDispatcherConfig)
+    server: SystemServerConfig = Field(default_factory=SystemServerConfig)
+
+
 class WorkerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -748,6 +841,7 @@ class WorkerConfig(BaseModel):
 class DispatchConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    system: SystemConfig
     server: str
     server_settings: dict[str, Any] = Field(default_factory=dict)
     proxies: list[dict[str, Any]] = Field(default_factory=list)
@@ -822,22 +916,15 @@ class DispatchConfig(BaseModel):
     @classmethod
     def load(cls, path: Path) -> "DispatchConfig":
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        sidecar = path.with_name(f"{path.stem}.capabilities{path.suffix}")
-        if sidecar.exists():
-            sidecar_data = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
-            if isinstance(sidecar_data, dict):
-                merged = dict(data)
-                # These sections are operational capability / role /
-                # remote-support catalog data, not worker runtime data.
-                # Keeping them in a sidecar lets dispatch.yaml stay
-                # focused on scheduler/runtime/worker definitions while
-                # preserving backwards compatibility with the historic
-                # single-file shape.
-                for key in ("remote_support", "capabilities", "roles"):
-                    if key in sidecar_data:
-                        merged[key] = sidecar_data[key]
-                data = merged
-        data = _interpolate_env_data(data, str(path))
+        capabilities_path = path.with_name("dispatch.capabilities.yaml")
+        capabilities_data = yaml.safe_load(capabilities_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(capabilities_data, dict):
+            raise ValueError(f"capabilities config must be a mapping: {capabilities_path}")
+        merged = dict(data)
+        for key in ("remote_support", "capabilities", "roles"):
+            if key in capabilities_data:
+                merged[key] = capabilities_data[key]
+        data = merged
         data = prepare_bind_mount_data(data, path.parent)
         data = prepare_capability_data(data, path.parent)
         data = prepare_role_data(data, path.parent)
@@ -1150,60 +1237,3 @@ def _parse_mock_probability(worker_name: str, phase_key: str, outcomes: dict[str
     if value < 0 or value > 1:
         raise ValueError(f"worker {worker_name} {phase_key}.outcomes.{outcome} must be between 0 and 1")
     return value
-
-
-_ENV_VAR_RE = re.compile(
-    r"\$\{(?P<name>[A-Z_][A-Z0-9_]*)(?:(?P<colon>:)?-(?P<default>[^}]*))?\}"
-)
-
-
-def _interpolate_env_string(value: str, source: str) -> str:
-    def replace(match):
-        name = match.group("name")
-        colon = match.group("colon")
-        default = match.group("default")
-        env_value = os.environ.get(name)
-
-        if colon == ":":
-            # ${VAR:-default}: default if env is unset OR empty (bash :- semantics)
-            if env_value is None or env_value == "":
-                if default is None:
-                    raise ValueError(
-                        f"{source} references ${{{name}:-}} but env var is unset or empty"
-                    )
-                return default
-            return env_value
-        if default is not None:
-            # ${VAR-default}: default only if env is unset; empty stays empty (bash - semantics)
-            if env_value is None:
-                return default
-            return env_value
-        # ${VAR}: required, error if unset
-        if env_value is None:
-            raise ValueError(
-                f"{source} references ${{{name}}} but environment variable is not set"
-            )
-        return env_value
-    return _ENV_VAR_RE.sub(replace, value)
-
-
-# Keys that store an env var NAME (not a value). ${ENV_VAR} interpolation is
-# intentionally skipped for these so the literal name reaches the schema, and
-# the value is resolved at use time (e.g. when injecting into worker env or
-# emitting mcp_servers.<id>.bearer_token_env_var).
-_INTERPOLATION_SKIP_KEYS = frozenset({"bearer_token_env"})
-
-
-def _interpolate_env_data(data, source):
-    if isinstance(data, dict):
-        return {
-            key: data[key] if key in _INTERPOLATION_SKIP_KEYS else _interpolate_env_data(
-                item, f"{source}.{key}" if source else str(key),
-            )
-            for key, item in data.items()
-        }
-    if isinstance(data, list):
-        return [_interpolate_env_data(item, f"{source}[{index}]") for index, item in enumerate(data)]
-    if isinstance(data, str):
-        return _interpolate_env_string(data, source)
-    return data

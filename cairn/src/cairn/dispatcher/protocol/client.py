@@ -8,16 +8,12 @@ import threading
 from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
-from tenacity import retry, retry_if_exception_type, stop_after_attempt
-try:
-    from tenacity import wait_exponential_jitter
-except ImportError:  # pragma: no cover - compatibility for older tenacity
-    from tenacity import wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
-    def wait_exponential_jitter(*, initial: float, max: float):
-        return wait_exponential(multiplier=initial, max=max)
-
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, ProxyConfig, ReasonState, Settings
+from cairn.shared.protocol_models import Settings
+from cairn.shared.protocol_models import ReasonState
+from cairn.shared.protocol_models import Intent, ProjectDetail, ProjectSummary
+from cairn.shared.protocol_models import ProxyConfig
 
 LOG = logging.getLogger(__name__)
 
@@ -50,11 +46,7 @@ class CairnClient:
     ):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        # Bearer token for outbound requests. Reads CAIRN_API_TOKEN when
-        # not passed explicitly so the dispatcher process does not need
-        # extra wiring - just set the env var.
-        import os
-        self._api_token = api_token if api_token is not None else os.environ.get("CAIRN_API_TOKEN", "")
+        self._api_token = api_token or ""
         self._summary_adapter = TypeAdapter(list[ProjectSummary])
         self._local = threading.local()
         self._sessions: dict[int, requests.Session] = {}
@@ -238,17 +230,11 @@ class CairnClient:
             json={},
         )
 
-    def get_project_capabilities(self, project_id: str) -> ApiResult:
-        return self._get_json_result(f"/projects/{project_id}/capabilities")
-
-    def get_project_ai_profiles(self, project_id: str) -> ApiResult:
-        return self._get_json_result(f"/projects/{project_id}/ai-profiles")
+    def get_project_execution_config(self, project_id: str, task_type: str) -> ApiResult:
+        return self._get_json_result(f"/projects/{project_id}/execution-configs/{task_type}")
 
     def list_ai_profiles(self) -> ApiResult:
         return self._get_json_result("/ai-profiles")
-
-    def sync_ai_profiles(self, body: dict[str, Any]) -> ApiResult:
-        return self._request_json("POST", "/ai-profiles/sync", json=body)
 
     def post_ai_health_report(self, body: dict[str, Any]) -> ApiResult:
         return self._request_json("POST", "/ai-profiles/health-report", json=body)
@@ -268,20 +254,6 @@ class CairnClient:
 
     def get_project_role(self, project_id: str) -> ApiResult:
         return self._get_json_result(f"/projects/{project_id}/role")
-
-    def register_capability_catalog(self, catalog: list[dict[str, Any]]) -> ApiResult:
-        return self._request_json(
-            "POST",
-            "/capabilities/catalog",
-            json={"catalog": catalog},
-        )
-
-    def register_role_catalog(self, roles: list[dict[str, Any]]) -> ApiResult:
-        return self._request_json(
-            "POST",
-            "/roles/catalog",
-            json={"roles": roles},
-        )
 
     def dispatcher_lock_acquire(self, name: str, holder: str, ttl_seconds: float) -> ApiResult:
         return self._request_json(

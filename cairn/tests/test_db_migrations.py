@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,12 +14,11 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 
 class DbMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".pgtest", delete=False)
-        self.tmp.close()
         from cairn.server import db
 
         db.reset_for_tests()
-        db.configure(Path(self.tmp.name), run_migrations=False)
+        from cairn.server.runtime_config import system_config
+        db.configure(system_config().database.url, run_migrations=False)
         db.drop_all_for_tests()
         db.upgrade_head()
         db.seed_defaults()
@@ -28,13 +26,14 @@ class DbMigrationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.db.reset_for_tests()
-        if os.path.exists(self.tmp.name):
-            os.unlink(self.tmp.name)
 
     def test_alembic_version_records_head(self) -> None:
-        with self.db.get_conn() as conn:
-            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        self.assertEqual(row["version_num"], "0003_worker_execution_configs")
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
+            assert row is not None
+        self.assertEqual(row["version_num"], "0004_remove_legacy_tables")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -44,25 +43,30 @@ class DbMigrationTests(unittest.TestCase):
             "idx_intents_project_goal_once",
             "idx_intents_project_fact_once",
             "idx_intent_sources_project_fact",
-            "idx_project_capabilities_project_kind",
             "idx_replay_steps_run_status",
             "idx_project_reason_state_retry",
             "idx_worker_execution_configs_project_task",
         }
-        with self.db.get_conn() as conn:
-            rows = conn.execute(
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            rows = sql.fetchall(
+                conn,
                 """
                 SELECT indexname AS name
                 FROM pg_indexes
                 WHERE schemaname = 'public'
                 """
-            ).fetchall()
+            )
         names = {row["name"] for row in rows}
         self.assertTrue(expected.issubset(names), expected - names)
 
     def test_required_defaults_are_in_schema(self) -> None:
-        with self.db.get_conn() as conn:
-            rows = conn.execute(
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            rows = sql.fetchall(
+                conn,
                 """
                 SELECT table_name, column_name, column_default
                 FROM information_schema.columns
@@ -72,7 +76,7 @@ class DbMigrationTests(unittest.TestCase):
                     ('ai_profile_check_requests', 'error_message')
                   )
                 """
-            ).fetchall()
+            )
         defaults = {(row["table_name"], row["column_name"]): row["column_default"] for row in rows}
         self.assertIn("0", defaults[("intent_sources", "position")])
         self.assertIn("''", defaults[("ai_profile_check_requests", "error_message")])

@@ -1,25 +1,15 @@
-"""Retention sweep for LLM execution observability data.
-
-A single ``prune_older_than`` helper is wrapped by an async loop
-that the FastAPI lifespan starts in ``cairn serve`` mode. The loop
-runs every :data:`DEFAULT_RETENTION_INTERVAL_SECONDS` seconds and
-trims rows from ``llm_executions`` (and their child
-``llm_execution_events``) older than the configured cutoff.
-
-The CLI (``cairn dispatch`` etc.) does *not* start the loop -
-operators using the CLI manage retention externally (cron + the
-exposed helper) to avoid background threads in short-lived
-processes.
-"""
+"""Retention sweep for LLM execution observability data."""
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from cairn.server.observability import db as observability_db
+import yaml
+
+from cairn.server import db
+from cairn.server.repositories import sql
 
 
 LOG = logging.getLogger(__name__)
@@ -29,51 +19,34 @@ DEFAULT_RETENTION_INTERVAL_SECONDS = 6 * 60 * 60  # 6 hours
 
 
 def retention_hours() -> int:
-    """Resolve the retention window from env, falling back to the default."""
-    raw = os.environ.get("OBSERVABILITY_RETENTION_HOURS")
-    if not raw:
+    """Resolve the retention window from dispatch.yaml observability settings."""
+    from cairn.server.runtime_config import dispatch_config_path
+
+    path = dispatch_config_path()
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    observability = data.get("observability") if isinstance(data, dict) else None
+    raw = observability.get("retention_days") if isinstance(observability, dict) else None
+    if raw is None:
         return DEFAULT_RETENTION_HOURS
     try:
-        value = int(raw)
-    except ValueError:
+        days = int(raw)
+    except (TypeError, ValueError):
         LOG.warning(
-            "OBSERVABILITY_RETENTION_HOURS=%r is not an int; using default %s",
+            "observability.retention_days=%r is not an int in %s; using default %s",
             raw,
+            path,
             DEFAULT_RETENTION_HOURS,
         )
         return DEFAULT_RETENTION_HOURS
-    if value <= 0:
+    if days <= 0:
         LOG.warning(
-            "OBSERVABILITY_RETENTION_HOURS=%r must be > 0; using default %s",
+            "observability.retention_days=%r must be > 0 in %s; using default %s",
             raw,
+            path,
             DEFAULT_RETENTION_HOURS,
         )
         return DEFAULT_RETENTION_HOURS
-    return value
-
-
-def retention_interval_seconds() -> int:
-    raw = os.environ.get("OBSERVABILITY_RETENTION_INTERVAL_SECONDS")
-    if not raw:
-        return DEFAULT_RETENTION_INTERVAL_SECONDS
-    try:
-        value = int(raw)
-    except ValueError:
-        LOG.warning(
-            "OBSERVABILITY_RETENTION_INTERVAL_SECONDS=%r is not an int; using default %s",
-            raw,
-            DEFAULT_RETENTION_INTERVAL_SECONDS,
-        )
-        return DEFAULT_RETENTION_INTERVAL_SECONDS
-    if value < 60:
-        # Guard against typos like "6" being interpreted as 6s.
-        LOG.warning(
-            "OBSERVABILITY_RETENTION_INTERVAL_SECONDS=%r too small (<60s); using default %s",
-            raw,
-            DEFAULT_RETENTION_INTERVAL_SECONDS,
-        )
-        return DEFAULT_RETENTION_INTERVAL_SECONDS
-    return value
+    return days * 24
 
 
 def _cutoff_iso(hours: int) -> str:
@@ -82,24 +55,23 @@ def _cutoff_iso(hours: int) -> str:
 
 
 def prune_older_than(conn: Any, cutoff_iso: str) -> int:
-    """Delete executions older than ``cutoff_iso`` and return the count.
-
-    Kept for backward compat with prior tests / cron scripts. The
-    background loop calls :func:`run_sweep` instead.
-    """
-    rows = conn.execute(
-        "SELECT id FROM llm_executions WHERE started_at < ?",
-        (cutoff_iso,),
-    ).fetchall()
+    """Delete executions older than ``cutoff_iso`` and return the count."""
+    rows = sql.fetchall(
+        conn,
+        "SELECT id FROM llm_executions WHERE started_at < :cutoff",
+        {"cutoff": cutoff_iso},
+    )
     execution_ids = [row["id"] for row in rows]
     for execution_id in execution_ids:
-        conn.execute(
-            "DELETE FROM llm_execution_events WHERE execution_id = ?",
-            (execution_id,),
+        sql.execute(
+            conn,
+            "DELETE FROM llm_execution_events WHERE execution_id = :execution_id",
+            {"execution_id": execution_id},
         )
-    cur = conn.execute(
-        "DELETE FROM llm_executions WHERE started_at < ?",
-        (cutoff_iso,),
+    cur = sql.execute(
+        conn,
+        "DELETE FROM llm_executions WHERE started_at < :cutoff",
+        {"cutoff": cutoff_iso},
     )
     return cur.rowcount
 
@@ -112,7 +84,7 @@ def run_sweep(hours: int | None = None) -> int:
     """
     window = hours if hours is not None else retention_hours()
     cutoff = _cutoff_iso(window)
-    with observability_db.get_conn() as conn:
+    with db.session_scope() as conn:
         deleted = prune_older_than(conn, cutoff)
     if deleted:
         LOG.info(
@@ -124,17 +96,16 @@ def run_sweep(hours: int | None = None) -> int:
     return deleted
 
 
-async def retention_loop(stop_event: asyncio.Event) -> None:
+async def retention_loop(stop_event: asyncio.Event, *, interval_seconds: int) -> None:
     """Background loop. Exits when ``stop_event`` is set.
 
     Spawned by :mod:`cairn.server.app` ``lifespan`` only in
-    ``cairn serve`` mode. Sleeps ``OBSERVABILITY_RETENTION_INTERVAL_SECONDS``
-    between sweeps and logs the outcome.
+    ``cairn serve`` mode. Sleeps ``interval_seconds`` between sweeps and
+    logs the outcome.
     """
-    interval = retention_interval_seconds()
     LOG.info(
         "observability retention loop started interval_seconds=%s retention_hours=%s",
-        interval,
+        interval_seconds,
         retention_hours(),
     )
     try:
@@ -144,7 +115,7 @@ async def retention_loop(stop_event: asyncio.Event) -> None:
             except Exception:  # noqa: BLE001 - never let a sweep kill the loop
                 LOG.exception("observability retention sweep failed")
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
             except asyncio.TimeoutError:
                 continue
     finally:

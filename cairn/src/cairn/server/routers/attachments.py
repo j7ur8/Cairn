@@ -1,23 +1,30 @@
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from cairn.server.db import get_conn
-from cairn.server.models import AttachmentUpload, AttachmentUploadResponse
+from cairn.server import db
+from cairn.server.models_pkg.projects import AttachmentUpload, AttachmentUploadResponse
+from cairn.server.repositories import sql
 from cairn.server.security.paths import validate_project_id
 from cairn.server.services import check_project_hint_writable, next_hint_id, utcnow
 
 router = APIRouter(tags=["attachments"])
 
-_DEFAULT_ATTACHMENT_ROOT = Path(__file__).resolve().parents[5] / "datas" / "attachments"
-_HOST_ATTACHMENT_ROOT = Path(os.environ.get("CAIRN_ATTACHMENTS_ROOT", str(_DEFAULT_ATTACHMENT_ROOT)))
-_WORKER_ATTACHMENT_ROOT = os.environ.get("CAIRN_WORKER_ATTACHMENTS_ROOT", "/mnt/attachments").rstrip("/")
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+def _host_attachment_root() -> Path:
+    from cairn.server.runtime_config import system_config
+    return Path(system_config().paths.resolved_attachments_root)
+
+
+def _worker_attachment_root() -> str:
+    from cairn.server.runtime_config import system_config
+    return system_config().paths.worker_attachments_root.rstrip("/")
 
 
 def _safe_filename(filename: str) -> str:
@@ -70,10 +77,10 @@ def upload_project_attachments(
     validate_project_id(project_id)
 
     creator = creator.strip() or "Human"
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         check_project_hint_writable(conn, project_id)
 
-    project_dir = _HOST_ATTACHMENT_ROOT / project_id
+    project_dir = _host_attachment_root() / project_id
     project_dir.mkdir(parents=True, exist_ok=True)
 
     uploaded: list[tuple[str, str, int, str, str]] = []
@@ -89,7 +96,7 @@ def upload_project_attachments(
                 while chunk := upload.file.read(1024 * 1024):
                     size += len(chunk)
                     out.write(chunk)
-            worker_path = f"{_WORKER_ATTACHMENT_ROOT}/{project_id}/{target.name}"
+            worker_path = f"{_worker_attachment_root()}/{project_id}/{target.name}"
             description = descriptions[idx] if descriptions and idx < len(descriptions) else ""
             hint = _attachment_hint(description, worker_path)
             uploaded.append((original_filename, target.name, size, worker_path, hint))
@@ -106,14 +113,24 @@ def upload_project_attachments(
 
     attachments: list[AttachmentUpload] = []
     try:
-        with get_conn() as conn:
+        with db.session_scope() as conn:
             check_project_hint_writable(conn, project_id)
             now = utcnow()
             for original_filename, stored_filename, size, worker_path, hint in uploaded:
                 hid = next_hint_id(conn, project_id)
-                conn.execute(
-                    "INSERT INTO hints (id, project_id, content, creator, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (hid, project_id, hint, creator, now),
+                sql.execute(
+                    conn,
+                    """
+                    INSERT INTO hints (id, project_id, content, creator, created_at)
+                    VALUES (:id, :project_id, :content, :creator, :created_at)
+                    """,
+                    {
+                        "id": hid,
+                        "project_id": project_id,
+                        "content": hint,
+                        "creator": creator,
+                        "created_at": now,
+                    },
                 )
                 attachments.append(
                     AttachmentUpload(

@@ -1,6 +1,5 @@
 """Stage 7: write unit tests for HTTP transport + bearer token + probe + redaction."""
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -13,16 +12,16 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class McpServerCapabilityConfigHttpTests(unittest.TestCase):
-    """Schema validation for transport=http and bearer_token_env."""
+    """Schema validation for transport=http and direct headers."""
 
     def setUp(self):
-        from cairn.dispatcher.config import McpServerCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig
         self.McpServerCapabilityConfig = McpServerCapabilityConfig
 
-    def test_stdio_default_no_transport_field(self):
-        # back-compat: legacy entries without transport default to stdio
-        m = self.McpServerCapabilityConfig(id="x", name="x", command="/bin/true")
-        self.assertEqual(m.transport, "stdio")
+    def test_transport_is_required(self):
+        with self.assertRaises(Exception) as cm:
+            self.McpServerCapabilityConfig(id="x", name="x", command="/bin/true")
+        self.assertIn("transport", str(cm.exception))
 
     def test_http_with_url_only(self):
         m = self.McpServerCapabilityConfig(
@@ -50,40 +49,12 @@ class McpServerCapabilityConfigHttpTests(unittest.TestCase):
                     )
                 self.assertIn("url must start with http", str(cm.exception))
 
-    def test_http_bearer_token_env_requires_env_set(self):
-        old = os.environ.pop("DEFINITELY_NOT_SET_XYZ", None)
-        try:
-            with self.assertRaises(Exception) as cm:
-                self.McpServerCapabilityConfig(
-                    id="x", name="x", transport="http",
-                    url="https://example.com",
-                    bearer_token_env="DEFINITELY_NOT_SET_XYZ",
-                )
-            self.assertIn("not set in the dispatcher process", str(cm.exception))
-        finally:
-            if old is not None:
-                os.environ["DEFINITELY_NOT_SET_XYZ"] = old
-
-    def test_http_bearer_token_env_passes_when_env_set(self):
-        os.environ["MCP_TEST_TOKEN"] = "tk-1"
+    def test_http_accepts_headers(self):
         m = self.McpServerCapabilityConfig(
             id="x", name="x", transport="http",
-            url="https://example.com", bearer_token_env="MCP_TEST_TOKEN",
+            url="https://example.com", headers={"Authorization": "Bearer tk-1"},
         )
-        self.assertEqual(m.bearer_token_env, "MCP_TEST_TOKEN")
-        del os.environ["MCP_TEST_TOKEN"]
-
-    def test_stdio_with_bearer_token_env_rejected(self):
-        os.environ["MCP_TEST_TOKEN"] = "tk-1"
-        try:
-            with self.assertRaises(Exception) as cm:
-                self.McpServerCapabilityConfig(
-                    id="x", name="x", transport="stdio", command="/bin/true",
-                    bearer_token_env="MCP_TEST_TOKEN",
-                )
-            self.assertIn("only valid for http transport", str(cm.exception))
-        finally:
-            del os.environ["MCP_TEST_TOKEN"]
+        self.assertEqual(m.headers, {"Authorization": "Bearer tk-1"})
 
     def test_healthcheck_timeout_bounds(self):
         with self.assertRaises(Exception):
@@ -99,26 +70,26 @@ class McpServerCapabilityConfigHttpTests(unittest.TestCase):
 
 
 class DispatchConfigInterpTests(unittest.TestCase):
-    """${ENV_VAR} interpolation skip for bearer_token_env."""
-
-    def setUp(self):
-        os.environ["MCP_TEST_TOKEN"] = "tk-1"
-        os.environ["MY_HOST"] = "h.local"
-
-    def tearDown(self):
-        os.environ.pop("MCP_TEST_TOKEN", None)
-        os.environ.pop("MY_HOST", None)
+    """Dispatch config loading keeps YAML values literal."""
 
     def _write_yaml(self, body: str) -> Path:
-        f = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False, mode="w")
-        f.write(body)
-        f.close()
-        return Path(f.name)
+        root = Path(tempfile.mkdtemp(prefix="cairn-mcp-config-"))
+        path = root / "dispatch.yaml"
+        path.write_text(body, encoding="utf-8")
+        return path
 
-    def test_bearer_token_env_preserved_as_literal_name(self):
-        from cairn.dispatcher.config import DispatchConfig
+    def test_dispatch_yaml_values_are_not_interpolated_from_env(self):
+        from cairn.shared.dispatch_config import DispatchConfig
 
         yaml = """
+system:
+  database:
+    url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+  auth:
+    jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+    dispatcher_api_token: test-dispatcher-token
+  paths:
+    datas_root: /tmp/cairn-test
 server: "http://x"
 runtime:
   interval: 3
@@ -135,14 +106,6 @@ container:
   image: "x:latest"
   network_mode: "cairn"
   completed_action: "stop"
-capabilities:
-  mcp_servers:
-    - id: "h"
-      name: "h"
-      transport: "http"
-      url: "https://${MY_HOST}/mcp"
-      bearer_token_env: "MCP_TEST_TOKEN"
-      task_types: ["bootstrap"]
 workers:
   - name: "m"
     type: "mock"
@@ -153,26 +116,37 @@ workers:
 """
         p = self._write_yaml(yaml)
         try:
+            (p.parent / "dispatch.capabilities.yaml").write_text(
+                """
+capabilities:
+  mcp_servers:
+    - id: "h"
+      name: "h"
+      transport: "http"
+      url: "https://example.test/mcp"
+      headers:
+        Authorization: "Bearer tk-direct"
+      task_types: ["bootstrap"]
+  skills: []
+roles: []
+""",
+                encoding="utf-8",
+            )
             cfg = DispatchConfig.load(p)
             mcp = cfg.capabilities.mcp_servers[0]
-            # bearer_token_env stays as the literal name
-            self.assertEqual(mcp.bearer_token_env, "MCP_TEST_TOKEN")
-            # url was interpolated
-            self.assertEqual(mcp.url, "https://h.local/mcp")
+            self.assertEqual(mcp.url, "https://example.test/mcp")
+            self.assertEqual(mcp.headers["Authorization"], "Bearer tk-direct")
         finally:
-            p.unlink()
+            import shutil
+            shutil.rmtree(p.parent, ignore_errors=True)
 
 
 class McpInjectionTests(unittest.TestCase):
     """_mcp_config_detail / _mcp_json / _mcp_detail shape per transport."""
 
     def setUp(self):
-        os.environ["MCP_TEST_TOKEN"] = "tk-1"
-        from cairn.dispatcher.config import McpServerCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig
         self.McpServerCapabilityConfig = McpServerCapabilityConfig
-
-    def tearDown(self):
-        os.environ.pop("MCP_TEST_TOKEN", None)
 
     def test_stdio_detail_shape(self):
         from cairn.dispatcher.capabilities import _mcp_config_detail
@@ -198,11 +172,11 @@ class McpInjectionTests(unittest.TestCase):
         self.assertEqual(d["url"], "https://example.com/mcp")
         self.assertNotIn("headers", d)
 
-    def test_http_detail_with_bearer_resolves_token(self):
+    def test_http_detail_with_headers(self):
         from cairn.dispatcher.capabilities import _mcp_config_detail
         m = self.McpServerCapabilityConfig(
             id="x", name="x", transport="http", url="https://example.com/mcp",
-            bearer_token_env="MCP_TEST_TOKEN",
+            headers={"Authorization": "Bearer tk-1"},
         )
         d = _mcp_config_detail(m, "/cap")
         self.assertEqual(d["type"], "http")
@@ -215,7 +189,7 @@ class McpInjectionTests(unittest.TestCase):
         )
         http = self.McpServerCapabilityConfig(
             id="h", name="h", transport="http", url="https://example.com/mcp",
-            bearer_token_env="MCP_TEST_TOKEN",
+            headers={"Authorization": "Bearer tk-1"},
         )
         rendered = _mcp_json([stdio, http], "/cap")
         parsed = json.loads(rendered)
@@ -227,19 +201,16 @@ class McpInjectionTests(unittest.TestCase):
             "Bearer tk-1",
         )
 
-    def test_mcp_detail_includes_transport_and_bearer_env(self):
+    def test_mcp_detail_includes_transport_and_headers(self):
         from cairn.dispatcher.capabilities import _mcp_detail
         m = self.McpServerCapabilityConfig(
             id="h", name="h", transport="http", url="https://example.com",
-            bearer_token_env="MCP_TEST_TOKEN",
+            headers={"Authorization": "Bearer tk-1"},
         )
         d = _mcp_detail(m, "/cap")
         self.assertEqual(d["id"], "h")
         self.assertEqual(d["transport"], "http")
-        self.assertEqual(d["bearer_token_env"], "MCP_TEST_TOKEN")
-        # token value NOT included in detail (it lives in mcp.json's
-        # headers only, populated at injection time)
-        self.assertNotIn("headers", d)
+        self.assertEqual(d["headers"], {"Authorization": "Bearer tk-1"})
 
     def test_chrome_devtools_stdio_args_resolve_host_alias(self):
         from cairn.dispatcher.capabilities import _mcp_config_detail, _mcp_detail
@@ -282,7 +253,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
     def _config(self, task_types):
         from types import SimpleNamespace
-        from cairn.dispatcher.config import McpServerCapabilityConfig, SkillCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         return SimpleNamespace(
             capabilities=SimpleNamespace(
@@ -361,7 +332,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
     def test_cypher_ctf_injection_uses_bundled_sub_skill_directory(self):
         from types import SimpleNamespace
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.dispatcher.config import SkillCapabilityConfig
+        from cairn.shared.dispatch_config import SkillCapabilityConfig
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
         config = SimpleNamespace(
@@ -416,7 +387,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
     def test_cypher_pentest_injection_uses_bundled_sub_skill_directory(self):
         from types import SimpleNamespace
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.dispatcher.config import SkillCapabilityConfig
+        from cairn.shared.dispatch_config import SkillCapabilityConfig
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
         config = SimpleNamespace(
@@ -521,7 +492,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
 
 class CodexAdapterHttpTests(unittest.TestCase):
-    """Codex adapter emits -c mcp_servers.<id>.url and bearer_token_env_var."""
+    """Codex adapter emits -c mcp_servers.<id>.url and headers."""
 
     def _context(self, mcp_servers):
         from cairn.dispatcher.workers.base import WorkerExecutionContext
@@ -546,17 +517,17 @@ class CodexAdapterHttpTests(unittest.TestCase):
         self.assertIn('mcp_servers.s.env.K="V"', joined)
         self.assertNotIn("mcp_servers.s.url", joined)
 
-    def test_http_emits_url_and_bearer_token_env_var(self):
+    def test_http_emits_url_and_headers(self):
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
         ctx = self._context([{
             "id": "h", "transport": "http",
             "url": "https://example.com/mcp",
-            "bearer_token_env": "MCP_AUTH_TOKEN",
+            "headers": {"Authorization": "Bearer tk-1"},
         }])
         argv = CodexDriver._capability_args(ctx)
         joined = " ".join(argv)
         self.assertIn('mcp_servers.h.url="https://example.com/mcp"', joined)
-        self.assertIn('mcp_servers.h.bearer_token_env_var="MCP_AUTH_TOKEN"', joined)
+        self.assertIn('mcp_servers.h.headers.Authorization="Bearer tk-1"', joined)
         self.assertNotIn("mcp_servers.h.command", joined)
 
     def test_http_without_bearer_emits_only_url(self):
@@ -568,7 +539,7 @@ class CodexAdapterHttpTests(unittest.TestCase):
         argv = CodexDriver._capability_args(ctx)
         joined = " ".join(argv)
         self.assertIn('mcp_servers.h.url="https://example.com/mcp"', joined)
-        self.assertNotIn("bearer_token_env_var", joined)
+        self.assertNotIn("headers.Authorization", joined)
 
 
 class RedactionTests(unittest.TestCase):
@@ -624,7 +595,7 @@ class HttpProbeTests(unittest.TestCase):
 
     def test_validate_selected_mcp_uses_chrome_devtools_probe(self):
         from cairn.dispatcher.capabilities import _validate_selected_mcp
-        from cairn.dispatcher.config import McpServerCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig
         mcp = McpServerCapabilityConfig(
             id="chrome-devtools-host",
             name="Host Chrome",
@@ -649,7 +620,7 @@ class HttpProbeTests(unittest.TestCase):
 
     def test_validate_selected_mcp_reports_missing_devtools_key(self):
         from cairn.dispatcher.capabilities import _validate_selected_mcp
-        from cairn.dispatcher.config import McpServerCapabilityConfig
+        from cairn.shared.dispatch_config import McpServerCapabilityConfig
         mcp = McpServerCapabilityConfig(
             id="chrome-devtools-host",
             name="Host Chrome",

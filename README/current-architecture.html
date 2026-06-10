@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cairn Current Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1220px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot {
+      width: 12px;
+      height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1060px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; line-height: 1.65; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-left: auto; flex-shrink: 0; align-items: center; }
+    .toolbar-toggle {
+      background: transparent;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.25rem;
+      line-height: 1;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.375rem;
+      transition: color 0.2s, background 0.2s;
+    }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions { display: none; gap: 0.5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 0.375rem 0.75rem;
+      border-radius: 0.375rem;
+      font-family: inherit;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .toolbar-actions button:hover { background: rgba(51, 65, 85, 0.8); color: white; border-color: #475569; }
+    @media print { body { background: #020617; padding: 1rem; } .toolbar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Cairn Current Architecture</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">Shared schema/config core · thin Server routers · decoupled Dispatcher runtime · PostgreSQL/YAML/File persistence</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1120 760" aria-label="Cairn architecture diagram">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="1120" height="760" fill="url(#grid)" />
+
+        <!-- Connections rendered behind boxes -->
+        <line x1="180" y1="170" x2="230" y2="288" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="185" y="232" fill="#94a3b8" font-size="9">REST</text>
+
+        <line x1="410" y1="170" x2="330" y2="288" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="346" y="234" fill="#94a3b8" font-size="9">imports</text>
+
+        <line x1="720" y1="170" x2="790" y2="288" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="738" y="234" fill="#94a3b8" font-size="9">imports</text>
+
+        <line x1="730" y1="410" x2="505" y2="410" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="582" y="397" fill="#94a3b8" font-size="9">CairnClient API</text>
+
+        <line x1="292" y1="590" x2="292" y2="655" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="306" y="626" fill="#94a3b8" font-size="9">SQL / files</text>
+
+        <line x1="885" y1="590" x2="885" y2="655" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="900" y="626" fill="#94a3b8" font-size="9">containers</text>
+
+        <line x1="505" y1="475" x2="730" y2="475" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowhead)"/>
+        <text x="592" y="463" fill="#fb7185" font-size="8">optional reload</text>
+
+        <line x1="730" y1="696" x2="505" y2="696" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="590" y="684" fill="#94a3b8" font-size="9">project files</text>
+
+        <!-- Browser -->
+        <rect x="45" y="110" width="210" height="90" rx="8" fill="#0f172a"/>
+        <rect x="45" y="110" width="210" height="90" rx="8" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="150" y="137" fill="white" font-size="12" font-weight="700" text-anchor="middle">Browser UI</text>
+        <text x="150" y="156" fill="#94a3b8" font-size="9" text-anchor="middle">server/static/index.html</text>
+        <text x="150" y="174" fill="#22d3ee" font-size="8" text-anchor="middle">Auth · Admin · Project Ops</text>
+
+        <!-- Shared -->
+        <rect x="325" y="82" width="470" height="128" rx="10" fill="#0f172a"/>
+        <rect x="325" y="82" width="470" height="128" rx="10" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="560" y="110" fill="white" font-size="13" font-weight="700" text-anchor="middle">Shared Core</text>
+        <text x="560" y="128" fill="#94a3b8" font-size="9" text-anchor="middle">single contract layer used by Server and Dispatcher</text>
+        <rect x="350" y="148" width="110" height="28" rx="5" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="405" y="166" fill="#d1fae5" font-size="8" text-anchor="middle">task_types.py</text>
+        <rect x="475" y="148" width="140" height="28" rx="5" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="545" y="166" fill="#d1fae5" font-size="8" text-anchor="middle">protocol_models.py</text>
+        <rect x="630" y="148" width="140" height="28" rx="5" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="700" y="166" fill="#d1fae5" font-size="8" text-anchor="middle">dispatch_config.py</text>
+        <text x="560" y="196" fill="#94a3b8" font-size="8" text-anchor="middle">capability_projection.py · no server/dispatcher imports</text>
+
+        <!-- Server boundary -->
+        <rect x="58" y="255" width="500" height="365" rx="12" fill="rgba(6, 78, 59, 0.06)" stroke="#34d399" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="76" y="276" fill="#34d399" font-size="10" font-weight="700">Server Process · FastAPI</text>
+
+        <rect x="92" y="300" width="180" height="62" rx="6" fill="#0f172a"/>
+        <rect x="92" y="300" width="180" height="62" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="182" y="324" fill="white" font-size="11" font-weight="600" text-anchor="middle">Routers</text>
+        <text x="182" y="341" fill="#94a3b8" font-size="8" text-anchor="middle">projects · replay · task-types</text>
+
+        <rect x="312" y="300" width="205" height="62" rx="6" fill="#0f172a"/>
+        <rect x="312" y="300" width="205" height="62" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="414" y="324" fill="white" font-size="11" font-weight="600" text-anchor="middle">Application Services</text>
+        <text x="414" y="341" fill="#94a3b8" font-size="8" text-anchor="middle">replay_service · project_creation</text>
+
+        <rect x="92" y="405" width="180" height="62" rx="6" fill="#0f172a"/>
+        <rect x="92" y="405" width="180" height="62" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="182" y="429" fill="white" font-size="11" font-weight="600" text-anchor="middle">Config Modules</text>
+        <text x="182" y="446" fill="#94a3b8" font-size="8" text-anchor="middle">server/config/*</text>
+
+        <rect x="312" y="405" width="205" height="62" rx="6" fill="#0f172a"/>
+        <rect x="312" y="405" width="205" height="62" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="414" y="429" fill="white" font-size="11" font-weight="600" text-anchor="middle">Repositories</text>
+        <text x="414" y="446" fill="#94a3b8" font-size="8" text-anchor="middle">repositories/sql.py</text>
+
+        <rect x="92" y="510" width="180" height="62" rx="6" fill="#0f172a"/>
+        <rect x="92" y="510" width="180" height="62" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="182" y="534" fill="white" font-size="11" font-weight="600" text-anchor="middle">Security</text>
+        <text x="182" y="551" fill="#94a3b8" font-size="8" text-anchor="middle">JWT · users · deps</text>
+
+        <rect x="312" y="510" width="205" height="62" rx="6" fill="#0f172a"/>
+        <rect x="312" y="510" width="205" height="62" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="414" y="534" fill="white" font-size="11" font-weight="600" text-anchor="middle">Model Boundary</text>
+        <text x="414" y="551" fill="#94a3b8" font-size="8" text-anchor="middle">models_pkg re-exports shared</text>
+
+        <!-- Dispatcher boundary -->
+        <rect x="680" y="255" width="395" height="365" rx="12" fill="rgba(251, 191, 36, 0.05)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="698" y="276" fill="#fbbf24" font-size="10" font-weight="700">Dispatcher Runtime</text>
+
+        <rect x="715" y="300" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="715" y="300" width="150" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="790" y="324" fill="white" font-size="11" font-weight="600" text-anchor="middle">Scheduler Loop</text>
+        <text x="790" y="341" fill="#94a3b8" font-size="8" text-anchor="middle">loop.py</text>
+
+        <rect x="895" y="300" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="895" y="300" width="150" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="970" y="324" fill="white" font-size="11" font-weight="600" text-anchor="middle">Coordinators</text>
+        <text x="970" y="341" fill="#94a3b8" font-size="8" text-anchor="middle">health · selection</text>
+
+        <rect x="715" y="405" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="715" y="405" width="150" height="62" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="790" y="429" fill="white" font-size="11" font-weight="600" text-anchor="middle">Execution Helpers</text>
+        <text x="790" y="446" fill="#94a3b8" font-size="8" text-anchor="middle">ai_overlay · proxy_env</text>
+
+        <rect x="895" y="405" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="895" y="405" width="150" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="970" y="429" fill="white" font-size="11" font-weight="600" text-anchor="middle">Runtime</text>
+        <text x="970" y="446" fill="#94a3b8" font-size="8" text-anchor="middle">ContainerManager</text>
+
+        <rect x="715" y="510" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="715" y="510" width="150" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="790" y="534" fill="white" font-size="11" font-weight="600" text-anchor="middle">Task Runners</text>
+        <text x="790" y="551" fill="#94a3b8" font-size="8" text-anchor="middle">bootstrap · explore · reason</text>
+
+        <rect x="895" y="510" width="150" height="62" rx="6" fill="#0f172a"/>
+        <rect x="895" y="510" width="150" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="970" y="534" fill="white" font-size="11" font-weight="600" text-anchor="middle">Worker Adapters</text>
+        <text x="970" y="551" fill="#94a3b8" font-size="8" text-anchor="middle">codex · claude · pi · mock</text>
+
+        <!-- Persistence and workers -->
+        <rect x="92" y="655" width="425" height="70" rx="8" fill="#0f172a"/>
+        <rect x="92" y="655" width="425" height="70" rx="8" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="304" y="682" fill="white" font-size="11" font-weight="600" text-anchor="middle">Persistence / Config</text>
+        <text x="304" y="700" fill="#94a3b8" font-size="8" text-anchor="middle">PostgreSQL · dispatch.yaml · dispatch.capabilities.yaml · datas/attachments</text>
+
+        <rect x="715" y="655" width="330" height="70" rx="8" fill="#0f172a"/>
+        <rect x="715" y="655" width="330" height="70" rx="8" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="880" y="682" fill="white" font-size="11" font-weight="600" text-anchor="middle">Worker Containers</text>
+        <text x="880" y="700" fill="#94a3b8" font-size="8" text-anchor="middle">bind mounts · proxy env · AI env overlay · MCP/skills</text>
+
+        <!-- Legend -->
+        <text x="910" y="92" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="910" y="106" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="934" y="114" fill="#94a3b8" font-size="8">Frontend</text>
+        <rect x="910" y="124" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="934" y="132" fill="#94a3b8" font-size="8">Backend</text>
+        <rect x="910" y="142" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="934" y="150" fill="#94a3b8" font-size="8">Dispatcher / Worker</text>
+        <rect x="910" y="160" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="934" y="168" fill="#94a3b8" font-size="8">Database / Config</text>
+        <line x1="910" y1="185" x2="930" y2="185" stroke="#fb7185" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="934" y="188" fill="#94a3b8" font-size="8">Control / reload</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Boundary cleanup</h3>
+        </div>
+        <ul>
+          <li>• Shared owns task types, protocol models, dispatch config</li>
+          <li>• Server no longer imports dispatcher config</li>
+          <li>• Dispatcher no longer imports server models</li>
+          <li>• Legacy facade paths are not architecture entry points</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Server shape</h3>
+        </div>
+        <ul>
+          <li>• Routers stay thin and bind HTTP to services</li>
+          <li>• Replay workflow lives in replay_service</li>
+          <li>• Config writes use server/config modules</li>
+          <li>• Database access is isolated behind repositories/sql</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Dispatcher shape</h3>
+        </div>
+        <ul>
+          <li>• CairnClient is the server boundary</li>
+          <li>• Health, worker selection, proxy env are focused helpers</li>
+          <li>• Task runners own bootstrap/explore/reason execution</li>
+          <li>• ContainerManager owns worker container lifecycle</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">Cairn · current backend architecture · generated with architecture-diagram skill</p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'cairn-current-architecture.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('cairn-current-architecture.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>

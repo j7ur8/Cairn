@@ -3,7 +3,8 @@ from fastapi.responses import Response
 from datetime import datetime
 import yaml
 
-from cairn.server.db import get_conn
+from cairn.server import db
+from cairn.server.repositories import sql
 from cairn.server.services import expire_reason_leases, expire_workers, get_project_or_404
 
 router = APIRouter(tags=["export"])
@@ -24,24 +25,39 @@ def _load_project_data(conn, project_id: str):
     expire_reason_leases(conn, project_id)
     proj = get_project_or_404(conn, project_id)
 
-    facts = conn.execute(
-        "SELECT id, description FROM facts WHERE project_id = ?", (project_id,)
-    ).fetchall()
-    hints = conn.execute(
-        "SELECT content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at",
-        (project_id,),
-    ).fetchall()
-    intents = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
-        (project_id,),
-    ).fetchall()
+    facts = sql.fetchall(
+        conn,
+        "SELECT id, description FROM facts WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )
+    hints = sql.fetchall(
+        conn,
+        """
+        SELECT content, creator, created_at
+        FROM hints
+        WHERE project_id = :project_id
+        ORDER BY created_at
+        """,
+        {"project_id": project_id},
+    )
+    intents = sql.fetchall(
+        conn,
+        "SELECT * FROM intents WHERE project_id = :project_id ORDER BY created_at",
+        {"project_id": project_id},
+    )
 
     sources_by_intent = {}
     for i in intents:
-        rows = conn.execute(
-            "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
-            (i["id"], project_id),
-        ).fetchall()
+        rows = sql.fetchall(
+            conn,
+            """
+            SELECT fact_id
+            FROM intent_sources
+            WHERE intent_id = :intent_id AND project_id = :project_id
+            ORDER BY position, fact_id
+            """,
+            {"intent_id": i["id"], "project_id": project_id},
+        )
         sources_by_intent[i["id"]] = [r["fact_id"] for r in rows]
 
     return proj, facts, hints, intents, sources_by_intent
@@ -155,7 +171,7 @@ def export_project(project_id: str, format: str = "yaml"):
     if format not in ("yaml", "timeline"):
         raise HTTPException(400, "Supported formats: yaml, timeline")
 
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         if format == "timeline":
             text = _export_timeline(conn, project_id)
         else:

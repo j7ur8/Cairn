@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any
 
-from cairn.dispatcher.config import ObservabilityConfig
+from cairn.shared.dispatch_config import ObservabilityConfig
 from cairn.dispatcher.observability.buffer import OutputBuffer
 from cairn.dispatcher.observability.redaction import redact_content
 from cairn.dispatcher.observability.trace import TraceEvent

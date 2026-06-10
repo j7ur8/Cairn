@@ -1,16 +1,6 @@
-"""JWT issue/verify for the Cairn API.
-
-A small, dependency-light wrapper around ``pyjwt``. The signing key is loaded
-from ``CAIRN_JWT_SECRET`` (falling back to ``CAIRN_SECRETS_KEY`` so operators
-do not need a second secret to start the server). Lifetime defaults to 1
-hour; tokens are HS256.
-
-The same module is used by the CairnClient (dispatcher side) to mint
-service-account tokens for outbound calls.
-"""
+"""JWT issue/verify for the Cairn API."""
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from typing import Any
@@ -26,11 +16,10 @@ class JWTError(RuntimeError):
 
 
 def _signing_key() -> str:
-    key = os.environ.get("CAIRN_JWT_SECRET") or os.environ.get("CAIRN_SECRETS_KEY")
+    from cairn.server.runtime_config import system_config
+    key = system_config().auth.jwt_secret
     if not key:
-        raise JWTError(
-            "CAIRN_JWT_SECRET (or CAIRN_SECRETS_KEY) is not set; cannot issue tokens"
-        )
+        raise JWTError("dispatch.yaml system.auth.jwt_secret is not set; cannot issue tokens")
     return key
 
 

@@ -6,8 +6,10 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from cairn.server.models import Intent, ProjectMeta, ProjectReason, ReasonState
+from cairn.server.models_pkg.intents import ReasonState
+from cairn.server.models_pkg.projects import Intent, ProjectMeta, ProjectReason
 from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
+from cairn.server.repositories import sql
 
 
 REASON_FAILURE_BACKOFF_BASE_SECONDS = 30
@@ -37,30 +39,33 @@ def _reason_backoff_until(now: str, failure_count: int) -> str:
 
 
 def next_project_id(conn: Any) -> str:
-    conn.execute("UPDATE counters SET value = value + 1 WHERE name = 'project'")
-    row = conn.execute("SELECT value FROM counters WHERE name = 'project'").fetchone()
+    sql.execute(conn, "UPDATE counters SET value = value + 1 WHERE name = 'project'")
+    row = sql.fetchone(conn, "SELECT value FROM counters WHERE name = 'project'")
     return f"proj_{row['value']:03d}"
 
 
 def _next_scoped_id(
     conn: Any, kind: str, prefix: str, project_id: str
 ) -> str:
-    conn.execute(
+    sql.execute(
+        conn,
         """
         INSERT INTO scoped_counters (project_id, kind, value)
-        VALUES (?, ?, 0)
+        VALUES (:project_id, :kind, 0)
         ON CONFLICT (project_id, kind) DO NOTHING
         """,
-        (project_id, kind),
+        {"project_id": project_id, "kind": kind},
     )
-    conn.execute(
-        "UPDATE scoped_counters SET value = value + 1 WHERE project_id = ? AND kind = ?",
-        (project_id, kind),
+    sql.execute(
+        conn,
+        "UPDATE scoped_counters SET value = value + 1 WHERE project_id = :project_id AND kind = :kind",
+        {"project_id": project_id, "kind": kind},
     )
-    row = conn.execute(
-        "SELECT value FROM scoped_counters WHERE project_id = ? AND kind = ?",
-        (project_id, kind),
-    ).fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT value FROM scoped_counters WHERE project_id = :project_id AND kind = :kind",
+        {"project_id": project_id, "kind": kind},
+    )
     assert row is not None
     return f"{prefix}{row['value']:03d}"
 
@@ -78,7 +83,7 @@ def next_hint_id(conn: Any, project_id: str) -> str:
 
 
 def get_project_or_404(conn: Any, project_id: str) -> Any:
-    row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    row = sql.fetchone(conn, "SELECT * FROM projects WHERE id = :project_id", {"project_id": project_id})
     if row is None:
         raise HTTPException(404, "Project not found")
     return row
@@ -109,9 +114,11 @@ def validate_facts_exist(
     conn: Any, project_id: str, fact_ids: list[str]
 ) -> None:
     for fid in fact_ids:
-        row = conn.execute(
-            "SELECT 1 FROM facts WHERE id = ? AND project_id = ?", (fid, project_id)
-        ).fetchone()
+        row = sql.fetchone(
+            conn,
+            "SELECT 1 FROM facts WHERE id = :fact_id AND project_id = :project_id",
+            {"fact_id": fid, "project_id": project_id},
+        )
         if row is None:
             raise HTTPException(404, f"Fact {fid} not found")
 
@@ -129,10 +136,11 @@ def validate_intent_creator_worker(creator: str, worker: str | None) -> None:
 def get_intent_or_404(
     conn: Any, project_id: str, intent_id: str
 ) -> Any:
-    row = conn.execute(
-        "SELECT * FROM intents WHERE id = ? AND project_id = ?",
-        (intent_id, project_id),
-    ).fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT * FROM intents WHERE id = :intent_id AND project_id = :project_id",
+        {"intent_id": intent_id, "project_id": project_id},
+    )
     if row is None:
         raise HTTPException(404, "Intent not found")
     return row
@@ -154,16 +162,17 @@ def claim_open_intent_or_409(
     conn: Any, project_id: str, intent_id: str, worker: str, now: str
 ) -> Any:
     get_claimable_open_intent_or_404(conn, project_id, intent_id, worker)
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE intents
-        SET worker = ?, last_heartbeat_at = ?
-        WHERE id = ?
-          AND project_id = ?
+        SET worker = :worker, last_heartbeat_at = :now
+        WHERE id = :intent_id
+          AND project_id = :project_id
           AND to_fact_id IS NULL
-          AND (worker IS NULL OR worker = ?)
+          AND (worker IS NULL OR worker = :worker)
         """,
-        (worker, now, intent_id, project_id, worker),
+        {"worker": worker, "now": now, "intent_id": intent_id, "project_id": project_id},
     )
     if cursor.rowcount != 1:
         row = get_intent_or_404(conn, project_id, intent_id)
@@ -184,16 +193,17 @@ def release_open_intent_or_409(
     row = get_releasable_open_intent_or_404(conn, project_id, intent_id, worker)
     if row["worker"] is None:
         return row
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE intents
         SET worker = NULL
-        WHERE id = ?
-          AND project_id = ?
+        WHERE id = :intent_id
+          AND project_id = :project_id
           AND to_fact_id IS NULL
-          AND worker = ?
+          AND worker = :worker
         """,
-        (intent_id, project_id, worker),
+        {"intent_id": intent_id, "project_id": project_id, "worker": worker},
     )
     if cursor.rowcount != 1:
         row = get_intent_or_404(conn, project_id, intent_id)
@@ -214,16 +224,17 @@ def conclude_open_intent_or_409(
     now: str,
 ) -> Any:
     get_claimable_open_intent_or_404(conn, project_id, intent_id, worker)
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE intents
-        SET to_fact_id = ?, worker = ?, last_heartbeat_at = ?, concluded_at = ?
-        WHERE id = ?
-          AND project_id = ?
+        SET to_fact_id = :fact_id, worker = :worker, last_heartbeat_at = :now, concluded_at = :now
+        WHERE id = :intent_id
+          AND project_id = :project_id
           AND to_fact_id IS NULL
-          AND (worker IS NULL OR worker = ?)
+          AND (worker IS NULL OR worker = :worker)
         """,
-        (fact_id, worker, now, now, intent_id, project_id, worker),
+        {"fact_id": fact_id, "worker": worker, "now": now, "intent_id": intent_id, "project_id": project_id},
     )
     if cursor.rowcount != 1:
         row = get_intent_or_404(conn, project_id, intent_id)
@@ -253,10 +264,11 @@ def get_releasable_open_intent_or_404(
 
 
 def get_completion_intent_or_409(conn: Any, project_id: str) -> Any:
-    rows = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? AND to_fact_id = 'goal'",
-        (project_id,),
-    ).fetchall()
+    rows = sql.fetchall(
+        conn,
+        "SELECT * FROM intents WHERE project_id = :project_id AND to_fact_id = 'goal'",
+        {"project_id": project_id},
+    )
     if not rows:
         raise HTTPException(409, "Completed project is missing its completion intent")
     if len(rows) != 1:
@@ -265,10 +277,16 @@ def get_completion_intent_or_409(conn: Any, project_id: str) -> Any:
 
 
 def intent_to_model(conn: Any, row: Any, project_id: str) -> Intent:
-    sources = conn.execute(
-        "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
-        (row["id"], project_id),
-    ).fetchall()
+    sources = sql.fetchall(
+        conn,
+        """
+        SELECT fact_id
+        FROM intent_sources
+        WHERE intent_id = :intent_id AND project_id = :project_id
+        ORDER BY position, fact_id
+        """,
+        {"intent_id": row["id"], "project_id": project_id},
+    )
     return Intent(
         id=row["id"],
         **{"from": [s["fact_id"] for s in sources]},
@@ -283,20 +301,21 @@ def intent_to_model(conn: Any, row: Any, project_id: str) -> Intent:
 
 
 def build_intents(conn: Any, project_id: str) -> list[Intent]:
-    rows = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
-        (project_id,),
-    ).fetchall()
+    rows = sql.fetchall(
+        conn,
+        "SELECT * FROM intents WHERE project_id = :project_id ORDER BY created_at",
+        {"project_id": project_id},
+    )
     return [intent_to_model(conn, r, project_id) for r in rows]
 
 
 def get_intent_timeout(conn: Any) -> int:
-    row = conn.execute("SELECT intent_timeout FROM settings WHERE rowid = 1").fetchone()
+    row = sql.fetchone(conn, "SELECT intent_timeout FROM settings WHERE id = 1")
     return row["intent_timeout"]
 
 
 def get_reason_timeout(conn: Any) -> int:
-    row = conn.execute("SELECT reason_timeout FROM settings WHERE rowid = 1").fetchone()
+    row = sql.fetchone(conn, "SELECT reason_timeout FROM settings WHERE id = 1")
     return row["reason_timeout"]
 
 
@@ -342,10 +361,11 @@ def reason_state_from_row(row: Any) -> ReasonState:
 
 
 def get_project_reason_state(conn: Any, project_id: str) -> ReasonState | None:
-    row = conn.execute(
-        "SELECT * FROM project_reason_state WHERE project_id = ?",
-        (project_id,),
-    ).fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT * FROM project_reason_state WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )
     if row is None:
         return None
     return reason_state_from_row(row)
@@ -377,10 +397,11 @@ def reason_trigger_dispatch_blocker(
     open_intent_count: int,
     now: str | None = None,
 ) -> str | None:
-    row = conn.execute(
-        "SELECT * FROM project_reason_state WHERE project_id = ?",
-        (project_id,),
-    ).fetchone()
+    row = sql.fetchone(
+        conn,
+        "SELECT * FROM project_reason_state WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )
     if not _same_reason_trigger_state(row, trigger_hash, fact_count, hint_count, open_intent_count):
         return None
     assert row is not None
@@ -393,7 +414,8 @@ def reason_trigger_dispatch_blocker(
 
 
 def clear_project_reason(conn: Any, project_id: str) -> None:
-    conn.execute(
+    sql.execute(
+        conn,
         """
         UPDATE projects
         SET reason_worker = NULL,
@@ -401,9 +423,9 @@ def clear_project_reason(conn: Any, project_id: str) -> None:
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL
-        WHERE id = ?
+        WHERE id = :project_id
         """,
-        (project_id,),
+        {"project_id": project_id},
     )
 
 
@@ -442,19 +464,20 @@ def claim_project_reason_or_409(
     if current_worker == worker:
         return row
 
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE projects
-        SET reason_worker = ?,
-            reason_run_id = ?,
-            reason_trigger = ?,
-            reason_started_at = ?,
-            reason_last_heartbeat_at = ?
-        WHERE id = ?
+        SET reason_worker = :worker,
+            reason_run_id = :run_id,
+            reason_trigger = :trigger,
+            reason_started_at = :now,
+            reason_last_heartbeat_at = :now
+        WHERE id = :project_id
           AND status = 'active'
           AND reason_worker IS NULL
         """,
-        (worker, run_id, trigger, now, now, project_id),
+        {"worker": worker, "run_id": run_id, "trigger": trigger, "now": now, "project_id": project_id},
     )
     if cursor.rowcount != 1:
         row = get_project_or_404(conn, project_id)
@@ -493,10 +516,11 @@ def finish_project_reason_or_409(
         raise HTTPException(409, "Project reason run has been superseded")
 
     trigger_hash = trigger_hash or reason_trigger_hash(trigger)
-    previous = conn.execute(
-        "SELECT * FROM project_reason_state WHERE project_id = ?",
-        (project_id,),
-    ).fetchone()
+    previous = sql.fetchone(
+        conn,
+        "SELECT * FROM project_reason_state WHERE project_id = :project_id",
+        {"project_id": project_id},
+    )
     same_trigger = _same_reason_trigger_state(
         previous,
         trigger_hash,
@@ -519,13 +543,18 @@ def finish_project_reason_or_409(
     elif outcome not in REASON_SUCCESS_OUTCOMES:
         raise HTTPException(400, f"invalid reason outcome: {outcome}")
 
-    conn.execute(
+    sql.execute(
+        conn,
         """
         INSERT INTO project_reason_state (
             project_id, trigger, trigger_hash, fact_count, hint_count,
             open_intent_count, outcome, failure_count, last_error,
             next_retry_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            :project_id, :trigger, :trigger_hash, :fact_count, :hint_count,
+            :open_intent_count, :outcome, :failure_count, :last_error,
+            :next_retry_at, :updated_at
+        )
         ON CONFLICT(project_id) DO UPDATE SET
             trigger = excluded.trigger,
             trigger_hash = excluded.trigger_hash,
@@ -538,19 +567,19 @@ def finish_project_reason_or_409(
             next_retry_at = excluded.next_retry_at,
             updated_at = excluded.updated_at
         """,
-        (
-            project_id,
-            trigger,
-            trigger_hash,
-            fact_count,
-            hint_count,
-            open_intent_count,
-            stored_outcome,
-            failure_count,
-            last_error,
-            next_retry_at,
-            now,
-        ),
+        {
+            "project_id": project_id,
+            "trigger": trigger,
+            "trigger_hash": trigger_hash,
+            "fact_count": fact_count,
+            "hint_count": hint_count,
+            "open_intent_count": open_intent_count,
+            "outcome": stored_outcome,
+            "failure_count": failure_count,
+            "last_error": last_error,
+            "next_retry_at": next_retry_at,
+            "updated_at": now,
+        },
     )
     if row["status"] == "active" and (current_worker is None or current_worker == worker):
         clear_project_reason(conn, project_id)
@@ -573,15 +602,16 @@ def heartbeat_project_reason_or_409(
     if run_id is not None and current_run_id is not None and current_run_id != run_id:
         raise HTTPException(409, "Project reason run has been superseded")
 
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE projects
-        SET reason_last_heartbeat_at = ?
-        WHERE id = ?
+        SET reason_last_heartbeat_at = :now
+        WHERE id = :project_id
           AND status = 'active'
-          AND reason_worker = ?
+          AND reason_worker = :worker
         """,
-        (now, project_id, worker),
+        {"now": now, "project_id": project_id, "worker": worker},
     )
     if cursor.rowcount != 1:
         row = get_project_or_404(conn, project_id)
@@ -612,7 +642,8 @@ def release_project_reason_or_409(
     if run_id is not None and current_run_id is not None and current_run_id != run_id:
         raise HTTPException(409, "Project reason run has been superseded")
 
-    cursor = conn.execute(
+    cursor = sql.execute(
+        conn,
         """
         UPDATE projects
         SET reason_worker = NULL,
@@ -620,11 +651,11 @@ def release_project_reason_or_409(
             reason_trigger = NULL,
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL
-        WHERE id = ?
+        WHERE id = :project_id
           AND status = 'active'
-          AND reason_worker = ?
+          AND reason_worker = :worker
         """,
-        (project_id, worker),
+        {"project_id": project_id, "worker": worker},
     )
     if cursor.rowcount != 1:
         row = get_project_or_404(conn, project_id)
@@ -649,13 +680,13 @@ def expire_workers(conn: Any, project_id: str | None = None) -> None:
         WHERE to_fact_id IS NULL
           AND worker IS NOT NULL
           AND last_heartbeat_at IS NOT NULL
-          AND last_heartbeat_at < ?
+          AND last_heartbeat_at < :cutoff
     """
-    params: tuple = (cutoff,)
+    params: dict[str, str] = {"cutoff": cutoff}
     if project_id is not None:
-        query = query.replace("WHERE ", "WHERE project_id = ? AND ", 1)
-        params = (project_id, cutoff)
-    conn.execute(query, params)
+        query = query.replace("WHERE ", "WHERE project_id = :project_id AND ", 1)
+        params["project_id"] = project_id
+    sql.execute(conn, query, params)
 
 
 def expire_reason_leases(conn: Any, project_id: str | None = None) -> None:
@@ -671,10 +702,10 @@ def expire_reason_leases(conn: Any, project_id: str | None = None) -> None:
             reason_last_heartbeat_at = NULL
         WHERE reason_worker IS NOT NULL
           AND reason_last_heartbeat_at IS NOT NULL
-          AND reason_last_heartbeat_at < ?
+          AND reason_last_heartbeat_at < :cutoff
     """
-    params: tuple = (cutoff,)
+    params: dict[str, str] = {"cutoff": cutoff}
     if project_id is not None:
-        query = query.replace("WHERE ", "WHERE id = ? AND ", 1)
-        params = (project_id, cutoff)
-    conn.execute(query, params)
+        query = query.replace("WHERE ", "WHERE id = :project_id AND ", 1)
+        params["project_id"] = project_id
+    sql.execute(conn, query, params)

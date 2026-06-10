@@ -415,6 +415,29 @@
 <!-- ═══════════ GRAPH VIEW ═══════════ -->
 <template x-if="view === 'graph'">
 <div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
+  <template x-if="!project || !project.project">
+    <div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
+      <header class="bg-white/80 backdrop-blur border-b border-slate-200/60 px-4 py-2.5 flex items-center gap-3 shrink-0 z-20">
+        <button @click="backToList()" class="p-1.5 rounded-lg hover:bg-slate-100 transition text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="min-w-0">
+          <div class="text-[11px] font-mono text-slate-400" x-text="selectedProjectId || 'project'"></div>
+          <h2 class="text-[15px] font-semibold text-slate-700 truncate" x-text="projectLoadError || 'Loading project…'"></h2>
+        </div>
+        <div class="flex-1"></div>
+        <button @click="backToList()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Projects</button>
+      </header>
+      <div class="flex-1 min-h-0 grid place-items-center bg-slate-50/40">
+        <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-8 py-10 text-center shadow-sm max-w-md">
+          <p class="text-sm font-semibold text-slate-600" x-text="projectLoadError || 'Loading project…'"></p>
+          <p class="text-xs text-slate-400 mt-2">The project detail panel is hidden until a project is available.</p>
+        </div>
+      </div>
+    </div>
+  </template>
+  <template x-if="project && project.project">
+  <div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
   <header class="bg-white/80 backdrop-blur border-b border-slate-200/60 px-4 py-2.5 flex items-center gap-3 shrink-0 z-20">
     <button @click="backToList()" class="p-1.5 rounded-lg hover:bg-slate-100 transition text-slate-400 hover:text-slate-600">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
@@ -1235,6 +1258,8 @@
   </div>
 </div>
 </template>
+</div>
+</template>
 
 <!-- Settings -->
 <div x-show="view === 'settings'" x-cloak class="h-full overflow-y-auto px-4 pb-4 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
@@ -1312,7 +1337,7 @@
       <div class="flex items-center justify-between mb-3">
         <div>
           <h4 class="text-sm font-semibold text-slate-700">Capabilities</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">MCP servers and skills that projects can attach per task stage (bootstrap / explore / reason). Built-ins are mirrored from <span class="font-mono">dispatch.capabilities.yaml</span>; the ones you add here are project-scoped. Probe checks server-visible paths, URLs, and stdio command configuration. It does not guarantee the worker can execute the capability successfully.</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">MCP servers and skills that projects can attach per task stage (bootstrap / explore / reason). This page reads and writes <span class="font-mono">dispatch.capabilities.yaml</span>; project creation snapshots the selected config into <span class="font-mono">worker_execution_configs</span>. Probe checks server-visible paths, URLs, and stdio command configuration. It does not guarantee the worker can execute the capability successfully.</p>
         </div>
         <div class="flex gap-2 shrink-0">
           <button data-testid="settings-capability-refresh" @click="loadCapabilityAdmin()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Refresh</button>
@@ -1361,7 +1386,7 @@
           </div>
           <div x-show="capabilityForm.transport === 'http'" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
             <input x-model="capabilityForm.url" placeholder="https://mcp.example.com/mcp" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-            <input x-model="capabilityForm.bearer_token_env" placeholder="bearer token env var (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+            <input x-model="capabilityForm.authorization_header" placeholder="Authorization header, e.g. Bearer sk-..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
         </div>
         <div x-show="capabilityForm.kind === 'skill'" class="grid grid-cols-1 gap-2">
@@ -1461,7 +1486,7 @@
           <p class="text-[11px] text-slate-400 mt-0.5">Shared AI worker profiles that new projects (and replays) can attach to as primary or fallback. Authentication env vars are fixed by worker type and applied automatically.</p>
         </div>
         <div class="flex gap-2 shrink-0">
-          <button data-testid="settings-ai-refresh" @click="refreshAiProfiles()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition" title="Reload the catalog from the server. dispatch.yaml workers are mirrored at dispatcher startup.">Refresh</button>
+          <button data-testid="settings-ai-refresh" @click="refreshAiProfiles()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition" title="Reload AI profiles from dispatch.yaml.">Refresh</button>
           <button data-testid="settings-ai-add" @click="openCreateAiProfile()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add</button>
         </div>
       </div>
@@ -1490,7 +1515,7 @@
         <textarea x-model="aiProfileForm.models_text" rows="2" placeholder="optional models, one per line or comma-separated" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
         <div class="space-y-1">
           <div class="flex items-center gap-2">
-            <input data-testid="ai-profile-secret" type="password" autocomplete="off" x-model="aiProfileForm.sk" @input="aiProfileForm.skTouched = true" :placeholder="aiProfileSkPlaceholder()" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" title="Raw secret key. Stored locally in datas/cairn/cairn.db.">
+            <input data-testid="ai-profile-secret" type="password" autocomplete="off" x-model="aiProfileForm.sk" @input="aiProfileForm.skTouched = true" :placeholder="aiProfileSkPlaceholder()" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" title="Raw secret key. Stored locally in dispatch.yaml.">
             <button type="button" x-show="aiProfileForm.skTouched && aiProfileForm.sk.length > 0" @click="aiProfileForm.sk = ''" class="px-2 py-1.5 text-[10px] text-slate-500 hover:text-rose-500 transition" title="Clear the input">clear</button>
           </div>
           <div class="flex items-center justify-between text-[10px] text-slate-400">
@@ -1605,7 +1630,7 @@
             </template>
           </select>
           <template x-if="newProjectRoleItems().length === 0">
-            <p class="text-[11px] text-slate-400 mt-1.5">No roles registered yet. Start a dispatcher to register role catalog.</p>
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.capabilities.yaml.</p>
           </template>
         </div>
 
@@ -1840,7 +1865,7 @@
             </template>
           </select>
           <template x-if="replayConfigRoleItems().length === 0">
-            <p class="text-[11px] text-slate-400 mt-1.5">No roles registered yet. Start a dispatcher to register role catalog.</p>
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.capabilities.yaml.</p>
           </template>
         </div>
 
@@ -2310,9 +2335,6 @@ function cairnApp() {
     user_skill_ids: [],
   });
   const defaultTaskCapabilitiesMap = () => ({
-    bootstrap: defaultTaskCapabilities(),
-    explore: defaultTaskCapabilities(),
-    reason: defaultTaskCapabilities(),
   });
   const defaultAiProfileSelection = () => ({
     primary_profile_id: '',
@@ -2321,9 +2343,6 @@ function cairnApp() {
     fallback_profile_ids: [],
   });
   const defaultTaskAiProfileSelections = () => ({
-    bootstrap: defaultAiProfileSelection(),
-    explore: defaultAiProfileSelection(),
-    reason: defaultAiProfileSelection(),
   });
   const defaultLlmVisibleEventKinds = () => LLM_EVENT_KIND_OPTIONS.filter(kind => kind !== 'usage');
   const defaultCapabilityForm = () => ({
@@ -2331,7 +2350,7 @@ function cairnApp() {
     id: '',
     name: '',
     description: '',
-    task_types: ['bootstrap', 'explore', 'reason'],
+    task_types: [],
     requires_ids: [],
     required_skill_ids: [],
     use_when: [],
@@ -2341,7 +2360,7 @@ function cairnApp() {
     command: '',
     args: '',
     url: '',
-    bearer_token_env: '',
+    authorization_header: '',
     source_path: '',
     headers: {},
     probe_config: {},
@@ -2349,9 +2368,12 @@ function cairnApp() {
     available: true,
   });
   return {
+    task_type_specs: [],
+    task_types: [],
     view: 'list',
     projects: [],
     project: null,
+    projectLoadError: '',
     selectedProjectId: '',
     polling: true,
     pollTimer: null,
@@ -2715,6 +2737,7 @@ function cairnApp() {
     },
 
     async bootstrapAuthenticatedApp() {
+      await this.loadTaskTypes();
       await this.loadProjects();
       await this.loadSettings();
       this.startPolling();
@@ -3313,6 +3336,19 @@ function cairnApp() {
       }
     },
 
+    async loadTaskTypes() {
+      const rows = await this.api('GET', '/task-types') || [];
+      this.task_type_specs = Array.isArray(rows) ? rows : [];
+      this.task_types = this.task_type_specs
+        .map(item => item && typeof item.name === 'string' ? item.name.trim() : '')
+        .filter(Boolean);
+      this.newProject.capabilities = this.defaultTaskCapabilitiesMap();
+      this.newProject.ai_profiles = this.defaultTaskAiProfileSelections();
+      if (this.capabilityForm && (!Array.isArray(this.capabilityForm.task_types) || this.capabilityForm.task_types.length === 0)) {
+        this.capabilityForm.task_types = [...this.task_types];
+      }
+    },
+
     resetProxyForm() {
       this.proxyForm = { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' };
       this.proxyFormOpen = false;
@@ -3596,10 +3632,9 @@ function cairnApp() {
       throw new Error('AI profile check timed out waiting for dispatcher result');
     },
 
-    // Note: the actual sync from dispatch.yaml runs at dispatcher startup
-    // (see _sync_ai_catalog_from_dispatch_yaml in scheduler/loop.py). The
-    // server-side POST /ai-profiles/sync endpoint exists for the
-    // dispatcher to call; the UI does not call it directly.
+    // AI Profiles are edited directly in dispatch.yaml. The Check button
+    // enqueues a dispatcher health probe; there is no dispatcher startup
+    // sync or database mirror for profile definitions.
 
     aiProfileHealthDotClass(p) {
       if (!p.available) return 'bg-rose-500';
@@ -3618,10 +3653,18 @@ function cairnApp() {
 
     async loadProject(id) {
       try {
+        this.projectLoadError = '';
         this.project = await this.api('GET', `/projects/${id}`);
         this.invalidateProjectViewCaches();
         if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
-      } catch(e) { this.showToast(e.message, 'error'); }
+        return true;
+      } catch(e) {
+        this.project = null;
+        this.projectLoadError = e.message || 'Project not found';
+        this.invalidateProjectViewCaches();
+        this.showToast(this.projectLoadError, 'error');
+        return false;
+      }
     },
 
     async loadCapabilities() {
@@ -3909,14 +3952,20 @@ function cairnApp() {
         id: '',
         name: '',
         description: '',
-        task_types: ['bootstrap', 'explore', 'reason'],
+        task_types: [...this.task_types],
         requires_ids: [],
+        required_skill_ids: [],
+        use_when: [],
+        activation_hint: '',
+        preferred_mcp_ids: [],
         transport: 'stdio',
         command: '',
         args: '',
         url: '',
-        bearer_token_env: '',
+        authorization_header: '',
         source_path: '',
+        headers: {},
+        probe_config: {},
         detail: '',
         available: true,
       };
@@ -3947,13 +3996,13 @@ function cairnApp() {
         use_when: Array.isArray(item.use_when) ? [...item.use_when] : [],
         activation_hint: item.activation_hint || '',
         preferred_mcp_ids: Array.isArray(item.preferred_mcp_ids) ? [...item.preferred_mcp_ids] : [],
-        transport: item.transport || 'stdio',
+        transport: item.transport,
         command: item.command || '',
         args: Array.isArray(item.args) ? item.args.join(' ') : (item.args || ''),
         url: item.url || '',
-        bearer_token_env: item.bearer_token_env || '',
         source_path: item.source_path || '',
         headers: (item.headers && typeof item.headers === 'object') ? item.headers : {},
+        authorization_header: item.headers && typeof item.headers === 'object' ? (item.headers.Authorization || '') : '',
         probe_config: (item.probe_config && typeof item.probe_config === 'object') ? item.probe_config : {},
         detail: item.detail || '',
         available: item.available !== false,
@@ -3993,15 +4042,19 @@ function cairnApp() {
       if (this.capabilityForm.kind === 'mcp_server') {
         payload = {
           ...basePayload,
-          transport: this.capabilityForm.transport || 'stdio',
+          transport: this.capabilityForm.transport,
           command: this.capabilityForm.command || '',
           args: normalizeStringList(this.capabilityForm.args),
           url: this.capabilityForm.url || '',
-          bearer_token_env: this.capabilityForm.bearer_token_env || '',
           source_path: this.capabilityForm.source_path || '',
         };
         payload.headers = (this.capabilityForm.headers && typeof this.capabilityForm.headers === 'object')
           ? this.capabilityForm.headers : {};
+        if (this.capabilityForm.authorization_header) {
+          payload.headers.Authorization = this.capabilityForm.authorization_header;
+        } else {
+          delete payload.headers.Authorization;
+        }
         payload.probe_config = (this.capabilityForm.probe_config && typeof this.capabilityForm.probe_config === 'object')
           ? this.capabilityForm.probe_config : {};
       } else {
@@ -4055,19 +4108,17 @@ function cairnApp() {
     },
 
     aiProfileTaskTypes() {
-      return [
-        { key: 'bootstrap', label: 'Bootstrap' },
-        { key: 'explore', label: 'Intent' },
-        { key: 'reason', label: 'Reason' },
-      ];
+      return this.task_types.map(key => ({ key, label: this.taskTypeLabel(key) }));
     },
 
     capabilityTaskTypes() {
-      return [
-        { key: 'bootstrap', label: 'Bootstrap' },
-        { key: 'explore', label: 'Intent' },
-        { key: 'reason', label: 'Reason' },
-      ];
+      return this.task_types.map(key => ({ key, label: this.taskTypeLabel(key) }));
+    },
+
+    taskTypeLabel(taskType) {
+      const labels = { bootstrap: 'Bootstrap', explore: 'Intent', reason: 'Reason' };
+      if (labels[taskType]) return labels[taskType];
+      return String(taskType || '').replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
     },
 
     defaultTaskCapabilities() {
@@ -4322,22 +4373,18 @@ function cairnApp() {
     },
 
     defaultTaskAiProfileSelections() {
-      return {
-        bootstrap: this.defaultAiProfileSelection(),
-        explore: this.defaultAiProfileSelection(),
-        reason: this.defaultAiProfileSelection(),
-      };
+      const out = {};
+      for (const task of this.aiProfileTaskTypes()) {
+        out[task.key] = this.defaultAiProfileSelection();
+      }
+      return out;
     },
 
     ensureTaskAiProfileSelections(target) {
       if (!target.ai_profiles) {
-        target.ai_profiles = {
-          bootstrap: this.defaultAiProfileSelection(),
-          explore: this.defaultAiProfileSelection(),
-          reason: this.defaultAiProfileSelection(),
-        };
+        target.ai_profiles = this.defaultTaskAiProfileSelections();
       }
-      for (const task of ['bootstrap', 'explore', 'reason']) {
+      for (const task of this.task_types) {
         if (!target.ai_profiles[task]) target.ai_profiles[task] = this.defaultAiProfileSelection();
         if (!Array.isArray(target.ai_profiles[task].fallback_profile_ids)) target.ai_profiles[task].fallback_profile_ids = [];
         if (target.ai_profiles[task].primary_model == null) target.ai_profiles[task].primary_model = '';
@@ -4566,7 +4613,7 @@ function cairnApp() {
     },
 
     async loadLlmExecutions() {
-      if (!this.selectedProjectId || this.view !== 'graph') return;
+      if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
       try {
         const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-executions?limit=200`);
         const executions = data.executions || [];
@@ -4691,7 +4738,7 @@ function cairnApp() {
     },
 
     async reloadLlmEventView(force = false) {
-      if (!this.selectedProjectId || this.view !== 'graph') return;
+      if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
       if (this.llmSelectedExecutionId) {
         await this.loadLlmExecutionEvents(this.llmSelectedExecutionId);
       } else {
@@ -4700,7 +4747,7 @@ function cairnApp() {
     },
 
     async loadLlmExecutionEvents(executionId) {
-      if (!this.selectedProjectId || !executionId) {
+      if (!this.selectedProjectId || !this.project?.project || !executionId) {
         this.llmSelectedExecutionEventsLoading = false;
         this._llmViewVersion++;
         return;
@@ -4728,7 +4775,7 @@ function cairnApp() {
     },
 
     async loadAllExecutionEvents(force = false) {
-      if (!this.selectedProjectId || this.view !== 'graph') return;
+      if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
       if (this.llmAllExecutionEventsLoading) return;
       if (!force && this.llmAllExecutionEventsLoaded) return;
       this.llmAllExecutionEventsLoading = true;
@@ -4751,7 +4798,7 @@ function cairnApp() {
     },
 
     async pollLlmEvents(force = false) {
-      if (!this.selectedProjectId || this.view !== 'graph' || this.replay.active) return;
+      if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project || this.replay.active) return;
       if (!force && (this.llmPanelCollapsed || this.llmPollingPaused)) return;
       if (this.llmPollInFlight && !force) return;
       this.llmPollInFlight = true;
@@ -4805,7 +4852,7 @@ function cairnApp() {
     startLlmPolling() {
       if (this.llmPollTimer) return;
       this.llmPollTimer = setInterval(async () => {
-        if (!this.selectedProjectId || this.view !== 'graph') return;
+        if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
         if (this.llmPanelCollapsed || this.llmPollingPaused || this.replay.active) return;
         const hasRunning = this.llmExecutions.some(execution => execution.process_state === 'running');
         const now = Date.now();
@@ -5913,7 +5960,7 @@ function cairnApp() {
         const availableIds = new Set(this.aiProfiles.filter(p => p.available !== false).map(p => p.id));
         const sourceSelections = projectAiProfiles?.selections || this.defaultTaskAiProfileSelections();
         const replaySelections = this.compactTaskAiProfileSelections(sourceSelections);
-        for (const taskType of ['bootstrap', 'explore', 'reason']) {
+        for (const taskType of this.task_types) {
           const selection = replaySelections[taskType];
           selection.primary_profile_id = selection.primary_profile_id && availableIds.has(selection.primary_profile_id)
             ? selection.primary_profile_id : '';
@@ -6138,11 +6185,25 @@ function cairnApp() {
       this.showReplayConfigModal = false;
       this.resetReplayConfig();
       this.resetProjectFiles();
-      await this.loadProject(id);
-      await this.loadCapabilities();
+      const loaded = await this.loadProject(id);
       this.view = 'graph';
       this.graphMode = 'graph';
       this.llmPanelCollapsed = false;
+      if (!loaded) {
+        this.capabilities = {
+          catalog: [],
+          tasks: this.defaultTaskCapabilitiesMap(),
+          health: {},
+          unavailable: { mcp_server_ids: [], skill_ids: [] },
+          projectAiProfiles: { catalog: [], selections: this.defaultTaskAiProfileSelections(), snapshots: [], unavailable_profile_ids: [] },
+        };
+        this.resetLlmState();
+        this.teardownAutoFit();
+        if (this.cy) { this.cy.destroy(); this.cy = null; }
+        if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
+        return;
+      }
+      await this.loadCapabilities();
       await this.loadLlmExecutions();
       // Materialize a stable, complete project-wide snapshot for the
       // default "All Executions" mode before warming the rolling live window.
@@ -6203,10 +6264,12 @@ function cairnApp() {
         if (this.projectPollInFlight) return;
         this.projectPollInFlight = true;
         try {
-          if (this.selectedProjectId && this.view === 'graph') {
-            await this.loadProject(this.selectedProjectId);
-            if (this.sideTab === 'files') await this.loadProjectFiles(true);
-            this.updateGraph();
+          if (this.selectedProjectId && this.view === 'graph' && this.project?.project) {
+            const loaded = await this.loadProject(this.selectedProjectId);
+            if (loaded) {
+              if (this.sideTab === 'files') await this.loadProjectFiles(true);
+              this.updateGraph();
+            }
           } else {
             await this.loadProjects();
           }

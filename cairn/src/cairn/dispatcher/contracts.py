@@ -79,11 +79,6 @@ def validate_reason_payload(
     complete = data.get("complete")
     blocked = data.get("blocked")
     intents = data.get("intents")
-    # backward compat: accept singular "intent" key from LLMs
-    if intents is None:
-        singular = data.get("intent")
-        if isinstance(singular, dict):
-            intents = [singular]
     if complete is not None:
         if intents is not None or blocked is not None:
             raise ValueError("complete, blocked, and intents cannot coexist")

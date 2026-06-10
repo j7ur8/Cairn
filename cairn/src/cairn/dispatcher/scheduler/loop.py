@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 import threading
 import uuid
@@ -12,19 +11,18 @@ from pathlib import Path
 
 import requests
 
-from cairn.dispatcher.config import DispatchConfig, WorkerConfig
-from cairn.dispatcher.capabilities import catalog_payload as capability_catalog_payload
-from cairn.dispatcher.roles import catalog_payload as role_catalog_payload
-from cairn.dispatcher.ai_health import probe_snapshot, run_profile_worker_healthcheck
+from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
+from cairn.dispatcher.ai_health import probe_snapshot
 from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
 from cairn.dispatcher.leadership import DispatcherLeader, LeadershipLost
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
+from cairn.dispatcher.scheduler.health import DispatcherHealthCoordinator
 from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache, compute_ai_overlay
 from cairn.dispatcher.scheduler.project_cache import ProjectCaches
+from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.scheduler.worker_selection import WorkerSelection, select_worker_default
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
@@ -37,13 +35,12 @@ from cairn.observability.metrics import (
     DISPATCHER_TICKS,
     WORKER_UNHEALTHY_SINCE,
 )
-from cairn.server.models import (
-    AiProfile,
+from cairn.shared.task_types import builtin_task_type_names
+from cairn.shared.protocol_models import ProjectAiProfileSnapshot
+from cairn.shared.protocol_models import (
     Intent,
-    ProjectAiProfileSnapshot,
     ProjectDetail,
     ProjectSummary,
-    ProxyConfig,
 )
 
 LOG = logging.getLogger(__name__)
@@ -54,53 +51,14 @@ BOOTSTRAP_INTENT_CREATOR = "dispatcher.bootstrap"
 REASON_CONSUMED_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
 
 
-# WorkerSelection dataclass moved to scheduler/worker_selection.py.
-
-
-def _proxy_config_to_env(cfg: ProxyConfig) -> dict[str, str]:
-    """Translate a :class:`ProxyConfig` into the env vars a worker container
-    needs in order to route traffic through the proxy.
-
-    Behaviour:
-
-    * ``socks5`` -> ``ALL_PROXY`` + ``NO_PROXY`` (socks is the all-protocols
-      fallback; ``HTTP_PROXY`` / ``HTTPS_PROXY`` are *not* set because most
-      HTTPS libraries will only honour ``ALL_PROXY`` for SOCKS).
-    * ``http`` / ``https`` -> ``HTTP_PROXY`` + ``HTTPS_PROXY`` + ``NO_PROXY``.
-      ``http`` is used for both so existing tools that read either variable
-      get the same value.
-
-    Auth is rendered into the URL as ``user:pass@`` when both are set, or
-    ``user@`` when only the username is set. ``NO_PROXY`` always excludes the
-    Cairn-internal hostnames so the dispatcher -> server RPC keeps working.
-    """
-    userpass = ""
-    if cfg.username and cfg.password:
-        userpass = f"{cfg.username}:{cfg.password}@"
-    elif cfg.username:
-        userpass = f"{cfg.username}@"
-    no_proxy = "localhost,127.0.0.1,cairn-server,cairn"
-    if cfg.type == "socks5":
-        return {
-            "ALL_PROXY": f"socks5://{userpass}{cfg.host}:{cfg.port}",
-            "NO_PROXY": no_proxy,
-        }
-    scheme = "http"
-    return {
-        "HTTP_PROXY": f"{scheme}://{userpass}{cfg.host}:{cfg.port}",
-        "HTTPS_PROXY": f"{scheme}://{userpass}{cfg.host}:{cfg.port}",
-        "NO_PROXY": no_proxy,
-    }
-
-
 class DispatcherLoop:
     def __init__(self, config_path: Path):
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
-        self.client = CairnClient(self.config.server)
+        self.client = CairnClient(self.config.server, api_token=self.config.system.auth.dispatcher_api_token)
         self.leader = DispatcherLeader(
             client=self.client,
-            ttl_seconds=float(os.environ.get("CAIRN_LEADER_TTL_SECONDS", "15")),
+            ttl_seconds=self.config.system.dispatcher.leader_ttl_seconds,
         )
         self._last_tick_at: float | None = None
         self.health_server = DispatcherHealthServer(
@@ -113,15 +71,14 @@ class DispatcherLoop:
             reload_handler=self._reload_from_health_server,
         )
         self.health_server.start()
-        bearer_token_env_keys = tuple(
-            mcp.bearer_token_env
-            for mcp in self.config.capabilities.mcp_servers
-            if mcp.transport == "http" and mcp.bearer_token_env
-        )
         self.container_manager = ContainerManager(
             self.config.container,
-            bearer_token_env_keys=bearer_token_env_keys,
             proxy_resolver=self._resolve_proxy_env,
+        )
+        self.health = DispatcherHealthCoordinator(
+            config=self.config,
+            client=self.client,
+            container_manager=self.container_manager,
         )
         self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
         self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, self.config.runtime.max_workers)))
@@ -136,10 +93,7 @@ class DispatcherLoop:
         self._inactive_cleanup_done: dict[str, str] = {}
         self.project_cursor = 0
         self._settings_checked = False
-        self._capability_catalog_registered = False
-        self._role_catalog_registered = False
         self._startup_healthchecks_checked = False
-        self._ai_catalog_synced = False
         # Per-project caches: proxy, AI selection chains, and the
         # fetched ``sk`` values for the profiles in those chains.
         # See :mod:`cairn.dispatcher.scheduler.project_cache` for the
@@ -208,18 +162,6 @@ class DispatcherLoop:
             self._validate_server_settings()
             self._settings_checked = True
             self.leader.heartbeat()
-        if not self._capability_catalog_registered:
-            self._register_capability_catalog()
-            self._capability_catalog_registered = True
-            self.leader.heartbeat()
-        if not self._role_catalog_registered:
-            self._register_role_catalog()
-            self._role_catalog_registered = True
-            self.leader.heartbeat()
-        if not self._ai_catalog_synced:
-            self._sync_ai_catalog_from_dispatch_yaml()
-            self._ai_catalog_synced = True
-            self.leader.heartbeat()
         self._process_ai_profile_check_requests()
         self.leader.heartbeat()
         self._reap_futures()
@@ -275,7 +217,7 @@ class DispatcherLoop:
         self._startup_healthchecks_checked = True
 
     def _health_addr(self) -> tuple[str, int]:
-        value = os.environ.get("CAIRN_DISPATCHER_HEALTH_ADDR", "127.0.0.1:9100")
+        value = self.config.system.dispatcher.health_addr
         host, _, port_text = value.partition(":")
         return host or "127.0.0.1", int(port_text or "9100")
 
@@ -284,36 +226,14 @@ class DispatcherLoop:
         DISPATCHER_TICKS.inc()
         DISPATCHER_INFLIGHT.set(len(self.futures))
 
-    def _register_capability_catalog(self) -> None:
-        response = self.client.register_capability_catalog(capability_catalog_payload(self.config))
-        if not response.ok:
-            raise RuntimeError(f"failed to register capability catalog status={response.status_code}: {response.text}")
-        LOG.info(
-            "registered capability catalog mcp_servers=%s skills=%s",
-            len(self.config.capabilities.mcp_servers),
-            len(self.config.capabilities.skills),
-        )
-
-    def _register_role_catalog(self) -> None:
-        response = self.client.register_role_catalog(role_catalog_payload(self.config))
-        if not response.ok:
-            raise RuntimeError(f"failed to register role catalog status={response.status_code}: {response.text}")
-        LOG.info("registered role catalog roles=%s", len(self.config.roles))
-
     def _reload_from_health_server(self, authorization: str | None) -> dict[str, object]:
-        expected = os.environ.get("CAIRN_API_TOKEN", "")
+        expected = self.config.system.auth.dispatcher_api_token
         if expected and authorization != f"Bearer {expected}":
             raise PermissionError("invalid reload token")
         with self._reload_lock:
             next_config = DispatchConfig.load(self.config_path)
-            bearer_token_env_keys = tuple(
-                mcp.bearer_token_env
-                for mcp in next_config.capabilities.mcp_servers
-                if mcp.transport == "http" and mcp.bearer_token_env
-            )
             next_container_manager = ContainerManager(
                 next_config.container,
-                bearer_token_env_keys=bearer_token_env_keys,
                 proxy_resolver=self._resolve_proxy_env,
             )
             old_container_manager = self.container_manager
@@ -323,6 +243,11 @@ class DispatcherLoop:
             self.client.close()
             self.client._base_url = next_config.server.rstrip("/")  # noqa: SLF001 - reloads existing client wiring.
             self.container_manager = next_container_manager
+            self.health.refresh(
+                config=self.config,
+                client=self.client,
+                container_manager=self.container_manager,
+            )
             self.executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
             self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, next_config.runtime.max_workers)))
             self.project_caches.clear_all()
@@ -330,9 +255,6 @@ class DispatcherLoop:
             self.worker_unhealthy_until.clear()
             self.worker_rejected_until.clear()
             self._settings_checked = False
-            self._capability_catalog_registered = False
-            self._role_catalog_registered = False
-            self._ai_catalog_synced = False
             try:
                 old_container_manager.close()
             finally:
@@ -451,32 +373,40 @@ class DispatcherLoop:
         cached as ``None`` so dispatch can keep going.
         """
         project_id = project.project.id
+        configs: dict[str, dict] = {}
         try:
-            response = self.client.get_project_ai_profiles(project_id)
-        except Exception as exc:  # noqa: BLE001 - tolerate any client glitch
+            for task_type in builtin_task_type_names():
+                response = self.client.get_project_execution_config(project_id, task_type)
+                if response.ok and isinstance(response.data, dict):
+                    configs[task_type] = response.data
+        except Exception as exc:  # noqa: BLE001
             LOG.warning(
-                "project=%s ai profile fetch raised error=%s; missing AI profile selection",
+                "project=%s execution config fetch raised error=%s; missing AI profile selection",
                 project_id,
                 exc,
             )
             self.project_caches.set_ai_chains(project_id, None)
             return
-        if not response.ok or not isinstance(response.data, dict):
+        if not configs:
             self.project_caches.set_ai_chains(project_id, None)
             return
-        data = response.data
         try:
-            snapshots = [ProjectAiProfileSnapshot.model_validate(item) for item in data.get("snapshots", [])]
+            snapshots = [
+                ProjectAiProfileSnapshot.model_validate(item)
+                for config in configs.values()
+                for item in (config.get("ai_profiles") or [])
+                if isinstance(item, dict)
+            ]
         except Exception as exc:  # noqa: BLE001
             LOG.warning(
-                "project=%s ai profile snapshot parse failed error=%s; missing AI profile selection",
+                "project=%s execution config ai snapshot parse failed error=%s",
                 project_id,
                 exc,
             )
             self.project_caches.set_ai_chains(project_id, None)
             return
         chains: dict[str, list[ProjectAiProfileSnapshot]] = {}
-        for task_type in ("bootstrap", "explore", "reason"):
+        for task_type in builtin_task_type_names():
             task_snaps = [snap for snap in snapshots if snap.task_type == task_type]
             ordered = sorted(
                 task_snaps,
@@ -488,24 +418,11 @@ class DispatcherLoop:
             self.project_caches.set_ai_chains(project_id, None)
             return
         self.project_caches.set_ai_chains(project_id, chains)
-        # Fetch the raw ``sk`` value for every referenced profile. Failures
-        # are tolerated and cached as ``None`` so a transient server
-        # glitch does not take down dispatch.
         secrets: dict[str, str | None] = {}
-        seen_profile_ids: set[str] = set()
-        for ordered in chains.values():
-            for snap in ordered:
-                if snap.profile_id in seen_profile_ids:
-                    continue
-                seen_profile_ids.add(snap.profile_id)
-                try:
-                    secrets[snap.profile_id] = self.client.get_ai_profile_secret(snap.profile_id)
-                except Exception as exc:  # noqa: BLE001
-                    LOG.warning(
-                        "project=%s ai profile secret fetch failed profile=%s error=%s",
-                        project_id, snap.profile_id, exc,
-                    )
-                    secrets[snap.profile_id] = None
+        for config in configs.values():
+            for item in config.get("ai_profiles") or []:
+                if isinstance(item, dict) and item.get("profile_id") and "sk" in item:
+                    secrets[str(item["profile_id"])] = item.get("sk")
         self.project_caches.set_ai_secret(project_id, secrets)
         # Secrets changed, so any cached overlay that referenced them
         # is stale.
@@ -561,7 +478,7 @@ class DispatcherLoop:
         cfg = self.project_caches.get_proxy(project_id)
         if cfg is None:
             return None
-        return _proxy_config_to_env(cfg)
+        return proxy_config_to_env(cfg)
 
     def _try_dispatch_project(self, summary: ProjectSummary) -> bool:
         skip_scope = f"project:{summary.id}:skip"
@@ -988,8 +905,10 @@ class DispatcherLoop:
             # We do not mutate the catalog here — only this dispatch pass
             # sees the failure. The catalog's ``available`` flag is updated
             # by the periodic health-report pass at startup.
+            secrets = self.project_caches.get_ai_secret(project_id)
+            cached_secret = secrets.get(snap.profile_id) or None
             try:
-                health = probe_snapshot(snap, config=self.config)
+                health = probe_snapshot(snap, config=self.config, cached_secret=cached_secret)
             except Exception as exc:  # noqa: BLE001
                 LOG.warning(
                     "ai profile probe raised project=%s profile=%s error=%s",
@@ -1014,7 +933,7 @@ class DispatcherLoop:
             if not overlay and snap.snapshot_api_key_env:
                 reason = (
                     f"{snap.profile_id}({snap.snapshot_worker_type}) env "
-                    f"{snap.snapshot_api_key_env} not set on dispatcher"
+                    f"{snap.snapshot_api_key_env} not configured in execution config"
                 )
                 last_unavailable_reasons.append(reason)
                 LOG.info(
@@ -1441,230 +1360,13 @@ class DispatcherLoop:
             if scope.startswith(prefix):
                 self._log_state.pop(scope, None)
 
-    def _sync_ai_catalog_from_dispatch_yaml(self) -> None:
-        """Idempotently mirror ``dispatch.yaml`` workers into ``ai_profiles``.
-
-        * Reads the current server-side catalog.
-        * If empty, builds a seed payload from the dispatcher's
-          ``self.config.workers`` (skipping ``pi`` and ``mock``) and
-          POSTs it to ``/ai-profiles/sync``.
-        * Otherwise (catalog is non-empty) skips the seed; user-defined
-          profiles are preserved across dispatcher restarts.
-        * After the seed, runs the local health probe and POSTs results
-          to ``/ai-profiles/health-report`` so the server's
-          ``available`` flag reflects dispatcher-side reality.
-        """
-        try:
-            response = self.client.list_ai_profiles()
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ai catalog sync: list_ai_profiles failed error=%s", exc)
-            return
-        if not response.ok or not isinstance(response.data, list):
-            LOG.info(
-                "ai catalog sync: list_ai_profiles unavailable status=%s; skipping",
-                response.status_code,
-            )
-            return
-        profiles = response.data if isinstance(response.data, list) else []
-        payload = {"workers": self._build_ai_sync_payload()}
-        if payload["workers"]:
-            try:
-                sync = self.client.sync_ai_profiles(payload)
-            except Exception as exc:  # noqa: BLE001
-                LOG.warning("ai catalog sync: sync_ai_profiles failed error=%s", exc)
-            else:
-                if not sync.ok:
-                    LOG.warning(
-                        "ai catalog sync: server returned status=%s body=%s",
-                        sync.status_code, sync.text[:200],
-                    )
-                else:
-                    LOG.info(
-                        "ai catalog synced from dispatch.yaml workers=%s",
-                        [w["name"] for w in payload["workers"]],
-                    )
-                    profiles = sync.data if isinstance(sync.data, list) else []
-        else:
-            LOG.info("ai catalog sync: no supported workers in dispatch.yaml; using existing profiles")
-        # Run the local probe and report results.
-        reports = []
-        for prof in profiles:
-            if not isinstance(prof, dict):
-                continue
-            profile_id = prof.get("id")
-            api_key_env = prof.get("api_key_env")
-            base_url = prof.get("base_url")
-            worker_type = prof.get("worker_type")
-            timeout = float(prof.get("healthcheck_timeout") or 1.0)
-            from cairn.dispatcher.ai_health import _check_auth_env, _check_base_url, _check_worker_type
-            auth_item = _check_auth_env(api_key_env or "")
-            url_item = _check_base_url(base_url or "", timeout)
-            type_item = _check_worker_type(worker_type or "", self.config.workers)
-            ok = all(item.ok for item in (auth_item, url_item, type_item))
-            message_bits = [
-                item.message for item in (auth_item, url_item, type_item) if not item.ok
-            ]
-            message = "; ".join(message_bits) if message_bits else "ok"
-            reports.append({
-                "profile_id": profile_id,
-                "ok": ok,
-                "message": message,
-            })
-        if not reports:
-            return
-        try:
-            self.client.post_ai_health_report({"reports": reports})
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ai catalog sync: health_report failed error=%s", exc)
-
     def _process_ai_profile_check_requests(self) -> None:
-        try:
-            claimed = self.client.claim_ai_profile_check_request()
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ai profile check: claim failed error=%s", exc)
+        if not hasattr(self, "health"):
             return
-        if not claimed.ok or not isinstance(claimed.data, dict) or not claimed.data:
-            return
-        request_id = str(claimed.data.get("id") or "")
-        profile_id = str(claimed.data.get("profile_id") or "")
-        if not request_id or not profile_id:
-            return
-        try:
-            response = self.client.list_ai_profiles()
-            if not response.ok or not isinstance(response.data, list):
-                self.client.complete_ai_profile_check_request(
-                    request_id, ok=False, message="unable to load ai profile catalog",
-                )
-                return
-            raw = next(
-                (item for item in response.data if isinstance(item, dict) and item.get("id") == profile_id),
-                None,
-            )
-            if raw is None:
-                self.client.complete_ai_profile_check_request(
-                    request_id, ok=False, message=f"ai profile not found: {profile_id}",
-                )
-                return
-            profile = AiProfile.model_validate(raw)
-            try:
-                cached_secret = self.client.get_ai_profile_secret(profile.id)
-            except Exception as exc:  # noqa: BLE001
-                LOG.warning("ai profile check: secret lookup failed profile_id=%s error=%s", profile.id, exc)
-                cached_secret = None
-            health = run_profile_worker_healthcheck(
-                profile,
-                config=self.config,
-                container_manager=self.container_manager,
-                cached_secret=cached_secret,
-                timeout_seconds=self.config.runtime.healthcheck_timeout,
-            )
-            message = health.message or ("ok" if health.ok else "worker healthcheck failed")
-            self.client.post_ai_health_report({
-                "reports": [{
-                    "profile_id": profile.id,
-                    "ok": health.ok,
-                    "message": message[:1000],
-                }],
-            })
-            self.client.complete_ai_profile_check_request(
-                request_id, ok=health.ok, message=message[:1000],
-            )
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ai profile check failed profile_id=%s error=%s", profile_id, exc)
-            try:
-                self.client.complete_ai_profile_check_request(
-                    request_id, ok=False, message=str(exc)[:1000],
-                )
-            except Exception:  # noqa: BLE001
-                LOG.exception("ai profile check complete failed request_id=%s", request_id)
-
-    def _build_ai_sync_payload(self) -> list[dict[str, object]]:
-        """Translate ``dispatch.yaml`` workers into the sync payload.
-
-        Only ``codex`` and ``claudecode`` are sent; ``pi`` and ``mock``
-        workers are skipped (no first-class AI profile support yet).
-        """
-        from cairn.dispatcher.config import WORKER_ENV_KEYS
-        supported = {"codex", "claudecode"}
-        result: list[dict[str, object]] = []
-        for worker in self.config.workers:
-            if worker.type not in supported:
-                continue
-            env = worker.env
-            # The dispatcher must declare at least the model env key for
-            # sync to make sense; without it the profile would be empty.
-            model_key = next((k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_MODEL")), None)
-            base_url_key = next((k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_BASE_URL")), None)
-            auth_token_key = next(
-                (k for k in WORKER_ENV_KEYS[worker.type] if k.endswith("_API_KEY") or k.endswith("_AUTH_TOKEN")),
-                None,
-            )
-            if model_key is None or auth_token_key is None:
-                continue
-            default_model = env.get(model_key, "").strip()
-            auth_value = env.get(auth_token_key, "").strip()
-            if not default_model or not auth_value:
-                # Skip workers that are not yet AI-shaped.
-                continue
-            models: list[str] = []
-            for model in (default_model, *worker.models):
-                if model not in models:
-                    models.append(model)
-            base_url_value = env.get(base_url_key, "").strip() if base_url_key else ""
-            # ``auth_value`` may be a ${VAR} reference; the dispatch.yaml
-            # loader has already resolved it via the env, but we only want
-            # to record the *name*. If the resolved value is non-empty, we
-            # treat the env-var name as the canonical key. (Operators who
-            # put a literal token here are doing it wrong; we do not
-            # paper over that — they will see it in the UI.)
-            api_key_env_name = auth_token_key
-            # The protocol model expects ``api_key_env`` to be a *name*,
-            # not a value; for dispatch.yaml-seeded profiles the canonical
-            # name for the worker type is the env-var key itself.
-            result.append({
-                "name": worker.name,
-                "worker_type": worker.type,
-                "model": default_model,
-                "models": models,
-                "base_url": base_url_value,
-                "api_key_env": api_key_env_name,
-                "provider": "",
-                "model_reasoning_effort": worker.model_reasoning_effort,
-                # The dispatcher already has the resolved token in
-                # ``auth_value`` (post-interpolation). Push it into the
-                # server DB so the worker container does not have to
-                # round-trip ``os.environ`` at task-launch time.
-                "sk": auth_value,
-            })
-        return result
+        self.health.process_ai_profile_check_requests()
 
     def _validate_server_settings(self) -> None:
-        settings = self.client.get_settings()
-        interval = self.config.runtime.interval
-        for name, value in (("intent_timeout", settings.intent_timeout), ("reason_timeout", settings.reason_timeout)):
-            if value <= interval:
-                raise RuntimeError(
-                    f"server {name}={value}s must be greater than dispatcher interval={interval}s"
-                )
-            if value < interval * 2:
-                LOG.warning(
-                    "server %s is tight %s=%ss interval=%ss; heartbeat slack is only %ss",
-                    name,
-                    name,
-                    value,
-                    interval,
-                    value - interval,
-                )
-                continue
-            LOG.info(
-                "server setting validated %s=%ss interval=%ss",
-                name,
-                value,
-                interval,
-            )
+        self.health.validate_server_settings()
 
     def _run_startup_healthchecks(self, *, show_commands: bool) -> None:
-        results = run_startup_healthchecks(self.config, self.container_manager, show_commands=show_commands)
-        if any(result.ok for result in results):
-            return
-        raise RuntimeError(format_failure_summary(results))
+        self.health.run_startup_healthchecks(show_commands=show_commands)

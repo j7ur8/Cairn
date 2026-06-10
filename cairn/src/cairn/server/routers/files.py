@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import mimetypes
-import os
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from cairn.server.db import get_conn
-from cairn.server.models import ProjectFileItem, ProjectFilesResponse
+from cairn.server import db
+from cairn.server.models_pkg.projects import ProjectFileItem, ProjectFilesResponse
 from cairn.server.security.paths import (
     download_size_guard,
     force_attachment_disposition,
@@ -21,9 +20,14 @@ from cairn.server.services import get_project_or_404
 
 router = APIRouter(tags=["files"])
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-_PROJECT_FILES_ROOT = Path(os.environ.get("CAIRN_PROJECT_FILES_ROOT", str(_REPO_ROOT / "datas" / "project-files")))
-_ATTACHMENTS_ROOT = Path(os.environ.get("CAIRN_ATTACHMENTS_ROOT", str(_REPO_ROOT / "datas" / "attachments")))
+def _project_files_root() -> Path:
+    from cairn.server.runtime_config import system_config
+    return Path(system_config().paths.resolved_project_files_root)
+
+
+def _attachments_root() -> Path:
+    from cairn.server.runtime_config import system_config
+    return Path(system_config().paths.resolved_attachments_root)
 
 
 def _iso_mtime(path: Path) -> str:
@@ -38,9 +42,9 @@ _safe_relative_path = validate_relative_path
 
 def _resolve_project_file(project_id: str, source: str, rel_path: str) -> Path:
     if source == "project":
-        root = _PROJECT_FILES_ROOT / project_id
+        root = _project_files_root() / project_id
     elif source == "attachment":
-        root = _ATTACHMENTS_ROOT / project_id
+        root = _attachments_root() / project_id
     else:
         raise HTTPException(400, "source must be project or attachment")
 
@@ -95,12 +99,12 @@ def _iter_files(root: Path, source: str) -> list[ProjectFileItem]:
 @router.get("/projects/{project_id}/files", response_model=ProjectFilesResponse)
 def list_project_files(project_id: str):
     validate_project_id(project_id)
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         get_project_or_404(conn, project_id)
 
     files = [
-        *_iter_files(_PROJECT_FILES_ROOT / project_id, "project"),
-        *_iter_files(_ATTACHMENTS_ROOT / project_id, "attachment"),
+        *_iter_files(_project_files_root() / project_id, "project"),
+        *_iter_files(_attachments_root() / project_id, "attachment"),
     ]
     files.sort(key=lambda item: (item.category, item.source, item.path))
     return ProjectFilesResponse(project_id=project_id, files=files)
@@ -112,7 +116,7 @@ def download_project_file(
     source: str = Query(..., pattern="^(project|attachment)$"),
     path: str = Query(..., min_length=1),
 ):
-    with get_conn() as conn:
+    with db.session_scope() as conn:
         get_project_or_404(conn, project_id)
 
     target = _resolve_project_file(project_id, source, path)
