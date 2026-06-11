@@ -34,7 +34,7 @@ def minimal_system_config(root: Path | None = None) -> dict[str, Any]:
             "datas_root": str(base),
             "attachments_root": str(base / "attachments"),
             "project_files_root": str(base / "project-files"),
-            "worker_attachments_root": "/mnt/attachments",
+            "worker_attachments_root": "/home/kali/workspace/attachments",
         },
         "dispatcher": {
             "reload_url": "http://127.0.0.1:9100/reload",

@@ -14,7 +14,7 @@ system:
     datas_root: datas
     attachments_root: datas/attachments
     project_files_root: datas/project-files
-    worker_attachments_root: /mnt/attachments
+    worker_attachments_root: /home/kali/workspace/attachments
   dispatcher:
     reload_url: http://127.0.0.1:9100/reload
     reload_enabled: false
@@ -85,7 +85,7 @@ container:
   # bind_mounts:
   #   - name: "mock-project-files"
   #     host_path: "./datas/mock-project-files/{project_id}"
-  #     container_path: "/mnt/project"
+  #     container_path: "/home/kali/workspace/project"
   #     read_only: false
   cap_add:
     - "NET_RAW"

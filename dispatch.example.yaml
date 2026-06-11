@@ -14,7 +14,7 @@ system:
     datas_root: datas
     attachments_root: datas/attachments
     project_files_root: datas/project-files
-    worker_attachments_root: /mnt/attachments
+    worker_attachments_root: /home/kali/workspace/attachments
   dispatcher:
     reload_url: http://cairn-dispatcher:9100/reload
     reload_enabled: true
@@ -66,11 +66,11 @@ container:
   bind_mounts:
   - name: ctf-attachments
     host_path: datas/attachments
-    container_path: /mnt/attachments
+    container_path: /home/kali/workspace/attachments
     read_only: true
   - name: project-files
     host_path: datas/project-files/{project_id}
-    container_path: /mnt/project
+    container_path: /home/kali/workspace/project
     read_only: false
 workers:
 - name: claudecode_deepseek-v4-pro

@@ -624,7 +624,7 @@ class ContainerConfig(BaseModel):
     - On macOS Docker Desktop, host bind mounts go through VirtioFS / gRPC-FUSE,
       which does not preserve the world-writable bit when the container's UID
       differs from the host file's owner. The worker (running as ``kali``,
-      UID 1000) therefore cannot write to ``/mnt/project`` if the host dir is
+      UID 1000) therefore cannot write to ``/home/kali/workspace/project`` if the host dir is
       owned by a different UID (e.g. host ``jmac`` = UID 501). Set ``user`` to
       the host user's ``uid:gid`` (``id -u`` / ``id -g``) to fix.
     - On Linux Docker Engine the UID namespace is shared 1:1 with the host, so
@@ -723,7 +723,7 @@ class SystemPathsConfig(BaseModel):
     datas_root: str
     attachments_root: str | None = None
     project_files_root: str | None = None
-    worker_attachments_root: str = "/mnt/attachments"
+    worker_attachments_root: str = "/home/kali/workspace/attachments"
 
     @field_validator("datas_root", "attachments_root", "project_files_root", "worker_attachments_root")
     @classmethod
