@@ -18,7 +18,7 @@ class TaskTypeRegistryTests(unittest.TestCase):
         self.assertIn("bootstrap", TASK_TYPE_REGISTRY.names())
         self.assertIn("explore", TASK_TYPE_REGISTRY.names())
         self.assertIn("reason", TASK_TYPE_REGISTRY.names())
-        self.assertNotIn("legacy", TASK_TYPE_REGISTRY.names())
+        self.assertEqual(set(TASK_TYPE_REGISTRY.names()), {"bootstrap", "explore", "reason"})
 
     def test_task_type_registry_is_builtin_scoped(self) -> None:
         from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names

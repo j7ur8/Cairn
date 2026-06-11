@@ -1,3 +1,30 @@
+system:
+  database:
+    url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+  auth:
+    jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+    dispatcher_api_token: test-dispatcher-token
+  initial_admin:
+    email: ''
+    password: ''
+  paths:
+    datas_root: datas
+    attachments_root: datas/attachments
+    project_files_root: datas/project-files
+    worker_attachments_root: /mnt/attachments
+  dispatcher:
+    reload_url: http://127.0.0.1:9100/reload
+    reload_enabled: false
+    health_addr: 127.0.0.1:9100
+  server:
+    log_level: INFO
+    log_format: text
+    retention_loop_enabled: false
+    retention_interval_seconds: 21600
+
 server: "http://127.0.0.1:8000"
 
 runtime:
@@ -21,9 +48,10 @@ tasks:
 
 observability:
   enabled: true
-  record_prompts: true
-  record_stdout: true
-  record_stderr: true
+  record:
+  - prompts
+  - stdout
+  - stderr
   record_raw_worker_stream: false
   max_event_bytes: 16384
   max_bytes_per_execution: 10485760

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -626,7 +627,7 @@ class SyncPayloadTests(unittest.TestCase):
         self.assertEqual([item["model"] for item in payload], ["gpt-default"])
         self.assertEqual(payload[0]["models"], ["gpt-default", "gpt-large"])
 
-    def test_single_model_keeps_legacy_seed_name(self) -> None:
+    def test_single_model_uses_seed_worker_name(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
         loop = DispatcherLoop.__new__(DispatcherLoop)
@@ -1158,6 +1159,31 @@ class AiProfileDbBridgeTests(unittest.TestCase):
             claimed.id,
             AiProfileCheckCompleteRequest(ok=True, message="ok"),
         )
+
+    def test_concurrent_check_request_claim_has_single_winner(self) -> None:
+        from cairn.server.routers.ai_profiles import (
+            claim_ai_profile_check_request,
+            create_ai_profile,
+            trigger_ai_profile_check,
+        )
+        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
+
+        created = create_ai_profile(AiProfileCreate(
+            name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",
+        ))
+        queued = trigger_ai_profile_check(created.id, user=None)
+        self.assertEqual(queued.status, "pending")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(claim_ai_profile_check_request) for _ in range(2)]
+            results = [future.result() for future in as_completed(futures)]
+
+        claimed = [result for result in results if result is not None]
+        empty = [result for result in results if result is None]
+        self.assertEqual(len(claimed), 1, results)
+        self.assertEqual(len(empty), 1, results)
+        self.assertEqual(claimed[0].id, queued.request_id)
+        self.assertEqual(claimed[0].status, "running")
 
 
 if __name__ == "__main__":

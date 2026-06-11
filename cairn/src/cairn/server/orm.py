@@ -232,15 +232,6 @@ class UserRow(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class DispatcherLockRow(Base):
-    __tablename__ = "dispatcher_locks"
-
-    name: Mapped[str] = mapped_column(Text, primary_key=True)
-    holder: Mapped[str] = mapped_column(Text, nullable=False)
-    acquired_at: Mapped[str] = mapped_column(Text, nullable=False)
-    heartbeat_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-
 class LlmExecutionRow(Base):
     __tablename__ = "llm_executions"
     __table_args__ = (Index("idx_llm_executions_project_started", "project_id", "started_at"),)

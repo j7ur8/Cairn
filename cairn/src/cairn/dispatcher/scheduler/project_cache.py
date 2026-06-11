@@ -59,10 +59,7 @@ class ProjectCaches:
         self.ai_secret.pop(project_id, None)
 
     def clear_all(self) -> None:
-        """Drop every cached value. Used on leader step-down so a
-        re-acquired leader does not serve stale state from the
-        previous lock window.
-        """
+        """Drop every cached value."""
         self.proxy.clear()
         self.ai_chains.clear()
         self.ai_secret.clear()

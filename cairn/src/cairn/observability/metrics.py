@@ -85,12 +85,6 @@ DISPATCHER_OVERFLOW = Counter(
     labelnames=("reason",),
     registry=REGISTRY,
 )
-DISPATCHER_STEPDOWN = Counter(
-    "cairn_dispatcher_stepdown_total",
-    "Times the dispatcher deliberately stepped down after losing its leader lock.",
-    labelnames=("reason",),
-    registry=REGISTRY,
-)
 WORKER_UNHEALTHY_SINCE = Gauge(
     "cairn_worker_unhealthy_since_seconds",
     "Unix timestamp when a worker was most recently marked unhealthy; 0 means healthy.",

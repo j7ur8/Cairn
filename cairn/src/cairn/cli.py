@@ -7,7 +7,6 @@ import uvicorn
 from cairn.dispatcher.logging import configure_logging
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
-from cairn.server.repositories import sql
 
 
 @click.group()
@@ -68,16 +67,10 @@ def db_commands():
 
 @db_commands.command("status")
 def db_status():
-    """Print PostgreSQL status and dispatcher lock diagnostics."""
+    """Print PostgreSQL status."""
     db.configure()
-    with db.session_scope() as conn:
-        lock_rows = [
-            dict(row)
-            for row in sql.fetchall(conn, "SELECT name, holder, acquired_at, heartbeat_at FROM dispatcher_locks ORDER BY name")
-        ]
     result = {
         "status": db.postgres_status(),
-        "dispatcher_locks": lock_rows,
     }
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 

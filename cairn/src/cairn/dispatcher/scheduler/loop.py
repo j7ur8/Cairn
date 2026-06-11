@@ -14,7 +14,6 @@ import requests
 from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.ai_health import probe_snapshot
 from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
-from cairn.dispatcher.leadership import DispatcherLeader, LeadershipLost
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -31,7 +30,6 @@ from cairn.dispatcher.tasks.reason import run_reason_task
 from cairn.observability.metrics import (
     DISPATCHER_INFLIGHT,
     DISPATCHER_OVERFLOW,
-    DISPATCHER_STEPDOWN,
     DISPATCHER_TICKS,
     WORKER_UNHEALTHY_SINCE,
 )
@@ -55,16 +53,10 @@ class DispatcherLoop:
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
         self.client = CairnClient(self.config.server, api_token=self.config.system.auth.dispatcher_api_token)
-        self.leader = DispatcherLeader(
-            client=self.client,
-            ttl_seconds=self.config.system.dispatcher.leader_ttl_seconds,
-        )
         self._last_tick_at: float | None = None
         self.health_server = DispatcherHealthServer(
             *self._health_addr(),
             state=DispatcherHealthState(
-                is_leader=lambda: self.leader.is_leader,
-                current_holder=lambda: self.leader.current_holder(),
                 last_tick_at=lambda: self._last_tick_at,
             ),
             reload_handler=self._reload_from_health_server,
@@ -111,97 +103,39 @@ class DispatcherLoop:
         self.executor.shutdown(wait=True)
         self.cleanup_executor.shutdown(wait=True)
         self.container_manager.close()
-        try:
-            if self.leader._is_leader:
-                self.leader.release()
-        except Exception:
-            LOG.exception("failed to release dispatcher leadership")
         self.client.close()
         self.health_server.stop()
 
     def run(self, once: bool = False) -> None:
-        """Main dispatcher loop.
-
-        Acquires the leader lock (blocking while a sibling dispatcher
-        is leader) and runs ticks until either ``once=True`` finishes a
-        single tick, a :class:`LeadershipLost` surfaces from
-        :meth:`DispatcherLeader.check_health` mid-tick, or the process
-        is shut down.
-
-        On :class:`LeadershipLost` we drain the in-flight task
-        executors, increment ``DISPATCHER_STEPDOWN`` and re-acquire
-        so the next sibling does not have to wait a full
-        ``runtime.interval`` to take over.
-        """
+        """Main dispatcher loop."""
         try:
             while True:
-                try:
-                    with self.leader.acquired(retry_interval=self.config.runtime.interval):
-                        self._run_leader_iteration(once=once)
-                    if once:
-                        return
-                except LeadershipLost as exc:
-                    DISPATCHER_STEPDOWN.labels(reason="lock_lost").inc()
-                    LOG.warning("dispatcher stepping down after leadership loss error=%s", exc)
-                    self._step_down_executors()
-                    if once:
-                        return
-                    # Loop back: ``acquired()`` will block until the
-                    # sibling dispatcher is also done.
-                    continue
+                self._run_iteration(once=once)
+                if once:
+                    return
         finally:
             self.close()
 
-    def _run_leader_iteration(self, *, once: bool) -> None:
-        """One tick of work performed under the leader lock."""
+    def _run_iteration(self, *, once: bool) -> None:
+        """One scheduler tick."""
         if not self._startup_healthchecks_checked:
             self.run_startup_healthchecks()
-            self.leader.heartbeat()
         if not self._settings_checked:
             self._validate_server_settings()
             self._settings_checked = True
-            self.leader.heartbeat()
         self._process_ai_profile_check_requests()
-        self.leader.heartbeat()
         self._reap_futures()
         self._reap_cleanup_futures()
         summaries = self.client.list_projects()
-        self.leader.check_health()
         self._initialize_reason_checkpoints(summaries)
         self._refresh_runtime_projects(summaries)
         self._cancel_inactive_tasks(summaries)
         self._queue_container_cleanups(summaries)
         self._dispatch_available(summaries)
         self._publish_tick_metrics()
-        self.leader.heartbeat()
         if once:
             return
         time.sleep(self.config.runtime.interval)
-
-    def _step_down_executors(self) -> None:
-        """Cancel in-flight tasks on the main executor so a sibling can
-        take over without us submitting duplicate work.
-
-        The cleanup executor is left running because orphan container
-        cleanup must keep happening regardless of leader status.
-        """
-        if not self.futures:
-            return
-        LOG.info(
-            "dispatcher step-down cancelling futures=%s",
-            len(self.futures),
-        )
-        # Best-effort cancellation signal: future.cancel() returns
-        # False once the task has already started running, which is
-        # fine - those tasks will finish naturally and the next
-        # leader will see the work has been claimed.
-        for fut in list(self.futures):
-            fut.cancel()
-        self.executor.shutdown(wait=False, cancel_futures=True)
-        self.futures.clear()
-        # Recreate the executor so subsequent ticks (after we
-        # re-acquire) can submit new work.
-        self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
 
     def run_startup_healthchecks_only(self) -> None:
         try:

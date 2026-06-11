@@ -162,33 +162,28 @@ def trigger_ai_profile_check(profile_id: str, user=Depends(current_user_optional
 def claim_ai_profile_check_request():
     now = _utcnow()
     with db.session_scope() as conn:
-        row = sql.fetchone(
-            conn,
-            """
-            SELECT *
-            FROM ai_profile_check_requests
-            WHERE status = 'pending'
-            ORDER BY requested_at ASC
-            LIMIT 1
-            """
-        )
-        if row is None:
-            return None
-        sql.execute(
+        row = sql.execute(
             conn,
             """
             UPDATE ai_profile_check_requests
-            SET status = 'running', started_at = :started_at, error_message = ''
-            WHERE id = :id
+            SET status = 'running',
+                started_at = :started_at,
+                error_message = ''
+            WHERE id = (
+                SELECT id
+                FROM ai_profile_check_requests
+                WHERE status = 'pending'
+                ORDER BY requested_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
             """,
-            {"started_at": now, "id": row["id"]},
-        )
-        claimed = sql.fetchone(
-            conn,
-            "SELECT * FROM ai_profile_check_requests WHERE id = :id",
-            {"id": row["id"]},
-        )
-    return _row_to_check_request(claimed)
+            {"started_at": now},
+        ).mappings().fetchone()
+        if row is None:
+            return None
+    return _row_to_check_request(row)
 
 
 @router.post("/ai-profiles/check-requests/{request_id}/complete", status_code=204)

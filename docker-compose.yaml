@@ -38,7 +38,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - /Users/jmac/Documents/GitHub/Cairn/datas:/Users/jmac/Documents/GitHub/Cairn/datas
+      - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml
     depends_on:
@@ -80,7 +80,7 @@ services:
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
-      - /Users/jmac/Documents/GitHub/Cairn/datas:/Users/jmac/Documents/GitHub/Cairn/datas
+      - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
     depends_on:
       cairn-postgres:
         condition: service_healthy

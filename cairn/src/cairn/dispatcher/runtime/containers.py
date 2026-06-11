@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from pathlib import Path
 from pathlib import PurePosixPath
 import tarfile
 import threading
-import uuid
 from typing import Callable
 
 import docker
@@ -21,11 +19,10 @@ LOG = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    _PREFIX = "cairn-dispatch-"
-    _STARTUP_PREFIX = "cairn-startup-healthcheck-"
+    _PREFIX = "cairn-worker-"
+    _STARTUP_NAME = "cairn-worker-startup-healthcheck"
     _STARTUP_PROJECT_ID = "startup-healthcheck"
     _LABEL_MANAGED = "cairn.managed"
-    _LABEL_DISPATCHER_ID = "cairn.dispatcher_id"
     _LABEL_PROJECT_ID = "cairn.project_id"
     _LABEL_STARTUP = "cairn.startup_healthcheck"
 
@@ -59,8 +56,7 @@ class ContainerManager:
 
     def container_name(self, project_id: str) -> str:
         sanitized = project_id.replace("/", "-")
-        dispatcher = self._config.dispatcher_id.replace("/", "-")
-        return f"{self._PREFIX}{dispatcher}-{sanitized}"
+        return f"{self._PREFIX}{sanitized}"
 
     def ensure_running(self, project_id: str) -> str:
         name = self.container_name(project_id)
@@ -81,7 +77,7 @@ class ContainerManager:
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
         try:
             volumes = self._docker_volumes(project_id)
-            container = self._client.containers.run(
+            self._client.containers.run(
                 self._config.image,
                 ["sleep", "infinity"],
                 detach=True,
@@ -93,7 +89,6 @@ class ContainerManager:
                 user=self._config.user,
                 labels=self._container_labels(project_id),
             )
-            self._ensure_container_bind_mount_permissions(name, project_id, container=container)
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
         except APIError as exc:
@@ -120,8 +115,9 @@ class ContainerManager:
             return lock
 
     def create_startup_container(self) -> str:
-        name = f"{self._STARTUP_PREFIX}{uuid.uuid4().hex[:12]}"
+        name = self._STARTUP_NAME
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self._config.image)
+        self.remove_container(name, force=True)
         try:
             volumes = self._docker_volumes(self._STARTUP_PROJECT_ID)
             self._client.containers.run(
@@ -143,16 +139,6 @@ class ContainerManager:
     def validate_bind_mounts(self, container_name: str, project_id: str) -> list[str]:
         errors: list[str] = []
         for mount in self._render_bind_mounts(project_id):
-            host_path = Path(mount["host_path"])
-            if not host_path.exists():
-                errors.append(f"{mount['name']} host path does not exist: {host_path}")
-                continue
-            if not host_path.is_dir():
-                errors.append(f"{mount['name']} host path is not a directory: {host_path}")
-                continue
-            if not mount["read_only"] and not self._host_dir_writable(host_path):
-                errors.append(f"{mount['name']} host path is not writable: {host_path}")
-                continue
             probe = self._probe_bind_mount(container_name, mount["container_path"], mount["read_only"])
             if probe:
                 errors.append(f"{mount['name']} {probe}")
@@ -297,14 +283,25 @@ class ContainerManager:
                 filters={
                     "label": [
                         f"{self._LABEL_MANAGED}=true",
-                        f"{self._LABEL_DISPATCHER_ID}={self._config.dispatcher_id}",
                     ],
                 },
             )
         except DockerException as exc:
             LOG.warning("failed to list managed containers error=%s", exc)
             return []
-        return sorted(container.name for container in containers if container.name.startswith(self._PREFIX))
+        return sorted(
+            container.name
+            for container in containers
+            if container.name.startswith(self._PREFIX) and not self._is_startup_container(container)
+        )
+
+    def _is_startup_container(self, container: Container) -> bool:
+        if container.name == self._STARTUP_NAME:
+            return True
+        labels = getattr(container, "labels", None)
+        if isinstance(labels, dict) and labels.get(self._LABEL_STARTUP) == "true":
+            return True
+        return False
 
     def needs_completed_cleanup(self, project_id: str) -> bool:
         name = self.container_name(project_id)
@@ -386,55 +383,11 @@ class ContainerManager:
         container = self._require_container(name)
         try:
             container.start()
-            if project_id is not None:
-                self._ensure_container_bind_mount_permissions(name, project_id)
             return
         except DockerException as exc:
             if self.inspect_state(name) == "running":
-                if project_id is not None:
-                    self._ensure_container_bind_mount_permissions(name, project_id)
                 return
             raise RuntimeError(f"failed to start container {name}: {exc}") from exc
-
-    def _ensure_container_bind_mount_permissions(
-        self,
-        container_name: str,
-        project_id: str,
-        *,
-        container: Container | None = None,
-    ) -> None:
-        """Best-effort chmod inside the container so exec_user can write bind mounts."""
-        writable_paths = [
-            str(mount["container_path"])
-            for mount in self._render_bind_mounts(project_id)
-            if not mount["read_only"]
-        ]
-        if not writable_paths:
-            return
-        container = container or self._require_container(container_name)
-        for path in writable_paths:
-            try:
-                result = container.exec_run(["chmod", "0777", path], user="0:0", stdout=True, stderr=True)
-            except DockerException as exc:
-                LOG.warning(
-                    "failed to chmod writable bind mount in container project=%s container=%s path=%s error=%s",
-                    project_id,
-                    container_name,
-                    path,
-                    exc,
-                )
-                continue
-            exit_code = result.exit_code if hasattr(result, "exit_code") else 1
-            if exit_code != 0:
-                output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
-                LOG.warning(
-                    "chmod writable bind mount failed project=%s container=%s path=%s code=%s output=%s",
-                    project_id,
-                    container_name,
-                    path,
-                    exit_code,
-                    output.strip(),
-                )
 
     def _get_container(self, name: str) -> Container | None:
         try:
@@ -454,11 +407,6 @@ class ContainerManager:
         volumes: dict[str, dict[str, str]] = {}
         for mount in self._render_bind_mounts(project_id):
             host_path = Path(mount["host_path"])
-            host_path.mkdir(parents=True, exist_ok=True)
-            if not host_path.is_dir():
-                raise RuntimeError(f"bind mount host path is not a directory: {host_path}")
-            if not mount["read_only"]:
-                _ensure_world_writable_dir(host_path)
             volumes[str(host_path)] = {
                 "bind": mount["container_path"],
                 "mode": "ro" if mount["read_only"] else "rw",
@@ -468,7 +416,6 @@ class ContainerManager:
     def _container_labels(self, project_id: str, *, startup: bool = False) -> dict[str, str]:
         return {
             self._LABEL_MANAGED: "true",
-            self._LABEL_DISPATCHER_ID: self._config.dispatcher_id,
             self._LABEL_PROJECT_ID: project_id,
             self._LABEL_STARTUP: "true" if startup else "false",
         }
@@ -493,19 +440,6 @@ class ContainerManager:
                 }
             )
         return rendered
-
-    @staticmethod
-    def _host_dir_writable(path: Path) -> bool:
-        probe = path / f".cairn-write-test-{uuid.uuid4().hex[:12]}"
-        try:
-            probe.write_text("ok", encoding="utf-8")
-        except OSError:
-            return False
-        try:
-            probe.unlink()
-        except OSError:
-            LOG.debug("failed to remove host bind mount write probe path=%s", probe)
-        return True
 
     def _probe_bind_mount(self, container_name: str, container_path: str, read_only: bool) -> str | None:
         script = (
@@ -605,27 +539,3 @@ class ContainerManager:
                 elif item.is_file():
                     archive.add(item, arcname=arcname, recursive=False)
         return archive_path, stream.getvalue()
-
-
-def _ensure_world_writable_dir(path: Path) -> None:
-    """Best-effort: make the host bind-mount dir world-writable.
-
-    If the dispatcher's process does not own ``path`` (e.g. it is running as a
-    non-root user inside the ``cairn-dispatcher`` container while the file is
-    owned by the host user), ``os.chmod`` raises ``PermissionError``. The
-    probe inside the worker container is the real source of truth for write
-    permission, so we downgrade the chmod failure to a warning rather than
-    crashing container creation.
-    """
-    mode = path.stat().st_mode
-    if mode & 0o002:
-        return
-    try:
-        os.chmod(path, mode | 0o777)
-    except PermissionError as exc:
-        LOG.warning(
-            "skipping chmod 0o777 on host bind mount (dispatcher lacks owner privilege); "
-            "operator should ensure the path is world-writable. path=%s err=%s",
-            path,
-            exc,
-        )

@@ -1,15 +1,13 @@
-"""Tests for the ``container.user`` field and the EPERM-safe bind-mount chmod.
+"""Tests for the ``container.user`` field.
 
 Background: on macOS Docker Desktop, the worker container (running as
 ``kali`` = UID 1000) cannot write to a host bind mount that is owned by a
 different UID. The fix is to let the operator configure ``container.user``
 to match the host user's ``uid:gid`` and pass it through to
-``docker.containers.run``. The chmod helper also needs to be EPERM-safe
-because the dispatcher itself runs as non-root inside its own container.
+``docker.containers.run``.
 """
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,14 +116,19 @@ class _DockerMock:
         return patch("docker.from_env", return_value=self.client)
 
 
+class _ListedContainer:
+    def __init__(self, name: str, labels: dict[str, str] | None = None):
+        self.name = name
+        self.labels = labels or {}
+
+
 class ContainerUserRuntimeTests(unittest.TestCase):
-    def _make_manager(self, user, exec_user=None, dispatcher_id="default"):
+    def _make_manager(self, user, exec_user=None):
         from cairn.shared.dispatch_config import BindMountConfig, ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
 
         cfg = ContainerConfig(
             image="cairn/test:latest",
-            dispatcher_id=dispatcher_id,
             user=user,
             exec_user=exec_user,
             network_mode="cairn",
@@ -164,78 +167,74 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         kwargs = dm.containers.run.call_args.kwargs
         self.assertEqual(kwargs.get("user"), "501:20")
 
-    def test_container_name_includes_dispatcher_id(self):
+    def test_container_name_uses_project_id(self):
         dm = _DockerMock()
         with dm.install():
-            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr = self._make_manager(user="0:0")
 
-        self.assertEqual(mgr.container_name("proj-1"), "cairn-dispatch-d1-proj-1")
+        self.assertEqual(mgr.container_name("proj-1"), "cairn-worker-proj-1")
 
     def test_created_container_receives_owner_labels(self):
         dm = _DockerMock()
         with dm.install():
-            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr = self._make_manager(user="0:0")
             mgr.ensure_running("proj-1")
 
         kwargs = dm.containers.run.call_args.kwargs
         self.assertEqual(kwargs["labels"]["cairn.managed"], "true")
-        self.assertEqual(kwargs["labels"]["cairn.dispatcher_id"], "d1")
         self.assertEqual(kwargs["labels"]["cairn.project_id"], "proj-1")
         self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "false")
-
-    def test_created_container_chmods_writable_bind_mount_as_root(self):
-        dm = _DockerMock()
-        container = MagicMock()
-        container.exec_run.return_value = type("R", (), {"exit_code": 0, "output": b""})()
-        dm.containers.run.return_value = container
-        with dm.install():
-            mgr = self._make_manager(user="0:0", exec_user="kali", dispatcher_id="d1")
-            mgr.ensure_running("proj-1")
-
-        container.exec_run.assert_called_once_with(
-            ["chmod", "0777", "/mnt/project"],
-            user="0:0",
-            stdout=True,
-            stderr=True,
-        )
 
     def test_startup_container_also_receives_user(self):
         dm = _DockerMock()
         with dm.install():
             mgr = self._make_manager(user="501:20")
-            mgr.create_startup_container()
+            name = mgr.create_startup_container()
 
         self.assertEqual(dm.containers.run.call_count, 1)
         kwargs = dm.containers.run.call_args.kwargs
+        self.assertEqual(name, "cairn-worker-startup-healthcheck")
+        self.assertEqual(kwargs["name"], "cairn-worker-startup-healthcheck")
         self.assertEqual(kwargs.get("user"), "501:20")
+
+    def test_startup_container_removes_stale_container_before_create(self):
+        dm = _DockerMock()
+        stale = MagicMock()
+        dm.containers.get.side_effect = [stale]
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            mgr.create_startup_container()
+
+        stale.remove.assert_called_once_with(force=True)
+        self.assertEqual(dm.containers.run.call_count, 1)
 
     def test_startup_container_receives_owner_labels(self):
         dm = _DockerMock()
         with dm.install():
-            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr = self._make_manager(user="0:0")
             mgr.create_startup_container()
 
         kwargs = dm.containers.run.call_args.kwargs
-        self.assertEqual(kwargs["labels"]["cairn.dispatcher_id"], "d1")
         self.assertEqual(kwargs["labels"]["cairn.project_id"], "startup-healthcheck")
         self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "true")
 
-    def test_managed_container_names_filters_by_dispatcher_label(self):
+    def test_managed_container_names_filters_managed_label(self):
         dm = _DockerMock()
         dm.containers.list.return_value = [
-            type("C", (), {"name": "cairn-dispatch-d1-proj-1"})(),
+            _ListedContainer("cairn-worker-proj-1"),
+            _ListedContainer("cairn-worker-startup-healthcheck"),
+            _ListedContainer("cairn-worker-startup-by-label", {"cairn.startup_healthcheck": "true"}),
         ]
         with dm.install():
-            mgr = self._make_manager(user="0:0", dispatcher_id="d1")
+            mgr = self._make_manager(user="0:0")
             names = mgr.managed_container_names()
 
-        self.assertEqual(names, ["cairn-dispatch-d1-proj-1"])
+        self.assertEqual(names, ["cairn-worker-proj-1"])
         dm.containers.list.assert_called_once_with(
             all=True,
             filters={
                 "label": [
                     "cairn.managed=true",
-                    "cairn.dispatcher_id=d1",
                 ],
             },
         )
@@ -261,36 +260,6 @@ class ContainerUserRuntimeTests(unittest.TestCase):
                 process = mgr.build_exec_process("c", {}, ["echo", "ok"], tty=True)
 
         self.assertTrue(process.tty)
-
-
-# ---------------------------------------------------------------------------
-# _ensure_world_writable_dir: EPERM must not raise
-# ---------------------------------------------------------------------------
-
-
-class EnsureWorldWritableDirEpermTests(unittest.TestCase):
-    def test_permission_error_does_not_raise(self):
-        from cairn.dispatcher.runtime.containers import _ensure_world_writable_dir
-
-        fake_path = Path("/fake/host/bind/mount")
-        with patch.object(Path, "stat", return_value=type("S", (), {"st_mode": 0o755})()):
-            with patch.object(
-                os,
-                "chmod",
-                side_effect=PermissionError(1, "operation not permitted"),
-            ):
-                # Must not raise. A warning is logged.
-                _ensure_world_writable_dir(fake_path)
-
-    def test_already_world_writable_skips_chmod(self):
-        from cairn.dispatcher.runtime.containers import _ensure_world_writable_dir
-
-        fake_path = Path("/fake/host/bind/mount")
-        # 0o002 = world-writable bit already set -> early return, no chmod call.
-        with patch.object(Path, "stat", return_value=type("S", (), {"st_mode": 0o777})()):
-            with patch.object(os, "chmod") as chmod:
-                _ensure_world_writable_dir(fake_path)
-                chmod.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +300,7 @@ tasks:
 
 observability:
   enabled: false
-  record_prompts: false
-  record_stdout: false
-  record_stderr: false
+  record: []
   record_raw_worker_stream: false
   max_event_bytes: 1024
   max_bytes_per_execution: 1024
@@ -453,6 +420,27 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         rendered_paths = {m["host_path"] for m in rendered}
         expected_root = str(self.datas_dir.resolve())
         self.assertIn(f"{expected_root}/project-files/proj-xyz", rendered_paths)
+
+    def test_deleted_dispatcher_fields_are_rejected(self) -> None:
+        from cairn.shared.dispatch_config import DispatchConfig
+
+        data = self.config_path.read_text(encoding="utf-8")
+        data = data.replace('  health_addr: "127.0.0.1:9100"\n', '  health_addr: "127.0.0.1:9100"\n  leader_ttl_seconds: 15\n')
+        data = data.replace('  image: "cairn/test:latest"\n', '  image: "cairn/test:latest"\n  dispatcher_id: "old"\n')
+        self.config_path.write_text(data, encoding="utf-8")
+
+        with self.assertRaises(ValidationError):
+            DispatchConfig.load(self.config_path)
+
+    def test_unknown_runtime_field_is_rejected(self) -> None:
+        from cairn.shared.dispatch_config import DispatchConfig
+
+        data = self.config_path.read_text(encoding="utf-8")
+        data = data.replace('  prompt_group: "mock"\n', '  prompt_group: "mock"\n  unknown_runtime_field: true\n')
+        self.config_path.write_text(data, encoding="utf-8")
+
+        with self.assertRaises(ValidationError):
+            DispatchConfig.load(self.config_path)
 
 if __name__ == "__main__":
     unittest.main()

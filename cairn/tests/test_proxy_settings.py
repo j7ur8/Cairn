@@ -114,7 +114,7 @@ class ProxyConfigToEnvTests(unittest.TestCase):
         self.assertEqual(env["HTTP_PROXY"], "http://u:p@h:80")
         self.assertEqual(env["HTTPS_PROXY"], "http://u:p@h:80")
 
-    def test_https_uses_http_scheme_for_legacy_clients(self) -> None:
+    def test_https_proxy_env_uses_http_scheme(self) -> None:
         env = self.proxy_config_to_env(_make_proxy(type="https", host="h", port=443, username=None, password=None, has_auth=False))
         self.assertEqual(env["HTTP_PROXY"], "http://h:443")
         self.assertEqual(env["HTTPS_PROXY"], "http://h:443")

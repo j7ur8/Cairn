@@ -313,7 +313,7 @@ def main() -> int:
         record(checks, failures, "analysis:entrypoint-discovery", False,
                "", "entrypoint_discovery section missing from analysis_result.json")
 
-    # --- New: capability_boundary validation ---
+    # --- Current capability_boundary validation ---
     cap_boundary = analysis.get("capability_boundary")
     if isinstance(cap_boundary, dict):
         record(
@@ -323,22 +323,20 @@ def main() -> int:
             "true_debugger_breakpoint_supported=false (honest)",
             "true_debugger_breakpoint_supported must be false — real debugger breakpoints are not supported",
         )
-        # New: VM/iframe/CSP boundary honesty (only check if fields exist)
         for field in ["vm_protected_js_supported", "iframe_cross_origin_supported", "csp_websocket_bypass_supported"]:
             val = cap_boundary.get(field)
-            if val is not None:
-                record(
-                    checks, failures,
-                    f"analysis:capability-boundary-{field}",
-                    val is False,
-                    f"{field}=false (honest)",
-                    f"{field} must be false",
-                )
+            record(
+                checks, failures,
+                f"analysis:capability-boundary-{field}",
+                val is False,
+                f"{field}=false (honest)",
+                f"{field} must be false",
+            )
     else:
         record(checks, failures, "analysis:capability-boundary", False,
                "", "capability_boundary section missing from analysis_result.json")
 
-    # --- New: runtime_health validation (backward-compatible) ---
+    # --- Current runtime_health validation ---
     runtime_health = analysis.get("runtime_health")
     if isinstance(runtime_health, dict):
         probe_status = runtime_health.get("probe_status")
@@ -358,8 +356,11 @@ def main() -> int:
                 "timeout_reason is set",
                 "probe_status=timeout requires timeout_reason to be set",
             )
+    else:
+        record(checks, failures, "analysis:runtime-health", False,
+               "", "runtime_health section missing from analysis_result.json")
 
-    # --- New: entrypoint_discovery.candidates validation (backward-compatible) ---
+    # --- Current entrypoint_discovery.candidates validation ---
     if isinstance(entrypoint_disc, dict):
         candidates = entrypoint_disc.get("candidates")
         if isinstance(candidates, list) and len(candidates) > 0:
@@ -373,7 +374,7 @@ def main() -> int:
                         f"candidate {i} missing total_score",
                     )
 
-    # --- New: encoding_detection validation (backward-compatible) ---
+    # --- Current encoding_detection validation ---
     encoding_det = analysis.get("encoding_detection")
     if isinstance(encoding_det, dict):
         detected = encoding_det.get("detected")
@@ -386,6 +387,9 @@ def main() -> int:
                 f"encoding algorithm detected: {algorithm}",
                 "encoding_detection.detected=true requires algorithm to be set",
             )
+    else:
+        record(checks, failures, "analysis:encoding-detection", False,
+               "", "encoding_detection section missing from analysis_result.json")
 
     # --- New: async invocation handling ---
     invocation = analysis.get("invocation", {})

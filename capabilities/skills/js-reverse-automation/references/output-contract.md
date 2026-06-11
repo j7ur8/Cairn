@@ -217,13 +217,12 @@ Phase 0 的输入会被规范化为如下 JSON 结构：
 - `parameters` 必须覆盖 Phase 0 中请求的每一个参数。
 - 每个参数都必须定义 `entrypoint.type`、`entrypoint.path` 或 `entrypoint.resolver_name` / `entrypoint.resolver_path`、`call_signature.async`，以及 `runtime.bind_this_path` 或 `runtime.bind_this_mode`。
 - `runtime.bind_this_mode` 支持 `window`、`global`、`entrypoint_parent`、`none` 或 `null`；未指定 `bind_this_path` 时生成器按该模式决定 `this` 绑定。
-- **新增**：`entrypoint_discovery`、`module_runtime`、`invocation`、`capability_boundary`、`runtime_trace`、`runtime_health`、`encoding_detection`、`csp_restrictions` 必须存在。
+- `entrypoint_discovery`、`module_runtime`、`invocation`、`capability_boundary`、`runtime_trace`、`runtime_health`、`encoding_detection`、`csp_restrictions` 必须存在。
 - `entrypoint_discovery.strategy` 为 `unsupported` 时，不得生成声称可用的 JSRPC action。
 - `entrypoint_discovery.confidence` 为 `high` 时，至少需要两类证据（网络 + 运行时）。
 - `entrypoint_discovery.candidates` 为可选字段，存在时每个候选必须包含 `name`、`scores`、`total_score`、`confidence`。
 - `runtime_health.probe_status` 必须为 `ok`、`timeout`、`crashed` 或 `partial`。
 - `capability_boundary.vm_protected_js_supported`、`iframe_cross_origin_supported`、`csp_websocket_bypass_supported` 必须为 false。
-- 所有新增字段均为可选（向后兼容），旧的 analysis_result.json 不含这些字段时校验不报错。
 - `capability_boundary.true_debugger_breakpoint_supported` 必须为 `false`。
 - `invocation.mode` 为 `async` 或 `promise` 时，JSRPC stub 必须包含 Promise 处理逻辑。
 - `jsrpc.action_name` 必须是确定性的，并与生成文件中的值一致。

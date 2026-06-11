@@ -255,30 +255,6 @@ class CairnClient:
     def get_project_role(self, project_id: str) -> ApiResult:
         return self._get_json_result(f"/projects/{project_id}/role")
 
-    def dispatcher_lock_acquire(self, name: str, holder: str, ttl_seconds: float) -> ApiResult:
-        return self._request_json(
-            "POST",
-            "/dispatcher-lock/acquire",
-            json={"name": name, "holder": holder, "ttl_seconds": ttl_seconds},
-        )
-
-    def dispatcher_lock_heartbeat(self, name: str, holder: str) -> ApiResult:
-        return self._request_json(
-            "POST",
-            "/dispatcher-lock/heartbeat",
-            json={"name": name, "holder": holder},
-        )
-
-    def dispatcher_lock_release(self, name: str, holder: str) -> ApiResult:
-        return self._request_json(
-            "POST",
-            "/dispatcher-lock/release",
-            json={"name": name, "holder": holder},
-        )
-
-    def dispatcher_lock_current(self, name: str) -> ApiResult:
-        return self._get_json_result("/dispatcher-lock/current", params={"name": name})
-
     def create_llm_execution(
         self,
         project_id: str,

@@ -146,30 +146,38 @@ MOCK_ALLOWED_ENV_KEYS = frozenset(
 
 
 class ReasonTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0)
     max_intents: int = Field(gt=0, default=3)
 
 
 class ExploreTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0)
     conclude_timeout: int = Field(gt=0)
 
 
 class BootstrapTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0)
     conclude_timeout: int = Field(gt=0)
 
 
 class TasksConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     bootstrap: BootstrapTaskConfig
     reason: ReasonTaskConfig
     explore: ExploreTaskConfig
 
 
 class ObservabilityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
-    # New authoritative field. Old ``record_*`` booleans are kept as
-    # computed properties so wire format and reporter.py keep working.
     record: set[str] = Field(default_factory=lambda: {"prompts", "stdout", "stderr"})
     record_raw_worker_stream: bool = False
     max_event_bytes: int = Field(default=16384, gt=0)
@@ -610,6 +618,8 @@ class RoleConfig(BaseModel):
 
 
 class ContainerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     """Worker container configuration.
 
     The ``user`` field controls which UID:GID the long-lived project container
@@ -626,11 +636,10 @@ class ContainerConfig(BaseModel):
     - On Linux Docker Engine the UID namespace is shared 1:1 with the host, so
       ``user`` is optional and the default (use the image's ``USER kali``)
       usually works.
-    - Leaving ``user`` unset (``None``) preserves the prior behavior.
+    - Leaving ``user`` unset (``None``) uses the image's default user.
     """
 
     image: str
-    dispatcher_id: str = "default"
     user: str | None = None
     exec_user: str | None = None
     network_mode: str
@@ -639,7 +648,7 @@ class ContainerConfig(BaseModel):
     cap_add: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMountConfig] = Field(default_factory=list)
 
-    @field_validator("dispatcher_id", "user", "exec_user")
+    @field_validator("user", "exec_user")
     @classmethod
     def validate_user(cls, value: str | None) -> str | None:
         if value is None:
@@ -663,6 +672,8 @@ class ContainerConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     max_workers: int = Field(gt=0)
     max_running_projects: int = Field(gt=0)
     max_project_workers: int = Field(gt=0)
@@ -747,7 +758,6 @@ class SystemDispatcherConfig(BaseModel):
     reload_url: str = "http://cairn-dispatcher:9100/reload"
     reload_enabled: bool = True
     health_addr: str = "127.0.0.1:9100"
-    leader_ttl_seconds: float = Field(default=15, gt=0)
 
 
 class SystemServerConfig(BaseModel):
@@ -978,7 +988,6 @@ def prepare_bind_mount_data(data: Any, config_dir: Path) -> Any:
         host_path = mount_copy.get("host_path")
         if isinstance(host_path, str):
             mount_copy["host_path"] = _resolve_bind_mount_host_path(config_dir, host_path)
-            _ensure_bind_mount_host_dir(mount_copy["host_path"])
         prepared_mounts.append(mount_copy)
 
     container_copy = dict(container)
@@ -1063,20 +1072,6 @@ def _resolve_bind_mount_host_path(config_dir: Path, host_path: str) -> str:
     if not path.is_absolute():
         path = config_dir / path
     return str(path.resolve(strict=False))
-
-
-def _ensure_bind_mount_host_dir(host_path: str) -> None:
-    if "{project_id}" in host_path:
-        root = Path(host_path.split("{project_id}", 1)[0]).expanduser()
-        root.mkdir(parents=True, exist_ok=True)
-        if not root.is_dir():
-            raise ValueError(f"bind mount host_path root is not a directory: {root}")
-        return
-    path = Path(host_path).expanduser()
-    path.mkdir(parents=True, exist_ok=True)
-    if not path.is_dir():
-        raise ValueError(f"bind mount host_path is not a directory: {path}")
-
 
 def validate_prompt_resources(prompt_group: str) -> None:
     prompts_dir = resources.files("cairn.dispatcher.prompts")

@@ -19,7 +19,6 @@ system:
     reload_url: http://cairn-dispatcher:9100/reload
     reload_enabled: true
     health_addr: 0.0.0.0:9100
-    leader_ttl_seconds: 15
   server:
     log_level: INFO
     log_format: text
@@ -46,9 +45,10 @@ tasks:
     conclude_timeout: 90
 observability:
   enabled: true
-  record_prompts: true
-  record_stdout: true
-  record_stderr: true
+  record:
+  - prompts
+  - stdout
+  - stderr
   record_raw_worker_stream: false
   max_event_bytes: 16384
   max_bytes_per_execution: 10485760
@@ -58,7 +58,6 @@ observability:
   redaction_patterns: []
 container:
   image: cairn-worker-container:mcp-camoufox
-  dispatcher_id: default
   user: 0:0
   exec_user: kali
   network_mode: cairn

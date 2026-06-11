@@ -12,8 +12,6 @@ class DispatcherHealthServerTests(unittest.TestCase):
 
         last_tick = 123.0
         state = DispatcherHealthState(
-            is_leader=lambda: True,
-            current_holder=lambda: "holder-a",
             last_tick_at=lambda: last_tick,
         )
         server = DispatcherHealthServer("127.0.0.1", 0, state)
@@ -24,8 +22,7 @@ class DispatcherHealthServerTests(unittest.TestCase):
             with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=5) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(body["status"], "ok")
-            self.assertTrue(body["is_leader"])
-            self.assertEqual(body["current_holder"], "holder-a")
+            self.assertIn("last_tick_age", body)
 
             DISPATCHER_TICKS.inc()
             with urllib.request.urlopen(f"http://{host}:{port}/metrics", timeout=5) as resp:
@@ -38,9 +35,7 @@ class DispatcherHealthServerTests(unittest.TestCase):
         from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
 
         state = DispatcherHealthState(
-            is_leader=lambda: (_ for _ in ()).throw(RuntimeError("leader failed")),
-            current_holder=lambda: (_ for _ in ()).throw(RuntimeError("holder failed")),
-            last_tick_at=lambda: 123.0,
+            last_tick_at=lambda: (_ for _ in ()).throw(RuntimeError("tick failed")),
         )
         server = DispatcherHealthServer("127.0.0.1", 0, state)
         try:
@@ -50,10 +45,7 @@ class DispatcherHealthServerTests(unittest.TestCase):
             with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=5) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(body["status"], "degraded")
-            self.assertFalse(body["is_leader"])
-            self.assertIsNone(body["current_holder"])
-            self.assertIn("leader failed", repr(body["errors"]))
-            self.assertIn("holder failed", repr(body["errors"]))
+            self.assertIn("tick failed", repr(body["errors"]))
         finally:
             server.stop()
 

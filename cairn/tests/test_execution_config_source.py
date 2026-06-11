@@ -85,7 +85,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
                 """,
                 {"project_id": project.project.id},
             )
-            legacy_tables = sql.fetchall(
+            removed_tables = sql.fetchall(
                 conn,
                 """
                 SELECT table_name
@@ -105,7 +105,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             )
 
         self.assertEqual([row["task_type"] for row in rows], ["bootstrap", "explore", "reason"])
-        self.assertEqual(legacy_tables, [])
+        self.assertEqual(removed_tables, [])
         self.assertIn('"ai_profiles"', rows[0]["config_json"])
         self.assertIn('"config_revision"', rows[0]["config_json"])
 

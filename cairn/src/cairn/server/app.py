@@ -32,7 +32,6 @@ from cairn.server.routers import (
     attachments,
     auth,
     capabilities,
-    dispatcher_lock,
     execution_configs,
     export,
     files,
@@ -255,7 +254,6 @@ app.include_router(files.router)
 app.include_router(replay.router)
 app.include_router(capabilities.router)
 app.include_router(execution_configs.router)
-app.include_router(dispatcher_lock.router)
 app.include_router(observability_routers.router)
 
 

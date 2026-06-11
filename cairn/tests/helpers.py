@@ -39,7 +39,6 @@ def minimal_system_config(root: Path | None = None) -> dict[str, Any]:
             "reload_url": "http://127.0.0.1:9100/reload",
             "reload_enabled": False,
             "health_addr": "127.0.0.1:9100",
-            "leader_ttl_seconds": 15,
         },
         "server": {
             "log_level": "INFO",

@@ -40,17 +40,5 @@ class DispatcherMetricTests(unittest.TestCase):
         self.assertIn("cairn_worker_unhealthy_since_seconds", body)
         self.assertIn('worker="codex"', body)
 
-    def test_stepdown_counter_renders(self) -> None:
-        from cairn.observability.metrics import (
-            DISPATCHER_STEPDOWN,
-            render_metrics,
-        )
-
-        DISPATCHER_STEPDOWN.labels(reason="lock_lost").inc()
-        body = render_metrics()[0].decode()
-        self.assertIn("cairn_dispatcher_stepdown_total", body)
-        self.assertIn('reason="lock_lost"', body)
-
-
 if __name__ == "__main__":
     unittest.main()

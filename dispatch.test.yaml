@@ -19,7 +19,6 @@ system:
     reload_url: http://127.0.0.1:9100/reload
     reload_enabled: false
     health_addr: 127.0.0.1:9100
-    leader_ttl_seconds: 15
   server:
     log_level: INFO
     log_format: text
@@ -59,7 +58,6 @@ observability:
   redaction_patterns: []
 container:
   image: cairn-worker-container:mcp-camoufox
-  dispatcher_id: regression-local
   user: 0:0
   exec_user: kali
   network_mode: cairn

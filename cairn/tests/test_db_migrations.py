@@ -11,6 +11,12 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
+from cairn.server import runtime_config
+
+
+runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _REPO / "dispatch.test.yaml"
+runtime_config.reset_runtime_config_cache()
+
 
 class DbMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -33,7 +39,7 @@ class DbMigrationTests(unittest.TestCase):
 
             row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
             assert row is not None
-        self.assertEqual(row["version_num"], "0004_remove_legacy_tables")
+        self.assertEqual(row["version_num"], "0001_initial_postgresql")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
