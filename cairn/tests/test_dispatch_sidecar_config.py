@@ -37,7 +37,7 @@ runtime:
   max_running_projects: 1
   max_project_workers: 1
   healthcheck_timeout: 1
-  prompt_group: cypher
+  prompt_group: default
 tasks:
   bootstrap: {timeout: 1, conclude_timeout: 1}
   reason: {timeout: 1, max_intents: 1}
@@ -101,7 +101,7 @@ runtime:
   max_running_projects: 1
   max_project_workers: 1
   healthcheck_timeout: 1
-  prompt_group: cypher
+  prompt_group: default
 tasks:
   bootstrap: {timeout: 1, conclude_timeout: 1}
   reason: {timeout: 1, max_intents: 1}
@@ -156,7 +156,7 @@ runtime:
   max_running_projects: 1
   max_project_workers: 1
   healthcheck_timeout: 1
-  prompt_group: cypher
+  prompt_group: default
 tasks:
   bootstrap: {timeout: 1, conclude_timeout: 1}
   reason: {timeout: 1, max_intents: 1}
