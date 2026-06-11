@@ -551,7 +551,7 @@
           @keydown="beginLlmExecutionSelectionInteraction()"
           @change="handleLlmExecutionSelectionChange()"
           class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-mono text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
-          <option value="">All executions</option>
+          <option :value="ALL_LLM_EXECUTIONS_VALUE">All executions</option>
           <template x-for="execution in llmExecutions" :key="execution.id">
             <option :value="execution.id" x-text="llmExecutionOptionLabel(execution)"></option>
           </template>
@@ -847,9 +847,6 @@
                 <div class="p-4 space-y-4">
                   <div class="space-y-2">
                     <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                    <template x-if="summaryCardViewModel(fact.description, 'fact').headline">
-                      <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(fact.description, 'fact').headline"></p>
-                    </template>
                     <template x-if="summaryCardViewModel(fact.description, 'fact').hasMeta">
                       <div class="flex flex-wrap gap-1.5">
                         <template x-for="item in summaryCardViewModel(fact.description, 'fact').metaItems" :key="`${fact.id}-${item.key}-${item.value}`">
@@ -860,8 +857,8 @@
                         </template>
                       </div>
                     </template>
-                    <template x-if="summaryCardViewModel(fact.description, 'fact').body">
-                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(fact.description, 'fact').body"></p>
+                    <template x-if="fact.description">
+                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="fact.description"></p>
                     </template>
                   </div>
                   <template x-if="factRelationSummary(fact)">
@@ -898,9 +895,6 @@
             <div class="p-4 space-y-4">
               <div class="space-y-2">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').headline">
-                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(selectedFactRecord().description, 'fact').headline"></p>
-                </template>
                 <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').hasMeta">
                   <div class="flex flex-wrap gap-1.5">
                     <template x-for="item in summaryCardViewModel(selectedFactRecord().description, 'fact').metaItems" :key="`${selectedFactId()}-${item.key}-${item.value}`">
@@ -911,8 +905,8 @@
                     </template>
                   </div>
                 </template>
-                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').body">
-                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(selectedFactRecord().description, 'fact').body"></p>
+                <template x-if="selectedFactRecord().description">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
                 </template>
               </div>
               <template x-if="hasProjectFileRefs(selectedFactRecord().description)">
@@ -966,9 +960,6 @@
             <div class="p-4 space-y-4">
               <div class="space-y-2">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
-                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').headline">
-                  <p class="text-sm font-medium text-slate-700 leading-relaxed break-words" x-text="summaryCardViewModel(selectedIntentRecord().description, 'intent').headline"></p>
-                </template>
                 <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').hasMeta">
                   <div class="flex flex-wrap gap-1.5">
                     <template x-for="item in summaryCardViewModel(selectedIntentRecord().description, 'intent').metaItems" :key="`${selectedIntentId()}-${item.key}-${item.value}`">
@@ -979,8 +970,8 @@
                     </template>
                   </div>
                 </template>
-                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').body">
-                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="summaryCardViewModel(selectedIntentRecord().description, 'intent').body"></p>
+                <template x-if="selectedIntentRecord().description">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedIntentRecord().description"></p>
                 </template>
               </div>
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
@@ -1229,9 +1220,6 @@
               </template>
               <template x-if="entry.summary">
                 <div class="mt-2 space-y-1">
-                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline">
-                    <p class="text-sm font-medium text-slate-600 leading-relaxed break-words" x-text="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline"></p>
-                  </template>
                   <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).hasMeta">
                     <div class="flex flex-wrap gap-1.5">
                       <template x-for="item in summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).metaItems" :key="`${entry.id}-${item.key}-${item.value}`">
@@ -1242,9 +1230,7 @@
                       </template>
                     </div>
                   </template>
-                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).body">
-                    <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).body"></p>
-                  </template>
+                  <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="entry.summary"></p>
                 </div>
               </template>
               <template x-if="entry.actor || entry.meta.length > 0">
@@ -2385,6 +2371,7 @@ const LAYOUT_ENGINE_SCRIPTS = Object.freeze({
 });
 
 function cairnApp() {
+  const ALL_LLM_EXECUTIONS_VALUE = '__all__';
   const defaultTaskCapabilities = () => ({
     mcp_server_ids: [],
     skill_ids: [],
@@ -2430,6 +2417,7 @@ function cairnApp() {
     available: true,
   });
   return {
+    ALL_LLM_EXECUTIONS_VALUE,
     task_type_specs: [],
     task_types: [],
     view: 'list',
@@ -2463,11 +2451,12 @@ function cairnApp() {
     llmAllExecutionEventCountLimit: 5000,
     llmEventViewActivity: null,
     llmEventViewStats: null,
-    llmSelectedExecutionId: '',
+    llmSelectedExecutionId: ALL_LLM_EXECUTIONS_VALUE,
     llmSelectedExecutionEvents: [],
     llmSelectedExecutionEventsLoading: false,
     llmExecutionSelectInteracting: false,
     llmExecutionsRefreshPending: false,
+    llmExecutionsLastRefreshAt: 0,
     llmEventContentCache: {},
     // Memoization for filteredLlmEvents() / _llmEventsForView(). Bumped on
     // any input change (event list, per-exec selection, filter, show-usage).
@@ -4706,11 +4695,12 @@ function cairnApp() {
       this.llmAllExecutionLastSequence = 0;
       this.llmEventViewActivity = null;
       this.llmEventViewStats = null;
-      this.llmSelectedExecutionId = '';
+      this.llmSelectedExecutionId = ALL_LLM_EXECUTIONS_VALUE;
       this.llmSelectedExecutionEvents = [];
       this.llmSelectedExecutionEventsLoading = false;
       this.llmExecutionSelectInteracting = false;
       this.llmExecutionsRefreshPending = false;
+      this.llmExecutionsLastRefreshAt = 0;
       this.llmEventContentCache = {};
       this.llmEventKindFilter = 'all';
       this.llmExpandedEvents = {};
@@ -4731,6 +4721,7 @@ function cairnApp() {
       try {
         const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-executions?limit=200`);
         const executions = data.executions || [];
+        this.llmExecutionsLastRefreshAt = Date.now();
         if (this.llmExecutionSelectInteracting) {
           this.llmExecutionsRefreshPending = true;
           return;
@@ -4739,6 +4730,14 @@ function cairnApp() {
       } catch (e) {
         console.error(e);
       }
+    },
+
+    isAllLlmExecutionsSelected() {
+      return this.llmSelectedExecutionId === ALL_LLM_EXECUTIONS_VALUE;
+    },
+
+    selectedLlmExecutionIdForQuery() {
+      return this.isAllLlmExecutionsSelected() ? '' : this.llmSelectedExecutionId;
     },
 
     applyLlmExecutions(executions) {
@@ -4760,18 +4759,11 @@ function cairnApp() {
       if (!sameItems) {
         this.llmExecutions = next;
       }
-      if (this.llmSelectedExecutionId && !next.some(execution => execution.id === this.llmSelectedExecutionId)) {
-        this.llmSelectedExecutionId = '';
-      }
-      if (!this.llmSelectedExecutionId) {
-        const running = next.find(execution => execution.process_state === 'running');
-        if (running) {
-          this.llmSelectedExecutionId = running.id;
-          this.llmSelectedExecutionEvents = [];
-          this.llmSelectedExecutionEventsLoading = true;
-          this._llmViewVersion++;
-          this.$nextTick(() => this.loadLlmExecutionEvents(running.id));
-        }
+      if (!this.isAllLlmExecutionsSelected() && !next.some(execution => execution.id === this.llmSelectedExecutionId)) {
+        this.llmSelectedExecutionId = ALL_LLM_EXECUTIONS_VALUE;
+        this.llmSelectedExecutionEvents = [];
+        this.llmSelectedExecutionEventsLoading = false;
+        this._llmViewVersion++;
       }
       this.llmExecutionsRefreshPending = false;
     },
@@ -4787,7 +4779,7 @@ function cairnApp() {
     },
 
     handleLlmExecutionSelectionChange() {
-      const targetId = this.llmSelectedExecutionId;
+      const targetId = this.selectedLlmExecutionIdForQuery();
       this.llmSelectedExecutionEvents = [];
       this.llmEventViewActivity = null;
       this.llmEventViewStats = null;
@@ -4800,6 +4792,8 @@ function cairnApp() {
         this.endLlmExecutionSelectionInteraction();
         if (targetId) {
           this.loadLlmExecutionEvents(targetId);
+        } else {
+          this.loadAllExecutionEvents(true);
         }
       });
     },
@@ -4807,7 +4801,11 @@ function cairnApp() {
     llmEventViewUrl({ executionId = '', after = 0, limit = 300 } = {}) {
       const params = new URLSearchParams();
       params.set('limit', String(limit));
-      params.set('include_low_signal', this.showUsageLogs ? 'true' : 'false');
+      const visibleKinds = this.currentLlmVisibleEventKinds();
+      if (visibleKinds.length === 0) params.append('event_kinds', '');
+      for (const kind of visibleKinds) {
+        params.append('event_kinds', kind);
+      }
       if (executionId) params.set('execution_id', executionId);
       if (after > 0) params.set('after', String(after));
       return `/projects/${this.selectedProjectId}/llm-events/view?${params.toString()}`;
@@ -4817,8 +4815,21 @@ function cairnApp() {
       const params = new URLSearchParams();
       params.set('limit', String(limit));
       params.set('after', String(after));
+      const visibleKinds = this.currentLlmVisibleEventKinds();
+      if (visibleKinds.length === 0) params.append('event_kinds', '');
+      for (const kind of visibleKinds) {
+        params.append('event_kinds', kind);
+      }
       if (executionId) params.set('execution_id', executionId);
       return `/projects/${this.selectedProjectId}/llm-events/incremental?${params.toString()}`;
+    },
+
+    currentLlmVisibleEventKinds() {
+      const projectKinds = this.llmVisibleKindsFromProject(this.project?.project || {});
+      const visible = new Set(projectKinds);
+      if (this.showUsageLogs) visible.add('usage');
+      else visible.delete('usage');
+      return LLM_EVENT_KIND_OPTIONS.filter(kind => visible.has(kind));
     },
 
     applyLlmEventViewMeta(data) {
@@ -4861,8 +4872,9 @@ function cairnApp() {
 
     async reloadLlmEventView(force = false) {
       if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
-      if (this.llmSelectedExecutionId) {
-        await this.loadLlmExecutionEvents(this.llmSelectedExecutionId);
+      const executionId = this.selectedLlmExecutionIdForQuery();
+      if (executionId) {
+        await this.loadLlmExecutionEvents(executionId);
       } else {
         await this.loadAllExecutionEvents(force);
       }
@@ -4877,19 +4889,19 @@ function cairnApp() {
       try {
         const data = await this.api('GET', this.llmEventViewUrl({ executionId, limit: 300 }));
         const events = Array.isArray(data?.primary_events) ? data.primary_events : [];
-        if (this.llmSelectedExecutionId === executionId) {
+        if (this.selectedLlmExecutionIdForQuery() === executionId) {
           this.llmSelectedExecutionEvents = events;
           this.applyLlmEventViewMeta(data);
           this._llmViewVersion++;
         }
       } catch (e) {
         console.error(e);
-        if (this.llmSelectedExecutionId === executionId) {
+        if (this.selectedLlmExecutionIdForQuery() === executionId) {
           this.llmSelectedExecutionEvents = [];
           this._llmViewVersion++;
         }
       } finally {
-        if (this.llmSelectedExecutionId === executionId) {
+        if (this.selectedLlmExecutionIdForQuery() === executionId) {
           this.llmSelectedExecutionEventsLoading = false;
           this._llmViewVersion++;
         }
@@ -4926,9 +4938,10 @@ function cairnApp() {
       this.llmPollInFlight = true;
       try {
         const after = force && this.llmEvents.length === 0 ? 0 : this.llmLastSequence;
+        const selectedExecutionId = this.selectedLlmExecutionIdForQuery();
         const data = await this.api(
           'GET',
-          this.llmIncrementalEventsUrl({ executionId: this.llmSelectedExecutionId || '', after, limit: 200 }),
+          this.llmIncrementalEventsUrl({ executionId: selectedExecutionId, after, limit: 200 }),
         );
         const events = Array.isArray(data?.events) ? data.events : [];
         const lastSequence = Number(data?.last_sequence || 0);
@@ -4939,16 +4952,16 @@ function cairnApp() {
         if (events.length > 0 || hasNewWindow) {
           if (after === 0) {
             this.llmEvents = [];
-            if (this.llmSelectedExecutionId) this.llmSelectedExecutionEvents = [];
+            if (selectedExecutionId) this.llmSelectedExecutionEvents = [];
           }
           this.llmEvents = this.mergeLlmEventRows(this.llmEvents, events, 1200);
 
-          if (this.llmSelectedExecutionId) {
-            const selectedAppended = events.filter(event => event.execution_id === this.llmSelectedExecutionId);
+          if (selectedExecutionId) {
+            const selectedAppended = events.filter(event => event.execution_id === selectedExecutionId);
             this.llmSelectedExecutionEvents = this.mergeLlmEventRows(this.llmSelectedExecutionEvents, selectedAppended, 1000);
           }
 
-          if (!this.llmSelectedExecutionId && this.llmAllExecutionEventsLoaded) {
+          if (!selectedExecutionId && this.llmAllExecutionEventsLoaded) {
             this.llmAllExecutionEvents = this.mergeLlmEventRows(
               this.llmAllExecutionEvents,
               events,
@@ -4980,6 +4993,9 @@ function cairnApp() {
         if (this.llmPanelCollapsed || this.llmPollingPaused || this.replay.active) return;
         const hasRunning = this.llmExecutions.some(execution => execution.process_state === 'running');
         const now = Date.now();
+        if (now - this.llmExecutionsLastRefreshAt >= 2000) {
+          await this.loadLlmExecutions();
+        }
         if (hasRunning || this.llmEvents.length === 0 || now - this.llmLastSlowPollAt >= 5000) {
           if (!hasRunning) this.llmLastSlowPollAt = now;
           await this.pollLlmEvents();
@@ -4993,7 +5009,7 @@ function cairnApp() {
         return this._llmEventsForViewCache;
       }
       let result;
-      if (!this.llmSelectedExecutionId) {
+      if (this.isAllLlmExecutionsSelected()) {
         // "All Executions" is backed by the stable complete-history snapshot,
         // not the rolling llmEvents live window.
         result = this.llmAllExecutionEvents;

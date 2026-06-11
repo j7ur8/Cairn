@@ -30,8 +30,6 @@ from cairn.server.observability.repository import (
     list_incremental_events,
     list_project_events,
 )
-from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
-from cairn.server.repositories import sql
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}", tags=["llm-execution-log"])
@@ -67,6 +65,7 @@ def get_project_llm_events_incremental(
     execution_id: str | None = Query(default=None),
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1),
+    event_kinds: list[str] | None = Query(default=None),
 ):
     with db.session_scope() as conn:
         events, last_sequence = list_incremental_events(
@@ -75,6 +74,7 @@ def get_project_llm_events_incremental(
             execution_id=execution_id,
             after=after,
             limit=_limit(limit),
+            event_kinds=event_kinds,
         )
         return IncrementalEventListResponse(events=events, last_sequence=last_sequence)
 
@@ -85,17 +85,8 @@ def get_project_llm_event_view(
     execution_id: str | None = Query(default=None),
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=300, ge=1),
-    include_low_signal: bool = Query(default=False),
+    event_kinds: list[str] | None = Query(default=None),
 ):
-    with db.session_scope() as main_conn:
-        row = sql.fetchone(
-            main_conn,
-            "SELECT llm_hidden_event_kinds FROM projects WHERE id = :project_id",
-            {"project_id": project_id},
-        )
-        hidden_event_kinds = parse_llm_hidden_event_kinds(
-            row["llm_hidden_event_kinds"] if row is not None else None
-        )
     with db.session_scope() as conn:
         return list_event_view(
             conn,
@@ -103,8 +94,7 @@ def get_project_llm_event_view(
             execution_id=execution_id,
             after=after,
             limit=_limit(limit),
-            include_low_signal=include_low_signal,
-            hidden_event_kinds=hidden_event_kinds,
+            event_kinds=event_kinds,
         )
 
 

@@ -17,9 +17,20 @@ from cairn.server.observability.models import (
     ObservabilitySettings,
 )
 from cairn.server.observability.redaction import redact_content, truncate_content
-from cairn.server.models_pkg.projects import DEFAULT_LLM_HIDDEN_EVENT_KINDS, normalize_llm_event_kinds
+from cairn.server.models_pkg.projects import normalize_llm_event_kinds
 from cairn.server.repositories import sql
 from cairn.server.services import utcnow
+
+
+def _normalize_event_kind_filter(
+    event_kinds: list[str] | tuple[str, ...] | None,
+) -> list[str] | None:
+    if event_kinds is None:
+        return None
+    cleaned = [str(kind).strip() for kind in event_kinds]
+    if not any(cleaned):
+        return []
+    return normalize_llm_event_kinds([kind for kind in cleaned if kind])
 
 
 def row_to_execution(row: Any) -> LlmExecution:
@@ -450,34 +461,46 @@ def list_incremental_events(
     execution_id: str | None = None,
     after: int = 0,
     limit: int = 200,
+    event_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[list[LlmExecutionEvent], int]:
+    where = ["project_id = :project_id", "sequence > :after"]
+    params: dict[str, object] = {"project_id": project_id, "after": after}
     if execution_id:
-        rows = sql.fetchall(
-            conn,
-            """
-            SELECT * FROM llm_execution_events
-            WHERE project_id = :project_id
-              AND execution_id = :execution_id
-              AND sequence > :after
-            ORDER BY sequence ASC
-            LIMIT :limit
-            """,
-            {"project_id": project_id, "execution_id": execution_id, "after": after, "limit": limit},
-        )
-    else:
-        rows = sql.fetchall(
-            conn,
-            """
-            SELECT * FROM llm_execution_events
-            WHERE project_id = :project_id
-              AND sequence > :after
-            ORDER BY sequence ASC
-            LIMIT :limit
-            """,
-            {"project_id": project_id, "after": after, "limit": limit},
-        )
+        where.append("execution_id = :execution_id")
+        params["execution_id"] = execution_id
+    where_sql = " AND ".join(where)
+
+    max_row = sql.fetchone(
+        conn,
+        f"SELECT MAX(sequence) AS last_sequence FROM llm_execution_events WHERE {where_sql}",
+        params,
+    )
+    last_sequence = int(max_row["last_sequence"] or after) if max_row is not None else after
+
+    event_where = list(where)
+    event_params = dict(params)
+    allowed_kinds = _normalize_event_kind_filter(event_kinds)
+    if allowed_kinds is not None:
+        if not allowed_kinds:
+            return [], last_sequence
+        placeholders: list[str] = []
+        for index, kind in enumerate(allowed_kinds):
+            key = f"event_kind_{index}"
+            placeholders.append(f":{key}")
+            event_params[key] = kind
+        event_where.append(f"event_kind IN ({', '.join(placeholders)})")
+
+    rows = sql.fetchall(
+        conn,
+        f"""
+        SELECT * FROM llm_execution_events
+        WHERE {" AND ".join(event_where)}
+        ORDER BY sequence ASC
+        LIMIT :limit
+        """,
+        {**event_params, "limit": limit},
+    )
     events = [row_to_event(row) for row in rows]
-    last_sequence = max((event.sequence for event in events), default=after)
     return events, last_sequence
 
 
@@ -488,8 +511,7 @@ def list_event_view(
     execution_id: str | None = None,
     after: int = 0,
     limit: int = 300,
-    include_low_signal: bool = False,
-    hidden_event_kinds: list[str] | tuple[str, ...] | None = None,
+    event_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> EventViewResponse:
     where = ["project_id = :project_id"]
     params: dict[str, object] = {"project_id": project_id}
@@ -522,32 +544,48 @@ def list_event_view(
 
     event_where = list(where)
     event_params = dict(params)
-    hidden_kinds = normalize_llm_event_kinds(
-        hidden_event_kinds if hidden_event_kinds is not None else list(DEFAULT_LLM_HIDDEN_EVENT_KINDS)
-    )
-    if not include_low_signal:
-        if hidden_kinds:
+    allowed_kinds = _normalize_event_kind_filter(event_kinds)
+    if allowed_kinds is not None:
+        if not allowed_kinds:
+            rows = []
+        else:
             placeholders: list[str] = []
-            for index, kind in enumerate(hidden_kinds):
-                key = f"hidden_kind_{index}"
+            for index, kind in enumerate(allowed_kinds):
+                key = f"event_kind_{index}"
                 placeholders.append(f":{key}")
                 event_params[key] = kind
-            event_where.append(f"event_kind NOT IN ({', '.join(placeholders)})")
-    rows = sql.fetchall(
-        conn,
-        f"""
-        SELECT * FROM llm_execution_events
-        WHERE {" AND ".join(event_where)}
-        ORDER BY sequence DESC
-        LIMIT :limit
-        """,
-        {**event_params, "limit": limit},
-    )
+            event_where.append(f"event_kind IN ({', '.join(placeholders)})")
+            rows = sql.fetchall(
+                conn,
+                f"""
+                SELECT * FROM llm_execution_events
+                WHERE {" AND ".join(event_where)}
+                ORDER BY sequence DESC
+                LIMIT :limit
+                """,
+                {**event_params, "limit": limit},
+            )
+    else:
+        rows = sql.fetchall(
+            conn,
+            f"""
+            SELECT * FROM llm_execution_events
+            WHERE {" AND ".join(event_where)}
+            ORDER BY sequence DESC
+            LIMIT :limit
+            """,
+            {**event_params, "limit": limit},
+        )
     primary_events = [row_to_event(row) for row in rows]
 
     hidden_by_kind: dict[str, int] = {}
-    if not include_low_signal:
-        hidden_by_kind = {kind: by_kind.get(kind, 0) for kind in hidden_kinds if by_kind.get(kind, 0) > 0}
+    if allowed_kinds is not None:
+        visible = set(allowed_kinds)
+        hidden_by_kind = {
+            kind: count
+            for kind, count in by_kind.items()
+            if kind not in visible and count > 0
+        }
 
     activity = _latest_usage_activity(conn, where_sql, params)
     return EventViewResponse(

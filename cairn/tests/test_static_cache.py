@@ -81,6 +81,39 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("selectableCapabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'skill')", html)
         self.assertIn("skill_ids: this.sanitizeUserSkillIdsForProjectPayload(entry.user_skill_ids || []),", html)
 
+    def test_llm_event_queries_use_visible_event_kind_allowlist(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("currentLlmVisibleEventKinds()", html)
+        self.assertIn("params.append('event_kinds', kind);", html)
+        self.assertIn("/llm-events/view?", html)
+        self.assertIn("/llm-events/incremental?", html)
+        self.assertNotIn("include_low_signal", html)
+
+    def test_execution_log_all_selection_uses_sentinel(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("const ALL_LLM_EXECUTIONS_VALUE = '__all__';", html)
+        self.assertIn("<option :value=\"ALL_LLM_EXECUTIONS_VALUE\">All executions</option>", html)
+        self.assertIn("selectedLlmExecutionIdForQuery()", html)
+        self.assertIn("return this.isAllLlmExecutionsSelected() ? '' : this.llmSelectedExecutionId;", html)
+        self.assertNotIn("const running = next.find(execution => execution.process_state === 'running');", html)
+
+    def test_detail_and_timeline_cards_render_full_text_without_summary_headline(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('x-text="fact.description"', html)
+        self.assertIn('x-text="selectedFactRecord().description"', html)
+        self.assertIn('x-text="selectedIntentRecord().description"', html)
+        self.assertIn('x-text="entry.summary"', html)
+        self.assertNotIn("summaryCardViewModel(fact.description, 'fact').headline", html)
+        self.assertNotIn("summaryCardViewModel(selectedFactRecord().description, 'fact').headline", html)
+        self.assertNotIn("summaryCardViewModel(selectedIntentRecord().description, 'intent').headline", html)
+        self.assertNotIn("summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline", html)
+
     def test_capability_admin_save_builds_kind_specific_payload(self) -> None:
         html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
             encoding="utf-8"

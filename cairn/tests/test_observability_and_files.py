@@ -232,6 +232,127 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual([event.content for event in events], ["a2"])
         self.assertEqual(last_sequence, events[-1].sequence)
 
+    def test_incremental_event_kinds_filter_does_not_spend_limit_on_usage(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
+
+        project_id = "proj_incremental_kinds"
+        execution_id = "exec_incremental_kinds"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+        for index in range(5):
+            append_event(
+                self.conn,
+                project_id,
+                execution_id,
+                CreateEventRequest(phase="bootstrap", event_kind="usage", stream="system", content=f"usage-{index}"),
+                ObservabilitySettings(),
+            )
+        append_event(
+            self.conn,
+            project_id,
+            execution_id,
+            CreateEventRequest(phase="bootstrap", event_kind="command_start", stream="system", content="start"),
+            ObservabilitySettings(),
+        )
+        append_event(
+            self.conn,
+            project_id,
+            execution_id,
+            CreateEventRequest(phase="bootstrap", event_kind="process_end", stream="system", content="done"),
+            ObservabilitySettings(),
+        )
+
+        events, last_sequence = list_incremental_events(
+            self.conn,
+            project_id,
+            execution_id=execution_id,
+            limit=2,
+            event_kinds=["command_start", "process_end"],
+        )
+
+        self.assertEqual([event.content for event in events], ["start", "done"])
+        self.assertEqual(last_sequence, events[-1].sequence)
+
+    def test_incremental_event_kinds_filter_advances_cursor_when_no_events_match(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
+
+        project_id = "proj_incremental_cursor"
+        execution_id = "exec_incremental_cursor"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+        last_event = None
+        for index in range(3):
+            last_event, _ = append_event(
+                self.conn,
+                project_id,
+                execution_id,
+                CreateEventRequest(phase="bootstrap", event_kind="usage", stream="system", content=f"usage-{index}"),
+                ObservabilitySettings(),
+            )
+        self.assertIsNotNone(last_event)
+
+        events, last_sequence = list_incremental_events(
+            self.conn,
+            project_id,
+            execution_id=execution_id,
+            limit=2,
+            event_kinds=["command_start"],
+        )
+
+        self.assertEqual(events, [])
+        self.assertEqual(last_sequence, last_event.sequence)
+
+    def test_incremental_empty_event_kinds_filter_returns_no_events_and_advances_cursor(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
+
+        project_id = "proj_incremental_empty_kinds"
+        execution_id = "exec_incremental_empty_kinds"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+        event, _ = append_event(
+            self.conn,
+            project_id,
+            execution_id,
+            CreateEventRequest(phase="bootstrap", event_kind="agent_message", stream="result", content="visible"),
+            ObservabilitySettings(),
+        )
+        self.assertIsNotNone(event)
+
+        events, last_sequence = list_incremental_events(
+            self.conn,
+            project_id,
+            execution_id=execution_id,
+            limit=2,
+            event_kinds=[""],
+        )
+
+        self.assertEqual(events, [])
+        self.assertEqual(last_sequence, event.sequence)
+
     def test_tail_project_events_returns_latest_events_in_ascending_order(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,
@@ -301,7 +422,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual([event.content for event in events], ["a-2", "a-3"])
         self.assertTrue(all(event.execution_id == "exec_a" for event in events))
 
-    def test_event_view_keeps_primary_events_when_usage_is_noisy(self) -> None:
+    def test_event_view_allowlist_keeps_primary_events_when_usage_is_noisy(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
@@ -344,7 +465,13 @@ class ObservabilityRepositoryTests(unittest.TestCase):
             ObservabilitySettings(),
         )
 
-        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10)
+        view = list_event_view(
+            self.conn,
+            project_id,
+            execution_id=execution_id,
+            limit=10,
+            event_kinds=["command_start", "process_end"],
+        )
 
         self.assertEqual([event.event_kind for event in view.primary_events], ["process_end", "command_start"])
         self.assertEqual(view.activity.hidden_usage_count, 25)
@@ -352,7 +479,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(view.stats.hidden_by_kind["usage"], 25)
         self.assertEqual(view.last_sequence, view.primary_events[0].sequence)
 
-    def test_event_view_can_include_low_signal_events(self) -> None:
+    def test_event_view_without_event_kinds_returns_all_event_kinds(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
@@ -376,7 +503,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
                 ObservabilitySettings(),
             )
 
-        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10, include_low_signal=True)
+        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10)
 
         self.assertEqual(
             [event.event_kind for event in view.primary_events],
@@ -384,7 +511,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(view.stats.hidden_by_kind, {})
 
-    def test_event_view_default_hides_only_usage(self) -> None:
+    def test_event_view_event_kinds_allowlist_hides_unselected_kinds(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
@@ -408,13 +535,49 @@ class ObservabilityRepositoryTests(unittest.TestCase):
                 ObservabilitySettings(),
             )
 
-        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10)
+        view = list_event_view(
+            self.conn,
+            project_id,
+            execution_id=execution_id,
+            limit=10,
+            event_kinds=["prompt", "capability_manifest", "agent_message"],
+        )
 
         self.assertEqual(
             [event.event_kind for event in view.primary_events],
             ["agent_message", "capability_manifest", "prompt"],
         )
         self.assertEqual(view.stats.hidden_by_kind, {"usage": 1})
+
+    def test_event_view_empty_event_kinds_filter_returns_no_primary_events(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+
+        project_id = "proj_view_empty_kinds"
+        execution_id = "exec_view_empty_kinds"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+        event, _ = append_event(
+            self.conn,
+            project_id,
+            execution_id,
+            CreateEventRequest(phase="bootstrap", event_kind="agent_message", stream="result", content="visible"),
+            ObservabilitySettings(),
+        )
+        self.assertIsNotNone(event)
+
+        view = list_event_view(self.conn, project_id, execution_id=execution_id, limit=10, event_kinds=[""])
+
+        self.assertEqual(view.primary_events, [])
+        self.assertEqual(view.stats.hidden_by_kind, {"agent_message": 1})
+        self.assertEqual(view.last_sequence, event.sequence)
 
 
 class ProjectFilesRouterTests(unittest.TestCase):
