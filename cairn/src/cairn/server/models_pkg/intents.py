@@ -154,7 +154,6 @@ class ReasonFinishRequest(BaseModel):
         "complete",
         "intents",
         "noop",
-        "blocked",
         "failed",
         "timeout",
         "rejected",

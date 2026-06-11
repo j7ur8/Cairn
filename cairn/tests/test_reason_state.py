@@ -16,47 +16,44 @@ from helpers import reset_postgres_db
 
 
 class ReasonContractTests(unittest.TestCase):
-    def test_blocked_payload_is_valid_reason_result(self) -> None:
+    def test_blocked_payload_is_rejected(self) -> None:
         from cairn.dispatcher.contracts import validate_reason_payload
 
-        kind, data = validate_reason_payload(
-            {
-                "accepted": True,
-                "data": {
-                    "blocked": {
-                        "from": ["f019"],
-                        "description": "All high-value paths are exhausted.",
-                        "retryable": False,
-                    }
+        with self.assertRaises(ValueError):
+            validate_reason_payload(
+                {
+                    "accepted": True,
+                    "data": {
+                        "blocked": {
+                            "from": ["f019"],
+                            "description": "All high-value paths are exhausted.",
+                            "retryable": False,
+                        }
+                    },
                 },
-            },
-            open_intents_empty=True,
-            max_intents=2,
-        )
-        self.assertEqual(kind, "blocked")
-        self.assertEqual(data["from"], ["f019"])
+                open_intents_empty=True,
+                max_intents=2,
+            )
 
-    def test_empty_intents_with_no_open_intents_becomes_blocked(self) -> None:
+    def test_empty_intents_with_no_open_intents_is_invalid(self) -> None:
         from cairn.dispatcher.contracts import validate_reason_payload
 
-        kind, data = validate_reason_payload(
-            {"accepted": True, "data": {"intents": []}},
-            open_intents_empty=True,
-            max_intents=2,
-        )
-        self.assertEqual(kind, "blocked")
-        self.assertIsInstance(data, dict)
+        with self.assertRaises(ValueError):
+            validate_reason_payload(
+                {"accepted": True, "data": {"intents": []}},
+                open_intents_empty=True,
+                max_intents=2,
+            )
 
-    def test_empty_data_with_no_open_intents_becomes_blocked(self) -> None:
+    def test_empty_data_with_no_open_intents_is_invalid(self) -> None:
         from cairn.dispatcher.contracts import validate_reason_payload
 
-        kind, data = validate_reason_payload(
-            {"accepted": True, "data": {}},
-            open_intents_empty=True,
-            max_intents=2,
-        )
-        self.assertEqual(kind, "blocked")
-        self.assertIsInstance(data, dict)
+        with self.assertRaises(ValueError):
+            validate_reason_payload(
+                {"accepted": True, "data": {}},
+                open_intents_empty=True,
+                max_intents=2,
+            )
 
     def test_empty_data_with_open_intents_remains_noop(self) -> None:
         from cairn.dispatcher.contracts import validate_reason_payload
@@ -68,6 +65,20 @@ class ReasonContractTests(unittest.TestCase):
         )
         self.assertEqual(kind, "noop")
         self.assertIsNone(data)
+
+    def test_singular_intent_is_accepted(self) -> None:
+        from cairn.dispatcher.contracts import validate_reason_payload
+
+        kind, data = validate_reason_payload(
+            {
+                "accepted": True,
+                "data": {"intent": {"from": ["f001"], "description": "try another path"}},
+            },
+            open_intents_empty=True,
+            max_intents=2,
+        )
+        self.assertEqual(kind, "intents")
+        self.assertEqual(data, [{"from": ["f001"], "description": "try another path"}])
 
 
 class ReasonStateServiceTests(unittest.TestCase):
@@ -98,47 +109,10 @@ class ReasonStateServiceTests(unittest.TestCase):
             )
         return "proj_t"
 
-    def test_blocked_reason_state_consumes_same_trigger(self) -> None:
-        from cairn.server.services import (
-            finish_project_reason_or_409,
-            reason_trigger_dispatch_blocker,
-            reason_trigger_hash,
-        )
-
-        project_id = self._create_project()
-        trigger = "facts:19->21"
-        trigger_hash = reason_trigger_hash(trigger)
-        with self.db.session_scope() as conn:
-            finish_project_reason_or_409(
-                conn,
-                project_id,
-                "codex",
-                trigger,
-                "2026-06-04T00:00:00Z",
-                trigger_hash=trigger_hash,
-                fact_count=21,
-                hint_count=1,
-                open_intent_count=0,
-                outcome="blocked",
-                error=None,
-            )
-            blocker = reason_trigger_dispatch_blocker(
-                conn,
-                project_id,
-                trigger_hash,
-                21,
-                1,
-                0,
-                "2026-06-04T00:00:01Z",
-            )
-        self.assertIsNotNone(blocker)
-        self.assertIn("already consumed", blocker)
-
-    def test_failures_backoff_then_block_same_trigger(self) -> None:
+    def test_failures_are_recorded_without_blocking_outcome(self) -> None:
         from cairn.server.services import (
             finish_project_reason_or_409,
             get_project_reason_state,
-            reason_trigger_dispatch_blocker,
             reason_trigger_hash,
         )
 
@@ -162,17 +136,7 @@ class ReasonStateServiceTests(unittest.TestCase):
             state = get_project_reason_state(conn, project_id)
             self.assertEqual(state.failure_count, 1)
             self.assertEqual(state.outcome, "timeout")
-            self.assertIsNotNone(state.next_retry_at)
-            blocker = reason_trigger_dispatch_blocker(
-                conn,
-                project_id,
-                trigger_hash,
-                21,
-                1,
-                0,
-                "2026-06-04T00:00:01Z",
-            )
-            self.assertIn("backoff", blocker)
+            self.assertIsNone(state.next_retry_at)
 
             finish_project_reason_or_409(
                 conn,
@@ -201,8 +165,8 @@ class ReasonStateServiceTests(unittest.TestCase):
                 error="timeout",
             )
             state = get_project_reason_state(conn, project_id)
-        self.assertEqual(state.outcome, "blocked")
-        self.assertEqual(state.failure_count, 3)
+        self.assertEqual(state.outcome, "timeout")
+        self.assertEqual(state.failure_count, 1)
 
     def test_superseded_reason_run_cannot_finish_active_claim(self) -> None:
         from fastapi import HTTPException
@@ -241,7 +205,7 @@ class ReasonStateServiceTests(unittest.TestCase):
                     fact_count=3,
                     hint_count=0,
                     open_intent_count=0,
-                    outcome="blocked",
+                    outcome="noop",
                     error=None,
                 )
         self.assertEqual(ctx.exception.status_code, 409)

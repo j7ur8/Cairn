@@ -11,11 +11,7 @@ from cairn.server.models_pkg.projects import Intent, ProjectMeta, ProjectReason
 from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
 from cairn.server.repositories import sql
 
-
-REASON_FAILURE_BACKOFF_BASE_SECONDS = 30
-REASON_FAILURE_BACKOFF_MAX_SECONDS = 300
-REASON_FAILURE_BLOCK_THRESHOLD = 3
-REASON_SUCCESS_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
+REASON_SUCCESS_OUTCOMES = {"success", "complete", "intents", "noop"}
 REASON_FAILURE_OUTCOMES = {"failed", "timeout", "rejected", "unhealthy", "cancelled"}
 
 def utcnow() -> str:
@@ -28,14 +24,6 @@ def reason_trigger_hash(trigger: str) -> str:
 
 def _parse_utc(value: str) -> datetime:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-
-
-def _reason_backoff_until(now: str, failure_count: int) -> str:
-    delay = min(
-        REASON_FAILURE_BACKOFF_MAX_SECONDS,
-        REASON_FAILURE_BACKOFF_BASE_SECONDS * (2 ** max(0, failure_count - 1)),
-    )
-    return (_parse_utc(now) + timedelta(seconds=delay)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def next_project_id(conn: Any) -> str:
@@ -371,48 +359,6 @@ def get_project_reason_state(conn: Any, project_id: str) -> ReasonState | None:
     return reason_state_from_row(row)
 
 
-def _same_reason_trigger_state(
-    row: Any | None,
-    trigger_hash: str,
-    fact_count: int,
-    hint_count: int,
-    open_intent_count: int,
-) -> bool:
-    if row is None:
-        return False
-    return (
-        row["trigger_hash"] == trigger_hash
-        and row["fact_count"] == fact_count
-        and row["hint_count"] == hint_count
-        and row["open_intent_count"] == open_intent_count
-    )
-
-
-def reason_trigger_dispatch_blocker(
-    conn: Any,
-    project_id: str,
-    trigger_hash: str,
-    fact_count: int,
-    hint_count: int,
-    open_intent_count: int,
-    now: str | None = None,
-) -> str | None:
-    row = sql.fetchone(
-        conn,
-        "SELECT * FROM project_reason_state WHERE project_id = :project_id",
-        {"project_id": project_id},
-    )
-    if not _same_reason_trigger_state(row, trigger_hash, fact_count, hint_count, open_intent_count):
-        return None
-    assert row is not None
-    if row["outcome"] in REASON_SUCCESS_OUTCOMES:
-        return f"reason trigger already consumed outcome={row['outcome']}"
-    next_retry_at = row["next_retry_at"]
-    if next_retry_at is not None and next_retry_at > (now or utcnow()):
-        return f"reason trigger backoff until {next_retry_at}"
-    return None
-
-
 def clear_project_reason(conn: Any, project_id: str) -> None:
     sql.execute(
         conn,
@@ -446,18 +392,6 @@ def claim_project_reason_or_409(
     row = get_project_or_404(conn, project_id)
     if row["status"] != "active":
         raise HTTPException(403, f"Project is {row['status']}")
-    trigger_hash = trigger_hash or reason_trigger_hash(trigger)
-    blocker = reason_trigger_dispatch_blocker(
-        conn,
-        project_id,
-        trigger_hash,
-        fact_count,
-        hint_count,
-        open_intent_count,
-        now,
-    )
-    if blocker is not None:
-        raise HTTPException(409, blocker)
     current_worker = row["reason_worker"]
     if current_worker is not None and current_worker != worker:
         raise HTTPException(409, f"Project reason is currently claimed by {current_worker}")
@@ -516,30 +450,13 @@ def finish_project_reason_or_409(
         raise HTTPException(409, "Project reason run has been superseded")
 
     trigger_hash = trigger_hash or reason_trigger_hash(trigger)
-    previous = sql.fetchone(
-        conn,
-        "SELECT * FROM project_reason_state WHERE project_id = :project_id",
-        {"project_id": project_id},
-    )
-    same_trigger = _same_reason_trigger_state(
-        previous,
-        trigger_hash,
-        fact_count,
-        hint_count,
-        open_intent_count,
-    )
-    previous_failures = previous["failure_count"] if same_trigger and previous is not None else 0
     last_error = (error or "")[:4000]
     next_retry_at: str | None = None
     stored_outcome = outcome
     failure_count = 0
     if outcome in REASON_FAILURE_OUTCOMES:
-        failure_count = previous_failures + 1
-        if failure_count >= REASON_FAILURE_BLOCK_THRESHOLD:
-            stored_outcome = "blocked"
-            next_retry_at = None
-        else:
-            next_retry_at = _reason_backoff_until(now, failure_count)
+        failure_count = 1
+        next_retry_at = None
     elif outcome not in REASON_SUCCESS_OUTCOMES:
         raise HTTPException(400, f"invalid reason outcome: {outcome}")
 

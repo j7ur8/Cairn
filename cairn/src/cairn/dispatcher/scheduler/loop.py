@@ -48,7 +48,6 @@ UNHEALTHY_RETRY_AFTER_SECONDS = 5
 REJECTED_RETRY_AFTER_SECONDS = 5
 BOOTSTRAP_INTENT_DESCRIPTION = "bootstrap"
 BOOTSTRAP_INTENT_CREATOR = "dispatcher.bootstrap"
-REASON_CONSUMED_OUTCOMES = {"success", "complete", "intents", "noop", "blocked"}
 
 
 class DispatcherLoop:
@@ -572,17 +571,6 @@ class DispatcherLoop:
             )
             return False
         reason_trigger_hash = self._reason_trigger_hash(reason_trigger)
-        reason_blocker = self._reason_dispatch_blocker(project, reason_trigger_hash)
-        if reason_blocker is not None:
-            self._log_changed(
-                f"{skip_scope}:reason_state",
-                logging.INFO,
-                "skip reason project=%s trigger=%s reason=%s",
-                summary.id,
-                reason_trigger,
-                reason_blocker,
-            )
-            return False
         export_yaml = self.client.export_project(summary.id)
         return self._dispatch_reason(project, export_yaml, reason_trigger, reason_trigger_hash)
 
@@ -1128,35 +1116,6 @@ class DispatcherLoop:
     @staticmethod
     def _reason_trigger_hash(trigger: str) -> str:
         return sha256(trigger.encode("utf-8")).hexdigest()
-
-    def _reason_dispatch_blocker(self, project: ProjectDetail, trigger_hash: str) -> str | None:
-        try:
-            response = self.client.get_reason_state(project.project.id)
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("reason state fetch raised project=%s error=%s", project.project.id, exc)
-            return None
-        if not response.ok:
-            LOG.warning(
-                "reason state fetch failed project=%s status=%s",
-                project.project.id,
-                response.status_code,
-            )
-            return None
-        state = response.data
-        if state is None:
-            return None
-        if (
-            state.trigger_hash != trigger_hash
-            or state.fact_count != len(project.facts)
-            or state.hint_count != len(project.hints)
-            or state.open_intent_count != self._project_open_intent_count(project)
-        ):
-            return None
-        if state.outcome in REASON_CONSUMED_OUTCOMES:
-            return f"already consumed outcome={state.outcome}"
-        if state.next_retry_at and state.next_retry_at > time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()):
-            return f"backoff until {state.next_retry_at}"
-        return None
 
     def _reap_futures(self) -> None:
         done = [future for future in self.futures if future.done()]

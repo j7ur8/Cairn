@@ -27,19 +27,12 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 {"accepted": true, "data": {}}
 ```
 
-If Goal has not been satisfied, Open Intents is empty, and no high-value direction remains, return:
-```json
-{"accepted": true, "data": {"blocked": {"from": ["f001"], "description": "Goal is not satisfied, but current facts exhaust the reachable high-value paths: ...", "retryable": false}}}
-```
-
 ## Rules
 - First determine whether the facts already satisfy Goal. If they do, `data.complete.from` must come from `Valid facts`, and `data.complete.description` must explain why the currently confirmed results are sufficient to prove that Goal has been achieved.
 - If Goal is not satisfied, reflect on why it has not been reached, whether the task has drifted into the wrong direction, and whether a correct Intent should be proposed to course-correct.
 - Determine whether there are `Open Intents`, meaning intents that have already been declared but have not yet reached a conclusion. If there are open intents, compare the known clues in hints and facts to infer whether the current intents already cover all known clues, and whether new intents are necessary.
-- If `Open Intents` is empty, propose new intents unless all high-value paths are exhausted.
-- If `Open Intents` is empty and all high-value paths are exhausted, return `blocked`.
+- If `Open Intents` is empty, you must propose new intents.
 - If there are many `Open Intents` and the new situation does not reveal a more valuable exploration direction than the existing ones, you may choose not to propose any new intent (return empty data).
-- Do not run exploratory commands, network scans, brute force loops, or long shell loops in reason. Read the graph and output the decision JSON; exploration belongs in explore intents.
 - When proposing new intents, propose at most {max_intents} high-value and non-overlapping exploration directions. Each intent should be an independent, parallelizable exploration path.
 - Each Intent should be a high-value exploration direction. It does not need to be overly detailed. Focus on the core insight and a clear direction. Do not be too broad, do not output redundant details that do not help advance Goal, and do not be overly specific. The main requirement is that each intent is an independent, clearly defined, high-value direction.
 - An Intent may originate from multiple facts.

@@ -332,21 +332,6 @@ def run_reason_task(
             reason_finish_outcome = "complete"
             reporter.emit_result("reason_write", data["description"], produced_fact_id="goal")
             return outcome
-        if kind == "blocked":
-            assert isinstance(data, dict)
-            LOG.info(
-                "reason blocked project=%s worker=%s from=%s execute_ms=%s total_ms=%s description=%s",
-                project.project.id,
-                worker.name,
-                data.get("from"),
-                execute_ms,
-                total_ms,
-                data.get("description"),
-            )
-            outcome = "success"
-            reason_finish_outcome = "blocked"
-            reporter.emit_result("reason_write", data.get("description", "blocked"))
-            return outcome
         if kind == "intents":
             created = 0
             created_ids: list[str] = []
