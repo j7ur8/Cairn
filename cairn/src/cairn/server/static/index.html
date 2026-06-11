@@ -1268,13 +1268,14 @@
     <h4 class="text-sm font-semibold text-slate-700 mb-3">Server Settings</h4>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent timeout (seconds)</label>
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent lease timeout (seconds)</label>
         <input type="number" x-model.number="settingsForm.intent_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
       </div>
       <div>
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason timeout (seconds)</label>
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason lease timeout (seconds)</label>
         <input type="number" x-model.number="settingsForm.reason_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
       </div>
+      <p class="sm:col-span-2 text-[11px] text-slate-400">These values control server heartbeat leases. Worker command timeouts are set per project when creating or replaying a project.</p>
 
     </section>
 
@@ -1692,6 +1693,34 @@
           </template>
           <p class="text-[11px] text-slate-400">Hint creator uses local actor: <span class="font-medium text-slate-600" x-text="actorName()"></span></p>
         </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+          <div>
+            <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Task Timeouts</div>
+            <p class="text-[11px] text-slate-400 mt-1">Worker command limits for this project. Defaults come from dispatch.yaml tasks.</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Bootstrap run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.bootstrap.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Bootstrap conclude</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.bootstrap.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Reason run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.reason.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Intent run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.explore.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Intent conclude</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.explore.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+          </div>
+        </div>
       </section>
 
       <section class="mt-5 border-t border-slate-200 pt-5 space-y-3">
@@ -1884,6 +1913,34 @@
               <button type="button" @click="replayConfig.hints.splice(idx, 1)" x-show="replayConfig.hints.length > 1" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
             </div>
           </template>
+        </div>
+        <div class="rounded-2xl border border-violet-100 bg-white p-3 space-y-3">
+          <div>
+            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">Task Timeouts</div>
+            <p class="text-[11px] text-slate-400 mt-1">Inherited from the source project and can be adjusted for this replay.</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Bootstrap run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.bootstrap.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Bootstrap conclude</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.bootstrap.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Reason run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.reason.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Intent run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.explore.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Intent conclude</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.explore.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+          </div>
         </div>
         </div>
         <div class="shrink-0 flex justify-end gap-2 px-4 py-4 border-t border-violet-100 bg-violet-50/60">
@@ -2344,6 +2401,11 @@ function cairnApp() {
   });
   const defaultTaskAiProfileSelections = () => ({
   });
+  const defaultTaskTimeouts = () => ({
+    bootstrap: { timeout: 300, conclude_timeout: 90 },
+    explore: { timeout: 300, conclude_timeout: 90 },
+    reason: { timeout: 300 },
+  });
   const defaultLlmVisibleEventKinds = () => LLM_EVENT_KIND_OPTIONS.filter(kind => kind !== 'usage');
   const defaultCapabilityForm = () => ({
     kind: 'mcp_server',
@@ -2476,6 +2538,7 @@ function cairnApp() {
       role_id: '',
       capabilities: defaultTaskCapabilitiesMap(),
       ai_profiles: defaultTaskAiProfileSelections(),
+      task_timeouts: defaultTaskTimeouts(),
       llm_visible_event_kinds: defaultLlmVisibleEventKinds(),
     },
     intentForm: { description: '' },
@@ -2494,6 +2557,7 @@ function cairnApp() {
       role_id: '',
       capabilities: defaultTaskCapabilitiesMap(),
       ai_profiles: defaultTaskAiProfileSelections(),
+      task_timeouts: defaultTaskTimeouts(),
       llm_visible_event_kinds: defaultLlmVisibleEventKinds(),
       catalog: { capabilities: [], roles: [], ai_profiles: [] },
     },
@@ -3822,6 +3886,7 @@ function cairnApp() {
         proxy_id: '',
         capabilities: this.defaultTaskCapabilitiesMap(),
         ai_profiles: this.defaultTaskAiProfileSelections(),
+        task_timeouts: this.defaultTaskTimeouts(),
         llm_visible_event_kinds: this.defaultLlmVisibleEventKinds(),
       };
       this.newProjectCapabilityPanel = 'bootstrap';
@@ -3881,12 +3946,14 @@ function cairnApp() {
 
     async loadNewProjectCatalog() {
       try {
-        const [capabilities, roles, aiProfiles] = await Promise.all([
+        const [capabilities, roles, aiProfiles, taskTimeouts] = await Promise.all([
           this.api('GET', '/capabilities/catalog'),
           this.api('GET', '/roles/catalog'),
           this.api('GET', '/ai-profiles'),
+          this.api('GET', '/task-timeouts/defaults'),
         ]);
         this.aiProfiles = aiProfiles || [];
+        this.newProject.task_timeouts = this.normalizeTaskTimeouts(taskTimeouts);
         this.newProjectCatalog = {
           capabilities: capabilities || [],
           roles: roles || [],
@@ -4380,6 +4447,52 @@ function cairnApp() {
       return out;
     },
 
+    defaultTaskTimeouts() {
+      return this.cloneData(defaultTaskTimeouts());
+    },
+
+    normalizeTaskTimeouts(value) {
+      const source = value || {};
+      return {
+        bootstrap: {
+          timeout: Number(source.bootstrap?.timeout) || 0,
+          conclude_timeout: Number(source.bootstrap?.conclude_timeout) || 0,
+        },
+        explore: {
+          timeout: Number(source.explore?.timeout) || 0,
+          conclude_timeout: Number(source.explore?.conclude_timeout) || 0,
+        },
+        reason: {
+          timeout: Number(source.reason?.timeout) || 0,
+        },
+      };
+    },
+
+    taskTimeoutsComplete(value) {
+      const t = this.normalizeTaskTimeouts(value);
+      return t.bootstrap.timeout > 0
+        && t.bootstrap.conclude_timeout > 0
+        && t.explore.timeout > 0
+        && t.explore.conclude_timeout > 0
+        && t.reason.timeout > 0;
+    },
+
+    taskTimeoutsForPayload(value) {
+      const t = this.normalizeTaskTimeouts(value);
+      if (!this.taskTimeoutsComplete(t)) {
+        throw new Error('Set all task timeouts to positive seconds before creating the project.');
+      }
+      return t;
+    },
+
+    taskTimeoutsFromExecutionConfigs(configs) {
+      for (const task of ['bootstrap', 'explore', 'reason']) {
+        const taskTimeouts = configs?.[task]?.task_timeouts;
+        if (taskTimeouts) return this.normalizeTaskTimeouts(taskTimeouts);
+      }
+      throw new Error('Source project execution config is missing task_timeouts.');
+    },
+
     ensureTaskAiProfileSelections(target) {
       if (!target.ai_profiles) {
         target.ai_profiles = this.defaultTaskAiProfileSelections();
@@ -4536,6 +4649,7 @@ function cairnApp() {
         role_id: '',
         capabilities: this.defaultTaskCapabilitiesMap(),
         ai_profiles: this.defaultTaskAiProfileSelections(),
+        task_timeouts: this.defaultTaskTimeouts(),
         llm_visible_event_kinds: this.defaultLlmVisibleEventKinds(),
         catalog: { capabilities: [], roles: [], ai_profiles: [] },
       };
@@ -4699,6 +4813,14 @@ function cairnApp() {
       return `/projects/${this.selectedProjectId}/llm-events/view?${params.toString()}`;
     },
 
+    llmIncrementalEventsUrl({ executionId = '', after = 0, limit = 200 } = {}) {
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      params.set('after', String(after));
+      if (executionId) params.set('execution_id', executionId);
+      return `/projects/${this.selectedProjectId}/llm-events/incremental?${params.toString()}`;
+    },
+
     applyLlmEventViewMeta(data) {
       this.llmEventViewActivity = data?.activity || null;
       this.llmEventViewStats = data?.stats || null;
@@ -4806,12 +4928,14 @@ function cairnApp() {
         const after = force && this.llmEvents.length === 0 ? 0 : this.llmLastSequence;
         const data = await this.api(
           'GET',
-          this.llmEventViewUrl({ executionId: this.llmSelectedExecutionId || '', after, limit: 200 }),
+          this.llmIncrementalEventsUrl({ executionId: this.llmSelectedExecutionId || '', after, limit: 200 }),
         );
-        const events = Array.isArray(data?.primary_events) ? data.primary_events : [];
+        const events = Array.isArray(data?.events) ? data.events : [];
         const lastSequence = Number(data?.last_sequence || 0);
         const hasNewWindow = lastSequence > after;
-        this.applyLlmEventViewMeta(data);
+        if (Number.isFinite(lastSequence) && lastSequence > 0) {
+          this.llmLastSequence = Math.max(this.llmLastSequence, lastSequence);
+        }
         if (events.length > 0 || hasNewWindow) {
           if (after === 0) {
             this.llmEvents = [];
@@ -5944,13 +6068,14 @@ function cairnApp() {
       if (!this.project || !this.selectedProjectId || this.project.project.status !== 'completed') return;
       try {
         const sourceProject = await this.api('GET', `/projects/${this.selectedProjectId}`);
-        const [catalogCapabilities, catalogRoles, projectCapabilities, projectRole, aiProfiles, projectAiProfiles] = await Promise.all([
+        const [catalogCapabilities, catalogRoles, projectCapabilities, projectRole, aiProfiles, projectAiProfiles, executionConfigs] = await Promise.all([
           this.api('GET', '/capabilities/catalog'),
           this.api('GET', '/roles/catalog'),
           this.api('GET', `/projects/${this.selectedProjectId}/capabilities`),
           this.api('GET', `/projects/${this.selectedProjectId}/role`),
           this.api('GET', '/ai-profiles'),
           this.api('GET', `/projects/${this.selectedProjectId}/ai-profiles`),
+          this.api('GET', `/projects/${this.selectedProjectId}/execution-configs`),
         ]);
         const origin = sourceProject.facts.find(f => f.id === 'origin')?.description || '';
         const goal = sourceProject.facts.find(f => f.id === 'goal')?.description || '';
@@ -5976,6 +6101,7 @@ function cairnApp() {
           role_id: replayRoleId,
           capabilities: this.hydrateReplayCapabilitiesFromSource(projectCapabilities),
           ai_profiles: replaySelections,
+          task_timeouts: this.taskTimeoutsFromExecutionConfigs(executionConfigs),
           llm_visible_event_kinds: this.llmVisibleKindsFromProject(sourceProject.project),
           catalog: {
             capabilities: catalogCapabilities || [],
@@ -5999,6 +6125,9 @@ function cairnApp() {
         if (!this.taskAiProfileSelectionsComplete(this.replayConfig, this.replayConfigAiProfileItems())) {
           throw new Error('Select an AI Profile for Bootstrap, Intent, and Reason before creating a replay project.');
         }
+        if (!this.taskTimeoutsComplete(this.replayConfig.task_timeouts)) {
+          throw new Error('Set all task timeouts to positive seconds before creating the replay project.');
+        }
         this.isCreatingReplayRun = true;
         const actor = this.actorName();
         const hints = (this.replayConfig.hints || [])
@@ -6011,6 +6140,7 @@ function cairnApp() {
           hints,
           role_id: this.replayConfig.role_id || null,
           capabilities: this.capabilitiesForReplayRun(),
+          task_timeouts: this.taskTimeoutsForPayload(this.replayConfig.task_timeouts),
           llm_visible_event_kinds: this.replayConfig.llm_visible_event_kinds || this.defaultLlmVisibleEventKinds(),
         };
         const aiSelections = this.ensureTaskAiProfileSelections(this.replayConfig);
@@ -6034,6 +6164,7 @@ function cairnApp() {
         && !!this.replayConfig.title
         && !!this.replayConfig.origin
         && !!this.replayConfig.goal
+        && this.taskTimeoutsComplete(this.replayConfig.task_timeouts)
         && this.taskAiProfileSelectionsComplete(this.replayConfig, this.replayConfigAiProfileItems());
     },
 
@@ -7787,6 +7918,7 @@ function cairnApp() {
         && !!this.newProject.title
         && !!this.newProject.origin
         && !!this.newProject.goal
+        && this.taskTimeoutsComplete(this.newProject.task_timeouts)
         && this.taskAiProfileSelectionsComplete(this.newProject, this.newProjectAiProfileItems());
     },
 
@@ -7796,6 +7928,9 @@ function cairnApp() {
       try {
         if (!this.taskAiProfileSelectionsComplete(this.newProject, this.newProjectAiProfileItems())) {
           throw new Error('Select an AI Profile for Bootstrap, Intent, and Reason before creating a project.');
+        }
+        if (!this.taskTimeoutsComplete(this.newProject.task_timeouts)) {
+          throw new Error('Set all task timeouts to positive seconds before creating the project.');
         }
         this.isCreatingProject = true;
         const actor = this.actorName();
@@ -7813,6 +7948,7 @@ function cairnApp() {
         }
         const aiSelections = this.ensureTaskAiProfileSelections(this.newProject);
         body.ai_profiles = this.compactTaskAiProfileSelections(aiSelections);
+        body.task_timeouts = this.taskTimeoutsForPayload(this.newProject.task_timeouts);
         body.llm_visible_event_kinds = this.newProject.llm_visible_event_kinds || this.defaultLlmVisibleEventKinds();
         const data = await this.api('POST', '/projects', body);
         createdProjectId = data.project.id;

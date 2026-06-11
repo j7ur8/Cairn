@@ -20,6 +20,7 @@ from cairn.server.models_pkg.projects import (
     hidden_kinds_from_visible,
 )
 from cairn.server.models_pkg.proxies import ProxySummary
+from cairn.shared.protocol_models import TaskTimeouts
 from cairn.server.ai_profile_service import (
     require_complete_ai_profile_selections,
 )
@@ -38,6 +39,7 @@ class ProjectCreationDraft:
     capabilities: TaskCapabilitySelectionMap | None = None
     capability_snapshots: TaskCapabilitiesMap | None = None
     ai_profiles: TaskAiProfileSelections | None = None
+    task_timeouts: TaskTimeouts | None = None
     role_id: str | None = None
     proxy_id: str | None = None
     llm_visible_event_kinds: list[str] | None = None
@@ -136,6 +138,8 @@ def create_project_from_draft(
         hints.append(Hint(id=hid, content=hint.content, creator=hint.creator, created_at=now))
 
     ai_profiles = require_complete_ai_profile_selections(draft.ai_profiles)
+    if draft.task_timeouts is None:
+        raise HTTPException(422, "task_timeouts is required")
     persist_worker_execution_configs(
         conn,
         pid,
@@ -143,6 +147,7 @@ def create_project_from_draft(
         capabilities=draft.capabilities,
         ai_profiles=ai_profiles,
         role_id=draft.role_id,
+        task_timeouts=draft.task_timeouts,
         now=now,
     )
 

@@ -344,6 +344,7 @@ class ProxyDatabaseTests(unittest.TestCase):
 
     def test_create_project_with_invalid_proxy_id_returns_400(self) -> None:
         from fastapi import HTTPException
+        from helpers import test_task_timeouts
         from cairn.server.routers import projects as projects_router
         from cairn.server.models_pkg.ai_profiles import (
             AiProfileCreate,
@@ -371,6 +372,7 @@ class ProxyDatabaseTests(unittest.TestCase):
             origin="o",
             goal="g",
             proxy_id="proxy_does_not_exist",
+            task_timeouts=test_task_timeouts(),
             ai_profiles=TaskAiProfileSelections(
                 bootstrap=selection,
                 explore=selection,

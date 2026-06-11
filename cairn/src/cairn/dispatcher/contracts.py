@@ -2,11 +2,93 @@ from __future__ import annotations
 
 from typing import Any
 
-from cairn.dispatcher.output_parser import extract_json_object
+from cairn.dispatcher.output_parser import extract_json_objects
 
 
 def parse_json_output(stdout: str) -> dict[str, Any]:
-    return extract_json_object(stdout)
+    objects = _candidate_protocol_payloads(stdout)
+    for payload in objects:
+        normalized = _normalize_protocol_payload(payload)
+        if normalized is not None:
+            return normalized
+    raise ValueError("no JSON object found in output")
+
+
+def _candidate_protocol_payloads(stdout: str) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for payload in extract_json_objects(stdout):
+        candidates.append(payload)
+        nested = _extract_nested_agent_message(payload)
+        if nested is not None:
+            candidates.append(nested)
+    return candidates
+
+
+def _extract_nested_agent_message(payload: dict[str, Any]) -> dict[str, Any] | None:
+    message: Any = None
+    payload_type = payload.get("type")
+    item = payload.get("item")
+    body = payload.get("payload")
+    if payload_type == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+        message = item.get("text") or item.get("message")
+    elif payload_type == "event_msg" and isinstance(body, dict) and body.get("type") == "agent_message":
+        message = body.get("message")
+    elif payload_type == "response_item" and isinstance(body, dict) and body.get("type") == "message":
+        message = _extract_response_item_text(body.get("content"))
+    if not isinstance(message, str) or not message.strip():
+        return None
+    for nested in extract_json_objects(message):
+        normalized = _normalize_protocol_payload(nested)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _extract_response_item_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text:
+            parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _normalize_protocol_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    accepted = payload.get("accepted")
+    if accepted is False:
+        return payload
+    if accepted is True:
+        return payload
+    if _looks_like_protocol_data(payload):
+        return {"accepted": True, "data": payload}
+    return None
+
+
+def _looks_like_protocol_data(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    keys = set(payload)
+    if keys == {"fact"}:
+        return isinstance(payload.get("fact"), dict)
+    if keys == {"fact", "complete"}:
+        return isinstance(payload.get("fact"), dict)
+    if keys == {"description"}:
+        return isinstance(payload.get("description"), str)
+    if keys == {"complete"}:
+        complete = payload.get("complete")
+        return isinstance(complete, dict) and "from" in complete and "description" in complete
+    if keys == {"intent"}:
+        intent = payload.get("intent")
+        return isinstance(intent, dict) and "from" in intent and "description" in intent
+    if keys == {"intents"}:
+        return isinstance(payload.get("intents"), list)
+    return False
 
 
 def validate_reason_payload(

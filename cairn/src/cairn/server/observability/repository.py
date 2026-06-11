@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import text
+
 from cairn.server.observability.models import (
     CreateEventRequest,
     CreateExecutionRequest,
@@ -114,38 +116,30 @@ def append_event(
     body: CreateEventRequest,
     settings: ObservabilitySettings,
 ) -> tuple[LlmExecutionEvent | None, bool]:
-    execution = sql.fetchone(
-        conn,
-        "SELECT * FROM llm_executions WHERE id = :execution_id AND project_id = :project_id",
-        {"execution_id": execution_id, "project_id": project_id},
-    )
-    if execution is None:
-        return None, True
+    events, dropped = append_events(conn, project_id, execution_id, [body], settings)
+    return events[0], bool(dropped)
 
-    current_bytes = int(execution["bytes_written"])
+
+def _prepare_event_row(
+    execution: Any,
+    execution_id: str,
+    project_id: str,
+    body: CreateEventRequest,
+    settings: ObservabilitySettings,
+    current_bytes: int,
+    now: str,
+) -> tuple[dict[str, Any] | None, int]:
     content, redacted = redact_content(body.content, settings.redaction_patterns)
     content, truncated = truncate_content(content, settings.max_event_bytes)
     byte_count = len(content.encode("utf-8"))
     if current_bytes + byte_count > settings.max_bytes_per_execution:
         if current_bytes >= settings.max_bytes_per_execution:
-            return None, True
+            return None, 0
         content = "Execution log byte limit reached; further output was dropped."
         truncated = True
         byte_count = len(content.encode("utf-8"))
 
-    now = utcnow()
-    cursor = sql.execute(
-        conn,
-        """
-        INSERT INTO llm_execution_events (
-            execution_id, project_id, intent_id, task_type, worker, phase,
-            event_kind, stream, content, truncated, redacted, created_at
-        ) VALUES (
-            :execution_id, :project_id, :intent_id, :task_type, :worker, :phase,
-            :event_kind, :stream, :content, :truncated, :redacted, :created_at
-        )
-        RETURNING sequence
-        """,
+    return (
         {
             "execution_id": execution_id,
             "project_id": project_id,
@@ -160,26 +154,113 @@ def append_event(
             "redacted": 1 if redacted else 0,
             "created_at": now,
         },
+        byte_count,
     )
-    sql.execute(
+
+
+def _insert_event_rows(conn: Any, rows: list[dict[str, Any]]) -> list[LlmExecutionEvent]:
+    if not rows:
+        return []
+    placeholders: list[str] = []
+    params: dict[str, Any] = {}
+    fields = (
+        "execution_id",
+        "project_id",
+        "intent_id",
+        "task_type",
+        "worker",
+        "phase",
+        "event_kind",
+        "stream",
+        "content",
+        "truncated",
+        "redacted",
+        "created_at",
+    )
+    for index, row in enumerate(rows):
+        names: list[str] = []
+        for field in fields:
+            key = f"{field}_{index}"
+            names.append(f":{key}")
+            params[key] = row[field]
+        placeholders.append(f"({', '.join(names)})")
+    result = conn.execute(
+        text(
+            f"""
+            INSERT INTO llm_execution_events (
+                execution_id, project_id, intent_id, task_type, worker, phase,
+                event_kind, stream, content, truncated, redacted, created_at
+            ) VALUES {", ".join(placeholders)}
+            RETURNING *
+            """
+        ),
+        params,
+    )
+    return [row_to_event(row) for row in result.mappings().fetchall()]
+
+
+def _append_events_batch(
+    conn: Any,
+    project_id: str,
+    execution_id: str,
+    bodies: list[CreateEventRequest],
+    settings: ObservabilitySettings,
+) -> tuple[list[LlmExecutionEvent | None], int]:
+    execution = sql.fetchone(
         conn,
-        """
-        UPDATE llm_executions
-        SET last_event_at = :last_event_at,
-            event_count = event_count + 1,
-            bytes_written = bytes_written + :byte_count
-        WHERE id = :execution_id
-        """,
-        {"last_event_at": now, "byte_count": byte_count, "execution_id": execution_id},
+        "SELECT * FROM llm_executions WHERE id = :execution_id AND project_id = :project_id",
+        {"execution_id": execution_id, "project_id": project_id},
     )
-    inserted = cursor.mappings().fetchone()
-    row = sql.fetchone(
-        conn,
-        "SELECT * FROM llm_execution_events WHERE sequence = :sequence",
-        {"sequence": inserted["sequence"]},
-    )
-    assert row is not None
-    return row_to_event(row), False
+    if execution is None:
+        return [None for _ in bodies], len(bodies)
+
+    current_bytes = int(execution["bytes_written"])
+    now = utcnow()
+    prepared: list[dict[str, Any] | None] = []
+    insert_rows: list[dict[str, Any]] = []
+    total_bytes = 0
+    dropped = 0
+    for body in bodies:
+        row, byte_count = _prepare_event_row(
+            execution,
+            execution_id,
+            project_id,
+            body,
+            settings,
+            current_bytes + total_bytes,
+            now,
+        )
+        prepared.append(row)
+        if row is None:
+            dropped += 1
+            continue
+        insert_rows.append(row)
+        total_bytes += byte_count
+
+    inserted_events = _insert_event_rows(conn, insert_rows)
+    if inserted_events:
+        sql.execute(
+            conn,
+            """
+            UPDATE llm_executions
+            SET last_event_at = :last_event_at,
+                event_count = event_count + :event_count,
+                bytes_written = bytes_written + :byte_count
+            WHERE id = :execution_id
+            """,
+            {
+                "last_event_at": now,
+                "event_count": len(inserted_events),
+                "byte_count": total_bytes,
+                "execution_id": execution_id,
+            },
+        )
+
+    inserted_iter = iter(inserted_events)
+    events: list[LlmExecutionEvent | None] = []
+    for row in prepared:
+        events.append(None if row is None else next(inserted_iter))
+    return events, dropped
 
 
 def append_events(
@@ -189,14 +270,7 @@ def append_events(
     bodies: list[CreateEventRequest],
     settings: ObservabilitySettings,
 ) -> tuple[list[LlmExecutionEvent | None], int]:
-    events: list[LlmExecutionEvent | None] = []
-    dropped = 0
-    for body in bodies:
-        event, was_dropped = append_event(conn, project_id, execution_id, body, settings)
-        events.append(event)
-        if was_dropped:
-            dropped += 1
-    return events, dropped
+    return _append_events_batch(conn, project_id, execution_id, bodies, settings)
 
 
 def finish_execution(
@@ -367,6 +441,44 @@ def list_execution_events(
         {"project_id": project_id, "execution_id": execution_id, "after": after, "limit": limit},
     )
     return [row_to_event(row) for row in rows]
+
+
+def list_incremental_events(
+    conn: Any,
+    project_id: str,
+    *,
+    execution_id: str | None = None,
+    after: int = 0,
+    limit: int = 200,
+) -> tuple[list[LlmExecutionEvent], int]:
+    if execution_id:
+        rows = sql.fetchall(
+            conn,
+            """
+            SELECT * FROM llm_execution_events
+            WHERE project_id = :project_id
+              AND execution_id = :execution_id
+              AND sequence > :after
+            ORDER BY sequence ASC
+            LIMIT :limit
+            """,
+            {"project_id": project_id, "execution_id": execution_id, "after": after, "limit": limit},
+        )
+    else:
+        rows = sql.fetchall(
+            conn,
+            """
+            SELECT * FROM llm_execution_events
+            WHERE project_id = :project_id
+              AND sequence > :after
+            ORDER BY sequence ASC
+            LIMIT :limit
+            """,
+            {"project_id": project_id, "after": after, "limit": limit},
+        )
+    events = [row_to_event(row) for row in rows]
+    last_sequence = max((event.sequence for event in events), default=after)
+    return events, last_sequence
 
 
 def list_event_view(

@@ -12,7 +12,7 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
 
-from helpers import TempYamlConfig, reset_postgres_db
+from helpers import TempYamlConfig, reset_postgres_db, test_task_timeouts
 
 
 class AiProfileFlowTests(unittest.TestCase):
@@ -90,6 +90,7 @@ class AiProfileFlowTests(unittest.TestCase):
             title="P-task-ai",
             origin="origin",
             goal="goal",
+            task_timeouts=test_task_timeouts(),
             ai_profiles=TaskAiProfileSelections(
                 bootstrap=AiProfileSelection(
                     primary_profile_id=boot.id,
@@ -168,6 +169,7 @@ class AiProfileFlowTests(unittest.TestCase):
                 title="P-invalid-model",
                 origin="origin",
                 goal="goal",
+                task_timeouts=test_task_timeouts(),
                 ai_profiles=TaskAiProfileSelections(
                     bootstrap=selection,
                     explore=selection,
@@ -195,6 +197,7 @@ class AiProfileFlowTests(unittest.TestCase):
             title="P",
             origin="origin",
             goal="goal",
+            task_timeouts=test_task_timeouts(),
             ai_profiles=TaskAiProfileSelections(
                 bootstrap=selection,
                 explore=selection,

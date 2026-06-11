@@ -167,6 +167,11 @@ class EventListResponse(BaseModel):
     events: list[LlmExecutionEvent]
 
 
+class IncrementalEventListResponse(BaseModel):
+    events: list[LlmExecutionEvent]
+    last_sequence: int = 0
+
+
 class LlmUsageActivity(BaseModel):
     latest_usage_sequence: int | None = None
     latest_usage_at: str | None = None

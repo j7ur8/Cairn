@@ -8,6 +8,7 @@ import yaml
 from sqlalchemy import create_engine, text
 
 from cairn.server import runtime_config
+from cairn.shared.protocol_models import TaskTimeouts
 
 
 _TEST_DISPATCH_PATH = Path(__file__).resolve().parents[2] / "dispatch.test.yaml"
@@ -47,6 +48,23 @@ def minimal_system_config(root: Path | None = None) -> dict[str, Any]:
             "retention_interval_seconds": 21600,
         },
     }
+
+
+def test_task_timeouts(
+    *,
+    bootstrap_timeout: int = 5,
+    bootstrap_conclude_timeout: int = 5,
+    explore_timeout: int = 5,
+    explore_conclude_timeout: int = 5,
+    reason_timeout: int = 5,
+) -> TaskTimeouts:
+    return TaskTimeouts.model_validate(
+        {
+            "bootstrap": {"timeout": bootstrap_timeout, "conclude_timeout": bootstrap_conclude_timeout},
+            "explore": {"timeout": explore_timeout, "conclude_timeout": explore_conclude_timeout},
+            "reason": {"timeout": reason_timeout},
+        }
+    )
 
 
 def reset_postgres_db():
@@ -96,6 +114,7 @@ class TempYamlConfig:
                 "explore": {"timeout": 5, "conclude_timeout": 5},
                 "reason": {"timeout": 5, "max_intents": 2},
             },
+            "server_settings": {"intent_timeout": 5, "reason_timeout": 5},
             "container": {
                 "image": "cairn/test:latest",
                 "network_mode": "cairn",

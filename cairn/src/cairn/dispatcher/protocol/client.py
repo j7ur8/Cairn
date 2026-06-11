@@ -43,9 +43,11 @@ class CairnClient:
         timeout: float = 10.0,
         *,
         api_token: str | None = None,
+        observability_timeout: float = 2.0,
     ):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._observability_timeout = observability_timeout
         self._api_token = api_token or ""
         self._summary_adapter = TypeAdapter(list[ProjectSummary])
         self._local = threading.local()
@@ -264,7 +266,7 @@ class CairnClient:
         task_type: str,
         worker: str,
     ) -> ApiResult:
-        return self._request_json(
+        return self._request_observability_json(
             "POST",
             f"/projects/{project_id}/llm-executions",
             json={"id": execution_id, "intent_id": intent_id, "task_type": task_type, "worker": worker},
@@ -280,7 +282,7 @@ class CairnClient:
         stream: str,
         content: str,
     ) -> ApiResult:
-        return self._request_json(
+        return self._request_observability_json(
             "POST",
             f"/projects/{project_id}/llm-executions/{execution_id}/events",
             json={"phase": phase, "event_kind": event_kind, "stream": stream, "content": content},
@@ -292,7 +294,7 @@ class CairnClient:
         execution_id: str,
         events: list[dict[str, str]],
     ) -> ApiResult:
-        return self._request_json(
+        return self._request_observability_json(
             "POST",
             f"/projects/{project_id}/llm-executions/{execution_id}/events/batch",
             json={"events": events},
@@ -318,7 +320,7 @@ class CairnClient:
             "produced_fact_id": produced_fact_id,
             "created_intent_ids": created_intent_ids,
         }
-        return self._request_json(
+        return self._request_observability_json(
             "POST",
             f"/projects/{project_id}/llm-executions/{execution_id}/finish",
             json=body,
@@ -342,6 +344,19 @@ class CairnClient:
             )
         except requests.RequestException as exc:
             LOG.warning("request failed method=%s path=%s error=%s", method, path, exc)
+            return ApiResult(status_code=0, text=str(exc))
+        return self._api_result_from_response(response)
+
+    def _request_observability_json(self, method: str, path: str, json: dict[str, Any]) -> ApiResult:
+        try:
+            response = self._session().request(
+                method,
+                self._url(path),
+                json=json,
+                timeout=self._observability_timeout,
+            )
+        except requests.RequestException as exc:
+            LOG.debug("observability request failed method=%s path=%s error=%s", method, path, exc)
             return ApiResult(status_code=0, text=str(exc))
         return self._api_result_from_response(response)
 

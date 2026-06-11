@@ -16,6 +16,34 @@ class Settings(BaseModel):
     reason_timeout: int = Field(ge=5)
 
 
+class BootstrapTaskTimeouts(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    timeout: int = Field(gt=0)
+    conclude_timeout: int = Field(gt=0)
+
+
+class ExploreTaskTimeouts(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    timeout: int = Field(gt=0)
+    conclude_timeout: int = Field(gt=0)
+
+
+class ReasonTaskTimeouts(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    timeout: int = Field(gt=0)
+
+
+class TaskTimeouts(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bootstrap: BootstrapTaskTimeouts
+    explore: ExploreTaskTimeouts
+    reason: ReasonTaskTimeouts
+
+
 class ProxySummary(BaseModel):
     id: str
     name: str

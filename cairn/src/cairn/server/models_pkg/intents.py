@@ -22,6 +22,7 @@ from cairn.server.models_pkg.projects import (
     normalize_llm_event_kinds,
 )
 from cairn.shared.protocol_models import ReasonState
+from cairn.shared.protocol_models import TaskTimeouts
 
 class CreateProjectRequest(BaseModel):
     model_config = {"extra": "forbid"}
@@ -34,6 +35,7 @@ class CreateProjectRequest(BaseModel):
     role_id: str | None = None
     proxy_id: str | None = None
     ai_profiles: TaskAiProfileSelections | None = None
+    task_timeouts: TaskTimeouts
     llm_visible_event_kinds: list[str] | None = None
 
     @model_validator(mode="after")
@@ -270,6 +272,7 @@ class ReplayRunCreateRequest(BaseModel):
     capabilities: TaskCapabilitySelectionMap | None = None
     role_id: str | None = None
     ai_profiles: TaskAiProfileSelections | None = None
+    task_timeouts: TaskTimeouts
     llm_visible_event_kinds: list[str] | None = None
 
     @field_validator("llm_visible_event_kinds")

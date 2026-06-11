@@ -34,6 +34,7 @@ from cairn.dispatcher.tasks.runner import (
     project_capability_data,
     project_execution_config,
     project_role_data,
+    project_task_timeout,
 )
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.shared.protocol_models import Intent, ProjectDetail
@@ -131,6 +132,11 @@ def run_bootstrap_task(
             return outcome
 
         execution_config = project_execution_config(client, project.project.id, "bootstrap", reporter, "bootstrap_start")
+        task_timeout = project_task_timeout(execution_config, "bootstrap_start", reporter)
+        if task_timeout is None:
+            best_effort_release(client, project.project.id, intent.id, worker.name)
+            outcome = "failed"
+            return outcome
         capability_data = project_capability_data(execution_config)
         reporter.emit_capability_manifest(
             "bootstrap_start",
@@ -182,7 +188,7 @@ def run_bootstrap_task(
             worker,
             execute.argv,
             phase="bootstrap",
-            timeout_seconds=config.tasks.bootstrap.timeout,
+            timeout_seconds=int(task_timeout["timeout"]),
             tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
@@ -249,6 +255,7 @@ def run_bootstrap_task(
                     lease,
                     cancellation,
                     reporter,
+                    int(task_timeout["conclude_timeout"]),
                     capabilities.context,
                 )
                 return outcome
@@ -305,6 +312,7 @@ def run_bootstrap_task(
                 lease,
                 cancellation,
                 reporter,
+                int(task_timeout["conclude_timeout"]),
                 capabilities.context,
             )
             return outcome
@@ -347,6 +355,7 @@ def _try_conclude_fallback(
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
     reporter: ExecutionReporter,
+    conclude_timeout: int,
     capability_context=None,
 ) -> str:
     if not driver.supports_conclude() or not session:
@@ -408,7 +417,7 @@ def _try_conclude_fallback(
         worker,
         conclude_argv,
         phase="bootstrap_conclude",
-        timeout_seconds=config.tasks.bootstrap.conclude_timeout,
+        timeout_seconds=conclude_timeout,
         tty=driver.requires_tty(),
         lease=lease,
         cancellation=cancellation,

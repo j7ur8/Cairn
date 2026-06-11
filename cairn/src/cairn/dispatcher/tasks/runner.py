@@ -55,3 +55,14 @@ def project_role_data(execution_config: dict | None) -> dict | None:
             "created_at": "",
         }
     }
+
+
+def project_task_timeout(execution_config: dict | None, phase: str, reporter: ExecutionReporter) -> dict | None:
+    if not execution_config:
+        reporter.emit_error(phase, "error", "execution config missing task_timeout")
+        return None
+    task_timeout = execution_config.get("task_timeout")
+    if not isinstance(task_timeout, dict):
+        reporter.emit_error(phase, "error", "execution config missing task_timeout")
+        return None
+    return task_timeout

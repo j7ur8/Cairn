@@ -99,6 +99,7 @@ def create_replay_run(project_id: str, body: ReplayRunCreateRequest):
                 hints=rewritten_hints,
                 capabilities=replay_capabilities,
                 ai_profiles=body.ai_profiles,
+                task_timeouts=body.task_timeouts,
                 role_id=body.role_id,
                 llm_hidden_event_kinds=llm_hidden_event_kinds,
                 status="stopped",

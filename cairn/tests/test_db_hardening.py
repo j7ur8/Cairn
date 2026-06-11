@@ -14,7 +14,7 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
 
-from helpers import TempYamlConfig, reset_postgres_db
+from helpers import TempYamlConfig, reset_postgres_db, test_task_timeouts
 
 
 class DbHardeningTests(unittest.TestCase):
@@ -133,6 +133,7 @@ class DbHardeningTests(unittest.TestCase):
                 title="p",
                 origin="o",
                 goal="g",
+                task_timeouts=test_task_timeouts(),
                 ai_profiles=self._project_ai_profiles(),
             )
         )
@@ -189,6 +190,7 @@ class DbHardeningTests(unittest.TestCase):
                 title="p",
                 origin="o",
                 goal="g",
+                task_timeouts=test_task_timeouts(),
                 ai_profiles=self._project_ai_profiles(),
             )
         )

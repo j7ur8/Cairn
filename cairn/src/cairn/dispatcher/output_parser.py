@@ -9,8 +9,16 @@ FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.IGNORECASE | re.D
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
+    objects = extract_json_objects(text)
+    if objects:
+        return objects[0]
+    raise ValueError("no JSON object found in output")
+
+
+def extract_json_objects(text: str) -> list[dict[str, Any]]:
     decoder = json.JSONDecoder()
     seen: set[str] = set()
+    objects: list[dict[str, Any]] = []
 
     for candidate in _candidate_segments(text):
         segment = candidate.strip()
@@ -24,7 +32,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
             pass
         else:
             if isinstance(parsed, dict):
-                return parsed
+                objects.append(parsed)
 
         for start in _object_start_positions(segment):
             try:
@@ -32,9 +40,9 @@ def extract_json_object(text: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict):
-                return parsed
+                objects.append(parsed)
 
-    raise ValueError("no JSON object found in output")
+    return objects
 
 
 def _candidate_segments(text: str) -> list[str]:

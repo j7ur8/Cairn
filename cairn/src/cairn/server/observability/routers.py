@@ -16,6 +16,7 @@ from cairn.server.observability.models import (
     EventViewResponse,
     ExecutionListResponse,
     FinishExecutionRequest,
+    IncrementalEventListResponse,
     ObservabilitySettings,
 )
 from cairn.server.observability.repository import (
@@ -26,6 +27,7 @@ from cairn.server.observability.repository import (
     list_event_view,
     list_execution_events,
     list_executions,
+    list_incremental_events,
     list_project_events,
 )
 from cairn.server.models_pkg.projects import parse_llm_hidden_event_kinds
@@ -57,6 +59,24 @@ def get_project_llm_events(
 ):
     with db.session_scope() as conn:
         return EventListResponse(events=list_project_events(conn, project_id, after, _limit(limit), tail=tail))
+
+
+@router.get("/llm-events/incremental", response_model=IncrementalEventListResponse)
+def get_project_llm_events_incremental(
+    project_id: str,
+    execution_id: str | None = Query(default=None),
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1),
+):
+    with db.session_scope() as conn:
+        events, last_sequence = list_incremental_events(
+            conn,
+            project_id,
+            execution_id=execution_id,
+            after=after,
+            limit=_limit(limit),
+        )
+        return IncrementalEventListResponse(events=events, last_sequence=last_sequence)
 
 
 @router.get("/llm-events/view", response_model=EventViewResponse)

@@ -30,6 +30,7 @@ from cairn.dispatcher.tasks.common import (
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.tasks.runner import project_capability_data, project_execution_config, project_role_data
+from cairn.dispatcher.tasks.runner import project_task_timeout
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.shared.protocol_models import ProjectDetail
 
@@ -126,6 +127,12 @@ def run_reason_task(
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
         execution_config = project_execution_config(client, project.project.id, "reason", reporter, "reason_execute")
+        task_timeout = project_task_timeout(execution_config, "reason_execute", reporter)
+        if task_timeout is None:
+            outcome = "failed"
+            reason_finish_outcome = "failed"
+            reason_finish_error = "execution config missing task_timeout"
+            return outcome
         capabilities = inject_project_capabilities(
             config,
             container_manager,
@@ -195,7 +202,7 @@ def run_reason_task(
             worker,
             command.argv,
             phase="reason_execute",
-            timeout_seconds=config.tasks.reason.timeout,
+            timeout_seconds=int(task_timeout["timeout"]),
             tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,

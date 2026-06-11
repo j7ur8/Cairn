@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 import json
+import queue
+import threading
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from cairn.shared.dispatch_config import ObservabilityConfig
@@ -13,6 +16,137 @@ from cairn.dispatcher.observability.trace import TraceEvent
 from cairn.dispatcher.protocol.client import CairnClient
 
 LOG = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _EventBatch:
+    events: list[dict[str, str]]
+
+
+@dataclass(slots=True)
+class _FinishRequest:
+    process_state: str
+    returncode: int | None
+    timed_out: bool
+    error_kind: str | None
+    produced_fact_id: str | None
+    created_intent_ids: list[str] | None
+
+
+class _ObservabilitySink:
+    def __init__(
+        self,
+        client: CairnClient,
+        *,
+        project_id: str,
+        execution_id: str,
+        max_queue_items: int = 128,
+    ):
+        self.client = client
+        self.project_id = project_id
+        self.execution_id = execution_id
+        self._queue: queue.Queue[_EventBatch | _FinishRequest | None] = queue.Queue(maxsize=max_queue_items)
+        self._closed = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"cairn-observability-{execution_id[:8]}",
+            daemon=True,
+        )
+        self.dropped_events = 0
+        self._thread.start()
+
+    def enqueue_events(self, events: list[dict[str, str]]) -> None:
+        if not events or self._closed.is_set():
+            return
+        try:
+            self._queue.put_nowait(_EventBatch(events))
+        except queue.Full:
+            self.dropped_events += len(events)
+            LOG.debug(
+                "observability queue full project=%s execution=%s dropped=%s",
+                self.project_id,
+                self.execution_id,
+                len(events),
+            )
+
+    def enqueue_finish(self, finish: _FinishRequest) -> None:
+        if self._closed.is_set():
+            return
+        try:
+            self._queue.put_nowait(finish)
+        except queue.Full:
+            LOG.debug(
+                "observability queue full dropping finish project=%s execution=%s",
+                self.project_id,
+                self.execution_id,
+            )
+
+    def close(self, *, drain_timeout: float = 2.0) -> None:
+        if self._closed.is_set():
+            return
+        deadline = time.monotonic() + drain_timeout
+        while time.monotonic() < deadline and not self._queue.empty():
+            time.sleep(0.01)
+        self._closed.set()
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        remaining = max(0.0, deadline - time.monotonic())
+        self._thread.join(timeout=remaining)
+
+    def _run(self) -> None:
+        while True:
+            try:
+                item = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                if self._closed.is_set():
+                    return
+                continue
+            try:
+                if item is None:
+                    return
+                if isinstance(item, _EventBatch):
+                    self._write_events(item.events)
+                else:
+                    self._finish(item)
+            finally:
+                self._queue.task_done()
+
+    def _write_events(self, events: list[dict[str, str]]) -> None:
+        response = self.client.create_llm_events(
+            self.project_id,
+            self.execution_id,
+            events,
+        )
+        if not response.ok:
+            self.dropped_events += len(events)
+            LOG.debug(
+                "observability event batch write failed project=%s execution=%s count=%s status=%s",
+                self.project_id,
+                self.execution_id,
+                len(events),
+                response.status_code,
+            )
+
+    def _finish(self, finish: _FinishRequest) -> None:
+        response = self.client.finish_llm_execution(
+            self.project_id,
+            self.execution_id,
+            process_state=finish.process_state,
+            returncode=finish.returncode,
+            timed_out=finish.timed_out,
+            error_kind=finish.error_kind,
+            produced_fact_id=finish.produced_fact_id,
+            created_intent_ids=finish.created_intent_ids,
+        )
+        if not response.ok:
+            LOG.debug(
+                "observability execution finish failed project=%s execution=%s status=%s",
+                self.project_id,
+                self.execution_id,
+                response.status_code,
+            )
 
 
 class ExecutionReporter:
@@ -41,6 +175,7 @@ class ExecutionReporter:
         self._buffer = OutputBuffer(settings.flush_interval_ms, settings.flush_max_bytes)
         self._pending_events: list[dict[str, str]] = []
         self._last_event_flush_at = time.monotonic()
+        self._sink: _ObservabilitySink | None = None
 
     @classmethod
     def disabled(cls) -> "DisabledExecutionReporter":
@@ -57,6 +192,12 @@ class ExecutionReporter:
             worker=self.worker,
         )
         self.started = response.ok
+        if self.started:
+            self._sink = _ObservabilitySink(
+                self.client,
+                project_id=self.project_id,
+                execution_id=self.execution_id,
+            )
         if not response.ok:
             LOG.debug(
                 "observability execution start failed project=%s execution=%s status=%s",
@@ -138,23 +279,18 @@ class ExecutionReporter:
             "system",
             f"process_state={process_state} returncode={returncode} timed_out={timed_out} error_kind={error_kind or ''}",
         )
-        response = self.client.finish_llm_execution(
-            self.project_id,
-            self.execution_id,
-            process_state=process_state,
-            returncode=returncode,
-            timed_out=timed_out,
-            error_kind=error_kind,
-            produced_fact_id=produced_fact_id or self.produced_fact_id,
-            created_intent_ids=created_intent_ids or self.created_intent_ids,
-        )
-        if not response.ok:
-            LOG.debug(
-                "observability execution finish failed project=%s execution=%s status=%s",
-                self.project_id,
-                self.execution_id,
-                response.status_code,
+        if self._sink is not None:
+            self._sink.enqueue_finish(
+                _FinishRequest(
+                    process_state=process_state,
+                    returncode=returncode,
+                    timed_out=timed_out,
+                    error_kind=error_kind,
+                    produced_fact_id=produced_fact_id or self.produced_fact_id,
+                    created_intent_ids=created_intent_ids or self.created_intent_ids,
+                )
             )
+            self._sink.close(drain_timeout=2.0)
 
     def _emit(self, phase: str, event_kind: str, stream: str, content: str, *, regular_output: bool = False) -> None:
         if not self.settings.enabled or not self.started:
@@ -194,19 +330,9 @@ class ExecutionReporter:
         events = self._pending_events
         self._pending_events = []
         self._last_event_flush_at = time.monotonic()
-        response = self.client.create_llm_events(
-            self.project_id,
-            self.execution_id,
-            events,
-        )
-        if not response.ok:
-            LOG.debug(
-                "observability event batch write failed project=%s execution=%s count=%s status=%s",
-                self.project_id,
-                self.execution_id,
-                len(events),
-                response.status_code,
-            )
+        if self._sink is None:
+            return
+        self._sink.enqueue_events(events)
 
 
 class DisabledExecutionReporter:

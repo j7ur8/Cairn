@@ -145,6 +145,93 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event.event_kind, "capability_manifest")
 
+    def test_batch_append_updates_execution_stats_once(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_events, create_execution, list_executions
+        from cairn.server.repositories import sql
+
+        project_id = "proj_batch"
+        execution_id = "exec_batch"
+        create_execution(
+            self.conn,
+            project_id,
+            CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+        )
+
+        events, dropped = append_events(
+            self.conn,
+            project_id,
+            execution_id,
+            [
+                CreateEventRequest(phase="bootstrap", event_kind="stdout", stream="stdout", content="one"),
+                CreateEventRequest(phase="bootstrap", event_kind="stderr", stream="stderr", content="two"),
+                CreateEventRequest(phase="bootstrap", event_kind="agent_message", stream="result", content="three"),
+            ],
+            ObservabilitySettings(),
+        )
+
+        self.assertEqual(dropped, 0)
+        self.assertEqual([event.content for event in events if event is not None], ["one", "two", "three"])
+        row = sql.fetchone(self.conn, "SELECT COUNT(*) AS count FROM llm_execution_events WHERE execution_id = :id", {"id": execution_id})
+        self.assertEqual(row["count"], 3)
+        execution = list_executions(self.conn, project_id, 10)[0]
+        self.assertEqual(execution.event_count, 3)
+        self.assertEqual(execution.bytes_written, len("onetwothree".encode("utf-8")))
+        self.assertIsNotNone(execution.last_event_at)
+
+    def test_incremental_events_are_filtered_by_execution_and_after(self) -> None:
+        from cairn.server.observability.models import (
+            CreateEventRequest,
+            CreateExecutionRequest,
+            ObservabilitySettings,
+        )
+        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
+
+        project_id = "proj_incremental"
+        for execution_id in ("exec_a", "exec_b"):
+            create_execution(
+                self.conn,
+                project_id,
+                CreateExecutionRequest(id=execution_id, intent_id="i001", task_type="bootstrap", worker="worker-a"),
+            )
+        event_a1, _ = append_event(
+            self.conn,
+            project_id,
+            "exec_a",
+            CreateEventRequest(phase="bootstrap", event_kind="stdout", stream="stdout", content="a1"),
+            ObservabilitySettings(),
+        )
+        append_event(
+            self.conn,
+            project_id,
+            "exec_b",
+            CreateEventRequest(phase="bootstrap", event_kind="stdout", stream="stdout", content="b1"),
+            ObservabilitySettings(),
+        )
+        append_event(
+            self.conn,
+            project_id,
+            "exec_a",
+            CreateEventRequest(phase="bootstrap", event_kind="stdout", stream="stdout", content="a2"),
+            ObservabilitySettings(),
+        )
+        self.assertIsNotNone(event_a1)
+
+        events, last_sequence = list_incremental_events(
+            self.conn,
+            project_id,
+            execution_id="exec_a",
+            after=event_a1.sequence,
+            limit=10,
+        )
+
+        self.assertEqual([event.content for event in events], ["a2"])
+        self.assertEqual(last_sequence, events[-1].sequence)
+
     def test_tail_project_events_returns_latest_events_in_ascending_order(self) -> None:
         from cairn.server.observability.models import (
             CreateEventRequest,

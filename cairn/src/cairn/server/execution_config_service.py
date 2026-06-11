@@ -25,6 +25,7 @@ from cairn.server.config.files import config_revision
 from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.config.roles import get_yaml_role_snapshot
 from cairn.server.config.settings import get_yaml_settings
+from cairn.shared.protocol_models import TaskTimeouts
 from cairn.shared.task_types import builtin_task_type_names
 
 
@@ -37,6 +38,7 @@ def build_worker_execution_payloads(
     ai_profiles: TaskAiProfileSelections,
     role_id: str | None,
     proxy_id: str | None,
+    task_timeouts: TaskTimeouts,
 ) -> dict[str, dict[str, Any]]:
     rev = config_revision()
     settings = get_yaml_settings()
@@ -65,6 +67,7 @@ def build_worker_execution_payloads(
             item["sk"] = yaml_ai_profile_secret(snap.profile_id)
             ai_chain.append(item)
         task_caps = expanded_per_task.get(task) or TaskCapabilities()
+        task_timeout = getattr(task_timeouts, task).model_dump()
         payloads[task] = {
             "task_type": task,
             "ai_profiles": ai_chain,
@@ -72,6 +75,8 @@ def build_worker_execution_payloads(
             "role": role,
             "proxy": proxy,
             "settings": settings.model_dump(),
+            "task_timeouts": task_timeouts.model_dump(),
+            "task_timeout": task_timeout,
             "catalog": [item.model_dump() for item in catalog],
             "health": {key: [entry.model_dump() for entry in entries] for key, entries in health.items()},
             "config_revision": rev,
@@ -87,6 +92,7 @@ def persist_worker_execution_configs(
     capabilities: TaskCapabilitySelectionMap | None,
     ai_profiles: TaskAiProfileSelections,
     role_id: str | None,
+    task_timeouts: TaskTimeouts,
     now: str,
 ) -> None:
     """Persist the complete project-time worker execution snapshot."""
@@ -95,6 +101,7 @@ def persist_worker_execution_configs(
         ai_profiles=ai_profiles,
         role_id=role_id,
         proxy_id=proxy_id,
+        task_timeouts=task_timeouts,
     )
     sql.execute(
         conn,
@@ -178,3 +185,11 @@ def execution_capabilities(configs: dict[str, dict[str, Any]]) -> TaskCapabiliti
         raw = config.get("capabilities") or {}
         out[task_type] = TaskCapabilities.model_validate(raw)
     return out
+
+
+def execution_task_timeouts(configs: dict[str, dict[str, Any]]) -> TaskTimeouts:
+    for task_type in TASK_TYPES:
+        raw = (configs.get(task_type) or {}).get("task_timeouts")
+        if isinstance(raw, dict):
+            return TaskTimeouts.model_validate(raw)
+    raise HTTPException(500, "project execution config missing task_timeouts")

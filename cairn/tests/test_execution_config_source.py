@@ -12,7 +12,7 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
 
-from helpers import TempYamlConfig
+from helpers import TempYamlConfig, test_task_timeouts
 
 
 class ExecutionConfigSourceTests(unittest.TestCase):
@@ -60,6 +60,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             title="execution source",
             origin="origin",
             goal="goal",
+            task_timeouts=test_task_timeouts(explore_timeout=11, explore_conclude_timeout=12),
             capabilities={
                 "bootstrap": CapabilitySelection(),
                 "explore": CapabilitySelection(),
@@ -108,6 +109,31 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual(removed_tables, [])
         self.assertIn('"ai_profiles"', rows[0]["config_json"])
         self.assertIn('"config_revision"', rows[0]["config_json"])
+        self.assertIn('"task_timeouts"', rows[0]["config_json"])
+        self.assertIn('"timeout": 11', next(row for row in rows if row["task_type"] == "explore")["config_json"])
+        self.assertIn('"conclude_timeout": 12', next(row for row in rows if row["task_type"] == "explore")["config_json"])
+
+    def test_create_project_request_requires_task_timeouts(self) -> None:
+        from pydantic import ValidationError
+        from cairn.server.models_pkg.ai_profiles import AiProfileSelection, TaskAiProfileSelections
+        from cairn.server.models_pkg.intents import CreateProjectRequest
+
+        selection = AiProfileSelection(
+            primary_profile_id="ai_test",
+            primary_model="m",
+            primary_reasoning_type="medium",
+        )
+        with self.assertRaises(ValidationError):
+            CreateProjectRequest(
+                title="missing timeouts",
+                origin="origin",
+                goal="goal",
+                ai_profiles=TaskAiProfileSelections(
+                    bootstrap=selection,
+                    explore=selection,
+                    reason=selection,
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -280,6 +280,22 @@ class CodexTraceParserTests(unittest.TestCase):
         )
         self.assertEqual(driver.extract_response_text(stdout, ""), '{"accepted":true}')
 
+    def test_current_codex_jsonl_extracts_last_agent_message_not_event_wrapper(self) -> None:
+        from cairn.dispatcher.workers.adapters.codex import CodexDriver
+
+        stdout = (
+            '{"type":"thread.started","thread_id":"019e9289-9f78-7b12-a33f-89252dcd62ac"}\n'
+            '{"type":"turn.started"}\n'
+            '{"type":"item.completed","item":{"id":"item_0","type":"agent_message",'
+            '"text":"{\\"accepted\\":true,\\"data\\":{\\"fact\\":{\\"description\\":\\"ok\\"}}}"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        )
+
+        self.assertEqual(
+            CodexDriver().extract_response_text(stdout, ""),
+            '{"accepted":true,"data":{"fact":{"description":"ok"}}}',
+        )
+
 
 class ClaudeTraceParserTests(unittest.TestCase):
     def test_thinking_tokens_system_event_is_usage(self) -> None:

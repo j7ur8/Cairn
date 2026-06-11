@@ -71,6 +71,19 @@ class CairnClientRetryTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
         self.assertEqual(session.return_value.request.call_count, 1)
 
+    def test_observability_requests_use_short_timeout(self) -> None:
+        client = self._make_client()
+        success = MagicMock(status_code=201)
+        success.headers = {"content-type": "application/json"}
+        success.content = b'{"events":[],"dropped":0}'
+        success.text = '{"events":[],"dropped":0}'
+        success.json.return_value = {"events": [], "dropped": 0}
+        with patch.object(client, "_session") as session:
+            session.return_value.request.return_value = success
+            result = client.create_llm_events("proj_001", "exec_1", [])
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(session.return_value.request.call_args.kwargs["timeout"], 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

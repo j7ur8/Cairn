@@ -14,7 +14,7 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 os.environ.setdefault("CAIRN_DISABLE_DISPATCHER_RELOAD", "1")
 
-from helpers import TempYamlConfig, reset_postgres_db
+from helpers import TempYamlConfig, reset_postgres_db, test_task_timeouts
 
 
 class CapabilityAdminTests(unittest.TestCase):
@@ -149,6 +149,7 @@ class CapabilityAdminTests(unittest.TestCase):
             origin="o",
             goal="g",
             role_id="role1",
+            task_timeouts=test_task_timeouts(),
             ai_profiles=self._create_profile_selection(),
         ))
 

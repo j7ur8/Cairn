@@ -26,6 +26,7 @@ from cairn.dispatcher.tasks.common import (
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.tasks.runner import project_capability_data, project_execution_config, project_role_data
+from cairn.dispatcher.tasks.runner import project_task_timeout
 from cairn.dispatcher.workers.registry import get_driver
 from cairn.shared.protocol_models import Intent, ProjectDetail
 
@@ -117,6 +118,11 @@ def run_explore_task(
             return outcome
 
         execution_config = project_execution_config(client, project.project.id, "explore", reporter, "explore_execute")
+        task_timeout = project_task_timeout(execution_config, "explore_execute", reporter)
+        if task_timeout is None:
+            best_effort_release(client, project.project.id, intent.id, worker.name)
+            outcome = "failed"
+            return outcome
         capabilities = inject_project_capabilities(
             config,
             container_manager,
@@ -169,7 +175,7 @@ def run_explore_task(
             worker,
             execute.argv,
             phase="explore_execute",
-            timeout=config.tasks.explore.timeout,
+            timeout=int(task_timeout["timeout"]),
             lease=lease,
             cancellation=cancellation,
             reporter=reporter,
@@ -237,6 +243,7 @@ def run_explore_task(
                     lease,
                     cancellation,
                     reporter,
+                    int(task_timeout["conclude_timeout"]),
                     capabilities.context,
                 )
                 return outcome
@@ -293,6 +300,7 @@ def run_explore_task(
                 lease,
                 cancellation,
                 reporter,
+                int(task_timeout["conclude_timeout"]),
                 capabilities.context,
             )
             return outcome
@@ -336,6 +344,7 @@ def _try_conclude_fallback(
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
     reporter: ExecutionReporter,
+    conclude_timeout: int,
     capability_context=None,
 ) -> str:
     if not driver.supports_conclude() or not session:
@@ -398,7 +407,7 @@ def _try_conclude_fallback(
         worker,
         conclude_argv,
         phase="explore_conclude",
-        timeout=config.tasks.explore.conclude_timeout,
+        timeout=conclude_timeout,
         lease=lease,
         cancellation=cancellation,
         reporter=reporter,
