@@ -78,7 +78,6 @@ class CodexDriver(RegexSessionDriver):
             f'model_providers.cairn.base_url="{env["CODEX_BASE_URL"]}"',
             "-c",
             'model_providers.cairn.env_key="OPENAI_API_KEY"',
-            *self._resume_capability_args(context),
             "--",
             prompt,
         ]
@@ -127,10 +126,6 @@ class CodexDriver(RegexSessionDriver):
     def _reasoning_effort_config(env: dict[str, str]) -> str:
         effort = (env.get("CAIRN_MODEL_REASONING_EFFORT") or DEFAULT_CODEX_REASONING_EFFORT).strip()
         return f"model_reasoning_effort={json.dumps(effort)}"
-
-    @staticmethod
-    def _resume_capability_args(context: WorkerExecutionContext | None) -> list[str]:
-        return CodexDriver._capability_args_for(context, include_skill_root=False)
 
     @staticmethod
     def _capability_args_for(context: WorkerExecutionContext | None, *, include_skill_root: bool) -> list[str]:

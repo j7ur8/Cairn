@@ -408,7 +408,7 @@ def _try_conclude_fallback(
         _bootstrap_prompt_replacements(project),
     )
     reporter.emit_prompt("bootstrap_conclude", prompt)
-    conclude_argv = driver.build_conclude(worker, prompt, session, capability_context)
+    conclude_argv = driver.build_conclude(worker, prompt, session, None)
     LOG.info("starting bootstrap conclude fallback project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
     conclude_started = time.perf_counter()
     result = run_worker_process(

@@ -398,7 +398,7 @@ def _try_conclude_fallback(
         },
     )
     reporter.emit_prompt("explore_conclude", prompt)
-    conclude_argv = driver.build_conclude(worker, prompt, session, capability_context)
+    conclude_argv = driver.build_conclude(worker, prompt, session, None)
     LOG.info("starting conclude fallback project=%s intent=%s worker=%s", project_id, intent.id, worker.name)
     conclude_started = time.perf_counter()
     result = _run_process(

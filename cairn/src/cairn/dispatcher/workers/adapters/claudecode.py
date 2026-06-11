@@ -113,7 +113,6 @@ class ClaudeCodeDriver(SeedSessionDriver):
         session: str,
         context: WorkerExecutionContext | None = None,
     ) -> list[str]:
-        capability_args = self._capability_args(context)
         effort_args = self._effort_args(worker)
         return [
             "claude",
@@ -124,8 +123,9 @@ class ClaudeCodeDriver(SeedSessionDriver):
             "--output-format",
             "stream-json",
             "--verbose",
+            "--tools",
+            "",
             *effort_args,
-            *capability_args,
             "--",
             prompt,
         ]

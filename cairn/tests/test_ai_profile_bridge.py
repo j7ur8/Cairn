@@ -509,42 +509,20 @@ class SyncPayloadTests(unittest.TestCase):
                 env={"CODEX_MODEL": "gpt-default", "CODEX_BASE_URL": "u", "OPENAI_API_KEY": "k"},
             )
 
-    def test_supported_workers_only(self) -> None:
+    def test_unknown_worker_type_is_rejected(self) -> None:
+        from pydantic import ValidationError
         from cairn.shared.dispatch_config import WorkerConfig
-        pi = WorkerConfig(
-            name="pi_x", type="pi", task_types=["bootstrap"],
-            max_running=1, priority=0,
-            env={"PI_MODEL": "m", "PI_BASE_URL": "u", "PI_API_KEY": "k", "PI_PROVIDER_API": "openai-completions"},
-        )
-        # Instantiate a stub loop with the config so we can call its helper.
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
-        from cairn.shared.dispatch_config import (
-            RuntimeConfig, TasksConfig, ContainerConfig, DispatchConfig,
-            BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
-        )
-        runtime = RuntimeConfig(
-            interval=1, max_workers=1, max_project_workers=1,
-            max_running_projects=1, healthcheck_timeout=1, prompt_group="g",
-        )
-        tasks = TasksConfig(
-            bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),
-            reason=ReasonTaskConfig(timeout=5, max_intents=3),
-            explore=ExploreTaskConfig(timeout=5, conclude_timeout=5),
-        )
-        container = ContainerConfig(
-            image="cairn/test:latest", user=None, network_mode="cairn",
-            completed_action="stop",
-        )
-        cfg = DispatchConfig(
-            system=minimal_system_config(),
-            server="http://localhost", runtime=runtime, tasks=tasks,
-            container=container, workers=[pi],
-        )
-        # Bypass __init__ so we can test the helper without a real container manager.
-        loop = DispatcherLoop.__new__(DispatcherLoop)
-        loop.config = cfg
-        payload = loop._build_ai_sync_payload()
-        self.assertEqual(payload, [])
+
+        with self.assertRaises(ValidationError):
+            WorkerConfig(
+                name="legacy_x", type="legacy", task_types=["bootstrap"],
+                max_running=1, priority=0,
+                env={
+                    "LEGACY_MODEL": "m",
+                    "LEGACY_BASE_URL": "u",
+                    "LEGACY_API_KEY": "k",
+                },
+            )
 
     def test_supported_translation(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
@@ -880,9 +858,9 @@ class AiProfileDbBridgeTests(unittest.TestCase):
             AiProfileSyncWorker(name="claude_ds", worker_type="claudecode",
                                 model="ds-v4", base_url="",
                                 api_key_env="ANTHROPIC_AUTH_TOKEN"),
-            AiProfileSyncWorker(name="pi_x", worker_type="pi",
+            AiProfileSyncWorker(name="legacy_x", worker_type="legacy",
                                 model="m", base_url="",
-                                api_key_env="PI_API_KEY"),
+                                api_key_env="LEGACY_API_KEY"),
         ])
         result = sync_ai_profiles(body)
         self.assertEqual(len(result), 1)
@@ -1030,9 +1008,9 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         # Re-sync with only an unsupported worker. The supported workers are
         # no longer "active" so their seeded rows must be pruned.
         body2 = AiProfileSyncRequest(workers=[
-            AiProfileSyncWorker(name="pi_x", worker_type="pi",
+            AiProfileSyncWorker(name="legacy_x", worker_type="legacy",
                                 model="m", base_url="",
-                                api_key_env="PI_API_KEY"),
+                                api_key_env="LEGACY_API_KEY"),
         ])
         sync_ai_profiles(body2)
         self.assertEqual(len(list_ai_profiles()), 0)

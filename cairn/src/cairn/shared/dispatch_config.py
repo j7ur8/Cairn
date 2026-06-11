@@ -29,7 +29,7 @@ def _check_known_task_types(value: list[str]) -> list[str]:
 
 
 TaskType = str  # any name registered in TASK_TYPE_REGISTRY
-WorkerType = Literal["claudecode", "codex", "pi", "mock"]
+WorkerType = Literal["claudecode", "codex", "mock"]
 ContainerInactiveAction = Literal["remove", "stop"]
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
 
@@ -43,12 +43,6 @@ WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
         "CODEX_MODEL",
         "CODEX_BASE_URL",
         "OPENAI_API_KEY",
-    ),
-    "pi": (
-        "PI_MODEL",
-        "PI_BASE_URL",
-        "PI_API_KEY",
-        "PI_PROVIDER_API",
     ),
     "mock": (),
 }
@@ -841,8 +835,6 @@ class WorkerConfig(BaseModel):
         missing = [key for key in required if not self.env.get(key)]
         if missing:
             raise ValueError(f"worker {self.name} missing env keys: {', '.join(missing)}")
-        if self.type == "pi":
-            _validate_optional_positive_int_env(self.name, self.env, "PI_MODEL_CONTEXT_WINDOW")
         if self.type == "mock":
             resolve_mock_behavior(self.name, self.env)
         return self

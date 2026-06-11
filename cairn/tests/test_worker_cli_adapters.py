@@ -48,6 +48,8 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         )
         self.assertIn("--print", argv)
         self.assertNotIn("-p", argv)
+        self.assertIn("--tools", argv)
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
 
     def test_build_execute_includes_effort_when_configured(self) -> None:
         from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
@@ -82,17 +84,23 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
             result.argv[result.argv.index("--plugin-dir") + 1],
             "/tmp/cairn-capabilities/proj/task/claude-plugin",
         )
+        self.assertIn("--mcp-config", result.argv)
+        self.assertEqual(
+            result.argv[result.argv.index("--mcp-config") + 1],
+            "/tmp/cairn-capabilities/proj/task/mcp.json",
+        )
         self.assertIn("--add-dir", result.argv)
         self.assertEqual(
             result.argv[result.argv.index("--add-dir") + 1],
             "/tmp/cairn-capabilities/proj/task/skills",
         )
 
-    def test_build_conclude_includes_claude_session_plugin(self) -> None:
+    def test_build_conclude_omits_claude_capabilities(self) -> None:
         from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
         context = WorkerExecutionContext(
+            mcp_config_path="/tmp/cairn-capabilities/proj/task/mcp.json",
             skill_root="/tmp/cairn-capabilities/proj/task/skills",
             claude_plugin_dir="/tmp/cairn-capabilities/proj/task/claude-plugin",
         )
@@ -103,11 +111,14 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
             context,
         )
 
-        self.assertIn("--plugin-dir", argv)
-        self.assertEqual(
-            argv[argv.index("--plugin-dir") + 1],
-            "/tmp/cairn-capabilities/proj/task/claude-plugin",
-        )
+        self.assertNotIn("--mcp-config", argv)
+        self.assertNotIn("/tmp/cairn-capabilities/proj/task/mcp.json", argv)
+        self.assertNotIn("--plugin-dir", argv)
+        self.assertNotIn("/tmp/cairn-capabilities/proj/task/claude-plugin", argv)
+        self.assertNotIn("--add-dir", argv)
+        self.assertNotIn("/tmp/cairn-capabilities/proj/task/skills", argv)
+        self.assertIn("--tools", argv)
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
 
 
 class CodexDriverCommandTests(unittest.TestCase):
@@ -172,7 +183,7 @@ class CodexDriverCommandTests(unittest.TestCase):
         joined = " ".join(result.argv)
         self.assertIn('model_reasoning_effort="xhigh"', joined)
 
-    def test_build_conclude_omits_resume_unsupported_add_dir(self) -> None:
+    def test_build_conclude_omits_codex_capabilities(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
@@ -194,8 +205,8 @@ class CodexDriverCommandTests(unittest.TestCase):
         joined = " ".join(argv)
         self.assertNotIn("--add-dir", argv)
         self.assertNotIn("/tmp/cairn-capabilities/proj/skills", argv)
-        self.assertIn('mcp_servers.kali.url="https://example.test/mcp"', joined)
-        self.assertIn('mcp_servers.kali.headers.Authorization="Bearer tk-1"', joined)
+        self.assertNotIn('mcp_servers.kali.url="https://example.test/mcp"', joined)
+        self.assertNotIn('mcp_servers.kali.headers.Authorization="Bearer tk-1"', joined)
 
     def test_build_execute_keeps_add_dir_for_skill_access(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
