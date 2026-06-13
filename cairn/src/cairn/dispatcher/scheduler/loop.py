@@ -43,11 +43,24 @@ LOG = logging.getLogger(__name__)
 
 class DispatcherLoop:
     def __init__(self, config_path: Path):
+        # Assembly is split into ordered phase methods for readability and to
+        # make the wiring testable; the order is load-bearing (each phase
+        # depends on attributes set by earlier ones) and must be preserved.
+        self._init_core(config_path)
+        self._init_health_server()
+        self._init_runtime_state()
+        self._init_worker_selection()
+        self._init_containers()
+        self._init_scheduler()
+
+    def _init_core(self, config_path: Path) -> None:
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
         validate_prompt_resources(self.config.runtime.prompt_group)
         self.client = CairnClient(self.config.server_url, api_token=self.config.system.auth.dispatcher_api_token)
         self._last_tick_at: float | None = None
+
+    def _init_health_server(self) -> None:
         self.health_server = DispatcherHealthServer(
             *self._health_addr(),
             state=DispatcherHealthState(
@@ -56,6 +69,8 @@ class DispatcherLoop:
             reload_handler=self._reload_from_health_server,
         )
         self.health_server.start()
+
+    def _init_runtime_state(self) -> None:
         self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
         self.runtime = RuntimeTaskRegistry()
         self.log_state = LogState()
@@ -70,6 +85,8 @@ class DispatcherLoop:
         self._ai_overlay_cache = AIOverlayCache()
         self.execution_configs = ExecutionConfigResolver(self.client, self.log_state)
         self.replay = ReplayCoordinator(self.client, self.log_state)
+
+    def _init_worker_selection(self) -> None:
         self.ai_worker_selector = AiWorkerSelector(
             config=self.config,
             worker_counts=self._worker_counts,
@@ -86,6 +103,8 @@ class DispatcherLoop:
             ai_overlay_cache=self._ai_overlay_cache,
             ai_worker_selector=self.ai_worker_selector,
         )
+
+    def _init_containers(self) -> None:
         self.container_manager = ContainerManager(
             self.config.container,
             proxy_resolver=self.project_context.resolve_proxy_env,
@@ -99,6 +118,8 @@ class DispatcherLoop:
             self.container_manager,
             max_workers=self.config.runtime.max_workers,
         )
+
+    def _init_scheduler(self) -> None:
         self.submitter = TaskSubmitter(
             config=self.config,
             client=self.client,
