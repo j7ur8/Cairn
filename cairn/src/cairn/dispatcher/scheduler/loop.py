@@ -29,13 +29,13 @@ from cairn.dispatcher.scheduler.tick_coordinator import TickCoordinator
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
-from cairn.observability.metrics import (
-    DISPATCHER_INFLIGHT,
-    DISPATCHER_TICKS,
-)
 from cairn.shared.config import DispatchConfig
 from cairn.shared.contracts import (
     ProjectDetail,
+)
+from cairn.shared.observability.metrics import (
+    DISPATCHER_INFLIGHT,
+    DISPATCHER_TICKS,
 )
 
 LOG = logging.getLogger(__name__)

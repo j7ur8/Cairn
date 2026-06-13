@@ -46,7 +46,7 @@ class YamlConfigWriteTests(unittest.TestCase):
 class SettingsConfigTests(unittest.TestCase):
     def test_settings_do_not_fallback_to_or_write_tasks(self) -> None:
         from cairn.server.config.settings import get_yaml_settings, get_yaml_task_timeouts, update_yaml_settings
-        from cairn.server.models_pkg.common import Settings
+        from cairn.shared.contracts import Settings
 
         dispatch = TempYamlConfig().dispatch
         dispatch["server"]["settings"] = {"intent_timeout": 90, "reason_timeout": 300}

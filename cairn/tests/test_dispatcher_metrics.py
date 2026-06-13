@@ -14,7 +14,7 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 
 class DispatcherMetricTests(unittest.TestCase):
     def test_overflow_counter_renders(self) -> None:
-        from cairn.observability.metrics import (
+        from cairn.shared.observability.metrics import (
             DISPATCHER_OVERFLOW,
             render_metrics,
         )
@@ -30,7 +30,7 @@ class DispatcherMetricTests(unittest.TestCase):
         self.assertGreater(len(body), len(before))
 
     def test_worker_unhealthy_gauge_renders(self) -> None:
-        from cairn.observability.metrics import (
+        from cairn.shared.observability.metrics import (
             WORKER_UNHEALTHY_SINCE,
             render_metrics,
         )

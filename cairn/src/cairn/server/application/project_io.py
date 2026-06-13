@@ -15,7 +15,6 @@ from cairn.server.models_pkg import CreateHintRequest
 from cairn.server.models_pkg.projects import (
     AttachmentUpload,
     AttachmentUploadResponse,
-    Hint,
     ProjectFileItem,
     ProjectFilesResponse,
 )
@@ -28,6 +27,7 @@ from cairn.server.security.paths import (
     validate_project_id,
     validate_relative_path,
 )
+from cairn.shared.contracts import Hint
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]+")
 

@@ -7,17 +7,17 @@ from cairn.server.domain.errors import DomainError
 from cairn.server.domain.projects import require_project
 from cairn.server.mappers.intents import build_intents, intent_to_model
 from cairn.server.mappers.projects import project_meta_from_row, project_reason_from_row
-from cairn.server.models_pkg.projects import (
+from cairn.server.repositories.intents import IntentRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.shared.contracts import (
     Fact,
     Hint,
     ProjectDetail,
     ProjectSummary,
     ProjectWorkSummary,
+    ProxySummary,
     parse_llm_hidden_event_kinds,
 )
-from cairn.server.models_pkg.proxies import ProxySummary
-from cairn.server.repositories.intents import IntentRepository
-from cairn.server.repositories.projects import ProjectRepository
 
 
 def list_project_summaries(conn: Any) -> list[ProjectSummary]:

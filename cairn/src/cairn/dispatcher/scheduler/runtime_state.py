@@ -5,8 +5,8 @@ import time
 from concurrent.futures import Future
 
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
-from cairn.observability.metrics import WORKER_UNHEALTHY_SINCE
 from cairn.shared.contracts import ProjectSummary
+from cairn.shared.observability.metrics import WORKER_UNHEALTHY_SINCE
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5

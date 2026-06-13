@@ -4,10 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# Re-export shim: ReasonState lives in cairn.shared.contracts; package
-# __init__ and other modules import it from here. Unused locally by design.
-from cairn.shared.contracts import ReasonState  # noqa: F401
-
 
 class ReasonClaimRequest(BaseModel):
     worker: str

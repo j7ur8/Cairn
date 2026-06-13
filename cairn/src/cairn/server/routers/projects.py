@@ -47,7 +47,7 @@ from cairn.server.models_pkg import (
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )
-from cairn.server.models_pkg.projects import Intent, ProjectDetail, ProjectMeta, ProjectSummary, ProjectWorkSummary
+from cairn.shared.contracts import Intent, ProjectDetail, ProjectMeta, ProjectSummary, ProjectWorkSummary
 
 router = APIRouter(tags=["projects"])
 

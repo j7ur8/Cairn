@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from cairn.server.models_pkg.projects import normalize_llm_event_kinds
 from cairn.server.observability.models import LlmExecution, LlmExecutionEvent
+from cairn.shared.contracts import normalize_llm_event_kinds
 
 
 def normalize_event_kind_filter(

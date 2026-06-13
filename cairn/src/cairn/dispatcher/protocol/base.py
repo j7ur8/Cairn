@@ -131,7 +131,7 @@ class HttpClientBase:
         if self._api_token:
             session.headers["Authorization"] = f"Bearer {self._api_token}"
         try:
-            from cairn.observability.trace import get_trace_id
+            from cairn.shared.observability.trace import get_trace_id
 
             trace_id = get_trace_id()
             if trace_id:

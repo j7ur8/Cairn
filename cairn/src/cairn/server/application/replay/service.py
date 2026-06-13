@@ -22,10 +22,11 @@ from cairn.server.models_pkg import (
     ReplayRunAdvanceResponse,
     ReplayRunCreateRequest,
 )
-from cairn.server.models_pkg.projects import CreateHintInline, hidden_kinds_from_visible, parse_llm_hidden_event_kinds
+from cairn.server.models_pkg.projects import CreateHintInline
 from cairn.server.repositories.ids import IdRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.repositories.replay import ReplayRepository
+from cairn.shared.contracts import hidden_kinds_from_visible, parse_llm_hidden_event_kinds
 
 
 def create_replay_run_in_transaction(

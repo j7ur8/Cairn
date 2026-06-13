@@ -3,8 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from cairn.server.config.files import load_dispatch_data, save_dispatch_data
-from cairn.server.models_pkg.common import Settings
-from cairn.shared.contracts import TaskTimeouts
+from cairn.shared.contracts import Settings, TaskTimeouts
 
 
 def get_yaml_settings() -> Settings:

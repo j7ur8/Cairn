@@ -20,7 +20,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
-from cairn.observability.metrics import AUTH_LOGINS
 from cairn.server.security.deps import (
     current_active_superuser,
     current_user,
@@ -29,6 +28,7 @@ from cairn.server.security.deps import (
 from cairn.server.security.jwt import issue_token
 from cairn.server.security.passwords import hash_password, verify_password
 from cairn.server.security.users import UserRow, create, get_by_email
+from cairn.shared.observability.metrics import AUTH_LOGINS
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])

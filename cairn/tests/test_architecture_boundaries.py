@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "cairn"
 MIGRATIONS = ROOT / "migrations" / "versions"
+ARCHITECTURE_PATH = ROOT.parent / "AI" / "ARCHITECTURE.md"
 
 
 def _py_files(path: Path) -> list[Path]:
@@ -187,3 +188,40 @@ def test_alembic_revision_ids_fit_default_version_column() -> None:
                     if len(revision) > 32:
                         offenders.append(f"{path.name}:{name}={revision!r}")
     assert offenders == []
+
+
+def test_architecture_doc_reflects_alembic_head() -> None:
+    """The Alembic head cited in ARCHITECTURE.md must match the latest revision.
+
+    Documentation drift between the migration chain and the architecture doc
+    misleads every AI session that reads ARCHITECTURE.md as its primary context.
+    This test ensures the doc stays in sync with the actual schema on each
+    change to the migrations directory.
+    """
+    # Resolve the head revision by walking the linear down_revision chain.
+    revisions: dict[str, str | None] = {}
+    for path in sorted(MIGRATIONS.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
+                    value = ast.literal_eval(node.value)
+                    revisions.setdefault(
+                        path.name,
+                        {"revision": None, "down_revision": None},
+                    )[target.id] = value  # type: ignore[index]
+    # Linear chain: each revision (except the initial) has a down_revision;
+    # the head is the one that no other migration claims as its down_revision.
+    ids = {v["revision"] for v in revisions.values() if v["revision"] is not None}
+    down_refs = {v["down_revision"] for v in revisions.values() if v["down_revision"] is not None}
+    heads = ids - down_refs
+    assert len(heads) == 1, f"expected exactly one alembic head, got: {heads!r}"
+    head = heads.pop()
+
+    doc = ARCHITECTURE_PATH.read_text(encoding="utf-8")
+    assert head in doc, (
+        f"ARCHITECTURE.md must reference the current Alembic head {head!r}, "
+        f"but it does not. Update the doc."
+    )

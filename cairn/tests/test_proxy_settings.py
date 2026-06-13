@@ -35,7 +35,7 @@ def _ts() -> str:
 
 def _make_proxy(**overrides: Any):
     """Factory for a fully-populated :class:`ProxyConfig`."""
-    from cairn.server.models_pkg.proxies import ProxyConfig
+    from cairn.shared.contracts import ProxyConfig
 
     ts = _ts()
     base = {
@@ -78,7 +78,7 @@ class ProxyConfigSchemaTests(unittest.TestCase):
             ProxyCreate(name="x", type="ftp", host="h", port=21)
 
     def test_summary_strips_credentials(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxySummary
+        from cairn.shared.contracts import ProxySummary
 
         ts = _ts()
         s = ProxySummary(
@@ -160,7 +160,7 @@ class ResolverCacheTests(unittest.TestCase):
     """``ProjectContextResolver`` populates cache and tolerates proxy lookup errors."""
 
     def _make_project(self, project_id: str = "p1", proxy=None):
-        from cairn.server.models_pkg.projects import ProjectDetail, ProjectMeta
+        from cairn.shared.contracts import ProjectDetail, ProjectMeta
 
         project = ProjectMeta(
             id=project_id, title="t", origin="o", goal="g",
@@ -169,7 +169,7 @@ class ResolverCacheTests(unittest.TestCase):
         return ProjectDetail(project=project, facts=[], intents=[], hints=[], proxy=proxy)
 
     def _make_proxy_summary(self, proxy_id: str = "px1"):
-        from cairn.server.models_pkg.proxies import ProxySummary
+        from cairn.shared.contracts import ProxySummary
 
         ts = _ts()
         return ProxySummary(
@@ -371,7 +371,7 @@ class ProjectDetailProxySummaryTests(unittest.TestCase):
     """``ProjectDetail.proxy`` is ``ProxySummary | None`` (no creds leak)."""
 
     def test_proxy_field_default_none(self) -> None:
-        from cairn.server.models_pkg.projects import ProjectDetail, ProjectMeta
+        from cairn.shared.contracts import ProjectDetail, ProjectMeta
 
         project = ProjectMeta(
             id="p1", title="t", origin="o", goal="g", status="active",

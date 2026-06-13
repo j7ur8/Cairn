@@ -10,8 +10,8 @@ from cairn.server.models_pkg import (
     TaskCapabilitiesMap,
     TaskCapabilitySelectionMap,
 )
-from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot, TaskAiProfileSelections
-from cairn.shared.contracts import TaskTimeouts
+from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
+from cairn.shared.contracts import ProjectAiProfileSnapshot, TaskTimeouts
 
 
 def update_project_execution_config(

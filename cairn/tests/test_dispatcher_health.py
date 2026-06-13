@@ -8,7 +8,7 @@ import urllib.request
 class DispatcherHealthServerTests(unittest.TestCase):
     def test_healthz_and_metrics(self) -> None:
         from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
-        from cairn.observability.metrics import DISPATCHER_TICKS
+        from cairn.shared.observability.metrics import DISPATCHER_TICKS
 
         last_tick = 123.0
         state = DispatcherHealthState(

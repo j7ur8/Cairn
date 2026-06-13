@@ -23,10 +23,10 @@ from cairn.server.models_pkg import (
     ReasonFinishRequest,
     ReasonState,
 )
-from cairn.server.models_pkg.projects import ProjectMeta
 from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.repositories.reason import ReasonRepository
+from cairn.shared.contracts import ProjectMeta
 
 
 def claim_reason(conn: Any, project_id: str, body: ReasonClaimRequest) -> ProjectMeta:

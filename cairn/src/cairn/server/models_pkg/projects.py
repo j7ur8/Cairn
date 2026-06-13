@@ -4,28 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
-# Re-export shim: the graph models and LLM-event-kind helpers live in
-# cairn.shared.contracts. Many server modules (routers, mappers,
-# application, sibling model modules) import them from here, so these
-# names are intentionally surfaced (noqa: F401) even though this module
-# only defines the attachment/file/hint request models below.
-from cairn.shared.contracts import (  # noqa: F401
-    DEFAULT_LLM_HIDDEN_EVENT_KINDS,
-    LLM_EVENT_KIND_OPTIONS,
-    Fact,
-    Hint,
-    Intent,
-    ProjectDetail,
-    ProjectMeta,
-    ProjectReason,
-    ProjectSummary,
-    ProjectWorkSummary,
-    hidden_kinds_from_visible,
-    normalize_llm_event_kinds,
-    parse_llm_hidden_event_kinds,
-    visible_kinds_from_hidden,
-)
-
 
 class AttachmentUpload(BaseModel):
     original_filename: str

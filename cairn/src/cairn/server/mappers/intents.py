@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cairn.server.models_pkg.projects import Intent
+from cairn.shared.contracts import Intent
 
 
 def intent_to_model(row: Any) -> Intent:

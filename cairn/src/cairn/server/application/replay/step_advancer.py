@@ -7,11 +7,11 @@ from cairn.server.application.replay.route_extractor import intent_source_ids
 from cairn.server.domain.errors import ConflictError
 from cairn.server.domain.projects import completion_intent_or_409
 from cairn.server.domain.time import utcnow
-from cairn.server.models_pkg.projects import Intent
 from cairn.server.repositories.ids import IdRepository
 from cairn.server.repositories.intents import IntentRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.repositories.replay import ReplayRepository
+from cairn.shared.contracts import Intent
 
 
 def replay_steps(conn: Any, run_id: str) -> list[Any]:

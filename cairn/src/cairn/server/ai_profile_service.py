@@ -4,12 +4,14 @@ from fastapi import HTTPException
 
 from cairn.server.config.ai_profiles import list_yaml_ai_profiles
 from cairn.server.models_pkg.ai_profiles import (
-    AiProfile,
     AiProfileSelection,
-    ProjectAiProfileSnapshot,
-    ReasoningType,
     TaskAiProfileSelections,
     ai_selections_from_snapshots,
+)
+from cairn.shared.contracts import (
+    AiProfile,
+    ProjectAiProfileSnapshot,
+    ReasoningType,
     canonical_auth_env,
 )
 from cairn.shared.task_types import builtin_task_type_names

@@ -11,17 +11,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from cairn import __version__
-from cairn.observability.logging import configure_logging
-from cairn.observability.metrics import (
-    HTTP_LATENCY,
-    HTTP_REQUESTS,
-    render_metrics,
-)
-from cairn.observability.trace import (
-    get_trace_id,
-    new_trace_id,
-    set_trace_id,
-)
 from cairn.server import db
 from cairn.server.domain.errors import DomainError
 from cairn.server.observability import routers as observability_routers
@@ -46,6 +35,17 @@ from cairn.server.routers import (
 from cairn.server.runtime_config import system_config
 from cairn.server.security.deps import current_user_optional
 from cairn.server.security.users import bootstrap_superuser_if_configured
+from cairn.shared.observability.logging import configure_logging
+from cairn.shared.observability.metrics import (
+    HTTP_LATENCY,
+    HTTP_REQUESTS,
+    render_metrics,
+)
+from cairn.shared.observability.trace import (
+    get_trace_id,
+    new_trace_id,
+    set_trace_id,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -71,7 +71,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     Honors an inbound ``X-Request-Id`` if the upstream proxy / load
     balancer already minted one; otherwise a fresh id is generated.
     The trace id rides every log line and every outbound call via
-    :data:`cairn.observability.trace.trace_id_var`, so a single
+    :data:`cairn.shared.observability.trace.trace_id_var`, so a single
     request can be followed from the HTTP edge through the
     dispatcher loop without manual correlation.
     """
@@ -99,7 +99,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             )
             return response
         finally:
-            from cairn.observability.trace import reset_trace_id
+            from cairn.shared.observability.trace import reset_trace_id
             reset_trace_id(token)
 
 

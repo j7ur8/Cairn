@@ -4,7 +4,8 @@ from typing import Any
 
 from cairn.server.config.files import load_dispatch_data, save_dispatch_data, utcnow
 from cairn.server.domain.errors import DomainError, NotFoundError
-from cairn.server.models_pkg.proxies import ProxyConfig, ProxyCreate, ProxySummary, ProxyUpdate
+from cairn.server.models_pkg.proxies import ProxyCreate, ProxyUpdate
+from cairn.shared.contracts import ProxyConfig, ProxySummary
 
 
 def list_yaml_proxies() -> list[ProxySummary]:

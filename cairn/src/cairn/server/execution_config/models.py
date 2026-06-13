@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cairn.server.models_pkg import TaskCapabilities
-from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
-from cairn.shared.contracts import TaskTimeouts
+from cairn.shared.contracts import ProjectAiProfileSnapshot, TaskTimeouts
 from cairn.shared.task_types import builtin_task_type_names
 
 TASK_TYPES = builtin_task_type_names()

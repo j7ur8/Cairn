@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
 from cairn.server.models_pkg.capability_selection import TaskCapabilitySelectionMap, task_capability_selection_map
-from cairn.server.models_pkg.projects import LLM_EVENT_KIND_OPTIONS, CreateHintInline, normalize_llm_event_kinds
-from cairn.shared.contracts import TaskTimeouts
+from cairn.server.models_pkg.projects import CreateHintInline
+from cairn.shared.contracts import LLM_EVENT_KIND_OPTIONS, TaskTimeouts, normalize_llm_event_kinds
 
 
 class CreateProjectRequest(BaseModel):

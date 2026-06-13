@@ -27,11 +27,11 @@ from cairn.server.models_pkg import (
     CreateIntentRequest,
     HeartbeatRequest,
 )
-from cairn.server.models_pkg.projects import Fact, Intent
 from cairn.server.repositories.ids import IdRepository
 from cairn.server.repositories.intents import IntentRepository
 from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.repositories.projects import ProjectRepository
+from cairn.shared.contracts import Fact, Intent
 
 
 def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Intent:

@@ -16,18 +16,18 @@ from cairn.server.models_pkg import (
     TaskCapabilitySelectionMap,
 )
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
-from cairn.server.models_pkg.projects import (
-    CreateHintInline,
+from cairn.server.models_pkg.projects import CreateHintInline
+from cairn.server.repositories.ids import IdRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.shared.contracts import (
     Fact,
     Hint,
     ProjectDetail,
     ProjectMeta,
+    ProxySummary,
+    TaskTimeouts,
     hidden_kinds_from_visible,
 )
-from cairn.server.models_pkg.proxies import ProxySummary
-from cairn.server.repositories.ids import IdRepository
-from cairn.server.repositories.projects import ProjectRepository
-from cairn.shared.contracts import TaskTimeouts
 
 
 @dataclass(slots=True)

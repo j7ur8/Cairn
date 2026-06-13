@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from cairn.observability.metrics import render_metrics
+from cairn.shared.observability.metrics import render_metrics
 
 
 @dataclass(slots=True)

@@ -85,12 +85,12 @@ def _codex(name="x1", model="m", base_url="https://api.example/v1", api_key="K",
 
 class AuthEnvWarningTests(unittest.TestCase):
     def test_canonical_name_returns_none(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import auth_env_warning
+        from cairn.shared.contracts import auth_env_warning
         self.assertIsNone(auth_env_warning("codex", "OPENAI_API_KEY"))
         self.assertIsNone(auth_env_warning("claudecode", "ANTHROPIC_AUTH_TOKEN"))
 
     def test_mismatch_returns_text(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import auth_env_warning
+        from cairn.shared.contracts import auth_env_warning
         w = auth_env_warning("codex", "DEEPSEEK_KEY")
         self.assertIsNotNone(w)
         self.assertIn("OPENAI_API_KEY", w)
@@ -98,7 +98,7 @@ class AuthEnvWarningTests(unittest.TestCase):
 
 class HealthCheckSnapshotTests(unittest.TestCase):
     def _snap(self, **overrides):
-        from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
+        from cairn.shared.contracts import ProjectAiProfileSnapshot
         defaults = {
             "profile_id": "p1", "task_type": "bootstrap", "role": "primary", "position": 0,
             "snapshot_name": "n", "snapshot_worker_type": "codex",
@@ -211,7 +211,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
 
     def test_probe_profile_reuses_snapshot_health_logic(self) -> None:
         from cairn.dispatcher.ai_health import probe_profile
-        from cairn.server.models_pkg.ai_profiles import AiProfile
+        from cairn.shared.contracts import AiProfile
 
         cfg = _make_config(_codex())
         profile = AiProfile(
@@ -248,7 +248,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
         from cairn.dispatcher.tasks.task_process import HealthcheckRun
-        from cairn.server.models_pkg.ai_profiles import AiProfile
+        from cairn.shared.contracts import AiProfile
 
         class _H(BaseHTTPRequestHandler):
             def do_HEAD(self):  # noqa: N802
@@ -333,7 +333,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
         from cairn.dispatcher.tasks.task_process import HealthcheckRun
-        from cairn.server.models_pkg.ai_profiles import AiProfile
+        from cairn.shared.contracts import AiProfile
 
         cfg = _make_config(_codex())
         cfg.runtime.healthcheck_timeout = 7
@@ -387,7 +387,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
         from cairn.dispatcher.tasks.task_process import HealthcheckRun
-        from cairn.server.models_pkg.ai_profiles import AiProfile
+        from cairn.shared.contracts import AiProfile
 
         cfg = _make_config(_codex())
         profile = AiProfile(
@@ -447,7 +447,7 @@ class DispatcherTaskAiSelectionTests(unittest.TestCase):
         from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
         from cairn.dispatcher.scheduler.project_cache import ProjectCaches
         from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
-        from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
+        from cairn.shared.contracts import ProjectAiProfileSnapshot
 
         caches = ProjectCaches()
         caches.ai_chains = {

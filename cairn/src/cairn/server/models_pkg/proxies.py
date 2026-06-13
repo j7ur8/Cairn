@@ -4,11 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# Re-export shim: ProxyConfig/ProxySummary live in cairn.shared.contracts
-# and are surfaced here for importers (application.project_read,
-# application.project_creation, routers.proxies). Unused locally by design.
-from cairn.shared.contracts import ProxyConfig, ProxySummary  # noqa: F401
-
 
 class ProxyCreate(BaseModel):
     name: str

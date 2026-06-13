@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from cairn.observability.metrics import DISPATCHER_OVERFLOW
 from cairn.shared.contracts import ProjectWorkSummary
+from cairn.shared.observability.metrics import DISPATCHER_OVERFLOW
 
 LOG = logging.getLogger(__name__)
 

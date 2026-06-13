@@ -16,9 +16,7 @@ from cairn.server.models_pkg import (
     CreateIntentRequest,
     HeartbeatRequest,
 )
-from cairn.server.models_pkg.projects import (
-    Intent,
-)
+from cairn.shared.contracts import Intent
 
 router = APIRouter(tags=["intents"])
 

@@ -33,7 +33,6 @@ from cairn.server.config.ai_profiles import (
     yaml_ai_profile_secret,
 )
 from cairn.server.models_pkg.ai_profiles import (
-    AiProfile,
     AiProfileCheckCompleteRequest,
     AiProfileCheckRequest,
     AiProfileCheckTriggerResponse,
@@ -42,10 +41,10 @@ from cairn.server.models_pkg.ai_profiles import (
     AiProfileModelsReportRequest,
     AiProfileUpdate,
     AiProfileWithHealth,
-    HealthCheckResult,
     ProjectAiProfilesResponse,
 )
 from cairn.server.security.deps import current_active_superuser
+from cairn.shared.contracts import AiProfile, HealthCheckResult
 
 router = APIRouter(tags=["ai-profiles"])
 
@@ -157,7 +156,7 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
     ``last_health_*`` columns into a ``HealthCheckResult`` payload so the
     UI can render a single "health" badge per row.
     """
-    from cairn.server.models_pkg.ai_profiles import HealthCheckItem
+    from cairn.shared.contracts import HealthCheckItem
     profiles = list_yaml_ai_profiles()
     result: list[AiProfileWithHealth] = []
     for profile in profiles:

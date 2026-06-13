@@ -428,6 +428,7 @@ docker compose up --build
 | 已修复 | AI profile check request claim 为 read-then-update，缺少状态条件保护 | `server/repositories/ai_profiles.py` | claim 改为单条 `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING`，router 不再直接持有 SQL |
 | 已修复 | 测试依赖未完整声明 | `pyproject.toml` dev group | 已加入 `pytest>=8.0`，并配置 `testpaths`、`pythonpath` 和 `db` marker |
 | 已修复 | Alembic revision id 超过默认版本表宽度导致 compose 启动失败 | `migrations/versions/0002_exec_config_names.py` | head 缩短为 `0002_exec_config_names`，业务 DDL 不变；边界测试扫描 revision/down_revision 长度不超过 32 |
+| 已修复 | `facts` 缺 project_id 索引、`llm_executions` 缺 started_at 索引 | `migrations/versions/0003_add_scan_indexes.py` | 新增 `idx_facts_project`（project_id）和 `idx_llm_executions_started`（started_at）；orm.py 同步更新 |
 | Low | Dispatcher 阶段入口仍偏大 | `dispatcher/tasks/bootstrap.py`, `dispatcher/tasks/explore.py`, `dispatcher/tasks/reason.py` | common/process/writeback/release/outcome/text/snapshot 已拆分；TaskSubmitter 提交流水线已统一，阶段主流程仍可继续收敛 |
 
 ## 13. 隐藏细节与注意事项
@@ -438,7 +439,7 @@ docker compose up --build
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
 | 注意 | `dispatch.yaml` 与 `dispatch.resources.yaml` 是强绑定 sidecar；不再兼容旧 `dispatch.capabilities.yaml`。 |
 | 注意 | `DispatchConfig.load(path)` 只读取同目录 `dispatch.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
-| 注意 | 当前 Alembic head 是 `0002_exec_config_names`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | 当前 Alembic head 是 `0003_add_scan_indexes`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后可能成为 hot path。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit，但保留策略依赖 retention loop。 |
 | 向后兼容 | Prompt 模板要求固定变量，如 `{graph_yaml}`、`{intent_id}`、`{capability_instructions}`，配置模型会校验。 |

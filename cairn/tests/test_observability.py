@@ -15,19 +15,19 @@ from helpers import TempYamlConfig, reset_postgres_db
 
 class TraceIdTests(unittest.TestCase):
     def test_default_is_none(self) -> None:
-        from cairn.observability import trace
+        from cairn.shared.observability import trace
         # Reset in case a prior test left it bound.
         trace.trace_id_var.set(None)
         self.assertIsNone(trace.get_trace_id())
 
     def test_new_trace_id_sets_value(self) -> None:
-        from cairn.observability import trace
+        from cairn.shared.observability import trace
         tid = trace.new_trace_id()
         self.assertEqual(len(tid), 32)
         self.assertEqual(trace.get_trace_id(), tid)
 
     def test_set_and_reset(self) -> None:
-        from cairn.observability import trace
+        from cairn.shared.observability import trace
         trace.trace_id_var.set(None)
         token = trace.set_trace_id("abc")
         self.assertEqual(trace.get_trace_id(), "abc")
@@ -37,7 +37,7 @@ class TraceIdTests(unittest.TestCase):
 
 class JsonFormatterTests(unittest.TestCase):
     def test_emits_json_with_trace_id(self) -> None:
-        from cairn.observability.logging import JsonFormatter
+        from cairn.shared.observability.logging import JsonFormatter
         formatter = JsonFormatter()
         record = logging.LogRecord(
             name="cairn.test", level=logging.INFO, pathname="x", lineno=1,
@@ -52,7 +52,7 @@ class JsonFormatterTests(unittest.TestCase):
         self.assertEqual(payload["trace_id"], "deadbeef")
 
     def test_extra_fields_appear(self) -> None:
-        from cairn.observability.logging import JsonFormatter
+        from cairn.shared.observability.logging import JsonFormatter
         formatter = JsonFormatter()
         record = logging.LogRecord(
             name="cairn.test", level=logging.INFO, pathname="x", lineno=1,
@@ -64,7 +64,7 @@ class JsonFormatterTests(unittest.TestCase):
         self.assertEqual(payload["user_id"], "u_42")
 
     def test_exception_info_serialized(self) -> None:
-        from cairn.observability.logging import JsonFormatter
+        from cairn.shared.observability.logging import JsonFormatter
         formatter = JsonFormatter()
         try:
             raise RuntimeError("boom")
@@ -83,7 +83,7 @@ class JsonFormatterTests(unittest.TestCase):
 
 class MetricsTests(unittest.TestCase):
     def test_render_includes_known_metrics(self) -> None:
-        from cairn.observability.metrics import (
+        from cairn.shared.observability.metrics import (
             DISPATCHER_TICKS,
             HTTP_REQUESTS,
             render_metrics,

@@ -24,13 +24,13 @@ from cairn.server.models_pkg import (
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )
-from cairn.server.models_pkg.projects import Fact, Intent, ProjectMeta
 from cairn.server.observability.executions import delete_project_observability
 from cairn.server.repositories.ids import IdRepository
 from cairn.server.repositories.intents import IntentRepository
 from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.repositories.reason import ReasonRepository
+from cairn.shared.contracts import Fact, Intent, ProjectMeta
 
 LOG = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
-from cairn.server.models_pkg.projects import Fact, Intent
+from cairn.shared.contracts import Fact, Intent
 
 
 class CreateIntentRequest(BaseModel):

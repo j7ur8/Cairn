@@ -39,9 +39,10 @@ from cairn.server.models_pkg.project_requests import (
     UpdateProjectTitleRequest,
 )
 from cairn.server.models_pkg.project_responses import ReopenResponse
-from cairn.server.models_pkg.reason_models import ReasonClaimRequest, ReasonFinishRequest, ReasonState
+from cairn.server.models_pkg.reason_models import ReasonClaimRequest, ReasonFinishRequest
 from cairn.server.models_pkg.replay_models import (
     ReplayRunAdvanceResponse,
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
+from cairn.shared.contracts import ReasonState
