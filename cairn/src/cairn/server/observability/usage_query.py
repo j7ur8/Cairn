@@ -54,6 +54,6 @@ def _optional_int(value: object) -> int | None:
     if value is None or value == "":
         return None
     try:
-        return int(value)
+        return int(value)  # type: ignore[call-overload]  # except guards non-convertible input
     except (TypeError, ValueError):
         return None

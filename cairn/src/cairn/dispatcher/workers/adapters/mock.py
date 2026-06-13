@@ -123,6 +123,23 @@ else:
 """.strip()
 
 
+def _compile_script() -> str:
+    """Validate the embedded mock script at import time.
+
+    The mock worker body runs in a child ``python3 -c`` process, so a syntax
+    error would otherwise only surface when a mock task executes. Compiling it
+    here turns that into an import-time failure with a clear message.
+    """
+    try:
+        compile(_SCRIPT, "<mock-worker-script>", "exec")
+    except SyntaxError as exc:  # pragma: no cover - guards against future edits
+        raise RuntimeError(f"mock worker script has a syntax error: {exc}") from exc
+    return _SCRIPT
+
+
+_SCRIPT = _compile_script()
+
+
 class MockDriver(SeedSessionDriver):
     type_name = "mock"
 

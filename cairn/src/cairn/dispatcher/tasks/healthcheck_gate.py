@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from cairn.dispatcher.observability.reporter import ExecutionReporter
+from cairn.dispatcher.observability.reporter import AnyReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -30,7 +30,7 @@ def run_intent_healthcheck_gate(
     tty: bool,
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
-    reporter: ExecutionReporter,
+    reporter: AnyReporter,
 ) -> str | None:
     phase = f"{task_type}_healthcheck"
     LOG.info(

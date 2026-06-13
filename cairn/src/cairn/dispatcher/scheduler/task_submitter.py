@@ -121,6 +121,9 @@ class TaskSubmitter:
         context = self._prepare_submission(project, "reason", needs_export=True)
         if context is None:
             return False
+        # needs_export=True guarantees a non-None export from _prepare_submission.
+        export_yaml = context.export_yaml
+        assert export_yaml is not None
 
         fact_count = len(project.facts)
         hint_count = len(project.hints)
@@ -155,7 +158,7 @@ class TaskSubmitter:
                 self.client,
                 self.container_manager,
                 project,
-                context.export_yaml,
+                export_yaml,
                 context.worker,
                 context.execution_config,
                 run_id,
@@ -239,6 +242,9 @@ class TaskSubmitter:
         context = self._prepare_submission(project, "explore", intent=intent, needs_export=True)
         if context is None:
             return False
+        # needs_export=True guarantees a non-None export from _prepare_submission.
+        export_yaml = context.export_yaml
+        assert export_yaml is not None
         if not self.claimer.claim_intent(
             task_type=context.task_type,
             project_id=context.project_id,
@@ -264,7 +270,7 @@ class TaskSubmitter:
                 self.client,
                 self.container_manager,
                 project,
-                context.export_yaml,
+                export_yaml,
                 intent,
                 context.worker,
                 context.execution_config,

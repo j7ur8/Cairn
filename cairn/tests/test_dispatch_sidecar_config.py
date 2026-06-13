@@ -127,9 +127,7 @@ roles:
         self.assertEqual(cfg.roles[0].default_skill_ids, ["skill1"])
 
     def test_role_default_skill_ids_must_resolve(self) -> None:
-        from pydantic import ValidationError
-
-        from cairn.shared.config import DispatchConfig
+        from cairn.shared.config import ConfigError, DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -151,7 +149,7 @@ roles:
 """.strip(),
                 encoding="utf-8",
             )
-            with self.assertRaises(ValidationError) as ctx:
+            with self.assertRaises(ConfigError) as ctx:
                 DispatchConfig.load(root / "dispatch.yaml")
 
         self.assertIn("missing-skill", str(ctx.exception))

@@ -134,7 +134,8 @@ def _worker_profile_id(worker: dict[str, Any]) -> str:
 
 def _worker_to_profile(worker: dict[str, Any]) -> AiProfile:
     worker_type = str(worker.get("type") or "")
-    env = worker.get("env") if isinstance(worker.get("env"), dict) else {}
+    env_raw = worker.get("env")
+    env = env_raw if isinstance(env_raw, dict) else {}
     model_key = _env_key(worker_type, "MODEL")
     base_url_key = _env_key(worker_type, "BASE_URL")
     auth_key = _auth_key(worker_type)
@@ -184,7 +185,8 @@ def _profile_body_to_worker(profile_id: str, body: AiProfileCreate) -> dict[str,
 def _profile_values_to_worker(values: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
     worker = deepcopy(existing or {})
     worker_type = values["worker_type"]
-    env = dict(worker.get("env") if isinstance(worker.get("env"), dict) else {})
+    env_raw = worker.get("env")
+    env = dict(env_raw if isinstance(env_raw, dict) else {})
     env[_env_key(worker_type, "MODEL")] = values["model"]
     env[_env_key(worker_type, "BASE_URL")] = values.get("base_url") or "http://localhost"
     auth_key = _auth_key(worker_type)
@@ -220,7 +222,7 @@ def _profile_values_to_worker(values: dict[str, Any], *, existing: dict[str, Any
 
 
 def _env_key(worker_type: str, suffix: str) -> str:
-    for key in WORKER_ENV_KEYS.get(worker_type, ()):  # type: ignore[arg-type]
+    for key in WORKER_ENV_KEYS.get(worker_type, ()):  # type: ignore[call-overload]
         if key.endswith(f"_{suffix}"):
             return key
     return f"{worker_type.upper()}_{suffix}"

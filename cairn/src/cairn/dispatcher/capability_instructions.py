@@ -19,27 +19,27 @@ def instructions(
     ]
     if mcp_servers:
         lines.extend(["## MCP Servers", f"Config file: {mcp_path}", ""])
-        for item in mcp_servers:
-            lines.append(f"- {item.id}: {item.name}")
-            _append_text(lines, "Description", item.description)
-            _append_list(lines, "Use when", item.use_when)
-            _append_list(lines, "Required skills", item.required_skill_ids)
-            _append_text(lines, "Instruction", item.activation_hint)
+        for mcp in mcp_servers:
+            lines.append(f"- {mcp.id}: {mcp.name}")
+            _append_text(lines, "Description", mcp.description)
+            _append_list(lines, "Use when", mcp.use_when)
+            _append_list(lines, "Required skills", mcp.required_skill_ids)
+            _append_text(lines, "Instruction", mcp.activation_hint)
             lines.append("")
     if skills:
         lines.extend(["## Skills", f"Directory root: {skill_root}", ""])
         lines.append("When your agent runtime exposes a native Skill tool and routing conditions match, invoke the matching skill first. If native skill invocation is unavailable, read the listed SKILL.md path for domain guidance. Treat procedures and examples as optional heuristics, adapting them to the current goal, evidence, scope, and constraints.")
         lines.append("")
-        for item in skills:
-            path = f"{skill_root}/{item.id}"
-            lines.append(f"- {item.id}: {item.name}")
+        for skill in skills:
+            path = f"{skill_root}/{skill.id}"
+            lines.append(f"- {skill.id}: {skill.name}")
             lines.append(f"  Path: {path}")
-            lines.append(f"  Claude native Skill name: {CLAUDE_SESSION_PLUGIN_NAME}:{item.id}")
-            _append_text(lines, "Description", item.description)
-            _append_list(lines, "Use when", item.use_when)
-            _append_list(lines, "Preferred MCP servers", item.preferred_mcp_ids)
-            if item.activation_hint:
-                _append_text(lines, "Instruction", item.activation_hint)
+            lines.append(f"  Claude native Skill name: {CLAUDE_SESSION_PLUGIN_NAME}:{skill.id}")
+            _append_text(lines, "Description", skill.description)
+            _append_list(lines, "Use when", skill.use_when)
+            _append_list(lines, "Preferred MCP servers", skill.preferred_mcp_ids)
+            if skill.activation_hint:
+                _append_text(lines, "Instruction", skill.activation_hint)
             else:
                 lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md for domain guidance and adapt any procedures or examples to the current evidence, scope, and constraints.")
             lines.append("")
@@ -65,21 +65,21 @@ def reason_instructions(
     ]
     if mcp_servers:
         lines.append("- MCP server metadata:")
-        for item in mcp_servers:
-            lines.append(f"  - {item.id}: {item.name}")
-            _append_text(lines, "Description", item.description, indent="    ")
-            _append_list(lines, "Use when", item.use_when, indent="    ")
-            _append_list(lines, "Required skills", item.required_skill_ids, indent="    ")
-            _append_text(lines, "Instruction", item.activation_hint, indent="    ")
+        for mcp in mcp_servers:
+            lines.append(f"  - {mcp.id}: {mcp.name}")
+            _append_text(lines, "Description", mcp.description, indent="    ")
+            _append_list(lines, "Use when", mcp.use_when, indent="    ")
+            _append_list(lines, "Required skills", mcp.required_skill_ids, indent="    ")
+            _append_text(lines, "Instruction", mcp.activation_hint, indent="    ")
         lines.append("")
     if skills:
         lines.append("- Skill metadata:")
-        for item in skills:
-            lines.append(f"  - {item.id}: {item.name}")
-            _append_text(lines, "Description", item.description, indent="    ")
-            _append_list(lines, "Use when", item.use_when, indent="    ")
-            _append_list(lines, "Preferred MCP servers", item.preferred_mcp_ids, indent="    ")
-            _append_text(lines, "Instruction", item.activation_hint, indent="    ")
+        for skill in skills:
+            lines.append(f"  - {skill.id}: {skill.name}")
+            _append_text(lines, "Description", skill.description, indent="    ")
+            _append_list(lines, "Use when", skill.use_when, indent="    ")
+            _append_list(lines, "Preferred MCP servers", skill.preferred_mcp_ids, indent="    ")
+            _append_text(lines, "Instruction", skill.activation_hint, indent="    ")
         lines.append("")
     lines.extend(
         [

@@ -55,11 +55,10 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check src tests
 
-      - name: Type check (mypy, advisory)
-        # Incremental adoption: type errors are surfaced in the log but do
-        # not fail the build yet. Remove continue-on-error to enforce once
-        # the annotated surface is clean.
-        continue-on-error: true
+      - name: Type check (mypy)
+        # The annotated surface is fully clean and enforced: any new type
+        # error fails the build. mypy config (check_untyped_defs,
+        # warn_unused_ignores) lives in cairn/pyproject.toml [tool.mypy].
         run: uv run mypy src
 
       - name: Tests (pytest, with PostgreSQL)
@@ -70,4 +69,7 @@ jobs:
           PGUSER: cairn
           PGPASSWORD: cairn
           PGDATABASE: cairn
+          # The CI Postgres service is a throwaway container, so the
+          # schema-dropping DB integration tests are allowed to run here.
+          CAIRN_ALLOW_DB_RESET: "1"
         run: uv run python -m pytest -q

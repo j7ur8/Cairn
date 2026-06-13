@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -37,7 +38,7 @@ def upload_project_attachments(
     with db.session_scope() as conn:
         verify_attachments_writable(conn, project_id)
 
-    written_paths = []
+    written_paths: list[Path] = []
     try:
         uploaded, written_paths = write_attachment_files(
             project_id,

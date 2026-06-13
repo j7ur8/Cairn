@@ -273,7 +273,7 @@ class IntentRepository:
         if not rows:
             return []
         intent_ids = {row["id"] for row in rows}
-        sources_by_intent = {
+        sources_by_intent: dict[str, list[str]] = {
             intent_id: []
             for intent_id in intent_ids
         }

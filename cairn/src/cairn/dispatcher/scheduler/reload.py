@@ -4,6 +4,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -13,7 +14,11 @@ LOG = logging.getLogger(__name__)
 
 
 class DispatcherReloader:
-    def __init__(self, loop: object, config_path: Path) -> None:
+    # `loop` is typed Any on purpose: the scheduler package must not depend on
+    # the loop module (enforced by
+    # test_scheduler_collaborators_do_not_depend_on_dispatcher_loop), and
+    # reload mutates ~15 loop attributes as a dynamic cross-boundary handle.
+    def __init__(self, loop: Any, config_path: Path) -> None:
         self.loop = loop
         self.config_path = config_path
         self.lock = threading.Lock()

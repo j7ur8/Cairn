@@ -59,7 +59,7 @@ class NoStoreStaticFiles(StaticFiles):
     forced to revalidate.
     """
 
-    async def get_response(self, path: str, scope):  # type: ignore[no-untyped-def]
+    async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         return response
@@ -76,7 +76,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     dispatcher loop without manual correlation.
     """
 
-    async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request, call_next):
         inbound = request.headers.get("x-request-id")
         token = set_trace_id(inbound or new_trace_id())
         request.state.trace_id = get_trace_id()

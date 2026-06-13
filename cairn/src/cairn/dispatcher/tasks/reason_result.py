@@ -68,6 +68,7 @@ def apply_reason_result(
         reporter.emit_error("reason_execute", "error", "model rejected task")
         return ReasonStepResult("rejected", "rejected", "model rejected task")
     if kind == "complete":
+        assert isinstance(data, dict)
         return _complete_project(
             client=client,
             project_id=project_id,
@@ -78,6 +79,7 @@ def apply_reason_result(
             reporter=reporter,
         )
     if kind == "intents":
+        assert isinstance(data, list)
         return _create_intents(
             client=client,
             project_id=project_id,

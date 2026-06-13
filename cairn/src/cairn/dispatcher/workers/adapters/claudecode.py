@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
+from cairn.dispatcher.workers.adapters._jsonl import extract_text_parts, iter_jsonl
 from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
 from cairn.shared.config import WorkerConfig
 
@@ -149,10 +147,13 @@ class ClaudeCodeDriver(SeedSessionDriver):
 
     def extract_response_text(self, stdout: str, stderr: str) -> str:
         messages: list[str] = []
-        for payload in _iter_jsonl(stdout):
+        for payload in iter_jsonl(stdout):
             payload_type = payload.get("type")
             if payload_type == "assistant" and isinstance(payload.get("message"), dict):
-                text = _extract_assistant_text(payload["message"].get("content"))
+                text = extract_text_parts(
+                    payload["message"].get("content"),
+                    predicate=lambda item: item.get("type") == "text",
+                )
                 if text:
                     messages.append(text)
             elif payload_type == "result":
@@ -162,32 +163,3 @@ class ClaudeCodeDriver(SeedSessionDriver):
         if messages:
             return messages[-1]
         return stdout
-
-
-def _iter_jsonl(text: str) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            payloads.append(payload)
-    return payloads
-
-
-def _extract_assistant_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") == "text" and isinstance(item.get("text"), str):
-            parts.append(item["text"])
-    return "\n".join(parts).strip()

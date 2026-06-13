@@ -18,6 +18,9 @@ from cairn.shared.contracts import Intent, ProjectDetail
 
 
 def _build_prompt(ctx: IntentTaskContext) -> str:
+    # explore always carries an export (run_explore_task requires str); the
+    # shared context types it as optional because bootstrap leaves it None.
+    assert ctx.export_yaml is not None
     return build_explore_execute_prompt(
         config=ctx.config,
         container_manager=ctx.container_manager,
@@ -54,6 +57,7 @@ def _write_success(ctx: IntentTaskContext, payload) -> IntentWriteOutcome:
 
 
 def _conclude_fallback(ctx: IntentTaskContext) -> str:
+    assert ctx.export_yaml is not None
     return run_explore_conclude_fallback(
         config=ctx.config,
         client=ctx.client,

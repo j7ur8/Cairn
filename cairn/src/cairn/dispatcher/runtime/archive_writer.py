@@ -12,6 +12,7 @@ def text_file_archive(path: str, content: str) -> tuple[str, bytes]:
     parts = target.parts[1:]
     if not parts or any(part in ("", ".", "..") for part in parts):
         raise ValueError(f"invalid container file path: {path}")
+    archive_parts: tuple[str, ...]
     if len(parts) == 1:
         archive_path = "/"
         archive_parts = parts

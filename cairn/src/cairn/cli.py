@@ -7,6 +7,7 @@ import uvicorn
 from cairn.dispatcher.logging import configure_logging
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
+from cairn.shared.config import ConfigError
 
 
 @click.group()
@@ -50,12 +51,17 @@ def serve(host: str, port: int, log_level: str, access_log: bool):
 def dispatch(config_path: Path, once: bool, startup_healthcheck_only: bool, log_level: str):
     """Run the Cairn dispatcher."""
     configure_logging(log_level, bare=startup_healthcheck_only)
-    loop = DispatcherLoop(config_path)
     try:
+        loop = DispatcherLoop(config_path)
         if startup_healthcheck_only:
             loop.run_startup_healthchecks_only()
             return
         loop.run(once=once)
+    except ConfigError as exc:
+        # Configuration problems are operator errors, not bugs: emit a single
+        # clear fatal line and exit non-zero instead of a bare traceback that
+        # would otherwise crash-loop under the container restart policy.
+        raise click.ClickException(f"configuration error: {exc}") from exc
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
 

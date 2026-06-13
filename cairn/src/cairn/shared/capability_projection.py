@@ -43,9 +43,12 @@ def project_capability_data(execution_config: dict | None) -> dict | None:
     if not execution_config:
         return None
     task_type = str(execution_config.get("task_type") or "")
-    capabilities = execution_config.get("capabilities") if isinstance(execution_config.get("capabilities"), dict) else {}
-    catalog = execution_config.get("catalog") if isinstance(execution_config.get("catalog"), list) else []
-    health = execution_config.get("health") if isinstance(execution_config.get("health"), dict) else {}
+    capabilities_raw = execution_config.get("capabilities")
+    capabilities = capabilities_raw if isinstance(capabilities_raw, dict) else {}
+    catalog_raw = execution_config.get("catalog")
+    catalog = catalog_raw if isinstance(catalog_raw, list) else []
+    health_raw = execution_config.get("health")
+    health = health_raw if isinstance(health_raw, dict) else {}
     return {
         "catalog": catalog,
         "tasks": {
@@ -77,10 +80,14 @@ def capability_manifest_payload(
             "unavailable": {"mcp_server_ids": [], "skill_ids": []},
         }
 
-    tasks = capability_data.get("tasks") if isinstance(capability_data.get("tasks"), dict) else {}
-    task_state = tasks.get(task_type) if isinstance(tasks.get(task_type), dict) else {}
-    snapshots = task_state.get("snapshots") if isinstance(task_state.get("snapshots"), list) else []
-    catalog = capability_data.get("catalog") if isinstance(capability_data.get("catalog"), list) else []
+    tasks_raw = capability_data.get("tasks")
+    tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
+    task_state_raw = tasks.get(task_type)
+    task_state = task_state_raw if isinstance(task_state_raw, dict) else {}
+    snapshots_raw = task_state.get("snapshots")
+    snapshots = snapshots_raw if isinstance(snapshots_raw, list) else []
+    catalog_raw = capability_data.get("catalog")
+    catalog = catalog_raw if isinstance(catalog_raw, list) else []
     mcp_ids = [
         str(item.get("capability_id") or "").strip()
         for item in snapshots
@@ -100,7 +107,8 @@ def capability_manifest_payload(
     }
     mcp_servers = [_manifest_item("mcp_server", capability_id, by_key, task_type) for capability_id in mcp_ids]
     skills = [_manifest_item("skill", capability_id, by_key, task_type) for capability_id in skill_ids]
-    unavailable = capability_data.get("unavailable") if isinstance(capability_data.get("unavailable"), dict) else {}
+    unavailable_raw = capability_data.get("unavailable")
+    unavailable = unavailable_raw if isinstance(unavailable_raw, dict) else {}
     return {
         "summary": f"Project capabilities before {task_type}: {len(mcp_servers)} MCP servers, {len(skills)} skills",
         "project_id": project_id,

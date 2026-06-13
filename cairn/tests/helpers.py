@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 import unittest
 import uuid
@@ -135,6 +136,17 @@ test_task_timeouts.__test__ = False
 def reset_postgres_db():
     from cairn.server import db
     from cairn.server.runtime_config import system_config
+
+    # Safety gate: this helper DROPS the entire schema. It must never run
+    # against a database that was not explicitly designated disposable. The
+    # caller (CI, or a developer pointing at a throwaway DB) must opt in via
+    # CAIRN_ALLOW_DB_RESET=1. Without it we skip rather than risk wiping a
+    # live database that happens to be the configured target.
+    if os.environ.get("CAIRN_ALLOW_DB_RESET") != "1":
+        raise unittest.SkipTest(
+            "DB integration tests skipped: set CAIRN_ALLOW_DB_RESET=1 and point "
+            "dispatch.test.yaml at a disposable database (these tests DROP the schema)."
+        )
 
     if not Path(runtime_config.DEFAULT_DISPATCH_CONFIG_PATH).exists():
         runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _TEST_DISPATCH_PATH

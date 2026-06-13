@@ -50,9 +50,12 @@ def inject_project_capabilities(
     if not selection_data:
         return CapabilityInjection("", "no capability selection available", [], [], [], WorkerExecutionContext())
 
-    tasks = selection_data.get("tasks") if isinstance(selection_data.get("tasks"), dict) else {}
-    task_state = tasks.get(task_type) if isinstance(tasks.get(task_type), dict) else {}
-    snapshots = task_state.get("snapshots") if isinstance(task_state.get("snapshots"), list) else []
+    tasks_raw = selection_data.get("tasks")
+    tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
+    task_state_raw = tasks.get(task_type)
+    task_state = task_state_raw if isinstance(task_state_raw, dict) else {}
+    snapshots_raw = task_state.get("snapshots")
+    snapshots = snapshots_raw if isinstance(snapshots_raw, list) else []
     selected_mcp = [
         str(item.get("capability_id") or "").strip()
         for item in snapshots
@@ -91,19 +94,19 @@ def inject_project_capabilities(
 
     skills: list[SkillCapabilityConfig] = []
     for capability_id in selected_skills:
-        item = skill_by_id.get(capability_id)
-        if item is None:
+        skill = skill_by_id.get(capability_id)
+        if skill is None:
             errors.append(f"skill:{capability_id}: not declared in dispatch config")
             continue
-        if task_type not in item.task_types:
+        if task_type not in skill.task_types:
             LOG.info(
                 "skip skill=%s because task_type=%s is not enabled enabled_task_types=%s",
                 capability_id,
                 task_type,
-                item.task_types,
+                skill.task_types,
             )
             continue
-        skills.append(item)
+        skills.append(skill)
 
     if not mcp_servers and not skills:
         return CapabilityInjection("", summary([], [], errors), [], [], errors, WorkerExecutionContext())

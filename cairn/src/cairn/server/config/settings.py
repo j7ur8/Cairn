@@ -9,8 +9,10 @@ from cairn.shared.contracts import TaskTimeouts
 
 def get_yaml_settings() -> Settings:
     data = load_dispatch_data()
-    server = data.get("server") if isinstance(data.get("server"), dict) else {}
-    server_settings = server.get("settings") if isinstance(server.get("settings"), dict) else {}
+    server_raw = data.get("server")
+    server = server_raw if isinstance(server_raw, dict) else {}
+    settings_raw = server.get("settings")
+    server_settings = settings_raw if isinstance(settings_raw, dict) else {}
     missing = [key for key in ("intent_timeout", "reason_timeout") if key not in server_settings]
     if missing:
         raise HTTPException(500, f"dispatch.yaml server.settings missing required fields: {', '.join(missing)}")
@@ -35,7 +37,8 @@ def update_yaml_settings(body: Settings) -> Settings:
 
 def get_yaml_task_timeouts() -> TaskTimeouts:
     data = load_dispatch_data()
-    tasks = data.get("tasks") if isinstance(data.get("tasks"), dict) else {}
+    tasks_raw = data.get("tasks")
+    tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
     try:
         return TaskTimeouts.model_validate(
             {

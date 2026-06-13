@@ -12,15 +12,15 @@ try:
     import docker
     from docker.errors import APIError, DockerException, NotFound
 except ModuleNotFoundError:  # Allows scheduler pure logic to import without Docker SDK.
-    docker = None  # type: ignore[assignment]
+    docker = None
 
-    class DockerException(Exception):
+    class DockerException(Exception):  # type: ignore[no-redef]
         pass
 
-    class APIError(DockerException):
+    class APIError(DockerException):  # type: ignore[no-redef]
         pass
 
-    class NotFound(DockerException):
+    class NotFound(DockerException):  # type: ignore[no-redef]
         pass
 
 from cairn.dispatcher.runtime.archive_writer import directory_archive, text_file_archive

@@ -136,9 +136,16 @@ class DispatchConfig(BaseModel):
 
 
 def _remote_support_env_from_raw(raw: Any) -> dict[str, str]:
+    # Derives worker env vars from the remote_support section during the
+    # before-validator merge. A malformed section is intentionally tolerated
+    # here (no env injected): the same data is authoritatively validated as
+    # ResourceConfig.remote_support in the main pass, which surfaces the real
+    # error. Narrow to ValidationError so genuine bugs are not swallowed.
     if not isinstance(raw, dict):
         return {}
+    from pydantic import ValidationError
+
     try:
         return RemoteSupportConfig.model_validate(raw).environment()
-    except Exception:
+    except ValidationError:
         return {}

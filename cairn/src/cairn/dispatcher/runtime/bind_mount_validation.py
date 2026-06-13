@@ -29,7 +29,7 @@ def mount_mismatches(
     }
     mismatches: list[str] = []
     for mount in expected:
-        actual = actual_by_destination.get(mount["container_path"])
+        actual = actual_by_destination.get(str(mount["container_path"]))
         if actual is None:
             mismatches.append(f"missing {mount['name']} at {mount['container_path']}")
             continue

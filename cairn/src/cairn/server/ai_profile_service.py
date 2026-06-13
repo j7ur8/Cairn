@@ -7,6 +7,7 @@ from cairn.server.models_pkg.ai_profiles import (
     AiProfile,
     AiProfileSelection,
     ProjectAiProfileSnapshot,
+    ReasoningType,
     TaskAiProfileSelections,
     ai_selections_from_snapshots,
     canonical_auth_env,
@@ -117,7 +118,7 @@ def _profile_models(profile: AiProfile) -> list[str]:
     return models or [profile.model]
 
 
-def _selected_reasoning_type(profile: AiProfile) -> str | None:
+def _selected_reasoning_type(profile: AiProfile) -> ReasoningType | None:
     return profile.model_reasoning_effort
 
 

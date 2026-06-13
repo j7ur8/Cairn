@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 try:
     from docker.errors import APIError, DockerException
 except ModuleNotFoundError:  # Allows scheduler pure logic to import without Docker SDK.
-    class DockerException(Exception):
+    class DockerException(Exception):  # type: ignore[no-redef]
         pass
 
-    class APIError(DockerException):
+    class APIError(DockerException):  # type: ignore[no-redef]
         pass
 
 LOG = logging.getLogger(__name__)

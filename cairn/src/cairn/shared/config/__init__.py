@@ -13,6 +13,7 @@ from cairn.shared.config.constants import (
     WorkerType,
 )
 from cairn.shared.config.loader import (
+    ConfigError,
     load_dispatch_config,
     validate_capability_resources,
     validate_role_resources,
@@ -106,6 +107,7 @@ __all__ = [
     "WorkerPoolConfig",
     "WorkerRuntimeConfig",
     "WorkerType",
+    "ConfigError",
     "load_dispatch_config",
     "resolve_mock_behavior",
     "validate_capability_resources",

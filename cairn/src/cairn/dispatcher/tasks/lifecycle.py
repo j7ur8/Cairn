@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cairn.dispatcher.observability.reporter import ExecutionReporter
+from cairn.dispatcher.observability.reporter import DisabledExecutionReporter, ExecutionReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
 from cairn.dispatcher.tasks.task_outcome import process_state_for_task_outcome
@@ -37,7 +37,7 @@ class TaskLifecycle:
         )
         self.lease.stop()
 
-    def _build_reporter(self) -> ExecutionReporter:
+    def _build_reporter(self) -> ExecutionReporter | DisabledExecutionReporter:
         config = self.context.config
         if not config.observability.enabled:
             return ExecutionReporter.disabled()

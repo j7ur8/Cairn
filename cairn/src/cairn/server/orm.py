@@ -51,6 +51,7 @@ class ProjectRow(Base):
 
 class FactRow(Base):
     __tablename__ = "facts"
+    __table_args__ = (Index("idx_facts_project", "project_id"),)
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     project_id: Mapped[str] = mapped_column(
@@ -283,7 +284,12 @@ class UserRow(Base):
 
 class LlmExecutionRow(Base):
     __tablename__ = "llm_executions"
-    __table_args__ = (Index("idx_llm_executions_project_started", "project_id", "started_at"),)
+    __table_args__ = (
+        Index("idx_llm_executions_project_started", "project_id", "started_at"),
+        # Supports the retention sweep, which filters on started_at alone
+        # (no project_id) and therefore cannot use the composite index above.
+        Index("idx_llm_executions_started", "started_at"),
+    )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     project_id: Mapped[str] = mapped_column(Text, nullable=False)

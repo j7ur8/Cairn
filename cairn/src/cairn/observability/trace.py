@@ -42,6 +42,6 @@ class TraceIdFilter:
     formatter can render ``trace_id=...`` next to each log line.
     """
 
-    def filter(self, record) -> bool:  # type: ignore[no-untyped-def]
+    def filter(self, record) -> bool:
         record.trace_id = get_trace_id() or "-"
         return True

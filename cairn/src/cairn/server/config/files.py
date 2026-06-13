@@ -130,7 +130,8 @@ def _dispatch_validation_data(data: dict[str, Any]) -> tuple[dict[str, Any], dic
     resources = cleaned.pop("resources", None)
     if resources is None:
         resources = load_resources_data()
-    worker_pool = cleaned.get("worker_pool") if isinstance(cleaned.get("worker_pool"), dict) else {}
+    worker_pool_raw = cleaned.get("worker_pool")
+    worker_pool = worker_pool_raw if isinstance(worker_pool_raw, dict) else {}
     for worker in worker_pool.get("workers") or []:
         if not isinstance(worker, dict):
             continue

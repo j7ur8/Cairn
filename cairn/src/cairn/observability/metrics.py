@@ -19,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover - exercised only without optional dependency
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
 
-    class CollectorRegistry:
+    class CollectorRegistry:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             pass
 
@@ -39,9 +39,9 @@ except ImportError:  # pragma: no cover - exercised only without optional depend
         def observe(self, *args, **kwargs) -> None:
             return None
 
-    Counter = Gauge = Histogram = _NoopMetric
+    Counter = Gauge = Histogram = _NoopMetric  # type: ignore[assignment,misc]
 
-    def generate_latest(registry) -> bytes:
+    def generate_latest(registry) -> bytes:  # type: ignore[misc]
         return b""
 
 

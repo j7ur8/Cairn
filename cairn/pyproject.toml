@@ -80,13 +80,14 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.12"
-# Incremental adoption: type errors do not fail the build yet, but the
-# checker runs so regressions in annotated code surface in review. Flip
-# these to strict per-package as modules get fully typed.
+# The annotated surface is fully clean and enforced as a blocking CI gate
+# (see .github/workflows/ci.yml). Keep it at zero: any new type error fails
+# the build. check_untyped_defs is on so unannotated function bodies are not
+# a blind spot; warn_unused_ignores keeps the # type: ignore set honest.
 ignore_missing_imports = true
-warn_unused_ignores = false
+warn_unused_ignores = true
 warn_redundant_casts = true
-check_untyped_defs = false
+check_untyped_defs = true
 exclude = ["migrations/", "tests/"]
 
 [[tool.uv.index]]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, overload
 
 from cairn.dispatcher.capability_constants import CHROME_DEVTOOLS_PROBE_TYPE, CLAUDE_SESSION_PLUGIN_NAME
 from cairn.dispatcher.capability_probe import resolve_host_alias_url
@@ -69,7 +69,13 @@ def mcp_detail(item: McpServerCapabilityConfig, capability_root: str) -> dict[st
     return detail
 
 
-def render_capability_path(value: str, capability_root: str) -> str:
+@overload
+def render_capability_path(value: str, capability_root: str) -> str: ...
+@overload
+def render_capability_path(value: None, capability_root: str) -> None: ...
+def render_capability_path(value: str | None, capability_root: str) -> str | None:
+    if value is None:
+        return None
     return value.replace("{capability_root}", capability_root)
 
 

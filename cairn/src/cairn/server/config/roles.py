@@ -9,7 +9,8 @@ from cairn.server.models_pkg import RoleCatalogItem
 
 def list_yaml_roles() -> list[RoleCatalogItem]:
     data = load_resources_data()
-    roles = data.get("roles") if isinstance(data.get("roles"), list) else []
+    roles_raw = data.get("roles")
+    roles = roles_raw if isinstance(roles_raw, list) else []
     result: list[RoleCatalogItem] = []
     for item in roles:
         payload = dict(item)
@@ -22,7 +23,8 @@ def list_yaml_roles() -> list[RoleCatalogItem]:
 
 def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
     data = load_resources_data()
-    roles = data.get("roles") if isinstance(data.get("roles"), list) else []
+    roles_raw = data.get("roles")
+    roles = roles_raw if isinstance(roles_raw, list) else []
     for item in roles:
         if not isinstance(item, dict) or item.get("id") != role_id:
             continue

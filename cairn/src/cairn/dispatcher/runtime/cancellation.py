@@ -16,6 +16,12 @@ class TaskCancellation:
         self._reason: str | None = None
 
     def attach_process(self, process: CancellableProcess | None) -> None:
+        # Snapshot reason under the lock, then act on the local snapshot
+        # outside it. Combined with cancel()'s symmetric handoff, this
+        # guarantees a cancel requested before the process attaches is still
+        # delivered, with no lost-update window. Do not "simplify" by calling
+        # process.cancel() inside the lock (it may block) or by reading
+        # self._reason after the lock (would reintroduce a race).
         with self._lock:
             self._process = process
             reason = self._reason

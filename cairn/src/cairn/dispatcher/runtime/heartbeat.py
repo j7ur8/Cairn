@@ -83,7 +83,10 @@ class HeartbeatLease:
 
     @property
     def failure(self) -> HeartbeatFailure | None:
-        return self._failure
+        # Read under the same lock that guards the write in _fail(): the
+        # heartbeat thread writes this field and the task thread polls it.
+        with self._lock:
+            return self._failure
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
@@ -110,14 +113,17 @@ class HeartbeatLease:
             return
 
     def _fail(self, status_code: int | None, text: str) -> None:
-        self._failure = HeartbeatFailure(status_code, text)
         LOG.warning(
             "heartbeat failed scope=%s worker=%s status=%s",
             self._scope,
             self._worker_name,
             status_code,
         )
+        # Publish the failure and snapshot the process under one lock so the
+        # task thread cannot observe a process kill without the failure being
+        # visible. The kill itself runs outside the lock (it may block).
         with self._lock:
+            self._failure = HeartbeatFailure(status_code, text)
             process = self._process
         if process is not None:
             process.kill()

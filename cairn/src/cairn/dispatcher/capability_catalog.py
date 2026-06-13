@@ -8,43 +8,43 @@ from cairn.shared.config import DispatchConfig
 
 def catalog_payload(config: DispatchConfig) -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
-    for item in config.capabilities.mcp_servers:
+    for mcp in config.capabilities.mcp_servers:
         payload.append(
             {
                 "kind": "mcp_server",
-                "id": item.id,
-                "name": item.name,
-                "description": item.description,
-                "task_types": item.task_types,
+                "id": mcp.id,
+                "name": mcp.name,
+                "description": mcp.description,
+                "task_types": mcp.task_types,
                 "available": True,
-                "detail": item.transport,
-                "source_path": item.source_path,
-                "transport": item.transport,
-                "command": item.command,
-                "args": runtime_mcp_args(item, ""),
-                "url": item.url,
-                "headers": dict(item.headers),
-                "probe_config": dict(item.probe_config),
-                "required_skill_ids": list(item.required_skill_ids),
-                "use_when": list(item.use_when),
-                "activation_hint": item.activation_hint,
+                "detail": mcp.transport,
+                "source_path": mcp.source_path,
+                "transport": mcp.transport,
+                "command": mcp.command,
+                "args": runtime_mcp_args(mcp, ""),
+                "url": mcp.url,
+                "headers": dict(mcp.headers),
+                "probe_config": dict(mcp.probe_config),
+                "required_skill_ids": list(mcp.required_skill_ids),
+                "use_when": list(mcp.use_when),
+                "activation_hint": mcp.activation_hint,
                 "preferred_mcp_ids": [],
             }
         )
-    for item in config.capabilities.skills:
+    for skill in config.capabilities.skills:
         payload.append(
             {
                 "kind": "skill",
-                "id": item.id,
-                "name": item.name,
-                "description": item.description,
-                "task_types": item.task_types,
+                "id": skill.id,
+                "name": skill.name,
+                "description": skill.description,
+                "task_types": skill.task_types,
                 "available": True,
                 "detail": "directory",
-                "source_path": item.source_path,
-                "use_when": list(item.use_when),
-                "activation_hint": item.activation_hint,
-                "preferred_mcp_ids": list(item.preferred_mcp_ids),
+                "source_path": skill.source_path,
+                "use_when": list(skill.use_when),
+                "activation_hint": skill.activation_hint,
+                "preferred_mcp_ids": list(skill.preferred_mcp_ids),
             }
         )
     return payload

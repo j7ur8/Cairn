@@ -45,6 +45,9 @@ def trigger_ai_profile_check_request(
     existing = repo.latest_active_for_profile(profile_id)
     if existing is not None:
         current = row_to_check_request(existing)
+        # latest_active_for_profile filters status IN ('pending','running'),
+        # so the broad CheckRequest literal is always one of those here.
+        assert current.status in ("pending", "running")
         return AiProfileCheckTriggerResponse(request_id=current.id, status=current.status)
 
     request_id = new_check_request_id()

@@ -11,7 +11,8 @@ from cairn.shared.task_types import default_capability_task_type_names
 
 def list_yaml_capabilities() -> list[CapabilityCatalogItem]:
     data = load_resources_data()
-    caps = data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+    caps_raw = data.get("capabilities")
+    caps = caps_raw if isinstance(caps_raw, dict) else {}
     result: list[CapabilityCatalogItem] = []
     for item in caps.get("mcp_servers") or []:
         payload = dict(item)

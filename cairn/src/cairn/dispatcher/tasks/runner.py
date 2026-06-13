@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cairn.dispatcher.capabilities import CapabilityInjection, inject_project_capabilities
-from cairn.dispatcher.observability.reporter import ExecutionReporter
+from cairn.dispatcher.observability.reporter import AnyReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.roles import RoleInjection, inject_project_role
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -28,7 +28,7 @@ def prepare_task_execution(
     project_id: str,
     task_type: str,
     capability_scope: str,
-    reporter: ExecutionReporter,
+    reporter: AnyReporter,
     phase: str,
     preloaded_execution_config: dict | None = None,
 ) -> PreparedTaskExecution | None:
@@ -73,7 +73,7 @@ def project_execution_config(
     client: CairnClient,
     project_id: str,
     task_type: str,
-    reporter: ExecutionReporter,
+    reporter: AnyReporter,
     phase: str,
 ) -> dict | None:
     response = client.get_project_execution_config(project_id, task_type)
@@ -101,7 +101,7 @@ def project_role_data(execution_config: dict | None) -> dict | None:
     }
 
 
-def project_task_timeout(execution_config: dict | None, phase: str, reporter: ExecutionReporter) -> dict | None:
+def project_task_timeout(execution_config: dict | None, phase: str, reporter: AnyReporter) -> dict | None:
     if not execution_config:
         reporter.emit_error(phase, "error", "execution config missing task_timeout")
         return None

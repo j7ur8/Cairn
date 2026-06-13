@@ -31,7 +31,7 @@ class DbMigrationTests(unittest.TestCase):
 
             row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
             assert row is not None
-        self.assertEqual(row["version_num"], "0002_exec_config_names")
+        self.assertEqual(row["version_num"], "0003_add_scan_indexes")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -46,6 +46,8 @@ class DbMigrationTests(unittest.TestCase):
             "idx_project_execution_configs_project",
             "idx_project_execution_ai_profiles_project_task",
             "idx_project_execution_capabilities_project_task",
+            "idx_facts_project",
+            "idx_llm_executions_started",
         }
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql

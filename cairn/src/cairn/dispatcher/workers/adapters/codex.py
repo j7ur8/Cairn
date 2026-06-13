@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
+from cairn.dispatcher.workers.adapters._jsonl import extract_text_parts, iter_jsonl
 from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
 from cairn.shared.config import WorkerConfig
 
@@ -171,7 +171,7 @@ class CodexDriver(RegexSessionDriver):
     def extract_session(self, session: str | None, stdout: str, stderr: str) -> str | None:
         if session:
             return session
-        for payload in _iter_jsonl(stdout):
+        for payload in iter_jsonl(stdout):
             if payload.get("type") == "thread.started":
                 session_id = payload.get("thread_id")
                 if isinstance(session_id, str) and session_id:
@@ -184,7 +184,7 @@ class CodexDriver(RegexSessionDriver):
 
     def extract_response_text(self, stdout: str, stderr: str) -> str:
         messages: list[str] = []
-        for payload in _iter_jsonl(stdout):
+        for payload in iter_jsonl(stdout):
             top_type = payload.get("type")
             body = payload.get("payload")
             item = payload.get("item")
@@ -197,39 +197,9 @@ class CodexDriver(RegexSessionDriver):
                 if isinstance(message, str) and message:
                     messages.append(message)
             elif top_type == "response_item" and isinstance(body, dict) and body.get("type") == "message":
-                text = _extract_text(body.get("content"))
+                text = extract_text_parts(body.get("content"))
                 if text:
                     messages.append(text)
         if messages:
             return messages[-1]
         return stdout
-
-
-def _iter_jsonl(text: str) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            payloads.append(payload)
-    return payloads
-
-
-def _extract_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-        text = item.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-    return "\n".join(parts).strip()

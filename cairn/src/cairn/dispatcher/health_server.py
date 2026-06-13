@@ -60,8 +60,8 @@ class DispatcherHealthServer:
     def address(self) -> tuple[str, int] | None:
         if self._server is None:
             return None
-        host, port = self._server.server_address
-        return str(host), int(port)
+        address = self._server.server_address
+        return str(address[0]), int(address[1])
 
     def start(self) -> None:
         if self._server is not None:

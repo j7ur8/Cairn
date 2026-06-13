@@ -247,3 +247,8 @@ class DisabledExecutionReporter:
         created_intent_ids: list[str] | None = None,
     ) -> None:
         pass
+
+
+# The task lifecycle hands hooks either a real reporter or the disabled
+# no-op sibling; they are structurally interchangeable for emit/finish calls.
+AnyReporter = ExecutionReporter | DisabledExecutionReporter

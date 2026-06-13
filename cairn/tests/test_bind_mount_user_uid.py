@@ -418,24 +418,24 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         self.assertIn(f"{expected_root}/project-files/proj-xyz", rendered_paths)
 
     def test_deleted_dispatcher_fields_are_rejected(self) -> None:
-        from cairn.shared.config import DispatchConfig
+        from cairn.shared.config import ConfigError, DispatchConfig
 
         data = self.config_path.read_text(encoding="utf-8")
         data = data.replace('  health_addr: "127.0.0.1:9100"\n', '  health_addr: "127.0.0.1:9100"\n  leader_ttl_seconds: 15\n')
         data = data.replace('    image: "cairn/test:latest"\n', '    image: "cairn/test:latest"\n    dispatcher_id: "old"\n')
         self.config_path.write_text(data, encoding="utf-8")
 
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ConfigError):
             DispatchConfig.load(self.config_path)
 
     def test_unknown_runtime_field_is_rejected(self) -> None:
-        from cairn.shared.config import DispatchConfig
+        from cairn.shared.config import ConfigError, DispatchConfig
 
         data = self.config_path.read_text(encoding="utf-8")
         data = data.replace('    prompt_group: "mock"\n', '    prompt_group: "mock"\n    unknown_runtime_field: true\n')
         self.config_path.write_text(data, encoding="utf-8")
 
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ConfigError):
             DispatchConfig.load(self.config_path)
 
 if __name__ == "__main__":
