@@ -149,6 +149,14 @@ class IntentRepository:
         )
 
     def claim_open(self, project_id: str, intent_id: str, worker: str, now: str) -> int:
+        # Mutual exclusion without an explicit FOR UPDATE: the conditional
+        # ``worker IS NULL OR worker = :worker`` predicate plus PostgreSQL
+        # row-level locking under READ COMMITTED makes concurrent claims
+        # safe. A second writer blocks on the row, re-checks the predicate
+        # against the committed version, and matches zero rows. Callers must
+        # treat rowcount==1 as "won the claim" and rowcount==0 as "lost".
+        # Guarded by tests/test_intent_claim_concurrency.py — do not replace
+        # with an unconditional UPDATE or relax the isolation assumption.
         cursor = sql.execute(
             self.conn,
             """
