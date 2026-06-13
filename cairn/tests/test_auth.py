@@ -31,10 +31,10 @@ class AuthTestHarness:
         self._attachments_root = Path(self._tmpdir.name) / "attachments"
         self._project_files_root = Path(self._tmpdir.name) / "project-files"
         self._yaml = TempYamlConfig()
-        self._yaml.dispatch["system"]["auth"]["jwt_secret"] = "test-secret-do-not-use-in-prod"
-        self._yaml.dispatch["system"]["auth"]["dispatcher_api_token"] = ""
-        self._yaml.dispatch["system"]["paths"]["attachments_root"] = str(self._attachments_root)
-        self._yaml.dispatch["system"]["paths"]["project_files_root"] = str(self._project_files_root)
+        self._yaml.dispatch["server"]["auth"]["jwt_secret"] = "test-secret-do-not-use-in-prod"
+        self._yaml.dispatch["server"]["auth"]["dispatcher_api_token"] = ""
+        self._yaml.dispatch["server"]["paths"]["attachments_root"] = str(self._attachments_root)
+        self._yaml.dispatch["server"]["paths"]["project_files_root"] = str(self._project_files_root)
         self._yaml.__enter__()
 
         from cairn.server import db
@@ -49,6 +49,7 @@ class AuthTestHarness:
 
     def client(self):
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
         return TestClient(app)
 
@@ -88,8 +89,8 @@ class AuthSurfaceTests(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
     def _seed_user(self, email, password, *, is_superuser=False):
-        from cairn.server.security.users import create
         from cairn.server.security.passwords import hash_password
+        from cairn.server.security.users import create
         return create(email, hash_password(password), is_superuser=is_superuser).id
 
     def test_login_good_credentials_issues_token(self) -> None:

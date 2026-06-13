@@ -12,7 +12,7 @@ os.environ.setdefault("CAIRN_JWT_SECRET", "test-jwt-secret-do-not-use-in-prod-32
 os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-32bytes")
 
 from cairn.server import runtime_config
-
+from helpers import reset_postgres_db
 
 runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _REPO / "dispatch.test.yaml"
 runtime_config.reset_runtime_config_cache()
@@ -20,15 +20,7 @@ runtime_config.reset_runtime_config_cache()
 
 class DbMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        from cairn.server import db
-
-        db.reset_for_tests()
-        from cairn.server.runtime_config import system_config
-        db.configure(system_config().database.url, run_migrations=False)
-        db.drop_all_for_tests()
-        db.upgrade_head()
-        db.seed_defaults()
-        self.db = db
+        self.db = reset_postgres_db()
 
     def tearDown(self) -> None:
         self.db.reset_for_tests()
@@ -39,7 +31,7 @@ class DbMigrationTests(unittest.TestCase):
 
             row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
             assert row is not None
-        self.assertEqual(row["version_num"], "0001_initial_postgresql")
+        self.assertEqual(row["version_num"], "0002_exec_config_names")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -51,7 +43,9 @@ class DbMigrationTests(unittest.TestCase):
             "idx_intent_sources_project_fact",
             "idx_replay_steps_run_status",
             "idx_project_reason_state_retry",
-            "idx_worker_execution_configs_project_task",
+            "idx_project_execution_configs_project",
+            "idx_project_execution_ai_profiles_project_task",
+            "idx_project_execution_capabilities_project_task",
         }
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import bcrypt
 
-
 _BCRYPT_ROUNDS = 12  # ~250ms on a modern server; tunable via env in a later pass.
 
 

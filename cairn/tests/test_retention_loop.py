@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -21,8 +21,8 @@ class RetentionLoopTests(unittest.TestCase):
         self.db = db
         # Seed an old and a new execution.
         with db.session_scope() as conn:
-            old_started = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            new_started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            old_started = (datetime.now(UTC) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            new_started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             for started_at, exec_id in ((old_started, "old-1"), (new_started, "new-1")):
                 sql.execute(
                     conn,

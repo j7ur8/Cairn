@@ -1,4 +1,5 @@
-system:
+server:
+  base_url: http://cairn-server:8000
   database:
     url: postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn
     pool_size: 5
@@ -15,24 +16,27 @@ system:
     attachments_root: datas/attachments
     project_files_root: datas/project-files
     worker_attachments_root: /home/kali/workspace/attachments
-  dispatcher:
-    reload_url: http://cairn-dispatcher:9100/reload
-    reload_enabled: true
-    health_addr: 0.0.0.0:9100
-  server:
-    log_level: INFO
-    log_format: text
-    retention_loop_enabled: true
-    retention_interval_seconds: 21600
-server: http://cairn-server:8000
-common_env: {}
-runtime:
-  interval: 3
-  max_workers: 8
-  max_running_projects: 3
-  max_project_workers: 4
-  healthcheck_timeout: 20
-  prompt_group: default
+  log:
+    level: INFO
+    format: text
+  retention:
+    enabled: true
+    interval_seconds: 21600
+  settings:
+    intent_timeout: 90
+    reason_timeout: 300
+dispatcher:
+  health_addr: 0.0.0.0:9100
+  reload:
+    url: http://cairn-dispatcher:9100/reload
+    enabled: true
+  runtime:
+    interval: 3
+    max_workers: 8
+    max_running_projects: 3
+    max_project_workers: 4
+    healthcheck_timeout: 20
+    prompt_group: default
 tasks:
   bootstrap:
     timeout: 300
@@ -56,56 +60,57 @@ observability:
   flush_max_bytes: 8192
   retention_days: 14
   redaction_patterns: []
-container:
-  image: cairn-worker-container:mcp-camoufox
-  user: 0:0
-  exec_user: kali
-  network_mode: cairn
-  completed_action: stop
-  stopped_action: remove
-  bind_mounts:
-  - name: ctf-attachments
-    host_path: datas/attachments
-    container_path: /home/kali/workspace/attachments
-    read_only: true
-  - name: project-files
-    host_path: datas/project-files/{project_id}
-    container_path: /home/kali/workspace/project
-    read_only: false
-workers:
-- name: claudecode_deepseek-v4-pro
-  type: claudecode
-  task_types:
-  - bootstrap
-  - reason
-  - explore
-  max_running: 6
-  priority: 1
-  model_reasoning_effort: high
-  models:
-  - deepseek-v4-pro
-  - deepseek-v4-flash
-  env:
-    ANTHROPIC_MODEL: deepseek-v4-pro
-    ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
-    ANTHROPIC_AUTH_TOKEN: sk-REPLACE-ME
-- name: codex
-  type: codex
-  task_types:
-  - bootstrap
-  - reason
-  - explore
-  max_running: 2
-  priority: 0
-  model_reasoning_effort: high
-  models:
-  - gpt-5.4-mini
-  - gpt-5.4
-  - gpt-5.5
-  env:
-    CODEX_MODEL: gpt-5.4
-    CODEX_BASE_URL: https://seuapi.20250731.xyz
-    OPENAI_API_KEY: sk-REPLACE-ME
-server_settings:
-  intent_timeout: 90
-  reason_timeout: 300
+worker_runtime:
+  container:
+    image: cairn-worker-container:mcp-camoufox
+    user: 0:0
+    exec_user: kali
+    network_mode: cairn
+    completed_action: stop
+    stopped_action: remove
+    bind_mounts:
+    - name: ctf-attachments
+      host_path: datas/attachments
+      container_path: /home/kali/workspace/attachments
+      read_only: true
+    - name: project-files
+      host_path: datas/project-files/{project_id}
+      container_path: /home/kali/workspace/project
+      read_only: false
+  common_env: {}
+worker_pool:
+  proxies: []
+  workers:
+  - name: claudecode_deepseek-v4-pro
+    type: claudecode
+    task_types:
+    - bootstrap
+    - reason
+    - explore
+    max_running: 6
+    priority: 1
+    model_reasoning_effort: high
+    models:
+    - deepseek-v4-pro
+    - deepseek-v4-flash
+    env:
+      ANTHROPIC_MODEL: deepseek-v4-pro
+      ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+      ANTHROPIC_AUTH_TOKEN: sk-REPLACE-ME
+  - name: codex
+    type: codex
+    task_types:
+    - bootstrap
+    - reason
+    - explore
+    max_running: 2
+    priority: 0
+    model_reasoning_effort: high
+    models:
+    - gpt-5.4-mini
+    - gpt-5.4
+    - gpt-5.5
+    env:
+      CODEX_MODEL: gpt-5.4
+      CODEX_BASE_URL: https://seuapi.20250731.xyz
+      OPENAI_API_KEY: sk-REPLACE-ME

@@ -21,7 +21,6 @@ from typing import Any
 
 from cairn.observability.trace import TraceIdFilter
 
-
 _DEFAULT_TEXT_FORMAT = "[%(asctime)s] %(levelname)s %(name)s trace_id=%(trace_id)s %(message)s"
 _DEFAULT_DATEFMT = "%Y-%m-%d %H:%M:%S"
 

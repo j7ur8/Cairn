@@ -5,6 +5,89 @@
 
 # 更新日志
 
+## 2026-06-13 — compose migration head 修复
+
+- 修复 `docker compose up --build` migration 失败：原 `0002_project_execution_config_names` revision id 超过 Alembic 默认 `alembic_version.version_num VARCHAR(32)`，业务 DDL 成功后写版本号会报 `value too long for type character varying(32)`。
+- 将 Alembic head 缩短为 `0002_exec_config_names`，保持 `down_revision = "0001_initial_postgresql"` 和 migration 业务逻辑不变；已在 DB migration 测试中更新期望 head。
+- 新增 migration 卫生边界测试，扫描 `cairn/migrations/versions/*.py` 的 `revision`/`down_revision` 字符串长度不超过 32，避免同类 compose 启动故障复发。
+- 清理后端死代码：移除已无调用的 `ProjectRepository.open_intents()` 旧读接口；保留仍在项目状态切换中使用的 `release_open_intents()`。
+- 本次不更新静态前端资源或 `README/current-architecture.html`。
+
+---
+
+## 2026-06-13 — Backend-only v2 边界收口
+
+- Router purity v2：hints、attachments、files、execution configs、project capabilities/role 查询下沉到 application/query service；对应 routers 不再直接 import repository 或 SQL helper。
+- Mapper purity：`server/mappers/intents.py` 改为只消费 repository projection；intent source 查询由 `IntentRepository` 一次性提供，并新增 mapper SQL-free 边界检查。
+- Replay 事务边界拆清：`application/replay/service.py` 保留事务内创建/推进 use case，`application/replay/orchestration.py` 承接事务外附件复制、激活 replay project 和失败补偿清理。
+- Observability repository 拆薄：删除单体 `server/observability/repositories.py`，拆为 `execution_repository.py`、`event_repository.py`、`event_view_repository.py`、`usage_repository.py`、`retention_repository.py` 和 shared query helper。
+- Dispatcher submit pipeline 继续瘦身：`TaskSubmitter` 保留计划/提交编排，claim/release 和 runtime registry/log 分别拆到 `task_claims.py`、`submission_registry.py`；不恢复 collaborator 对完整 `DispatcherLoop` 的依赖。
+- 架构边界测试强化：覆盖 routers 禁 repository import、mappers 禁 SQL、application core 禁隐式 session（仅 orchestration/best-effort 白名单）、observability SQL 层约束和 TaskSubmitter collaborator 边界。
+- 当前环境验证：`python -m compileall -q cairn/src/cairn` 通过；`uv run python -m pytest -q -m 'not db'` 通过（158 passed, 23 skipped, 129 deselected, 7 subtests passed）；`uv run python -m pytest -q -m db` 通过（38 passed, 91 skipped, 181 deselected）。
+
+---
+
+## 2026-06-13 — post src 1-6 后端边界收口
+
+- Router SQL 边界继续收口：`routers/ai_profiles.py`、`routers/export.py`、`routers/proxies.py` 不再直接调用 SQL helper；AI profile check queue、export 查询、proxy detach 分别下沉到 application/repository。
+- Replay 持久化边界拆清：新增 `server/repositories/replay.py`，承接 replay run、step、fact map、source route、intent/fact 查询和条件更新；`application/replay` 保留 route/step 推进决策与响应编排。
+- Observability SQL 分层完成：新增 `server/observability/repositories.py`，集中 execution/event 写入查询、usage、event view 和 retention SQL；原 events/executions/view/retention 模块只做映射和应用编排。
+- Dispatcher 调度层继续瘦身：删除 `DispatcherLoop` 上 `_dispatch_*`、`_ordered_projects`、`_reap_futures`、proxy/AI selection 等兼容转发方法；测试改为直接依赖 `ProjectContextResolver`、`ProjectDispatcher`、`TaskSubmitter` 等 collaborator。
+- `TaskSubmitter` 抽出通用提交流水线，统一 execution config、worker selection、export、claim、submit、失败 release、runtime registry/log，同时保持 bootstrap/explore/reason 对外调度行为。
+- 测试工程补强：新增 `tests/conftest.py` 自动标记所有 `reset_postgres_db()` 测试为 `db`；新增 `test_architecture_boundaries.py` 覆盖 domain/router/scheduler/旧路径边界。
+- 当前环境验证：`python -m compileall -q cairn/src/cairn` 通过；`uv run python -m pytest -q -m 'not db'` 通过（153 passed, 23 skipped, 129 deselected）；`uv run python -m pytest -q -m db` 通过（38 passed, 91 skipped, 176 deselected）。
+
+---
+
+## 2026-06-13 — src 1-6 架构优化落地
+
+- Server domain 完成 SQL-free 切换：`server/domain` 不再导入 repository/SQL/FastAPI，application 层编排事务，repository 成为唯一 SQL 条件更新和读取层。
+- Dispatcher 边界继续收窄：tick/dispatch/project 协作者改依赖 `SchedulerServices`；`DispatcherLoop` 主要保留生命周期、reload、health 和运行态 wiring。
+- `ContainerManager` 收敛为 facade，生命周期、cleanup、archive/file、exec/process、labels、mounts、proxy env、cleanup policy 拆入 `dispatcher/runtime/*` 小模块。
+- 删除 `dispatcher/tasks/common.py`，task process/release/writeback/outcome/text/snapshot 等辅助逻辑拆分；阶段 handler 主要保留 prompt、payload 和阶段策略。
+- `server/models_pkg/intents.py` 与 `capabilities.py` 拆为 project request、intent/reason models、project/replay responses、capability catalog/selection/admin，并通过 `models_pkg` 包级入口统一导出。
+- 测试工程补强：dev dependency 加入 `pytest>=8.0`，pytest 配置 `testpaths/pythonpath/db marker`；DB helper 增加 PostgreSQL availability probe 和 stale temp config 恢复。
+- 当前环境验证：`python -m compileall -q cairn/src/cairn` 通过；架构边界 `rg` 检查无旧内部 import/domain SQL 依赖；`uv run python -m pytest -q -m 'not db'` 通过（191 passed, 114 skipped）；DB 目标无本地 PostgreSQL 时 clean skip。
+
+---
+
+## 2026-06-13 — 增量同步
+
+- 继续清理后端/Dispatcher 分层：`dispatcher/protocol/client.py` 拆为 base、project、task、AI profile、observability 子客户端，`client.py` 只保留组合类。
+- `shared/contracts/models.py` 删除，DTO 按 settings、timeouts、proxies、ai_profiles、llm_events、projects、reason 拆分，内部引用统一改为 `cairn.shared.contracts` 包级入口或具体模块。
+- `dispatcher/tasks/reason.py` 继续拆薄，reason 输出解析和 graph 写回迁入 `dispatcher/tasks/reason_result.py`。
+- 删除旧内部 facade：`server.capabilities_service`、`shared.config.resource_models`，测试和源码直接引用拆分后的 capability/config 模块。
+- 当前环境验证：compileall 通过；多组非 DB unittest 通过；DB 集成测试被本机 PostgreSQL `localhost:5432` connection refused 阻塞，未能在本环境确认。
+
+---
+
+## 2026-06-13 — 增量同步
+
+- 拆分 `server/application/replay` 为 package，分离 service、route extraction、attachments、step advance。
+- 拆分 Dispatcher task 辅助逻辑：新增 bootstrap/explore/reason prompt/result/process helper，阶段入口保留。
+- 拆分 container runtime helper：labels、mounts、proxy env、cleanup policy 从 `ContainerManager` 中外移。
+- 清理 execution config 历史命名：内部 API 改为 project execution config，移除旧 legacy 表类，DB revision 列统一为 `resources_sha256`。
+
+---
+
+## 2026-06-13 — 增量同步
+
+- 同步一次性源码目录重建后的架构文档：Server 拆为 `application/domain/repositories/mappers/execution_config`，Dispatcher scheduler 拆为 loop shell + coordinators/submitter/resolvers/selectors。
+- 记录 `shared.config` 与 `shared.contracts` 新边界，以及 `dispatch.yaml` + `dispatch.resources.yaml` 的破坏性新配置格式；旧 `dispatch.capabilities.yaml` 和旧 shared 聚合模块路径不再兼容。
+- 更新执行配置说明：按 task 组装 dispatcher payload，`resources_sha256` 为对外 revision 字段。
+- 更新测试状态：2026-06-13 使用 `.venv` Python 顺序执行 `cairn/tests/test_*.py` 全量通过，DB 测试需顺序执行以避免 migration/reset 竞争。
+
+---
+
+## 2026-06-12 — 增量同步
+
+- 同步 Dispatcher conclude fallback 协议：`bootstrap_conclude` 和 `explore_conclude` 成功时返回 sentinel 包裹的 plain fact text，不再返回 JSON。
+- 记录 `parse_sentinel_fact_output()` 的解析约束：单个 sentinel pair、内容非空、内容不能是 JSON。
+- 更新 Worker 输出说明：execute 阶段仍是 JSON protocol，conclude fallback 为 sentinel text；Claude conclude 只开放 `Read` 工具。
+- 修正架构文档中过期的 Pi adapter 描述。
+
+---
+
 ## 2026-06-10 — 首次分析
 
 - 初始化项目文档结构
@@ -17,4 +100,3 @@
 - 识别 TODO/问题数：11 个显式标记，5 个审查问题
 
 ---
-

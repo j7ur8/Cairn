@@ -4,14 +4,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request, Response
-from fastapi import HTTPException, status
-from fastapi.responses import FileResponse
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from cairn import __version__
 from cairn.observability.logging import configure_logging
 from cairn.observability.metrics import (
     HTTP_LATENCY,
@@ -23,12 +22,13 @@ from cairn.observability.trace import (
     new_trace_id,
     set_trace_id,
 )
-
-from cairn import __version__
 from cairn.server import db
+from cairn.server.domain.errors import DomainError
 from cairn.server.observability import routers as observability_routers
 from cairn.server.observability.retention import retention_loop
+from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.routers import (
+    ai_profiles,
     attachments,
     auth,
     capabilities,
@@ -42,11 +42,10 @@ from cairn.server.routers import (
     replay,
     settings,
     task_types,
-    ai_profiles,
 )
+from cairn.server.runtime_config import system_config
 from cairn.server.security.deps import current_user_optional
 from cairn.server.security.users import bootstrap_superuser_if_configured
-from cairn.server.runtime_config import system_config
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -133,9 +132,20 @@ async def lifespan(app: FastAPI):
             ),
             name="cairn-retention",
         )
+    lease_cleanup_stop = asyncio.Event()
+    lease_cleanup_task = asyncio.create_task(
+        lease_cleanup_loop(lease_cleanup_stop),
+        name="cairn-lease-cleanup",
+    )
     try:
         yield
     finally:
+        lease_cleanup_stop.set()
+        try:
+            await lease_cleanup_task
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception("lease cleanup task crashed")
         if retention_task is not None:
             retention_stop.set()
             try:
@@ -145,25 +155,55 @@ async def lifespan(app: FastAPI):
                 logging.getLogger(__name__).exception("retention task crashed")
 
 
-_PUBLIC_PATHS = {
-    "/",  # SPA shell; the JS handles the login redirect
-    "/auth/login",
-    "/auth/refresh",
-    "/auth/me",  # tolerates missing creds to let the SPA show "not logged in"
-    "/health",
-    "/metrics",
-}
+async def lease_cleanup_loop(stop: asyncio.Event, *, interval_seconds: float = 2.0) -> None:
+    import logging
+
+    log = logging.getLogger(__name__)
+    while not stop.is_set():
+        try:
+            with db.session_scope() as conn:
+                leases = LeaseRepository(conn)
+                leases.expire_workers()
+                leases.expire_reason_leases()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("lease cleanup failed error=%s", exc)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
+# Paths intentionally reachable without a bearer token. Keep this set
+# minimal: every entry is a deliberate decision to expose an endpoint to
+# anonymous callers. ``tests/test_route_auth_guard.py`` imports these two
+# constants and asserts every other route is behind the global guard, so a
+# new unauthenticated endpoint cannot slip in unnoticed.
+#
+#   /            SPA shell; the JS handles the login redirect
+#   /auth/login  issues the first token (chicken-and-egg, cannot require one)
+#   /health      liveness / readiness probe
+#   /metrics     Prometheus scrape; operational metrics, intentionally anonymous
+#
+# NOTE: other /auth/* endpoints (/auth/me, /auth/refresh, /auth/users) are
+# NOT public. They carry their own current_user / current_active_superuser
+# dependency and now also pass through this global guard — there is no blanket
+# "/auth" prefix skip, so a future auth-router endpoint is protected by default.
+PUBLIC_PATHS = frozenset(
+    {
+        "/",
+        "/auth/login",
+        "/health",
+        "/metrics",
+    }
+)
+PUBLIC_PATH_PREFIXES = ("/static",)
 
 
 async def _enforce_auth(request: Request, _user=Depends(current_user_optional)):
-    # The auth router has its own login/register endpoints that are
-    # public; the SPA shell, /health, and /metrics are also public.
-    # Everything else needs a valid Bearer token.
-    if request.url.path in _PUBLIC_PATHS:
+    path = request.url.path
+    if path in PUBLIC_PATHS:
         return None
-    if request.url.path.startswith("/static"):
-        return None
-    if request.url.path.startswith("/auth"):
+    if any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES):
         return None
     if _user is None:
         raise HTTPException(
@@ -185,7 +225,24 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
     dependencies=[Depends(_enforce_auth)],
+    # FastAPI serves /docs, /redoc and /openapi.json as plain Starlette
+    # routes that bypass the app-level ``_enforce_auth`` dependency, so
+    # leaving them on exposes the full API schema to anonymous callers.
+    # Gating them behind a bearer token does not work (Swagger UI fetches
+    # the schema from the browser without the token), and the hand-written
+    # SPA does not consume OpenAPI, so the interactive docs are disabled.
+    # Re-enable behind a localhost bind / reverse proxy if needed in dev.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+
+@app.exception_handler(DomainError)
+async def _domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 # Middleware order matters: Starlette runs the *last added* middleware
 # first on the way in. RequestIdMiddleware must run before everything
 # else so a panic in a downstream handler still carries a trace id.

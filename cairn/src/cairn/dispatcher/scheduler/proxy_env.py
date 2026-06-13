@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cairn.shared.protocol_models import ProxyConfig
+from cairn.shared.contracts import ProxyConfig
 
 
 def proxy_config_to_env(cfg: ProxyConfig) -> dict[str, str]:

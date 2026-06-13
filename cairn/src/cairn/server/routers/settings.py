@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from cairn.server.models_pkg.common import Settings
 from cairn.server.config.settings import get_yaml_settings, get_yaml_task_timeouts, update_yaml_settings
-from cairn.shared.protocol_models import TaskTimeouts
+from cairn.server.models_pkg.common import Settings
+from cairn.server.security.deps import current_active_superuser
+from cairn.shared.contracts import TaskTimeouts
 
 router = APIRouter(tags=["settings"])
 
@@ -13,7 +14,7 @@ def get_settings():
 
 
 @router.put("/settings", response_model=Settings)
-def update_settings(body: Settings):
+def update_settings(body: Settings, _superuser=Depends(current_active_superuser)):
     return update_yaml_settings(body)
 
 

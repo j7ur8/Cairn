@@ -4,10 +4,10 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
-from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.tasks.common import run_healthcheck
+from cairn.dispatcher.tasks.task_process import run_healthcheck
 from cairn.dispatcher.workers.registry import get_driver
+from cairn.shared.config import DispatchConfig, WorkerConfig
 
 LOG = logging.getLogger("runtime.startup")
 STARTUP_HEALTHCHECK_PREVIEW_LIMIT = 50

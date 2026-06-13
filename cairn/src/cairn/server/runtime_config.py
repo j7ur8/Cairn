@@ -5,8 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from cairn.shared.dispatch_config import SystemConfig
-
+from cairn.shared.config import DispatcherConfig, ServerConfig, SystemConfig
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DISPATCH_CONFIG_PATH = _REPO_ROOT / "dispatch.yaml"
@@ -25,10 +24,16 @@ def system_config() -> SystemConfig:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise RuntimeError(f"dispatch config must be a mapping: {path}")
-    system = data.get("system")
-    if not isinstance(system, dict):
-        raise RuntimeError(f"dispatch.yaml missing required system section: {path}")
-    return SystemConfig.model_validate(system)
+    server = data.get("server")
+    dispatcher = data.get("dispatcher")
+    if not isinstance(server, dict):
+        raise RuntimeError(f"dispatch.yaml missing required server section: {path}")
+    if not isinstance(dispatcher, dict):
+        raise RuntimeError(f"dispatch.yaml missing required dispatcher section: {path}")
+    return SystemConfig.from_sections(
+        ServerConfig.model_validate(server),
+        DispatcherConfig.model_validate(dispatcher),
+    )
 
 
 def reset_runtime_config_cache() -> None:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from cairn.shared.dispatch_config import WorkerConfig, resolve_mock_behavior
 from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
+from cairn.shared.config import WorkerConfig, resolve_mock_behavior
 
 _SCRIPT = """
 import json,random,sys,time
@@ -103,16 +103,19 @@ if phase=="bootstrap":
 
 if phase=="bootstrap_conclude":
     if outcome=="fact":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact for bootstrap_conclude"}}}, ensure_ascii=False))
+        print("32173462130721312360912mock fact for bootstrap_conclude32173462130721312360912")
     elif outcome=="rejected":
-        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
+        print("mock_rejected")
     else:
-        print(json.dumps({"accepted":True,"data":{"complete":{"description":"mock invalid payload"}}}, ensure_ascii=False))
+        print("mock invalid payload")
     raise SystemExit(0)
 
 if outcome=="fact":
     label = prompt.get("intent_id") or phase
-    print(json.dumps({"accepted":True,"data":{"description":f"mock fact for {label}"}} , ensure_ascii=False))
+    if phase=="explore_conclude":
+        print(f"32173462130721312360912mock fact for {label}32173462130721312360912")
+    else:
+        print(json.dumps({"accepted":True,"data":{"description":f"mock fact for {label}"}} , ensure_ascii=False))
 elif outcome=="rejected":
     print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
 else:

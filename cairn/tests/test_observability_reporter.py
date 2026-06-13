@@ -45,7 +45,7 @@ class _FakeClient:
 
 class ExecutionReporterTests(unittest.TestCase):
     def _settings(self):
-        from cairn.shared.dispatch_config import ObservabilityConfig
+        from cairn.shared.config import ObservabilityConfig
 
         return ObservabilityConfig(flush_interval_ms=0, flush_max_bytes=1)
 

@@ -8,7 +8,7 @@
 3. 如数据模型或 API 端点有变更，同步更新 ARCHITECTURE.md 中的相关图表
 4. 新增的函数入口点不超过 15 个上限时，追加到入口点列表；超过则替换次重要的
 
-生成日期：2026-06-10
+生成日期：2026-06-13
 -->
 
 # Cairn 全面代码分析
@@ -40,7 +40,7 @@ Cairn 的核心不是固定渗透测试流程，而是一个通用 problem-solvi
 | 认证 | PyJWT, bcrypt | JWT + 密码 hash |
 | 观测 | prometheus-client | HTTP/Dispatcher/Worker metrics |
 | 前端 | Static HTML, Alpine, Tailwind, Cytoscape | 无构建静态资源 |
-| 测试 | unittest/pytest 风格测试文件 | 当前环境缺少 pytest 包 |
+| 测试 | pytest + unittest 风格测试文件 | dev 依赖声明 `pytest`，统一入口为 `python -m pytest` |
 
 ## 2. 工程目录结构
 
@@ -52,9 +52,9 @@ Cairn/
 │   ├── migrations/                   # PostgreSQL 迁移
 │   ├── src/cairn/
 │   │   ├── cli.py                    # cairn serve / dispatch / db 命令
-│   │   ├── server/                   # FastAPI Server、routers、models、repositories
-│   │   ├── dispatcher/               # 调度器、worker adapters、runtime、prompts
-│   │   ├── shared/                   # 共享协议模型、配置模型、任务类型
+│   │   ├── server/                   # FastAPI Server、application/domain/repositories/routers
+│   │   ├── dispatcher/               # 调度器、tasks、runtime、worker adapters、prompts
+│   │   ├── shared/                   # config、contracts、任务类型
 │   │   └── observability/            # 日志、metrics、trace id
 │   └── tests/                        # 认证、路径安全、调度、配置、观测等测试
 ├── capabilities/                     # 技能、角色、payload 和模板
@@ -62,7 +62,7 @@ Cairn/
 ├── datas/                            # 默认数据目录
 ├── README/                           # 图片和架构可视化素材
 ├── dispatch.yaml                     # 主运行配置
-├── dispatch.capabilities.yaml        # 能力配置
+├── dispatch.resources.yaml           # remote_support、capabilities、roles 配置
 ├── docker-compose.yaml               # 本地完整栈
 └── Dockerfile                        # app 镜像
 ```
@@ -75,12 +75,20 @@ Cairn/
 | `cairn/src/cairn/server/app.py` | FastAPI app、lifespan、全局鉴权、路由注册、静态文件 |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
 | `cairn/src/cairn/server/orm.py` | 数据表、索引、约束定义 |
-| `cairn/src/cairn/server/services.py` | 图操作、claim/conclude/reason lease 等核心规则 |
-| `cairn/src/cairn/server/project_creation_service.py` | 项目创建、执行配置快照 |
+| `cairn/src/cairn/server/application/` | 项目、intent、reason、hints/files/attachments、execution config、capabilities、export、replay 等 HTTP 用例编排；replay 已拆为 service、orchestration、route、attachments、step advancer |
+| `cairn/src/cairn/server/domain/` | 图操作、claim/conclude/reason lease、项目状态等无 SQL 纯业务规则 |
+| `cairn/src/cairn/server/repositories/` | 项目、intent、reason、lease、ID、AI profile check、export、replay 等 SQL repository/query |
+| `cairn/src/cairn/server/observability/*_repository.py` | LLM execution、event、event view、usage、retention SQL repository/query，观测 application 模块只负责映射和编排 |
+| `cairn/src/cairn/server/execution_config/` | 执行配置快照、PATCH、结构化表持久化与 dispatcher payload 组装 |
+| `cairn/src/cairn/server/mappers/` | DB row 到 API/domain DTO 的转换 |
 | `cairn/src/cairn/dispatcher/scheduler/loop.py` | Dispatcher 主循环、任务分发 |
-| `cairn/src/cairn/dispatcher/protocol/client.py` | Dispatcher 调 Server 的 HTTP client |
-| `cairn/src/cairn/dispatcher/runtime/containers.py` | Worker 容器生命周期管理 |
-| `cairn/src/cairn/shared/dispatch_config.py` | YAML 配置模型和校验 |
+| `cairn/src/cairn/dispatcher/scheduler/task_submitter.py` | bootstrap/explore/reason 提交流程；claim/release 与 runtime registry/log 分别委托给 `task_claims.py` 和 `submission_registry.py` |
+| `cairn/src/cairn/dispatcher/tasks/lifecycle.py` | 统一 reporter 与 heartbeat lease 生命周期 |
+| `cairn/src/cairn/dispatcher/tasks/reason_result.py` | Reason 输出解析、complete/intents 写回和 finish outcome 映射 |
+| `cairn/src/cairn/dispatcher/protocol/` | Dispatcher 调 Server 的 HTTP client，按 project/task/AI profile/observability 子 API 拆分 |
+| `cairn/src/cairn/dispatcher/runtime/containers.py` | Worker 容器 facade；生命周期、cleanup、archive/file、exec/process 辅助拆到 runtime helper |
+| `cairn/src/cairn/shared/config/` | `dispatch.yaml` 与 `dispatch.resources.yaml` 配置模型、加载和资源校验 |
+| `cairn/src/cairn/shared/contracts/` | Server 与 Dispatcher 共享 HTTP DTO；按 settings/timeouts/proxies/AI profiles/LLM events/projects/reason 拆分 |
 
 ## 3. 关键入口点
 
@@ -93,11 +101,12 @@ Cairn/
 | `lifespan()` | `cairn/src/cairn/server/app.py` | FastAPI startup/shutdown | 配置日志、DB、管理员 bootstrap、retention loop |
 | `_enforce_auth()` | `cairn/src/cairn/server/app.py` | FastAPI global dependency | 全局 Bearer token 鉴权 |
 | `create_project()` | `server/routers/projects.py` | `POST /projects` | 创建项目和 execution config snapshot |
-| `claim_open_intent_or_409()` | `server/services.py` | Intent claim API | Worker claim open intent |
-| `conclude_open_intent_or_409()` | `server/services.py` | Intent conclude API | 写入 fact 并结束 intent |
-| `claim_project_reason_or_409()` | `server/services.py` | Reason claim API | 项目级 reason lease |
+| `claim_open_intent_or_409()` | `server/domain/intents.py` | Intent claim API | Worker claim open intent |
+| `create_project_from_draft()` | `server/application/project_creation.py` | `POST /projects` | 创建项目、origin/hints 和 execution config snapshot |
+| `load_project_execution_config()` | `server/execution_config/assembler.py` | execution config API / Dispatcher | 单 task payload 组装 |
 | `DispatcherLoop.run()` | `dispatcher/scheduler/loop.py` | Dispatcher process | 持续调度 tick |
-| `ContainerManager.ensure_running()` | `dispatcher/runtime/containers.py` | 任务启动前 | 创建或复用项目容器 |
+| `TickCoordinator.run_iteration()` | `dispatcher/scheduler/tick_coordinator.py` | Dispatcher tick | 维护 runtime、获取 work summaries、触发 dispatch |
+| `TaskSubmitter.dispatch_*()` | `dispatcher/scheduler/task_submitter.py` | 调度提交 | 统一 claim/export/worker selection/submit/release |
 | `run_bootstrap_task()` | `dispatcher/tasks/bootstrap.py` | Dispatcher task | Bootstrap 阶段 |
 | `run_reason_task()` / `run_explore_task()` | `dispatcher/tasks/` | Dispatcher task | Reason 和 Explore 阶段 |
 
@@ -105,11 +114,13 @@ Cairn/
 
 | 算法/机制 | 文件位置 | 功能描述 | 复杂度/特性 | 备注 |
 |-----------|----------|----------|-------------|------|
-| Fact-Intent graph expansion | `server/services.py`, `dispatcher/scheduler/loop.py` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
-| Round-robin project ordering | `dispatcher/scheduler/loop.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
+| Fact-Intent graph expansion | `server/domain/*`, `server/application/*`, `dispatcher/scheduler/*` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
+| Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
-| Lease expiration | `server/services.py` | 过期 intent worker 和 reason lease | SQL update/select | 通过 heartbeat_at 判断 |
-| Replay advance | `server/routers/replay.py`, `replay_service.py` | 从完成项目生成 replay run 并推进步骤 | 与 replay steps 数量相关 | 用于复现实验链路 |
+| AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
+| Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
+| Replay advance | `server/application/replay/`, `server/repositories/replay.py`, `dispatcher/scheduler/replay.py` | 从完成项目生成 replay run 并推进步骤 | 与 replay steps 数量相关 | 事务内创建/推进在 service，事务外附件复制、激活和失败补偿在 orchestration |
+| Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | 与事件数和查询 limit 相关 | SQL 收敛在 execution/event/view/usage/retention repository/query 类 |
 | Redaction | `server/observability/redaction.py`, `dispatcher/observability/redaction.py` | 对 token/key 等敏感文本脱敏 | 与事件文本长度和 pattern 数量相关 | 用于观测数据 |
 
 ## 5. 主要业务流程
@@ -124,10 +135,10 @@ sequenceDiagram
     participant YAML as dispatch YAML
 
     UI->>Server: POST /projects
-    Server->>YAML: load capabilities/roles/AI profiles/proxy
+    Server->>YAML: load dispatch/resources, roles, AI profiles, proxy
     Server->>DB: next_project_id()
     Server->>DB: INSERT projects, facts(origin), hints
-    Server->>DB: INSERT worker_execution_configs snapshots
+    Server->>DB: INSERT project_execution_configs snapshots
     Server-->>UI: ProjectDetail
 ```
 
@@ -148,10 +159,16 @@ sequenceDiagram
     S->>DB: update lease
     D->>C: ensure_running(project_id)
     D->>W: execute prompt
-    W-->>D: structured result
+    W-->>D: JSON protocol result
+    opt execute parse fails or times out
+        D->>W: conclude fallback prompt
+        W-->>D: sentinel-wrapped plain fact text
+    end
     D->>S: conclude/create_intent/complete/report events
     S->>DB: persist graph changes
 ```
+
+Bootstrap/Explore 的 execute 阶段仍使用 JSON protocol contract，由 `parse_json_output()` 解析，再按阶段校验 fact、intent、complete、noop、blocked 等结果。`bootstrap_conclude` 和 `explore_conclude` fallback 不再返回 JSON；成功输出必须是 `32173462130721312360912<facts text>32173462130721312360912`，失败或拒绝时不包裹 sentinel。Dispatcher 通过 `parse_sentinel_fact_output()` 解析该文本，要求只出现一个 sentinel pair、内容非空，且内容不能是 JSON。Claude conclude 命令只开放 `Read` 工具；mock worker 对 conclude 阶段也输出同样的 sentinel 文本。
 
 ### Reason 阶段
 
@@ -195,7 +212,7 @@ erDiagram
     projects ||--o{ intents : owns
     projects ||--o{ hints : owns
     projects ||--o{ scoped_counters : owns
-    projects ||--o{ worker_execution_configs : snapshots
+    projects ||--o{ project_execution_configs : snapshots
     projects ||--o{ replay_runs : source
     projects ||--o{ llm_executions : observes
     intents ||--o{ intent_sources : has_sources
@@ -261,8 +278,8 @@ erDiagram
 | 字段/配置 | 存储方式 | 说明 |
 |-----------|----------|------|
 | `users.hashed_password` | bcrypt hash | 不存明文密码 |
-| `system.auth.jwt_secret` | YAML 配置 | JWT HS256 签名密钥 |
-| `system.auth.dispatcher_api_token` | YAML 配置 | Dispatcher reload/API service token |
+| `server.auth.jwt_secret` | YAML 配置 | JWT HS256 签名密钥 |
+| `server.auth.dispatcher_api_token` | YAML 配置 | Dispatcher reload/API service token |
 | AI profile `sk` | YAML/加密包装服务 | Server 提供读取 secret 的接口 |
 | proxy password | YAML-backed config | Dispatcher 启动任务时注入 worker env |
 | remote SSH password | YAML config | Worker remote support env |
@@ -279,7 +296,7 @@ erDiagram
 
 ## 7. API 端点
 
-项目没有独立 OpenAPI 文件，FastAPI 运行时可生成 schema。当前扫描到 `@router`/`@app` 装饰器约 76 个。
+项目没有独立 OpenAPI 文件，FastAPI 运行时可生成 schema。当前扫描到 `@router`/`@app` 装饰器约 75 个。
 
 | 分组 | 主要端点 | 用途 | 认证 |
 |------|----------|------|------|
@@ -302,12 +319,12 @@ erDiagram
 | 层面 | 策略 |
 |------|------|
 | 数据库不可用 | `DatabaseUnavailable` 和 `SQLAlchemyError` 被转换为 503 JSON |
-| 业务冲突 | 使用 `HTTPException(409, ...)` 表示 intent 已被 claim、项目状态冲突等 |
+| 业务冲突 | domain 层抛 `DomainError`/`ConflictError` 等业务异常，`server/app.py` 统一映射到 HTTP JSON；部分 router 仍直接使用 `HTTPException` |
 | 鉴权失败 | 401 + `WWW-Authenticate: Bearer` |
 | 权限不足 | 403 |
 | 文件路径 | traversal、非法 project_id/path 返回 400；不存在返回 404；超大文件返回 413 |
 | Dispatcher HTTP | `CairnClient` 对部分请求返回 `ApiResult`，对读取请求调用 `raise_for_status()` |
-| Worker 执行 | adapters 输出 structured events，rejected/invalid_json/timeout 通过任务结果和观测事件体现 |
+| Worker 执行 | execute 阶段解析 JSON protocol；conclude fallback 解析 sentinel plain text；缺失 sentinel、多个 sentinel、空内容或 JSON 内容都会记录为 parse_error |
 
 日志和 trace：
 
@@ -321,10 +338,10 @@ erDiagram
 
 | 配置 | 加载位置 |
 |------|----------|
-| Server runtime system config | 优先 `/cairn/dispatch.yaml`，否则 repo 根 `dispatch.yaml` |
-| Dispatcher full config | CLI 参数 `--config` 指定 |
-| Capabilities config | `/cairn/dispatch.capabilities.yaml` 或 repo 根 `dispatch.capabilities.yaml` |
-| Docker Compose bind mount | 将本地 YAML 挂载到 `/cairn/` |
+| Server runtime system config | 优先 `/cairn/dispatch.yaml`，否则 repo 根 `dispatch.yaml`；只读取 `server` 和 `dispatcher` section |
+| Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `dispatch.resources.yaml` |
+| Resources config | `/cairn/dispatch.resources.yaml` 或 repo 根 `dispatch.resources.yaml`，包含 `remote_support`、`capabilities`、`roles` |
+| Docker Compose bind mount | 将 `dispatch.yaml` 和 `dispatch.resources.yaml` 挂载到 `/cairn/` |
 
 核心命令：
 
@@ -340,15 +357,17 @@ docker compose up --build
 
 | 配置 | 说明 |
 |------|------|
-| `system.database.url` | PostgreSQL URL，SQLite 被显式拒绝 |
-| `system.auth.jwt_secret` | JWT 签名密钥 |
-| `system.auth.dispatcher_api_token` | Dispatcher API/reload token |
-| `system.dispatcher.*` | reload、health addr |
-| `workers[]` | Worker 后端、优先级、env、模型 |
-| `container.*` | Worker image、network、capabilities、bind mounts |
+| `server.database.url` | PostgreSQL URL，SQLite 被显式拒绝 |
+| `server.auth.jwt_secret` | JWT 签名密钥 |
+| `server.auth.dispatcher_api_token` | Dispatcher API/reload token |
+| `server.paths/settings/log/retention` | Server 文件路径、超时、日志和 retention |
+| `dispatcher.reload/health_addr/runtime` | reload、health addr、调度并发和 prompt group |
+| `worker_pool.workers[]` | Worker 后端、优先级、env、模型 |
+| `worker_pool.proxies[]` | 系统代理配置 |
+| `worker_runtime.container.*` | Worker image、network、capabilities、bind mounts |
 | `tasks.bootstrap/reason/explore` | 超时和 reason max intents |
 | `observability.*` | 记录范围、事件大小、retention |
-| `capabilities.*` | MCP、skills、roles 和能力可用性 |
+| `dispatch.resources.yaml` | remote support、MCP、skills、roles 和能力可用性 |
 
 ## 10. 基础设施与横切关注点
 
@@ -377,12 +396,18 @@ docker compose up --build
 | `test_observability*.py` | LLM events、文件和 retention |
 | `test_db_*` | migration、PostgreSQL hardening |
 | `test_worker_cli_adapters.py` | Worker CLI adapters |
-| `test_yaml_config.py`, `test_proxy_settings.py` | YAML 配置和代理 |
+| `test_yaml_config.py`, `test_dispatch_sidecar_config.py`, `test_proxy_settings.py` | YAML 配置、resources sidecar 和代理 |
+| `test_scheduler_refactor.py` | Dispatcher scheduler 协作者和 TaskSubmitter 流水线回归 |
+| `test_architecture_boundaries.py` | domain/router/mapper/application/observability/scheduler/旧路径架构边界检查 |
+| `test_execution_config_source.py` | 执行配置快照、PATCH、secret 隔离 |
 
 当前验证状态：
 
-- 仓库有 30 个 `test_*.py` 测试文件。
-- 当前环境中 `pytest` 不在 PATH，`uv run python -m pytest ...` 报 `No module named pytest`；未能执行测试套件。
+- 仓库有 31 个 `test_*.py` 测试文件。
+- 2026-06-13 当前环境使用 `python -m compileall -q cairn/src/cairn` 通过。
+- 2026-06-13 当前环境使用 `uv run python -m pytest -q -m 'not db'` 通过：158 passed, 23 skipped, 129 deselected, 7 subtests passed；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
+- 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
+- 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
 
 ## 12. 待办与已知问题
 
@@ -398,10 +423,12 @@ docker compose up --build
 
 | 严重度 | 问题 | 位置 | 影响 |
 |--------|------|------|------|
-| High | 多个管理面接口只要求登录，未要求 superuser | `server/app.py`, `routers/settings.py`, `routers/proxies.py`, `routers/capabilities.py`, `routers/ai_profiles.py` | 普通用户可改系统配置、代理、能力、AI profile |
-| High | AI Profile secret 通过 API 明文返回 | `server/routers/ai_profiles.py` | 凭据泄露风险 |
-| Medium | AI profile check request claim 为 read-then-update，缺少状态条件保护 | `server/routers/ai_profiles.py` | 多个消费者可能重复 claim 同一任务 |
-| Medium | 测试依赖未完整声明 | `pyproject.toml` dev group 只有 `httpx` | 本地无法直接运行 pytest |
+| 已修复 | 多个管理面接口只要求登录，未要求 superuser | `routers/settings.py`, `routers/proxies.py`, `routers/capabilities.py`, `routers/ai_profiles.py` | 管理写接口和敏感读接口已要求 superuser/service token |
+| 已收敛 | AI Profile secret 通过 API 明文返回 | `server/routers/ai_profiles.py` | secret endpoint 仍供 dispatcher service token 注入 worker env，普通用户不可访问 |
+| 已修复 | AI profile check request claim 为 read-then-update，缺少状态条件保护 | `server/repositories/ai_profiles.py` | claim 改为单条 `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING`，router 不再直接持有 SQL |
+| 已修复 | 测试依赖未完整声明 | `pyproject.toml` dev group | 已加入 `pytest>=8.0`，并配置 `testpaths`、`pythonpath` 和 `db` marker |
+| 已修复 | Alembic revision id 超过默认版本表宽度导致 compose 启动失败 | `migrations/versions/0002_exec_config_names.py` | head 缩短为 `0002_exec_config_names`，业务 DDL 不变；边界测试扫描 revision/down_revision 长度不超过 32 |
+| Low | Dispatcher 阶段入口仍偏大 | `dispatcher/tasks/bootstrap.py`, `dispatcher/tasks/explore.py`, `dispatcher/tasks/reason.py` | common/process/writeback/release/outcome/text/snapshot 已拆分；TaskSubmitter 提交流水线已统一，阶段主流程仍可继续收敛 |
 
 ## 13. 隐藏细节与注意事项
 
@@ -409,8 +436,10 @@ docker compose up --build
 |------|------|
 | 注意 | Server 的全局鉴权只区分 public 和 authenticated；是否需要 superuser 要由各 router 单独声明。 |
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
-| 注意 | `dispatch.yaml` 同时被 Server 和 Dispatcher 使用，但 Dispatcher 通过 CLI 指定配置路径，Server 通过固定路径探测。 |
+| 注意 | `dispatch.yaml` 与 `dispatch.resources.yaml` 是强绑定 sidecar；不再兼容旧 `dispatch.capabilities.yaml`。 |
+| 注意 | `DispatchConfig.load(path)` 只读取同目录 `dispatch.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
+| 注意 | 当前 Alembic head 是 `0002_exec_config_names`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后可能成为 hot path。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit，但保留策略依赖 retention loop。 |
 | 向后兼容 | Prompt 模板要求固定变量，如 `{graph_yaml}`、`{intent_id}`、`{capability_instructions}`，配置模型会校验。 |
-| 向后兼容 | Worker adapters 的输出结构驱动 fact/intent/complete 解析，变更需同步 parser 和测试。 |
+| 向后兼容 | Worker execute 输出结构驱动 fact/intent/complete 解析；conclude fallback 使用 sentinel plain-text contract，变更需同步 prompts、parser、adapters 和测试。 |

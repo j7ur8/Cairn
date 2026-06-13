@@ -5,9 +5,9 @@ Covers:
 - ``ProxyConfig`` / ``ProxyCreate`` schema validation
 - ``proxy_config_to_env`` for socks5 / http / https with and without auth
 - ``BUILTIN_PATTERNS`` redaction of HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / SOCKS5_PROXY
-- ``DispatcherLoop._resolve_project_proxy`` populates the cache and tolerates
+- ``ProjectContextResolver.resolve_project_proxy`` populates the cache and tolerates
   ``LookupError`` / ``RequestException``
-- ``DispatcherLoop._resolve_proxy_env`` returns ``None`` for the
+- ``ProjectContextResolver.resolve_proxy_env`` returns ``None`` for the
   startup-healthcheck project id
 - ``ContainerManager`` accepts the ``proxy_resolver`` callable and merges its
   result into the worker container ``environment=``
@@ -18,18 +18,19 @@ from __future__ import annotations
 
 import sys
 import unittest
-from cairn.dispatcher.scheduler.project_cache import ProjectCaches
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
+
+from cairn.dispatcher.scheduler.project_cache import ProjectCaches
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 def _ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _make_proxy(**overrides: Any):
@@ -37,18 +38,18 @@ def _make_proxy(**overrides: Any):
     from cairn.server.models_pkg.proxies import ProxyConfig
 
     ts = _ts()
-    base = dict(
-        id="proxy_abc",
-        name="corp-socks",
-        type="socks5",
-        host="10.0.0.1",
-        port=1080,
-        has_auth=True,
-        username="alice",
-        password="hunter2",
-        created_at=ts,
-        updated_at=ts,
-    )
+    base = {
+        "id": "proxy_abc",
+        "name": "corp-socks",
+        "type": "socks5",
+        "host": "10.0.0.1",
+        "port": 1080,
+        "has_auth": True,
+        "username": "alice",
+        "password": "hunter2",
+        "created_at": ts,
+        "updated_at": ts,
+    }
     base.update(overrides)
     return ProxyConfig(**base)
 
@@ -156,7 +157,7 @@ class ProxyRedactionTests(unittest.TestCase):
 
 
 class ResolverCacheTests(unittest.TestCase):
-    """``DispatcherLoop._resolve_project_proxy`` populates cache and tolerates errors."""
+    """``ProjectContextResolver`` populates cache and tolerates proxy lookup errors."""
 
     def _make_project(self, project_id: str = "p1", proxy=None):
         from cairn.server.models_pkg.projects import ProjectDetail, ProjectMeta
@@ -176,92 +177,74 @@ class ResolverCacheTests(unittest.TestCase):
             has_auth=False, created_at=ts, updated_at=ts,
         )
 
-    def test_resolve_no_proxy_populates_none(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+    def _resolver(self, *, client=None):
+        from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
+        from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
 
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop._ai_overlay_cache = MagicMock()
+        return ProjectContextResolver(
+            config=MagicMock(),
+            client=client or MagicMock(),
+            runtime=MagicMock(),
+            project_caches=ProjectCaches(),
+            ai_overlay_cache=AIOverlayCache(),
+            ai_worker_selector=MagicMock(),
+        )
+
+    def test_resolve_no_proxy_populates_none(self) -> None:
+        resolver = self._resolver()
         project = self._make_project()
-        # Bind the real method onto the spec'd instance
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIn("p1", loop.project_caches.proxy)
-        self.assertIsNone(loop.project_caches.proxy["p1"])
+        resolver.resolve_project_proxy(project)
+        self.assertIn("p1", resolver.project_caches.proxy)
+        self.assertIsNone(resolver.project_caches.proxy["p1"])
 
     def test_resolve_fetches_proxy_when_proxy_summary_present(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
-
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop._ai_overlay_cache = MagicMock()
-        loop.client = MagicMock()
-        loop.client.get_proxy.return_value = _make_proxy()
+        client = MagicMock()
+        client.get_proxy.return_value = _make_proxy()
+        resolver = self._resolver(client=client)
         project = self._make_project(proxy=self._make_proxy_summary("px1"))
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertEqual(loop.project_caches.proxy["p1"].id, "proxy_abc")
-        loop.client.get_proxy.assert_called_once_with("px1")
+        resolver.resolve_project_proxy(project)
+        self.assertEqual(resolver.project_caches.proxy["p1"].id, "proxy_abc")
+        client.get_proxy.assert_called_once_with("px1")
 
     def test_resolve_lookup_error_falls_back_to_none(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
-
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop._ai_overlay_cache = MagicMock()
-        loop.client = MagicMock()
-        loop.client.get_proxy.side_effect = LookupError("not found")
+        client = MagicMock()
+        client.get_proxy.side_effect = LookupError("not found")
+        resolver = self._resolver(client=client)
         project = self._make_project(proxy=self._make_proxy_summary("px_missing"))
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIsNone(loop.project_caches.proxy["p1"])
+        resolver.resolve_project_proxy(project)
+        self.assertIsNone(resolver.project_caches.proxy["p1"])
 
     def test_resolve_request_exception_falls_back_to_none(self) -> None:
         import requests
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop._ai_overlay_cache = MagicMock()
-        loop.client = MagicMock()
-        loop.client.get_proxy.side_effect = requests.RequestException("boom")
+        client = MagicMock()
+        client.get_proxy.side_effect = requests.RequestException("boom")
+        resolver = self._resolver(client=client)
         project = self._make_project(proxy=self._make_proxy_summary("px_err"))
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        self.assertIsNone(loop.project_caches.proxy["p1"])
+        resolver.resolve_project_proxy(project)
+        self.assertIsNone(resolver.project_caches.proxy["p1"])
 
     def test_resolve_refetches_on_every_call(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
-
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop._ai_overlay_cache = MagicMock()
-        loop.client = MagicMock()
-        loop.client.get_proxy.return_value = _make_proxy()
+        client = MagicMock()
+        client.get_proxy.return_value = _make_proxy()
+        resolver = self._resolver(client=client)
         project = self._make_project(proxy=self._make_proxy_summary("px1"))
-        # First call fetches and caches
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        # Second call also fetches (always-refresh semantics) — cache is
-        # used by _resolve_proxy_env at container-launch time, not by
-        # _resolve_project_proxy itself.
-        DispatcherLoop._resolve_project_proxy(loop, project)
-        # Must be called every time (always-refresh semantics)
-        self.assertEqual(len(loop.client.get_proxy.call_args_list), 2)
+        resolver.resolve_project_proxy(project)
+        resolver.resolve_project_proxy(project)
+        self.assertEqual(len(client.get_proxy.call_args_list), 2)
 
     def test_resolve_proxy_env_returns_none_for_startup_healthcheck(self) -> None:
         from cairn.dispatcher.runtime.containers import ContainerManager
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
 
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop.project_caches.proxy = {"p1": _make_proxy()}
-        # Real method bound to the spec
-        result = DispatcherLoop._resolve_proxy_env(loop, ContainerManager._STARTUP_PROJECT_ID)
+        resolver = self._resolver()
+        resolver.project_caches.proxy = {"p1": _make_proxy()}
+        result = resolver.resolve_proxy_env(ContainerManager._STARTUP_PROJECT_ID)
         self.assertIsNone(result)
 
     def test_resolve_proxy_env_returns_env_for_cached_project(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
-
-        loop = MagicMock(spec=DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop.project_caches.proxy = {"p1": _make_proxy()}
-        result = DispatcherLoop._resolve_proxy_env(loop, "p1")
+        resolver = self._resolver()
+        resolver.project_caches.proxy = {"p1": _make_proxy()}
+        result = resolver.resolve_proxy_env("p1")
         self.assertIsNotNone(result)
         self.assertIn("ALL_PROXY", result)
 
@@ -270,8 +253,8 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
     """``ContainerManager`` accepts the ``proxy_resolver`` callable and merges."""
 
     def test_proxy_resolver_none_returns_empty_env(self) -> None:
-        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
+        from cairn.shared.config import ContainerConfig
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
         with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
@@ -279,8 +262,8 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
         self.assertEqual(mgr._proxy_environment("p1"), {})
 
     def test_proxy_resolver_returning_dict_is_merged(self) -> None:
-        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
+        from cairn.shared.config import ContainerConfig
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
         with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
@@ -288,8 +271,8 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
         self.assertEqual(mgr._proxy_environment("p1"), {"HTTP_PROXY": "http://h:80"})
 
     def test_proxy_resolver_returning_none_yields_empty(self) -> None:
-        from cairn.shared.dispatch_config import ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
+        from cairn.shared.config import ContainerConfig
 
         cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
         with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
@@ -343,16 +326,16 @@ class ProxyDatabaseTests(unittest.TestCase):
         self.assertEqual(self.proxies_router.list_proxies(), [])
 
     def test_create_project_with_invalid_proxy_id_returns_400(self) -> None:
-        from fastapi import HTTPException
-        from helpers import test_task_timeouts
-        from cairn.server.routers import projects as projects_router
+        from cairn.server.domain.errors import DomainError
+        from cairn.server.models_pkg import CreateProjectRequest
         from cairn.server.models_pkg.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.models_pkg.intents import CreateProjectRequest
+        from cairn.server.routers import projects as projects_router
         from cairn.server.routers.ai_profiles import create_ai_profile
+        from helpers import test_task_timeouts
 
         profile = create_ai_profile(AiProfileCreate(
             name="p",
@@ -379,7 +362,7 @@ class ProxyDatabaseTests(unittest.TestCase):
                 reason=selection,
             ),
         )
-        with self.assertRaises(HTTPException) as cm:
+        with self.assertRaises(DomainError) as cm:
             projects_router.create_project(body)
         self.assertEqual(cm.exception.status_code, 400)
 

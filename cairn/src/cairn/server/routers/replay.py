@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from cairn.server.models_pkg.intents import (
+from cairn.server.application.replay import advance_replay_run as advance_replay_run_service
+from cairn.server.application.replay import create_replay_run as create_replay_run_service
+from cairn.server.models_pkg import (
     ReplayRunAdvanceResponse,
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
-from cairn.server.replay_service import advance_replay_run as advance_replay_run_service
-from cairn.server.replay_service import create_replay_run as create_replay_run_service
 
 router = APIRouter(tags=["replay"])
 

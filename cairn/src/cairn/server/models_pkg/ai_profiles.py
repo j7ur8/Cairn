@@ -4,8 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names
-from cairn.shared.protocol_models import (
+from cairn.shared.contracts import (  # noqa: F401  (CANONICAL_AUTH_ENV/HealthCheckItem/auth helpers are re-exports)
     CANONICAL_AUTH_ENV,
     AiProfile,
     AiProfileBase,
@@ -16,6 +15,8 @@ from cairn.shared.protocol_models import (
     auth_env_warning,
     canonical_auth_env,
 )
+from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names  # noqa: F401
+
 
 class AiWorkerType:
     codex = "codex"

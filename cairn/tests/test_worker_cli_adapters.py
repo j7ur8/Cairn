@@ -11,7 +11,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class ClaudeCodeDriverCommandTests(unittest.TestCase):
     def _worker(self):
-        from cairn.shared.dispatch_config import WorkerConfig
+        from cairn.shared.config import WorkerConfig
         return WorkerConfig(
             name="claude",
             type="claudecode",
@@ -49,7 +49,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertIn("--print", argv)
         self.assertNotIn("-p", argv)
         self.assertIn("--tools", argv)
-        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertEqual(argv[argv.index("--tools") + 1], "Read")
 
     def test_build_execute_includes_effort_when_configured(self) -> None:
         from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
@@ -118,12 +118,12 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertNotIn("--add-dir", argv)
         self.assertNotIn("/tmp/cairn-capabilities/proj/task/skills", argv)
         self.assertIn("--tools", argv)
-        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertEqual(argv[argv.index("--tools") + 1], "Read")
 
 
 class CodexDriverCommandTests(unittest.TestCase):
     def _worker(self):
-        from cairn.shared.dispatch_config import WorkerConfig
+        from cairn.shared.config import WorkerConfig
         return WorkerConfig(
             name="codex",
             type="codex",
@@ -298,13 +298,13 @@ class CodexTraceParserTests(unittest.TestCase):
             '{"type":"thread.started","thread_id":"019e9289-9f78-7b12-a33f-89252dcd62ac"}\n'
             '{"type":"turn.started"}\n'
             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message",'
-            '"text":"{\\"accepted\\":true,\\"data\\":{\\"fact\\":{\\"description\\":\\"ok\\"}}}"}}\n'
+            '"text":"{\\"accepted\\":true,\\"data\\":{\\"description\\":\\"ok\\"}}"}}\n'
             '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n'
         )
 
         self.assertEqual(
             CodexDriver().extract_response_text(stdout, ""),
-            '{"accepted":true,"data":{"fact":{"description":"ok"}}}',
+            '{"accepted":true,"data":{"description":"ok"}}',
         )
 
 

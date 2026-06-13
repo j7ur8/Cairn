@@ -5,6 +5,20 @@ import logging
 from fastapi import APIRouter, Query
 
 from cairn.server import db
+from cairn.server.observability.events_query import (
+    list_execution_events,
+    list_incremental_events,
+    list_project_events,
+)
+from cairn.server.observability.events_writer import (
+    append_event,
+    append_events,
+)
+from cairn.server.observability.executions import (
+    create_execution,
+    finish_execution,
+    list_executions,
+)
 from cairn.server.observability.models import (
     CreateEventRequest,
     CreateEventResponse,
@@ -19,17 +33,7 @@ from cairn.server.observability.models import (
     IncrementalEventListResponse,
     ObservabilitySettings,
 )
-from cairn.server.observability.repository import (
-    append_event,
-    append_events,
-    create_execution,
-    finish_execution,
-    list_event_view,
-    list_execution_events,
-    list_executions,
-    list_incremental_events,
-    list_project_events,
-)
+from cairn.server.observability.view_service import list_event_view
 
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}", tags=["llm-execution-log"])

@@ -4,21 +4,19 @@ You will receive a YAML snapshot of the task graph. In the YAML graph, facts rep
 But note that you are not continuing the task here, and you do not need to wait for unfinished tasks or commands. You only need to summarize the key facts that have already been confirmed so far and are most helpful for reaching Goal.
 
 # Output Requirements
-Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
+For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.
 
-When rejecting a task, return the following:
-```json
-{"accepted": false, "reason": "policy_refusal"}
-```
+If you cannot produce a successful fact summary, output a plain error explanation without 32173462130721312360912.
 
 Normal return example:
-```json
-{"accepted": true, "data": {"description": "..."}}
+```text
+32173462130721312360912Confirmed fact summary...32173462130721312360912
 ```
 
 # Rules
-- `description` must be an already confirmed objective factual conclusion. Do not output plans, guesses, or explanatory filler. Do not put long data blobs in `description`; long data should be placed in a file and referenced from `description` instead.
-- `description` should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
+- The marked text must contain already confirmed objective factual conclusions. Do not output plans, guesses, or explanatory filler. Do not put long data blobs in the marked text;
+- The marked text should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
+- On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 # Context
 ## Graph

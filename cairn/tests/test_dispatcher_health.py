@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 import unittest
+import urllib.request
 
 
 class DispatcherHealthServerTests(unittest.TestCase):

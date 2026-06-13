@@ -4,7 +4,7 @@
 
 @update: 本文件应在项目发生重大变更（如核心目标调整、技术栈升级、目录重构）时更新。
 
-生成日期：2026-06-10
+生成日期：2026-06-13
 -->
 
 # Cairn 项目概览
@@ -37,12 +37,12 @@ Cairn/
 ├── Dockerfile                        # Cairn app 镜像
 ├── docker-compose.yaml               # PostgreSQL、Server、Dispatcher、Worker image 编排
 ├── dispatch.yaml                     # 本地运行配置
-├── dispatch.capabilities.yaml        # 能力、角色、MCP 配置
+├── dispatch.resources.yaml           # remote support、能力、角色、MCP 配置
 ├── cairn/
 │   ├── pyproject.toml                # Python 包、依赖和 CLI 入口
 │   ├── alembic.ini                   # Alembic 配置
 │   ├── migrations/                   # PostgreSQL schema migration
-│   ├── src/cairn/                    # Server、Dispatcher、共享模型
+│   ├── src/cairn/                    # Server、Dispatcher、Shared、Observability 分层源码
 │   └── tests/                        # 单元与集成测试
 ├── capabilities/
 │   ├── skills/                       # 领域能力 Skill
@@ -80,6 +80,16 @@ uv run --project cairn cairn db migrate
 uv run --project cairn cairn db reset --yes
 ```
 
+测试：
+
+```bash
+uv run --project cairn python -m pytest
+uv run --project cairn python -m pytest -m 'not db'
+uv run --project cairn python -m pytest -m db
+```
+
+无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。
+
 ## 5. 关键链接
 
 | 链接 | 说明 |
@@ -90,4 +100,3 @@ uv run --project cairn cairn db reset --yes
 | `capabilities/README.md` | 能力目录说明 |
 | `AI/ARCHITECTURE.md` | 架构与设计细节 |
 | `AI/CODEBASE_ANALYSIS.md` | 全量代码分析 |
-

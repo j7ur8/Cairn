@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import yaml
 
 from cairn.server import db
-from cairn.server.repositories import sql
-
+from cairn.server.observability.event_repository import LlmEventRepository
+from cairn.server.observability.retention_repository import LlmRetentionRepository
 
 LOG = logging.getLogger(__name__)
 
@@ -50,30 +50,16 @@ def retention_hours() -> int:
 
 
 def _cutoff_iso(hours: int) -> str:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
     return cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def prune_older_than(conn: Any, cutoff_iso: str) -> int:
     """Delete executions older than ``cutoff_iso`` and return the count."""
-    rows = sql.fetchall(
-        conn,
-        "SELECT id FROM llm_executions WHERE started_at < :cutoff",
-        {"cutoff": cutoff_iso},
-    )
-    execution_ids = [row["id"] for row in rows]
-    for execution_id in execution_ids:
-        sql.execute(
-            conn,
-            "DELETE FROM llm_execution_events WHERE execution_id = :execution_id",
-            {"execution_id": execution_id},
-        )
-    cur = sql.execute(
-        conn,
-        "DELETE FROM llm_executions WHERE started_at < :cutoff",
-        {"cutoff": cutoff_iso},
-    )
-    return cur.rowcount
+    retention = LlmRetentionRepository(conn)
+    execution_ids = retention.execution_ids_older_than(cutoff_iso)
+    LlmEventRepository(conn).delete_for_executions(execution_ids)
+    return retention.delete_executions_older_than(cutoff_iso)
 
 
 def run_sweep(hours: int | None = None) -> int:
@@ -116,7 +102,7 @@ async def retention_loop(stop_event: asyncio.Event, *, interval_seconds: int) ->
                 LOG.exception("observability retention sweep failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
     finally:
         LOG.info("observability retention loop stopped")

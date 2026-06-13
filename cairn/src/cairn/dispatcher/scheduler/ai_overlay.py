@@ -17,10 +17,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from cairn.shared.protocol_models import ProjectAiProfileSnapshot
-from cairn.shared.protocol_models import ProxyConfig
 from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
-
+from cairn.shared.contracts import ProjectAiProfileSnapshot, ProxyConfig
 
 OVERLAY_TTL_SECONDS = 60.0
 

@@ -6,8 +6,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from cairn.shared.dispatch_config import WORKER_ENV_KEYS
-from cairn.shared.task_types import default_worker_task_type_names
 from cairn.server.config.files import load_dispatch_data, save_dispatch_data, utcnow
 from cairn.server.models_pkg.ai_profiles import (
     AiProfile,
@@ -16,6 +14,8 @@ from cairn.server.models_pkg.ai_profiles import (
     auth_env_warning,
     canonical_auth_env,
 )
+from cairn.shared.config import WORKER_ENV_KEYS
+from cairn.shared.task_types import default_worker_task_type_names
 
 
 def list_yaml_ai_profiles() -> list[AiProfile]:
@@ -109,9 +109,12 @@ def update_yaml_ai_profile_models(profile_id: str, models: list[str]) -> None:
 
 
 def _workers(data: dict[str, Any]) -> list[dict[str, Any]]:
-    workers = data.setdefault("workers", [])
+    worker_pool = data.setdefault("worker_pool", {})
+    if not isinstance(worker_pool, dict):
+        raise HTTPException(500, "dispatch.yaml worker_pool must be a mapping")
+    workers = worker_pool.setdefault("workers", [])
     if not isinstance(workers, list):
-        raise HTTPException(500, "dispatch.yaml workers must be a list")
+        raise HTTPException(500, "dispatch.yaml worker_pool.workers must be a list")
     return workers
 
 
@@ -256,4 +259,3 @@ def _slug(value: str) -> str:
 
 def _is_manual_worker(worker: dict[str, Any]) -> bool:
     return str(worker.get("name") or "").strip().startswith("ai_")
-

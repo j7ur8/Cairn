@@ -68,6 +68,7 @@ class AiProfileSecretTests(unittest.TestCase):
 
     def test_put_empty_string_is_rejected(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
         from cairn.server.routers import ai_profiles as r
 

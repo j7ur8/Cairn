@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 
@@ -110,103 +111,174 @@ class ReasonStateServiceTests(unittest.TestCase):
         return "proj_t"
 
     def test_failures_are_recorded_without_blocking_outcome(self) -> None:
-        from cairn.server.services import (
-            finish_project_reason_or_409,
-            get_project_reason_state,
-            reason_trigger_hash,
-        )
+        from cairn.server.application.reason_commands import claim_reason, finish_reason, reason_state
+        from cairn.server.domain.reason import reason_trigger_hash
+        from cairn.server.models_pkg import ReasonClaimRequest, ReasonFinishRequest
 
         project_id = self._create_project()
         trigger = "facts:19->21"
         trigger_hash = reason_trigger_hash(trigger)
         with self.db.session_scope() as conn:
-            finish_project_reason_or_409(
+            claim_reason(
                 conn,
                 project_id,
-                "codex",
-                trigger,
-                "2026-06-04T00:00:00Z",
-                trigger_hash=trigger_hash,
-                fact_count=21,
-                hint_count=1,
-                open_intent_count=0,
-                outcome="timeout",
-                error="timeout",
+                ReasonClaimRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-1",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                ),
             )
-            state = get_project_reason_state(conn, project_id)
+            finish_reason(
+                conn,
+                project_id,
+                ReasonFinishRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-1",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                    outcome="timeout",
+                    error="timeout",
+                ),
+            )
+            state = reason_state(conn, project_id)
+            assert state is not None
             self.assertEqual(state.failure_count, 1)
             self.assertEqual(state.outcome, "timeout")
             self.assertIsNone(state.next_retry_at)
 
-            finish_project_reason_or_409(
+            claim_reason(
                 conn,
                 project_id,
-                "codex",
-                trigger,
-                "2026-06-04T00:10:00Z",
-                trigger_hash=trigger_hash,
-                fact_count=21,
-                hint_count=1,
-                open_intent_count=0,
-                outcome="timeout",
-                error="timeout",
+                ReasonClaimRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-2",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                ),
             )
-            finish_project_reason_or_409(
+            finish_reason(
                 conn,
                 project_id,
-                "codex",
-                trigger,
-                "2026-06-04T00:20:00Z",
-                trigger_hash=trigger_hash,
-                fact_count=21,
-                hint_count=1,
-                open_intent_count=0,
-                outcome="timeout",
-                error="timeout",
+                ReasonFinishRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-2",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                    outcome="timeout",
+                    error="timeout",
+                ),
             )
-            state = get_project_reason_state(conn, project_id)
+            claim_reason(
+                conn,
+                project_id,
+                ReasonClaimRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-3",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                ),
+            )
+            finish_reason(
+                conn,
+                project_id,
+                ReasonFinishRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="run-3",
+                    trigger_hash=trigger_hash,
+                    fact_count=21,
+                    hint_count=1,
+                    open_intent_count=0,
+                    outcome="timeout",
+                    error="timeout",
+                ),
+            )
+            state = reason_state(conn, project_id)
+            assert state is not None
         self.assertEqual(state.outcome, "timeout")
         self.assertEqual(state.failure_count, 1)
 
     def test_superseded_reason_run_cannot_finish_active_claim(self) -> None:
-        from fastapi import HTTPException
-
-        from cairn.server.services import (
-            claim_project_reason_or_409,
-            finish_project_reason_or_409,
-            reason_trigger_hash,
-        )
+        from cairn.server.application.reason_commands import claim_reason, finish_reason
+        from cairn.server.domain.errors import DomainError
+        from cairn.server.domain.reason import reason_trigger_hash
+        from cairn.server.models_pkg import ReasonClaimRequest, ReasonFinishRequest
 
         project_id = self._create_project()
         trigger = "facts:2->3"
         trigger_hash = reason_trigger_hash(trigger)
         with self.db.session_scope() as conn:
-            claim_project_reason_or_409(
+            claim_reason(
                 conn,
                 project_id,
-                "codex",
-                trigger,
-                "2026-06-04T00:00:00Z",
-                run_id="new-run",
-                trigger_hash=trigger_hash,
-                fact_count=3,
-                hint_count=0,
-                open_intent_count=0,
-            )
-            with self.assertRaises(HTTPException) as ctx:
-                finish_project_reason_or_409(
-                    conn,
-                    project_id,
-                    "codex",
-                    trigger,
-                    "2026-06-04T00:00:01Z",
-                    run_id="old-run",
+                ReasonClaimRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="new-run",
                     trigger_hash=trigger_hash,
                     fact_count=3,
                     hint_count=0,
                     open_intent_count=0,
-                    outcome="noop",
-                    error=None,
+                ),
+            )
+            with self.assertRaises(DomainError) as ctx:
+                finish_reason(
+                    conn,
+                    project_id,
+                    ReasonFinishRequest(
+                        worker="codex",
+                        trigger=trigger,
+                        run_id="old-run",
+                        trigger_hash=trigger_hash,
+                        fact_count=3,
+                        hint_count=0,
+                        open_intent_count=0,
+                        outcome="noop",
+                        error=None,
+                    ),
+                )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_unclaimed_reason_cannot_finish(self) -> None:
+        from cairn.server.application.reason_commands import finish_reason
+        from cairn.server.domain.errors import DomainError
+        from cairn.server.domain.reason import reason_trigger_hash
+        from cairn.server.models_pkg import ReasonFinishRequest
+
+        project_id = self._create_project()
+        trigger = "facts:2->3"
+        with self.db.session_scope() as conn:
+            with self.assertRaises(DomainError) as ctx:
+                finish_reason(
+                    conn,
+                    project_id,
+                    ReasonFinishRequest(
+                        worker="codex",
+                        trigger=trigger,
+                        run_id="missing-run",
+                        trigger_hash=reason_trigger_hash(trigger),
+                        fact_count=3,
+                        hint_count=0,
+                        open_intent_count=0,
+                        outcome="noop",
+                        error=None,
+                    ),
                 )
         self.assertEqual(ctx.exception.status_code, 409)
 

@@ -40,7 +40,7 @@ services:
     volumes:
       - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
       - ./dispatch.yaml:/cairn/dispatch.yaml
-      - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml
+      - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -78,7 +78,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dispatch.yaml:/cairn/dispatch.yaml
-      - ./dispatch.capabilities.yaml:/cairn/dispatch.capabilities.yaml:ro
+      - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
       - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
     depends_on:

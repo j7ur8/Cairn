@@ -1,28 +1,72 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
+from cairn.dispatcher.capabilities import CapabilityInjection, inject_project_capabilities
 from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.roles import RoleInjection, inject_project_role
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.shared.capability_projection import (
-    capability_manifest_payload,
-    project_capability_data,
-)
-from cairn.shared.protocol_models import Intent, ProjectDetail
+from cairn.shared.capability_projection import project_capability_data
+from cairn.shared.config import DispatchConfig
 
 
 @dataclass(slots=True)
-class WorkerTaskContext:
-    config: DispatchConfig
-    client: CairnClient
-    container_manager: ContainerManager
-    project: ProjectDetail
-    worker: WorkerConfig
-    task_type: str
-    intent: Intent | None = None
+class PreparedTaskExecution:
+    execution_config: dict
+    task_timeout: dict
+    capabilities: CapabilityInjection
+    role: RoleInjection
+
+
+def prepare_task_execution(
+    *,
+    config: DispatchConfig,
+    client: CairnClient,
+    container_manager: ContainerManager,
+    container_name: str,
+    project_id: str,
+    task_type: str,
+    capability_scope: str,
+    reporter: ExecutionReporter,
+    phase: str,
+    preloaded_execution_config: dict | None = None,
+) -> PreparedTaskExecution | None:
+    execution_config = preloaded_execution_config
+    if execution_config is None:
+        execution_config = project_execution_config(client, project_id, task_type, reporter, phase)
+    task_timeout = project_task_timeout(execution_config, phase, reporter)
+    if execution_config is None or task_timeout is None:
+        return None
+    capabilities = inject_project_capabilities(
+        config,
+        container_manager,
+        container_name,
+        project_id,
+        task_type,
+        capability_scope,
+        project_capability_data(execution_config),
+    )
+    if capabilities.summary:
+        reporter.emit_result("capabilities", capabilities.summary)
+    for error in capabilities.errors:
+        reporter.emit_error("capabilities", "error", error)
+
+    role = inject_project_role(
+        project_id,
+        task_type,
+        project_role_data(execution_config),
+    )
+    if role.summary:
+        reporter.emit_result("role", role.summary)
+    for error in role.errors or []:
+        reporter.emit_error("role", "error", error)
+    return PreparedTaskExecution(
+        execution_config=execution_config,
+        task_timeout=task_timeout,
+        capabilities=capabilities,
+        role=role,
+    )
 
 
 def project_execution_config(

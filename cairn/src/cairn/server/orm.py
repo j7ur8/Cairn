@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -191,16 +201,55 @@ class ProjectReasonStateRow(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class WorkerExecutionConfigRow(Base):
-    __tablename__ = "worker_execution_configs"
-    __table_args__ = (Index("idx_worker_execution_configs_project_task", "project_id", "task_type"),)
+class ProjectExecutionConfigRow(Base):
+    __tablename__ = "project_execution_configs"
+    __table_args__ = (Index("idx_project_execution_configs_project", "project_id"),)
+
+    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    role_id: Mapped[str | None] = mapped_column(Text)
+    role_json: Mapped[str | None] = mapped_column(Text)
+    proxy_id: Mapped[str | None] = mapped_column(Text)
+    dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    resources_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ProjectExecutionTaskTimeoutRow(Base):
+    __tablename__ = "project_execution_task_timeouts"
 
     project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     task_type: Mapped[str] = mapped_column(Text, primary_key=True)
-    config_json: Mapped[str] = mapped_column(Text, nullable=False)
-    dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    capabilities_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    timeout: Mapped[int] = mapped_column(Integer, nullable=False)
+    conclude_timeout: Mapped[int | None] = mapped_column(Integer)
+
+
+class ProjectExecutionAiProfileRow(Base):
+    __tablename__ = "project_execution_ai_profiles"
+    __table_args__ = (Index("idx_project_execution_ai_profiles_project_task", "project_id", "task_type"),)
+
+    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    task_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_name: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_worker_type: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_provider: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    snapshot_base_url: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    snapshot_model: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_reasoning_type: Mapped[str | None] = mapped_column(Text)
+    snapshot_api_key_env: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+
+
+class ProjectExecutionCapabilityRow(Base):
+    __tablename__ = "project_execution_capabilities"
+    __table_args__ = (Index("idx_project_execution_capabilities_project_task", "project_id", "task_type"),)
+
+    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    task_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class AiProfileCheckRequestRow(Base):

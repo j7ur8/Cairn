@@ -4,7 +4,7 @@ import json
 from importlib import resources
 from typing import Any
 
-from cairn.shared.dispatch_config import RemoteSupportConfig
+from cairn.shared.config import RemoteSupportConfig
 
 
 def load_prompt(group: str, name: str) -> str:

@@ -38,7 +38,56 @@ packages = ["src/cairn"]
 [dependency-groups]
 dev = [
     "httpx>=0.27",
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+markers = [
+    "db: PostgreSQL integration tests",
+]
+
+[tool.ruff]
+# Match the existing code style. The dispatcher and server modules use
+# wide log lines, so a hard line-length cap would produce noise without
+# improving anything; E501 is disabled below rather than reflowing logs.
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+# Conservative baseline so the gate is green on day one: pyflakes (F),
+# a subset of pycodestyle (E/W), isort (I), bugbear (B), pyupgrade (UP),
+# comprehensions (C4). Tighten incrementally rather than reflowing the
+# whole tree at once.
+select = ["F", "E", "W", "I", "B", "UP", "C4"]
+ignore = [
+    "E501",   # line length: log statements are intentionally long
+    "B008",   # function call in default arg: FastAPI Depends() idiom
+    "B017",   # tests intentionally assert broad Exception in a few places
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favor readability over import hygiene (sys.path shims at top).
+"tests/*" = ["E402"]
+# Package __init__ files are re-export aggregators; the "unused" imports
+# are the public surface of the package, not dead code.
+"**/__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.12"
+# Incremental adoption: type errors do not fail the build yet, but the
+# checker runs so regressions in annotated code surface in review. Flip
+# these to strict per-package as modules get fully typed.
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+check_untyped_defs = false
+exclude = ["migrations/", "tests/"]
 
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"

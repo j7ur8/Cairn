@@ -7,19 +7,29 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
-from helpers import minimal_system_config
+from helpers import minimal_server_config
 
 
 def _make_config(*workers):
     """Build a minimal DispatchConfig-shaped stub for the probe."""
-    from cairn.shared.dispatch_config import (
-        DispatchConfig, RuntimeConfig, TasksConfig, ContainerConfig,
-        BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
+    from cairn.shared.config import (
+        BootstrapTaskConfig,
+        ContainerConfig,
+        DispatchConfig,
+        DispatcherConfig,
+        DispatcherReloadConfig,
+        ExploreTaskConfig,
+        ReasonTaskConfig,
+        RuntimeConfig,
+        ServerConfig,
+        TasksConfig,
+        WorkerPoolConfig,
+        WorkerRuntimeConfig,
     )
     runtime = RuntimeConfig(
         interval=1, max_workers=1, max_project_workers=1,
@@ -35,15 +45,23 @@ def _make_config(*workers):
         image="cairn/test:latest", user=None, network_mode="cairn",
         completed_action="stop",
     )
+    server = ServerConfig.model_validate(minimal_server_config())
+    dispatcher = DispatcherConfig(
+        health_addr="127.0.0.1:9100",
+        reload=DispatcherReloadConfig(url="http://127.0.0.1:9100/reload", enabled=False),
+        runtime=runtime,
+    )
     return DispatchConfig(
-        system=minimal_system_config(),
-        server="http://localhost", runtime=runtime, tasks=tasks,
-        container=container, workers=list(workers),
+        server=server,
+        dispatcher=dispatcher,
+        tasks=tasks,
+        worker_runtime=WorkerRuntimeConfig(container=container, common_env={}),
+        worker_pool=WorkerPoolConfig(proxies=[], workers=list(workers)),
     )
 
 
 def _claudecode(name="c1", model="m", base_url="https://api.example/anthropic", api_key="K", env_overrides=None, models=None, model_reasoning_effort=None):
-    from cairn.shared.dispatch_config import WorkerConfig
+    from cairn.shared.config import WorkerConfig
     env = {"ANTHROPIC_MODEL": model, "ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
     if env_overrides:
         env.update(env_overrides)
@@ -55,7 +73,7 @@ def _claudecode(name="c1", model="m", base_url="https://api.example/anthropic", 
 
 
 def _codex(name="x1", model="m", base_url="https://api.example/v1", api_key="K", models=None, model_reasoning_effort=None):
-    from cairn.shared.dispatch_config import WorkerConfig
+    from cairn.shared.config import WorkerConfig
     return WorkerConfig(
         name=name, type="codex", task_types=["bootstrap"],
         max_running=1, priority=0,
@@ -81,12 +99,12 @@ class AuthEnvWarningTests(unittest.TestCase):
 class HealthCheckSnapshotTests(unittest.TestCase):
     def _snap(self, **overrides):
         from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
-        defaults = dict(
-            profile_id="p1", task_type="bootstrap", role="primary", position=0,
-            snapshot_name="n", snapshot_worker_type="codex",
-            snapshot_provider="", snapshot_base_url="",
-            snapshot_model="m", snapshot_api_key_env="CAIRN_TEST_KEY_PRESENT",
-        )
+        defaults = {
+            "profile_id": "p1", "task_type": "bootstrap", "role": "primary", "position": 0,
+            "snapshot_name": "n", "snapshot_worker_type": "codex",
+            "snapshot_provider": "", "snapshot_base_url": "",
+            "snapshot_model": "m", "snapshot_api_key_env": "CAIRN_TEST_KEY_PRESENT",
+        }
         defaults.update(overrides)
         return ProjectAiProfileSnapshot(**defaults)
 
@@ -229,7 +247,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
     def test_profile_worker_healthcheck_uses_profile_overlay(self) -> None:
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
-        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.dispatcher.tasks.task_process import HealthcheckRun
         from cairn.server.models_pkg.ai_profiles import AiProfile
 
         class _H(BaseHTTPRequestHandler):
@@ -314,7 +332,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
     def test_profile_worker_healthcheck_defaults_to_runtime_timeout(self) -> None:
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
-        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.dispatcher.tasks.task_process import HealthcheckRun
         from cairn.server.models_pkg.ai_profiles import AiProfile
 
         cfg = _make_config(_codex())
@@ -368,7 +386,7 @@ class HealthCheckSnapshotTests(unittest.TestCase):
     def test_profile_worker_healthcheck_failure_message_is_actionable(self) -> None:
         from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
         from cairn.dispatcher.runtime.process import ProcessResult
-        from cairn.dispatcher.tasks.common import HealthcheckRun
+        from cairn.dispatcher.tasks.task_process import HealthcheckRun
         from cairn.server.models_pkg.ai_profiles import AiProfile
 
         cfg = _make_config(_codex())
@@ -426,13 +444,13 @@ class HealthCheckSnapshotTests(unittest.TestCase):
 
 class DispatcherTaskAiSelectionTests(unittest.TestCase):
     def test_project_ai_snapshots_are_task_specific(self) -> None:
-        from cairn.dispatcher.scheduler.loop import DispatcherLoop
+        from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
         from cairn.dispatcher.scheduler.project_cache import ProjectCaches
+        from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
         from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
 
-        loop = DispatcherLoop.__new__(DispatcherLoop)
-        loop.project_caches = ProjectCaches()
-        loop.project_caches.ai_chains = {
+        caches = ProjectCaches()
+        caches.ai_chains = {
             "proj": {
                 "bootstrap": [
                     ProjectAiProfileSnapshot(
@@ -457,11 +475,19 @@ class DispatcherTaskAiSelectionTests(unittest.TestCase):
                 ],
             }
         }
+        resolver = ProjectContextResolver(
+            config=MagicMock(),
+            client=MagicMock(),
+            runtime=MagicMock(),
+            project_caches=caches,
+            ai_overlay_cache=AIOverlayCache(),
+            ai_worker_selector=MagicMock(),
+        )
 
-        self.assertEqual(loop._project_ai_snapshots("proj", "bootstrap")[0].profile_id, "boot")
-        self.assertEqual(loop._project_ai_snapshots("proj", "explore")[0].profile_id, "intent")
-        self.assertEqual(loop._project_ai_snapshots("proj", "reason")[0].profile_id, "reason")
-        self.assertEqual(loop._project_ai_snapshots("proj", "unknown"), [])
+        self.assertEqual(resolver.project_ai_snapshots("proj", "bootstrap")[0].profile_id, "boot")
+        self.assertEqual(resolver.project_ai_snapshots("proj", "explore")[0].profile_id, "intent")
+        self.assertEqual(resolver.project_ai_snapshots("proj", "reason")[0].profile_id, "reason")
+        self.assertEqual(resolver.project_ai_snapshots("proj", "unknown"), [])
 
 
 class ProfileWarningsTests(unittest.TestCase):
@@ -480,7 +506,7 @@ class ProfileWarningsTests(unittest.TestCase):
 @unittest.skip("dispatcher-to-server AI profile sync was removed; dispatch.yaml is the AI profile source of truth")
 class SyncPayloadTests(unittest.TestCase):
     def test_worker_models_are_trimmed_and_deduplicated(self) -> None:
-        from cairn.shared.dispatch_config import WorkerConfig
+        from cairn.shared.config import WorkerConfig
 
         worker = WorkerConfig(
             name="x",
@@ -496,7 +522,8 @@ class SyncPayloadTests(unittest.TestCase):
 
     def test_worker_models_reject_empty_values(self) -> None:
         from pydantic import ValidationError
-        from cairn.shared.dispatch_config import WorkerConfig
+
+        from cairn.shared.config import WorkerConfig
 
         with self.assertRaises(ValidationError):
             WorkerConfig(
@@ -511,7 +538,8 @@ class SyncPayloadTests(unittest.TestCase):
 
     def test_unknown_worker_type_is_rejected(self) -> None:
         from pydantic import ValidationError
-        from cairn.shared.dispatch_config import WorkerConfig
+
+        from cairn.shared.config import WorkerConfig
 
         with self.assertRaises(ValidationError):
             WorkerConfig(
@@ -526,31 +554,12 @@ class SyncPayloadTests(unittest.TestCase):
 
     def test_supported_translation(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
-        from cairn.shared.dispatch_config import (
-            DispatchConfig, RuntimeConfig, TasksConfig, ContainerConfig,
-            BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
-        )
-        runtime = RuntimeConfig(interval=1, max_workers=1, max_project_workers=1, max_running_projects=1, healthcheck_timeout=1, prompt_group="g")
-        tasks = TasksConfig(
-            bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),
-            reason=ReasonTaskConfig(timeout=5, max_intents=3),
-            explore=ExploreTaskConfig(timeout=5, conclude_timeout=5),
-        )
-        container = ContainerConfig(
-            image="cairn/test:latest", user=None, network_mode="cairn",
-            completed_action="stop",
-        )
-        cfg = DispatchConfig(
-            system=minimal_system_config(),
-            server="http://localhost", runtime=runtime, tasks=tasks,
-            container=container,
-            workers=[
+        cfg = _make_config(
                 _claudecode(name="claude_deepseek", model="ds-v4",
                             base_url="https://api.deepseek.com/anthropic",
                             api_key="ANTHROPIC_AUTH_TOKEN"),
                 _codex(name="codex_default", model="gpt-5.4-mini",
                        base_url="https://seuapi.20250731.xyz", api_key="OPENAI_API_KEY"),
-            ],
         )
         loop = DispatcherLoop.__new__(DispatcherLoop)
         loop.config = cfg
@@ -619,32 +628,13 @@ class SyncPayloadTests(unittest.TestCase):
 
     def test_runtime_env_names_are_canonical(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
-        from cairn.shared.dispatch_config import (
-            DispatchConfig, RuntimeConfig, TasksConfig, ContainerConfig,
-            BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
-        )
-        runtime = RuntimeConfig(interval=1, max_workers=1, max_project_workers=1, max_running_projects=1, healthcheck_timeout=1, prompt_group="g")
-        tasks = TasksConfig(
-            bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),
-            reason=ReasonTaskConfig(timeout=5, max_intents=3),
-            explore=ExploreTaskConfig(timeout=5, conclude_timeout=5),
-        )
-        container = ContainerConfig(
-            image="cairn/test:latest", user=None, network_mode="cairn",
-            completed_action="stop",
-        )
-        cfg = DispatchConfig(
-            system=minimal_system_config(),
-            server="http://localhost", runtime=runtime, tasks=tasks,
-            container=container,
-            workers=[
+        cfg = _make_config(
                 _claudecode(
                     name="claude_canonical",
                     model="ds-v4",
                     base_url="https://api.deepseek.com/anthropic",
                     api_key="runtime-token-value",
                 ),
-            ],
         )
         loop = DispatcherLoop.__new__(DispatcherLoop)
         loop.config = cfg
@@ -653,10 +643,6 @@ class SyncPayloadTests(unittest.TestCase):
 
     def test_ai_catalog_sync_does_not_fetch_or_report_remote_models(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
-        from cairn.shared.dispatch_config import (
-            DispatchConfig, RuntimeConfig, TasksConfig, ContainerConfig,
-            BootstrapTaskConfig, ReasonTaskConfig, ExploreTaskConfig,
-        )
 
         class Result:
             ok = True
@@ -668,7 +654,6 @@ class SyncPayloadTests(unittest.TestCase):
 
         class Client:
             def __init__(self):
-                self.models_report_calls = 0
                 self.health_report_calls = 0
 
             def list_ai_profiles(self):
@@ -690,24 +675,7 @@ class SyncPayloadTests(unittest.TestCase):
                 self.health_report_calls += 1
                 return Result(None)
 
-            def post_ai_models_report(self, body):
-                self.models_report_calls += 1
-                return Result(None)
-
-        runtime = RuntimeConfig(interval=1, max_workers=1, max_project_workers=1, max_running_projects=1, healthcheck_timeout=1, prompt_group="g")
-        tasks = TasksConfig(
-            bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),
-            reason=ReasonTaskConfig(timeout=5, max_intents=3),
-            explore=ExploreTaskConfig(timeout=5, conclude_timeout=5),
-        )
-        cfg = DispatchConfig(
-            system=minimal_system_config(),
-            server="http://localhost",
-            runtime=runtime,
-            tasks=tasks,
-            container=ContainerConfig(image="cairn/test:latest", user=None, network_mode="cairn", completed_action="stop"),
-            workers=[_codex(model="gpt-manual")],
-        )
+        cfg = _make_config(_codex(model="gpt-manual"))
         loop = DispatcherLoop.__new__(DispatcherLoop)
         loop.config = cfg
         loop.client = Client()
@@ -715,7 +683,6 @@ class SyncPayloadTests(unittest.TestCase):
         loop._sync_ai_catalog_from_dispatch_yaml()
 
         self.assertEqual(loop.client.health_report_calls, 1)
-        self.assertEqual(loop.client.models_report_calls, 0)
 
     def test_ai_catalog_sync_runs_even_when_profiles_exist(self) -> None:
         from cairn.dispatcher.scheduler.loop import DispatcherLoop
@@ -792,11 +759,12 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         pass
 
     def test_sync_upsert_idempotent(self) -> None:
-        from cairn.server.routers.ai_profiles import (
-            list_ai_profiles, sync_ai_profiles, post_health_report,
-        )
         from cairn.server.models_pkg.ai_profiles import (
-            AiProfileSyncRequest, AiProfileSyncWorker,
+            AiProfileSyncRequest,
+            AiProfileSyncWorker,
+        )
+        from cairn.server.routers.ai_profiles import (
+            sync_ai_profiles,
         )
 
         body = AiProfileSyncRequest(workers=[
@@ -829,8 +797,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual({p.name for p in result3}, {"claude_ds"})
 
     def test_sync_updates_profile_models_and_reasoning(self) -> None:
-        from cairn.server.routers.ai_profiles import sync_ai_profiles
         from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
+        from cairn.server.routers.ai_profiles import sync_ai_profiles
 
         body = AiProfileSyncRequest(workers=[
             AiProfileSyncWorker(
@@ -851,8 +819,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(profile.model_reasoning_effort, "xhigh")
 
     def test_sync_drops_unsupported_worker_types(self) -> None:
-        from cairn.server.routers.ai_profiles import sync_ai_profiles
         from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
+        from cairn.server.routers.ai_profiles import sync_ai_profiles
 
         body = AiProfileSyncRequest(workers=[
             AiProfileSyncWorker(name="claude_ds", worker_type="claudecode",
@@ -874,10 +842,10 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         ``codex``/``claudecode`` worker set and confirms the obsolete
         row (and its models) are deleted.
         """
-        from cairn.server.routers.ai_profiles import (
-            list_ai_profiles, sync_ai_profiles,
-        )
         from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
+        from cairn.server.routers.ai_profiles import (
+            sync_ai_profiles,
+        )
 
         # Pre-seed an obsolete seeded profile as if a previous dispatcher
         # version had inserted it. seeded_from_worker != current worker name.
@@ -960,11 +928,15 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_preserves_operator_created_profiles(self) -> None:
         """Profiles with seeded_from_worker IS NULL must survive a sync prune."""
-        from cairn.server.routers.ai_profiles import (
-            create_ai_profile, list_ai_profiles, sync_ai_profiles,
-        )
         from cairn.server.models_pkg.ai_profiles import (
-            AiProfileCreate, AiProfileSyncRequest, AiProfileSyncWorker,
+            AiProfileCreate,
+            AiProfileSyncRequest,
+            AiProfileSyncWorker,
+        )
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile,
+            list_ai_profiles,
+            sync_ai_profiles,
         )
 
         manual = create_ai_profile(AiProfileCreate(
@@ -988,10 +960,11 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_with_no_supported_workers_drops_all_seeded(self) -> None:
         """An empty/payload with only unsupported workers prunes every seeded row."""
-        from cairn.server.routers.ai_profiles import (
-            list_ai_profiles, sync_ai_profiles,
-        )
         from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
+        from cairn.server.routers.ai_profiles import (
+            list_ai_profiles,
+            sync_ai_profiles,
+        )
 
         # Seed two profiles manually.
         body = AiProfileSyncRequest(workers=[
@@ -1017,10 +990,11 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_keeps_seeded_profile_whose_worker_renamed_to_match(self) -> None:
         """A worker renaming its seed must adopt the old id, not duplicate it."""
-        from cairn.server.routers.ai_profiles import (
-            list_ai_profiles, sync_ai_profiles,
-        )
         from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
+        from cairn.server.routers.ai_profiles import (
+            list_ai_profiles,
+            sync_ai_profiles,
+        )
 
         # First sync establishes the "codex" seeded row.
         body = AiProfileSyncRequest(workers=[
@@ -1045,11 +1019,15 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(listed[0].id, first_id)
 
     def test_health_report_flips_availability(self) -> None:
-        from cairn.server.routers.ai_profiles import (
-            create_ai_profile, post_health_report, list_ai_profiles,
-        )
         from cairn.server.models_pkg.ai_profiles import (
-            AiProfileCreate, AiProfileHealthReportRequest, AiProfileHealthReport,
+            AiProfileCreate,
+            AiProfileHealthReport,
+            AiProfileHealthReportRequest,
+        )
+        from cairn.server.routers.ai_profiles import (
+            create_ai_profile,
+            list_ai_profiles,
+            post_health_report,
         )
 
         created = create_ai_profile(AiProfileCreate(
@@ -1076,8 +1054,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertTrue(row.last_health_ok)
 
     def test_auth_var_is_canonicalized_on_create(self) -> None:
-        from cairn.server.routers.ai_profiles import create_ai_profile
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate
+        from cairn.server.routers.ai_profiles import create_ai_profile
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
@@ -1086,8 +1064,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(created.warnings, [])
 
     def test_update_keeps_canonical_auth_env(self) -> None:
-        from cairn.server.routers.ai_profiles import create_ai_profile, update_ai_profile
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
+        from cairn.server.routers.ai_profiles import create_ai_profile, update_ai_profile
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
@@ -1100,6 +1078,7 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_healthcheck_timeout_bounds(self) -> None:
         from pydantic import ValidationError
+
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate
 
         with self.assertRaises(ValidationError):
@@ -1113,13 +1092,13 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(ok.healthcheck_timeout, 2.5)
 
     def test_check_request_lifecycle(self) -> None:
+        from cairn.server.models_pkg.ai_profiles import AiProfileCheckCompleteRequest, AiProfileCreate
         from cairn.server.routers.ai_profiles import (
             claim_ai_profile_check_request,
             complete_ai_profile_check_request,
             create_ai_profile,
             trigger_ai_profile_check,
         )
-        from cairn.server.models_pkg.ai_profiles import AiProfileCheckCompleteRequest, AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",
@@ -1139,12 +1118,12 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         )
 
     def test_concurrent_check_request_claim_has_single_winner(self) -> None:
+        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers.ai_profiles import (
             claim_ai_profile_check_request,
             create_ai_profile,
             trigger_ai_profile_check,
         )
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",

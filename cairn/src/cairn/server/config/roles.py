@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cairn.server.config.files import capabilities_yaml_path, load_capabilities_data, _text_sha256
-from cairn.server.models_pkg.capabilities import RoleCatalogItem
+from cairn.server.config.files import _text_sha256, load_resources_data, resources_yaml_path
+from cairn.server.models_pkg import RoleCatalogItem
 
 
 def list_yaml_roles() -> list[RoleCatalogItem]:
-    data = load_capabilities_data()
+    data = load_resources_data()
     roles = data.get("roles") if isinstance(data.get("roles"), list) else []
     result: list[RoleCatalogItem] = []
     for item in roles:
@@ -21,7 +21,7 @@ def list_yaml_roles() -> list[RoleCatalogItem]:
 
 
 def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
-    data = load_capabilities_data()
+    data = load_resources_data()
     roles = data.get("roles") if isinstance(data.get("roles"), list) else []
     for item in roles:
         if not isinstance(item, dict) or item.get("id") != role_id:
@@ -30,7 +30,7 @@ def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
         if not prompt and item.get("source_path"):
             path = Path(str(item["source_path"]))
             if not path.is_absolute():
-                path = capabilities_yaml_path().parent / path
+                path = resources_yaml_path().parent / path
             prompt = path.read_text(encoding="utf-8").strip()
         return {
             "id": str(item.get("id") or ""),
@@ -40,4 +40,3 @@ def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
             "default_skill_ids": list(item.get("default_skill_ids") or []),
         }
     return None
-

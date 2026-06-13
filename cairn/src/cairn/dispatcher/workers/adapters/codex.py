@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
-
+from cairn.shared.config import WorkerConfig
 
 CODEX_ENV_PREFIX = [
     "env",

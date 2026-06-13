@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import unittest
@@ -10,8 +9,9 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
-SYSTEM_YAML = """
-system:
+DISPATCH_YAML = """
+server:
+  base_url: http://server
   database:
     url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
   auth:
@@ -19,44 +19,54 @@ system:
     dispatcher_api_token: test-dispatcher-token
   paths:
     datas_root: /tmp/cairn-test
+  settings:
+    intent_timeout: 5
+    reason_timeout: 5
+dispatcher:
+  health_addr: 127.0.0.1:9100
+  reload:
+    url: http://127.0.0.1:9100/reload
+    enabled: false
+  runtime:
+    interval: 3
+    max_workers: 1
+    max_running_projects: 1
+    max_project_workers: 1
+    healthcheck_timeout: 1
+    prompt_group: default
+tasks:
+  bootstrap: {timeout: 1, conclude_timeout: 1}
+  reason: {timeout: 1, max_intents: 1}
+  explore: {timeout: 1, conclude_timeout: 1}
+worker_runtime:
+  common_env: {}
+  container:
+    image: img
+    network_mode: bridge
+    completed_action: stop
+worker_pool:
+  proxies: []
+  workers:
+    - name: mock
+      type: mock
+      priority: 1
+      max_running: 1
+      task_types: [bootstrap, explore, reason]
+      env: {}
 """
 
 
 class DispatchSidecarConfigTests(unittest.TestCase):
     def test_capabilities_sidecar_merges_into_dispatch_config(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "dispatch.yaml").write_text(
-                SYSTEM_YAML + """
-server: http://server
-runtime:
-  interval: 3
-  max_workers: 1
-  max_running_projects: 1
-  max_project_workers: 1
-  healthcheck_timeout: 1
-  prompt_group: default
-tasks:
-  bootstrap: {timeout: 1, conclude_timeout: 1}
-  reason: {timeout: 1, max_intents: 1}
-  explore: {timeout: 1, conclude_timeout: 1}
-container:
-  image: img
-  network_mode: bridge
-  completed_action: stop
-workers:
-  - name: mock
-    type: mock
-    priority: 1
-    max_running: 1
-    task_types: [bootstrap, explore, reason]
-    env: {}
-""".strip(),
+                DISPATCH_YAML.strip(),
                 encoding="utf-8",
             )
-            (root / "dispatch.capabilities.yaml").write_text(
+            (root / "dispatch.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers:
@@ -86,41 +96,17 @@ remote_support:
         self.assertTrue(cfg.remote_support.enabled)
 
     def test_role_default_skill_ids_resolve(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "skill").mkdir()
             (root / "role.md").write_text("role prompt", encoding="utf-8")
             (root / "dispatch.yaml").write_text(
-                SYSTEM_YAML + """
-server: http://server
-runtime:
-  interval: 3
-  max_workers: 1
-  max_running_projects: 1
-  max_project_workers: 1
-  healthcheck_timeout: 1
-  prompt_group: default
-tasks:
-  bootstrap: {timeout: 1, conclude_timeout: 1}
-  reason: {timeout: 1, max_intents: 1}
-  explore: {timeout: 1, conclude_timeout: 1}
-container:
-  image: img
-  network_mode: bridge
-  completed_action: stop
-workers:
-  - name: mock
-    type: mock
-    priority: 1
-    max_running: 1
-    task_types: [bootstrap, explore, reason]
-    env: {}
-""".strip(),
+                DISPATCH_YAML.strip(),
                 encoding="utf-8",
             )
-            (root / "dispatch.capabilities.yaml").write_text(
+            (root / "dispatch.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers: []
@@ -141,41 +127,18 @@ roles:
         self.assertEqual(cfg.roles[0].default_skill_ids, ["skill1"])
 
     def test_role_default_skill_ids_must_resolve(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
         from pydantic import ValidationError
+
+        from cairn.shared.config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "role.md").write_text("role prompt", encoding="utf-8")
             (root / "dispatch.yaml").write_text(
-                SYSTEM_YAML + """
-server: http://server
-runtime:
-  interval: 3
-  max_workers: 1
-  max_running_projects: 1
-  max_project_workers: 1
-  healthcheck_timeout: 1
-  prompt_group: default
-tasks:
-  bootstrap: {timeout: 1, conclude_timeout: 1}
-  reason: {timeout: 1, max_intents: 1}
-  explore: {timeout: 1, conclude_timeout: 1}
-container:
-  image: img
-  network_mode: bridge
-  completed_action: stop
-workers:
-  - name: mock
-    type: mock
-    priority: 1
-    max_running: 1
-    task_types: [bootstrap, explore, reason]
-    env: {}
-""".strip(),
+                DISPATCH_YAML.strip(),
                 encoding="utf-8",
             )
-            (root / "dispatch.capabilities.yaml").write_text(
+            (root / "dispatch.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers: []
@@ -194,7 +157,7 @@ roles:
         self.assertIn("missing-skill", str(ctx.exception))
 
     def test_repo_capability_routing_metadata_loads_from_sidecar(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         cfg = DispatchConfig.load(_REPO / "dispatch.yaml")
 

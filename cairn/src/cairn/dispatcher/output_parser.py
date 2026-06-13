@@ -4,15 +4,7 @@ import json
 import re
 from typing import Any
 
-
 FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.IGNORECASE | re.DOTALL)
-
-
-def extract_json_object(text: str) -> dict[str, Any]:
-    objects = extract_json_objects(text)
-    if objects:
-        return objects[0]
-    raise ValueError("no JSON object found in output")
 
 
 def extract_json_objects(text: str) -> list[dict[str, Any]]:

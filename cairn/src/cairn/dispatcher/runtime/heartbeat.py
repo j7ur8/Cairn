@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from cairn.dispatcher.protocol.client import ApiResult, CairnClient
 from cairn.dispatcher.runtime.process import ManagedProcess
 
-
 LOG = logging.getLogger(__name__)
 HEARTBEAT_FAILURE_GRACE_MULTIPLIER = 2
 
@@ -47,7 +46,7 @@ class HeartbeatLease:
         intent_id: str,
         worker_name: str,
         interval: int,
-    ) -> "HeartbeatLease":
+    ) -> HeartbeatLease:
         return cls(
             heartbeat=lambda: client.heartbeat(project_id, intent_id, worker_name),
             scope=f"project={project_id} intent={intent_id}",
@@ -63,7 +62,7 @@ class HeartbeatLease:
         worker_name: str,
         interval: int,
         run_id: str | None = None,
-    ) -> "HeartbeatLease":
+    ) -> HeartbeatLease:
         return cls(
             heartbeat=lambda: client.reason_heartbeat(project_id, worker_name, run_id),
             scope=f"project={project_id} reason",

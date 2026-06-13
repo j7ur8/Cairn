@@ -20,7 +20,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from cairn.server.security.jwt import JWTError, verify_token
 from cairn.server.security.users import UserRow, get_by_id, user_to_public
 
-
 LOG = logging.getLogger(__name__)
 _bearer_scheme = HTTPBearer(auto_error=False)
 

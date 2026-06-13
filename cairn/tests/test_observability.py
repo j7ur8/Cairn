@@ -38,7 +38,6 @@ class TraceIdTests(unittest.TestCase):
 class JsonFormatterTests(unittest.TestCase):
     def test_emits_json_with_trace_id(self) -> None:
         from cairn.observability.logging import JsonFormatter
-        from cairn.observability import trace
         formatter = JsonFormatter()
         record = logging.LogRecord(
             name="cairn.test", level=logging.INFO, pathname="x", lineno=1,
@@ -108,14 +107,12 @@ class ObservabilityDbTests(unittest.TestCase):
         self.db.reset_for_tests()
 
     def test_batch_append_persists_events(self) -> None:
+        from cairn.server.observability.events_writer import append_events
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
-        )
-        from cairn.server.observability.repository import (
-            append_events,
-            create_execution,
         )
 
         with self.db.session_scope() as conn:
@@ -156,6 +153,7 @@ class RequestIdMiddlewareTests(unittest.TestCase):
         yaml_cfg.__enter__()
         reset_postgres_db()
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
         return TestClient(app), yaml_cfg
 

@@ -30,7 +30,6 @@ from cairn.server.security.jwt import issue_token
 from cairn.server.security.passwords import hash_password, verify_password
 from cairn.server.security.users import UserRow, create, get_by_email
 
-
 LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 

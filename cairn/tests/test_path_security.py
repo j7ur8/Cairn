@@ -29,6 +29,7 @@ class ProjectIdValidatorTests(unittest.TestCase):
 
     def test_rejects_wrong_prefix(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import validate_project_id
         with self.assertRaises(HTTPException):
             validate_project_id("p_001")
@@ -37,6 +38,7 @@ class ProjectIdValidatorTests(unittest.TestCase):
 
     def test_rejects_empty(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import validate_project_id
         with self.assertRaises(HTTPException):
             validate_project_id("")
@@ -50,12 +52,14 @@ class RelativePathValidatorTests(unittest.TestCase):
 
     def test_rejects_absolute_path(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import validate_relative_path
         with self.assertRaises(HTTPException):
             validate_relative_path("/etc/passwd")
 
     def test_rejects_parent_traversal(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import validate_relative_path
         with self.assertRaises(HTTPException):
             validate_relative_path("../escape")
@@ -71,6 +75,7 @@ class RelativePathValidatorTests(unittest.TestCase):
 
     def test_rejects_empty(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import validate_relative_path
         with self.assertRaises(HTTPException):
             validate_relative_path("")
@@ -96,6 +101,7 @@ class SafeResolveWithinTests(unittest.TestCase):
 
     def test_404_for_missing_file(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import safe_resolve_within, validate_relative_path
         with self.assertRaises(HTTPException) as ctx:
             safe_resolve_within(self.root, validate_relative_path("missing.txt"))
@@ -103,6 +109,7 @@ class SafeResolveWithinTests(unittest.TestCase):
 
     def test_refuses_symlink_escape(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import safe_resolve_within, validate_relative_path
         # Symlink that points outside the project root
         external = Path(self.tmp.name) / "secret.txt"
@@ -123,6 +130,7 @@ class DownloadSizeGuardTests(unittest.TestCase):
 
     def test_rejects_oversize(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.security.paths import download_size_guard
         with tempfile.NamedTemporaryFile(delete=False) as f:
             f.write(b"x" * 2048)

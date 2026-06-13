@@ -67,12 +67,12 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertEqual(list_ai_profiles(), [])
 
     def test_project_ai_selection_round_trips_from_execution_config(self) -> None:
+        from cairn.server.models_pkg import CreateProjectRequest
         from cairn.server.models_pkg.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.models_pkg.intents import CreateProjectRequest
         from cairn.server.routers.ai_profiles import create_ai_profile, get_project_ai_profiles
         from cairn.server.routers.projects import create_project
 
@@ -151,8 +151,8 @@ class AiProfileFlowTests(unittest.TestCase):
     def test_invalid_selected_model_rejected_on_project_create(self) -> None:
         from fastapi import HTTPException
 
+        from cairn.server.models_pkg import CreateProjectRequest
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
-        from cairn.server.models_pkg.intents import CreateProjectRequest
         from cairn.server.routers.ai_profiles import create_ai_profile
         from cairn.server.routers.projects import create_project
 
@@ -180,8 +180,8 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertIn("not available", ctx.exception.detail)
 
     def test_deleted_profile_marks_existing_snapshot_unavailable(self) -> None:
+        from cairn.server.models_pkg import CreateProjectRequest
         from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
-        from cairn.server.models_pkg.intents import CreateProjectRequest
         from cairn.server.routers.ai_profiles import create_ai_profile, delete_ai_profile, get_project_ai_profiles
         from cairn.server.routers.projects import create_project
 

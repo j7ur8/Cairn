@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import sys
 import threading
 import unittest
@@ -124,7 +124,7 @@ class DbHardeningTests(unittest.TestCase):
         )
 
     def test_concurrent_conclude_produces_one_fact(self) -> None:
-        from cairn.server.models_pkg.intents import ConcludeRequest, CreateIntentRequest, CreateProjectRequest
+        from cairn.server.models_pkg import ConcludeRequest, CreateIntentRequest, CreateProjectRequest
         from cairn.server.routers.intents import conclude, create_intent
         from cairn.server.routers.projects import create_project
 
@@ -182,7 +182,7 @@ class DbHardeningTests(unittest.TestCase):
         self.assertEqual(fact_count, 1)
 
     def test_concurrent_complete_produces_one_goal_intent(self) -> None:
-        from cairn.server.models_pkg.intents import CompleteRequest, CreateProjectRequest
+        from cairn.server.models_pkg import CompleteRequest, CreateProjectRequest
         from cairn.server.routers.projects import complete_project, create_project
 
         project = create_project(
@@ -229,7 +229,9 @@ class DbHardeningTests(unittest.TestCase):
 
     def test_cli_status_migrate_and_reset(self) -> None:
         import json
+
         from click.testing import CliRunner
+
         from cairn.cli import main
 
         runner = CliRunner()

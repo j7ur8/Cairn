@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-06-10
+生成日期：2026-06-13
 -->
 
 # Cairn 架构与设计文档
@@ -25,26 +25,26 @@ flowchart TB
     subgraph API["Cairn Server / FastAPI"]
         Auth["JWT 鉴权\nserver/security"]
         Routers["业务路由\nprojects/intents/hints/files/etc."]
-        Services["业务服务\nservices/repositories"]
-        ConfigStore["YAML 配置存储\nConfigStore"]
+        Services["应用/领域/仓储层\napplication/domain/repositories"]
+        ConfigStore["YAML 配置存储\ndispatch/resources"]
         ObsAPI["观测 API\nllm-executions/events"]
     end
 
     subgraph Data["数据层"]
         PG[("PostgreSQL\nfacts/intents/projects/users")]
-        YAML[("dispatch.yaml\ndispatch.capabilities.yaml")]
+        YAML[("dispatch.yaml\ndispatch.resources.yaml")]
         Files[("project-files\nattachments")]
     end
 
     subgraph Dispatcher["Cairn Dispatcher"]
-        Loop["DispatcherLoop"]
-        Scheduler["任务选择与调度"]
-        Containers["ContainerManager\nDocker SDK"]
+        Loop["DispatcherLoop\n生命周期外壳"]
+        Scheduler["Tick/Dispatch/Submit\n调度协作者"]
+        Containers["ContainerManager facade\nlifecycle/cleanup/files/exec"]
         Client["CairnClient\nHTTP client"]
     end
 
     subgraph Workers["Worker Container"]
-        Agent["Agent Worker\nClaude Code / Codex / Pi / Mock"]
+        Agent["Agent Worker\nClaude Code / Codex / Mock"]
         Prompts["Prompt templates\nbootstrap/reason/explore"]
         MCP["MCP / Skills / Roles"]
     end
@@ -63,13 +63,13 @@ flowchart TB
     Scheduler --> Containers
     Client --> Routers
     Containers -->|"Docker socket"| Workers
-    Agent -->|"structured output"| Dispatcher
+    Agent -->|"JSON execute output\nsentinel conclude text"| Dispatcher
     Dispatcher -->|"facts/intents/complete/events"| API
     Workers --> MCP
     Workers --> Files
 ```
 
-Cairn 是一个分层单体加外部 Worker 容器的架构。Server 负责共享事实图和配置管理；Dispatcher 是调度进程；Worker Container 是隔离执行环境。
+Cairn 是一个分层单体加外部 Worker 容器的架构。Server 负责共享事实图、执行配置快照和配置管理；Dispatcher 是调度进程；Worker Container 是隔离执行环境。
 
 ## 2. 启动与初始化链路
 
@@ -134,14 +134,22 @@ sequenceDiagram
 | 模块名称 | 路径 | 职责 | 输入 | 输出 | 依赖 |
 |---------|------|------|------|------|------|
 | CLI | `cairn/src/cairn/cli.py` | 进程入口和管理命令 | 命令行参数 | Server/Dispatcher/DB 操作 | FastAPI, DispatcherLoop, db |
-| Server | `cairn/src/cairn/server/` | HTTP API、数据库访问、配置管理、静态 UI | HTTP Request | HTTP Response, DB/YAML/文件变更 | FastAPI, SQLAlchemy, Pydantic |
+| Server | `cairn/src/cairn/server/` | HTTP API、应用用例、领域规则、仓储访问、配置管理、静态 UI | HTTP Request | HTTP Response, DB/YAML/文件变更 | FastAPI, SQLAlchemy, Pydantic |
+| Server Application | `cairn/src/cairn/server/application/` | 跨 repository 的用例编排：项目创建/读取/命令、intent/reason 命令、hints/files/attachments、execution config、capabilities、export、replay | Router 调用、DB connection | DTO/domain result | domain, repositories, mappers |
+| Server Domain | `cairn/src/cairn/server/domain/` | intent/reason/project 业务规则、ID、时间、lease 清理、业务异常 | repository row/state、命令参数 | domain result 或 `DomainError` | 纯 Python，无 SQL/FastAPI/repository import |
+| Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、结构化持久化、PATCH 和 dispatcher payload 组装 | `dispatch.yaml`, `dispatch.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
 | Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器、回写结果 | Server API, YAML config | HTTP writes, worker execution | requests, Docker SDK |
-| Shared | `cairn/src/cairn/shared/` | 共享协议模型、配置模型、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
-| Observability | `cairn/src/cairn/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
+| Dispatcher Scheduler | `cairn/src/cairn/dispatcher/scheduler/` | tick、reload、planner、submitter、worker selection、runtime state、replay coordination | Project summaries/config/runtime state | submitted tasks, releases, metrics | protocol client, runtime, tasks |
+| Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
+| Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
+| Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；SQL 拆到 execution/event/view/usage/retention repository/query 模块 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
+| Shared Observability | `cairn/src/cairn/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
 | Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
 | Capabilities | `capabilities/` | 技能、角色、payload、模板、MCP 配置素材 | YAML/Markdown | Worker prompt context | Dispatcher, prompt builder |
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
-| Tests | `cairn/tests/` | 回归测试和关键行为验证 | pytest/unittest | pass/fail | httpx, test helpers |
+| Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
+
+当前 Alembic head 为 `0002_exec_config_names`。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
 ## 4. 内部模块间通信
 
@@ -152,9 +160,9 @@ sequenceDiagram
 | SPA | Cairn Server | HTTP + Bearer token | 项目、图、配置、文件、观测 UI |
 | Dispatcher | Cairn Server | HTTP + service JWT | 读取项目、claim/heartbeat/conclude、写观测事件 |
 | Server | PostgreSQL | SQLAlchemy session | 持久化 projects/facts/intents/users/events |
-| Server | YAML files | 原子写入/覆盖 | dispatch 和 capabilities 配置 |
+| Server | YAML files | 原子写入/覆盖 | dispatch 和 resources 配置 |
 | Dispatcher | Docker daemon | Docker socket | 创建/启动/停止 Worker 容器 |
-| Dispatcher | Worker process | subprocess / CLI adapter | 运行 Claude Code、Codex、Pi 或 mock |
+| Dispatcher | Worker process | subprocess / CLI adapter | 运行 Claude Code、Codex 或 mock |
 
 典型 Explore 请求链路：
 
@@ -175,7 +183,8 @@ sequenceDiagram
     S->>DB: atomic-ish claim update
     D->>C: ensure_running(project_id)
     D->>W: run explore prompt
-    W-->>D: structured fact / rejection / error
+    W-->>D: JSON fact / rejection / error
+    Note over D,W: conclude fallback returns sentinel-wrapped plain fact text
     D->>S: POST /projects/{id}/intents/{intent_id}/conclude
     S->>DB: insert fact + conclude intent
     D->>S: POST /projects/{id}/llm-executions/{exec}/events
@@ -195,8 +204,8 @@ sequenceDiagram
 | 数据 | 写入方 | 读取方 |
 |------|--------|--------|
 | projects/facts/intents/hints | Server routers, Dispatcher through API | SPA, Dispatcher, export/replay |
-| worker_execution_configs | project creation/replay | Dispatcher, project detail APIs |
-| dispatch.yaml | Server config routers, operator | Server runtime, Dispatcher |
+| project_execution_configs | project creation/replay | Dispatcher, project detail APIs |
+| dispatch.yaml / dispatch.resources.yaml | Server config routers, operator | Server runtime, Dispatcher |
 | attachments/project-files | upload route, Worker container | SPA download, Worker |
 
 ## 5. 关键设计模式与架构风格
@@ -204,11 +213,15 @@ sequenceDiagram
 | 模式 | 应用位置 | 说明 |
 |------|----------|------|
 | Blackboard Architecture | facts/intents/hints graph | Worker 不直接通信，通过共享图协作 |
-| Repository | `server/repositories/` | SQL 访问封装，降低 router 直接拼 SQL 的范围 |
-| Adapter | `dispatcher/workers/adapters/` | 对接 Claude Code、Codex、Pi、mock |
-| Scheduler | `dispatcher/scheduler/` | 基于项目状态、worker 健康和配置选择任务 |
-| Service Layer | `server/services.py`, `project_creation_service.py` | 放置跨 repository 的业务规则 |
-| Config-as-data | `dispatch.yaml`, `dispatch.capabilities.yaml` | Worker、能力、AI Profile、路径和运行参数由 YAML 驱动 |
+| Router/Application/Domain | `server/routers/`, `server/application/`, `server/domain/` | Router 只做参数/鉴权/HTTP 响应映射，application/query service 编排事务用例，domain 是无 SQL 的规则/决策层 |
+| Repository / Query | `server/repositories/`, `server/execution_config/repository.py`, `server/observability/*_repository.py` | 唯一 SQL 访问层，负责条件更新、lease 过期、ID 分配、export/replay/AI check/observability row 读取 |
+| Mapper | `server/mappers/` | 只做 row/projection 到 API/domain DTO 的转换，不查 SQL |
+| Adapter | `dispatcher/workers/adapters/` | 对接 Claude Code、Codex、mock |
+| Scheduler Coordinators | `dispatcher/scheduler/` | `DispatcherLoop` 保持生命周期外壳，tick/dispatch/runtime/submitter 协作者依赖 `SchedulerServices` 或具体 resolver，而不是完整 loop |
+| Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用 execution config、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
+| Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
+| Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
+| Config-as-data | `dispatch.yaml`, `dispatch.resources.yaml` | Worker、能力、AI Profile、路径和运行参数由 YAML 驱动 |
 | Lease/Heartbeat | intents, reason lock | 用心跳和超时释放运行中工作 |
 
 总体架构风格是“中心化 Server + 独立调度器 + 容器化执行环境”的分层单体架构，不是微服务系统。边界通过 HTTP、PostgreSQL 和 Docker socket 连接。
@@ -220,11 +233,11 @@ sequenceDiagram
 | 项 | 实现 |
 |----|------|
 | Token | JWT HS256 |
-| 签名密钥 | `dispatch.yaml` 的 `system.auth.jwt_secret` |
+| 签名密钥 | `dispatch.yaml` 的 `server.auth.jwt_secret` |
 | 默认有效期 | 1 小时 |
 | 密码 | bcrypt hash |
 | 服务账号 | JWT claim `role=service`，映射为 synthetic superuser |
-| 初始管理员 | `system.initial_admin` 可在启动时 bootstrap |
+| 初始管理员 | `server.initial_admin` 可在启动时 bootstrap |
 
 鉴权入口：
 

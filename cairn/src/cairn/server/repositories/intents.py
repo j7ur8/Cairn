@@ -5,6 +5,20 @@ from typing import Any
 from cairn.server.repositories import sql
 
 
+def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "from": list(sources_by_intent.get(row["id"], [])),
+        "to_fact_id": row["to_fact_id"],
+        "description": row["description"],
+        "creator": row["creator"],
+        "worker": row["worker"],
+        "last_heartbeat_at": row["last_heartbeat_at"],
+        "created_at": row["created_at"],
+        "concluded_at": row["concluded_at"],
+    }
+
+
 class IntentRepository:
     def __init__(self, conn: Any):
         self.conn = conn
@@ -134,6 +148,66 @@ class IntentRepository:
             {"fact_id": fact_id, "project_id": project_id, "description": description},
         )
 
+    def claim_open(self, project_id: str, intent_id: str, worker: str, now: str) -> int:
+        cursor = sql.execute(
+            self.conn,
+            """
+            UPDATE intents
+            SET worker = :worker, last_heartbeat_at = :now
+            WHERE id = :intent_id
+              AND project_id = :project_id
+              AND to_fact_id IS NULL
+              AND (worker IS NULL OR worker = :worker)
+            """,
+            {"worker": worker, "now": now, "intent_id": intent_id, "project_id": project_id},
+        )
+        return cursor.rowcount
+
+    def heartbeat_open(self, project_id: str, intent_id: str, worker: str, now: str) -> int:
+        cursor = sql.execute(
+            self.conn,
+            """
+            UPDATE intents
+            SET last_heartbeat_at = :now
+            WHERE id = :intent_id
+              AND project_id = :project_id
+              AND to_fact_id IS NULL
+              AND worker = :worker
+            """,
+            {"worker": worker, "now": now, "intent_id": intent_id, "project_id": project_id},
+        )
+        return cursor.rowcount
+
+    def release_open(self, project_id: str, intent_id: str, worker: str) -> int:
+        cursor = sql.execute(
+            self.conn,
+            """
+            UPDATE intents
+            SET worker = NULL
+            WHERE id = :intent_id
+              AND project_id = :project_id
+              AND to_fact_id IS NULL
+              AND worker = :worker
+            """,
+            {"intent_id": intent_id, "project_id": project_id, "worker": worker},
+        )
+        return cursor.rowcount
+
+    def conclude_open(self, project_id: str, intent_id: str, worker: str, fact_id: str, now: str) -> int:
+        cursor = sql.execute(
+            self.conn,
+            """
+            UPDATE intents
+            SET to_fact_id = :fact_id, worker = :worker, last_heartbeat_at = :now, concluded_at = :now
+            WHERE id = :intent_id
+              AND project_id = :project_id
+              AND to_fact_id IS NULL
+              AND worker = :worker
+            """,
+            {"fact_id": fact_id, "worker": worker, "now": now, "intent_id": intent_id, "project_id": project_id},
+        )
+        return cursor.rowcount
+
     def delete_intent(self, project_id: str, intent_id: str) -> None:
         sql.execute(
             self.conn,
@@ -147,6 +221,67 @@ class IntentRepository:
             "SELECT * FROM intents WHERE id = :intent_id AND project_id = :project_id",
             {"intent_id": intent_id, "project_id": project_id},
         )
+
+    def get_intent_projection(self, project_id: str, intent_id: str) -> dict[str, Any] | None:
+        row = self.get_intent(project_id, intent_id)
+        if row is None:
+            return None
+        return _intent_projection(row, {intent_id: self.source_fact_ids(project_id, intent_id)})
+
+    def list_intent_projections(self, project_id: str) -> list[dict[str, Any]]:
+        rows = sql.fetchall(
+            self.conn,
+            "SELECT * FROM intents WHERE project_id = :project_id ORDER BY created_at",
+            {"project_id": project_id},
+        )
+        if not rows:
+            return []
+        source_rows = sql.fetchall(
+            self.conn,
+            """
+            SELECT intent_id, fact_id
+            FROM intent_sources
+            WHERE project_id = :project_id
+            ORDER BY intent_id, position, fact_id
+            """,
+            {"project_id": project_id},
+        )
+        sources_by_intent: dict[str, list[str]] = {}
+        for source in source_rows:
+            sources_by_intent.setdefault(source["intent_id"], []).append(source["fact_id"])
+        return [_intent_projection(row, sources_by_intent) for row in rows]
+
+    def list_open_intent_projections(self, project_id: str) -> list[dict[str, Any]]:
+        rows = sql.fetchall(
+            self.conn,
+            """
+            SELECT *
+            FROM intents
+            WHERE project_id = :project_id AND to_fact_id IS NULL
+            ORDER BY created_at
+            """,
+            {"project_id": project_id},
+        )
+        if not rows:
+            return []
+        intent_ids = {row["id"] for row in rows}
+        sources_by_intent = {
+            intent_id: []
+            for intent_id in intent_ids
+        }
+        for source in sql.fetchall(
+            self.conn,
+            """
+            SELECT intent_id, fact_id
+            FROM intent_sources
+            WHERE project_id = :project_id
+            ORDER BY intent_id, position, fact_id
+            """,
+            {"project_id": project_id},
+        ):
+            if source["intent_id"] in sources_by_intent:
+                sources_by_intent[source["intent_id"]].append(source["fact_id"])
+        return [_intent_projection(row, sources_by_intent) for row in rows]
 
     def source_fact_ids(self, project_id: str, intent_id: str) -> list[str]:
         rows = sql.fetchall(

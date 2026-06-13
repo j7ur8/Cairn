@@ -19,18 +19,18 @@ from __future__ import annotations
 
 import logging
 import socket
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 from urllib.parse import urlparse
 
-from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.ai_overlay import compute_ai_overlay
-from cairn.dispatcher.tasks.common import run_healthcheck
+from cairn.dispatcher.tasks.task_process import run_healthcheck
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.shared.protocol_models import (
-    AiProfile,
+from cairn.shared.config import DispatchConfig, WorkerConfig
+from cairn.shared.contracts import (
     CANONICAL_AUTH_ENV,
+    AiProfile,
     HealthCheckItem,
     HealthCheckResult,
     ProjectAiProfileSnapshot,
@@ -72,7 +72,7 @@ def _probe_http_url(url: str, timeout: float) -> tuple[bool, str]:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True, ""
-    except (OSError, socket.timeout) as exc:
+    except (TimeoutError, OSError) as exc:
         return False, f"{type(exc).__name__}: {exc}"
 
 

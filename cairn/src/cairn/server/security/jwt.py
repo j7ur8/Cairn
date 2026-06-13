@@ -7,7 +7,6 @@ from typing import Any
 
 import jwt
 
-
 DEFAULT_LIFETIME_SECONDS = 60 * 60  # 1 hour
 
 

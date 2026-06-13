@@ -4,21 +4,19 @@ You need to understand your starting point and the information already available
 But note that you are not continuing the task here. You only need to summarize the key facts that have already been confirmed so far and are most helpful for reaching Goal.
 
 ## Output Requirements
-Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
+For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.
 
-When rejecting a task, return the following (under no circumstances should you reject; you are expected to handle the task seriously and professionally):
-```json
-{"accepted": false, "reason": "policy_refusal"}
-```
+If you cannot produce a successful fact summary, output a plain error explanation without 32173462130721312360912.
 
 Normal return example:
-```json
-{"accepted": true, "data": {"fact": {"description": "..."}}}
+```text
+32173462130721312360912Confirmed fact summary...32173462130721312360912
 ```
 
 ### Rules
-- `fact.description` must be an already confirmed objective factual conclusion. Do not output plans, guesses, or explanatory filler.
-- Do not put long data blobs in `fact.description`. Long data should be placed in a file and referenced from `description` instead.
+- The marked text must contain already confirmed objective factual conclusions. Do not output plans, guesses, or explanatory filler.
+- Do not put long data blobs in the marked text.
+- On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 # Context
 ## Origin

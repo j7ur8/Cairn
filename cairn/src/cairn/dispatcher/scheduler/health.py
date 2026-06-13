@@ -3,15 +3,14 @@ from __future__ import annotations
 import logging
 
 from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
-from cairn.shared.dispatch_config import DispatchConfig
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.startup_healthcheck import (
     format_failure_summary,
     run_startup_healthchecks,
 )
-from cairn.shared.protocol_models import AiProfile
-
+from cairn.shared.config import DispatchConfig
+from cairn.shared.contracts import AiProfile
 
 LOG = logging.getLogger(__name__)
 

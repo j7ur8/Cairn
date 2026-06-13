@@ -1324,7 +1324,7 @@
       <div class="flex items-center justify-between mb-3">
         <div>
           <h4 class="text-sm font-semibold text-slate-700">Capabilities</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">MCP servers and skills that projects can attach per task stage (bootstrap / explore / reason). This page reads and writes <span class="font-mono">dispatch.capabilities.yaml</span>; project creation snapshots the selected config into <span class="font-mono">worker_execution_configs</span>. Probe checks server-visible paths, URLs, and stdio command configuration. It does not guarantee the worker can execute the capability successfully.</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">MCP servers and skills that projects can attach per task stage (bootstrap / explore / reason). This page reads and writes <span class="font-mono">dispatch.resources.yaml</span>; project creation snapshots the selected config into structured execution config tables. Probe checks server-visible paths, URLs, and stdio command configuration. It does not guarantee the worker can execute the capability successfully.</p>
         </div>
         <div class="flex gap-2 shrink-0">
           <button data-testid="settings-capability-refresh" @click="loadCapabilityAdmin()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Refresh</button>
@@ -1617,7 +1617,7 @@
             </template>
           </select>
           <template x-if="newProjectRoleItems().length === 0">
-            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.capabilities.yaml.</p>
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.resources.yaml.</p>
           </template>
         </div>
 
@@ -1880,7 +1880,7 @@
             </template>
           </select>
           <template x-if="replayConfigRoleItems().length === 0">
-            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.capabilities.yaml.</p>
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.resources.yaml.</p>
           </template>
         </div>
 

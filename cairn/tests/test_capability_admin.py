@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 import unittest
@@ -50,7 +49,7 @@ class CapabilityAdminTests(unittest.TestCase):
         return TaskAiProfileSelections(bootstrap=selection, explore=selection, reason=selection)
 
     def test_admin_upsert_and_delete_uses_capabilities_yaml(self) -> None:
-        from cairn.server.models_pkg.capabilities import CapabilityAdminRequest
+        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             delete_admin_capability,
             get_capability_catalog,
@@ -81,11 +80,11 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertNotIn(("skill", "my-skill"), items)
 
     def test_expansion_auto_adds_required_skill(self) -> None:
-        from cairn.server.capabilities_service import (
+        from cairn.server.capability_expansion import (
             catalog_map_from_items,
             expand_task_capabilities,
         )
-        from cairn.server.models_pkg.capabilities import CapabilityAdminRequest, task_capabilities_map
+        from cairn.server.models_pkg import CapabilityAdminRequest, task_capabilities_map
         from cairn.server.routers.capabilities import get_capability_catalog, upsert_admin_capability
 
         upsert_admin_capability("skill", "a", CapabilityAdminRequest(
@@ -117,11 +116,11 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(expanded["bootstrap"].user_skill_ids, [])
 
     def test_project_create_persists_role_default_skill_in_execution_config(self) -> None:
-        from cairn.server.models_pkg.capabilities import CapabilityAdminRequest
-        from cairn.server.models_pkg.intents import CreateProjectRequest
+        import yaml
+
+        from cairn.server.models_pkg import CapabilityAdminRequest, CreateProjectRequest
         from cairn.server.routers.capabilities import get_project_capabilities, upsert_admin_capability
         from cairn.server.routers.projects import create_project
-        import yaml
 
         skill_dir = self.yaml.root / "role-skill"
         skill_dir.mkdir()
@@ -154,20 +153,9 @@ class CapabilityAdminTests(unittest.TestCase):
         ))
 
         with self.db.session_scope() as conn:
-            from cairn.server.repositories import sql
+            from cairn.server.execution_config import load_project_execution_config
 
-            rows = sql.fetchall(
-                conn,
-                """
-                SELECT task_type, config_json
-                FROM worker_execution_configs
-                WHERE project_id = :project_id
-                ORDER BY task_type
-                """,
-                {"project_id": project.project.id},
-            )
-        self.assertEqual([row["task_type"] for row in rows], ["bootstrap", "explore", "reason"])
-        bootstrap_config = json.loads(rows[0]["config_json"])
+            bootstrap_config = load_project_execution_config(conn, project.project.id, "bootstrap")
         self.assertEqual(bootstrap_config["capabilities"]["skill_ids"], ["role-skill"])
         self.assertEqual(bootstrap_config["capabilities"]["role_default_skill_ids"], ["role-skill"])
 
@@ -177,7 +165,7 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(boot_snapshots[0].source, "role_default")
 
     def test_probe_stdio_command_without_source_path_is_ok(self) -> None:
-        from cairn.server.models_pkg.capabilities import CapabilityAdminRequest
+        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import probe_admin_capability, upsert_admin_capability
 
         upsert_admin_capability("mcp_server", "stdio-mcp", CapabilityAdminRequest(
@@ -192,7 +180,7 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(entry.message, "stdio command configured")
 
     def test_probe_chrome_devtools_http_reports_reachable(self) -> None:
-        from cairn.server.models_pkg.capabilities import CapabilityAdminRequest
+        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import probe_admin_capability, upsert_admin_capability
 
         upsert_admin_capability("mcp_server", "chrome-devtools-host", CapabilityAdminRequest(
@@ -219,12 +207,13 @@ class CapabilityAdminTests(unittest.TestCase):
 
 class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):
     def test_yaml_mcp_required_skill_must_resolve(self) -> None:
-        from cairn.shared.dispatch_config import (
+        from pydantic import ValidationError
+
+        from cairn.shared.config import (
             CapabilitiesConfig,
             McpServerCapabilityConfig,
             SkillCapabilityConfig,
         )
-        from pydantic import ValidationError
 
         with self.assertRaises(ValidationError) as ctx:
             CapabilitiesConfig(
@@ -244,8 +233,9 @@ class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):
         self.assertIn("ghost", str(ctx.exception))
 
     def test_yaml_skill_preferred_mcp_must_resolve(self) -> None:
-        from cairn.shared.dispatch_config import CapabilitiesConfig, SkillCapabilityConfig
         from pydantic import ValidationError
+
+        from cairn.shared.config import CapabilitiesConfig, SkillCapabilityConfig
 
         with self.assertRaises(ValidationError) as ctx:
             CapabilitiesConfig(

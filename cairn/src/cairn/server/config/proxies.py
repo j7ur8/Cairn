@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
-
 from cairn.server.config.files import load_dispatch_data, save_dispatch_data, utcnow
+from cairn.server.domain.errors import DomainError, NotFoundError
 from cairn.server.models_pkg.proxies import ProxyConfig, ProxyCreate, ProxySummary, ProxyUpdate
 
 
@@ -20,7 +19,7 @@ def get_yaml_proxy(proxy_id: str) -> ProxyConfig:
     for item in _proxies(data):
         if item.get("id") == proxy_id:
             return _proxy_to_config(item)
-    raise HTTPException(404, f"proxy not found: {proxy_id}")
+    raise NotFoundError(f"proxy not found: {proxy_id}")
 
 
 def create_yaml_proxy(body: ProxyCreate) -> ProxyConfig:
@@ -55,7 +54,7 @@ def update_yaml_proxy(proxy_id: str, body: ProxyUpdate) -> ProxyConfig:
         item["updated_at"] = utcnow()
         save_dispatch_data(data)
         return _proxy_to_config(item)
-    raise HTTPException(404, f"proxy not found: {proxy_id}")
+    raise NotFoundError(f"proxy not found: {proxy_id}")
 
 
 def delete_yaml_proxy(proxy_id: str) -> None:
@@ -66,13 +65,16 @@ def delete_yaml_proxy(proxy_id: str) -> None:
             proxies.pop(idx)
             save_dispatch_data(data)
             return
-    raise HTTPException(404, f"proxy not found: {proxy_id}")
+    raise NotFoundError(f"proxy not found: {proxy_id}")
 
 
 def _proxies(data: dict[str, Any]) -> list[dict[str, Any]]:
-    proxies = data.setdefault("proxies", [])
+    worker_pool = data.setdefault("worker_pool", {})
+    if not isinstance(worker_pool, dict):
+        raise DomainError("dispatch.yaml worker_pool must be a mapping", status_code=500)
+    proxies = worker_pool.setdefault("proxies", [])
     if not isinstance(proxies, list):
-        raise HTTPException(500, "dispatch.yaml proxies must be a list")
+        raise DomainError("dispatch.yaml worker_pool.proxies must be a list", status_code=500)
     return proxies
 
 
@@ -114,4 +116,3 @@ def _proxy_summary(item: ProxyConfig) -> ProxySummary:
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
-

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 
@@ -32,18 +33,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.db.reset_for_tests()
 
     def test_recreating_execution_preserves_existing_event_counters(self) -> None:
+        from cairn.server.observability.events_query import list_project_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution, finish_execution, list_executions
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             FinishExecutionRequest,
             ObservabilitySettings,
-        )
-        from cairn.server.observability.repository import (
-            append_event,
-            create_execution,
-            finish_execution,
-            list_executions,
-            list_project_events,
         )
 
         project_id = "proj_obs"
@@ -111,12 +108,13 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertIn("process_state=cancelled", process_end_events[0].content)
 
     def test_capability_manifest_event_kind_is_accepted(self) -> None:
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution
 
         project_id = "proj_caps"
         create_execution(
@@ -146,12 +144,13 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(event.event_kind, "capability_manifest")
 
     def test_batch_append_updates_execution_stats_once(self) -> None:
+        from cairn.server.observability.events_writer import append_events
+        from cairn.server.observability.executions import create_execution, list_executions
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_events, create_execution, list_executions
         from cairn.server.repositories import sql
 
         project_id = "proj_batch"
@@ -180,16 +179,18 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(row["count"], 3)
         execution = list_executions(self.conn, project_id, 10)[0]
         self.assertEqual(execution.event_count, 3)
-        self.assertEqual(execution.bytes_written, len("onetwothree".encode("utf-8")))
+        self.assertEqual(execution.bytes_written, len(b"onetwothree"))
         self.assertIsNotNone(execution.last_event_at)
 
     def test_incremental_events_are_filtered_by_execution_and_after(self) -> None:
+        from cairn.server.observability.events_query import list_incremental_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
 
         project_id = "proj_incremental"
         for execution_id in ("exec_a", "exec_b"):
@@ -233,12 +234,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(last_sequence, events[-1].sequence)
 
     def test_incremental_event_kinds_filter_does_not_spend_limit_on_usage(self) -> None:
+        from cairn.server.observability.events_query import list_incremental_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
 
         project_id = "proj_incremental_kinds"
         execution_id = "exec_incremental_kinds"
@@ -282,12 +285,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(last_sequence, events[-1].sequence)
 
     def test_incremental_event_kinds_filter_advances_cursor_when_no_events_match(self) -> None:
+        from cairn.server.observability.events_query import list_incremental_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
 
         project_id = "proj_incremental_cursor"
         execution_id = "exec_incremental_cursor"
@@ -319,12 +324,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(last_sequence, last_event.sequence)
 
     def test_incremental_empty_event_kinds_filter_returns_no_events_and_advances_cursor(self) -> None:
+        from cairn.server.observability.events_query import list_incremental_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_incremental_events
 
         project_id = "proj_incremental_empty_kinds"
         execution_id = "exec_incremental_empty_kinds"
@@ -354,12 +361,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(last_sequence, event.sequence)
 
     def test_tail_project_events_returns_latest_events_in_ascending_order(self) -> None:
+        from cairn.server.observability.events_query import list_project_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_project_events
 
         project_id = "proj_tail"
         create_execution(
@@ -387,12 +396,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual([event.sequence for event in events], sorted(event.sequence for event in events))
 
     def test_tail_execution_events_is_scoped_to_execution(self) -> None:
+        from cairn.server.observability.events_query import list_execution_events
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_execution_events
 
         project_id = "proj_tail_exec"
         for execution_id in ("exec_a", "exec_b"):
@@ -423,12 +434,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertTrue(all(event.execution_id == "exec_a" for event in events))
 
     def test_event_view_allowlist_keeps_primary_events_when_usage_is_noisy(self) -> None:
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+        from cairn.server.observability.view_service import list_event_view
 
         project_id = "proj_view"
         execution_id = "exec_view"
@@ -480,12 +493,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(view.last_sequence, view.primary_events[0].sequence)
 
     def test_event_view_without_event_kinds_returns_all_event_kinds(self) -> None:
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+        from cairn.server.observability.view_service import list_event_view
 
         project_id = "proj_view_low"
         execution_id = "exec_view_low"
@@ -512,12 +527,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(view.stats.hidden_by_kind, {})
 
     def test_event_view_event_kinds_allowlist_hides_unselected_kinds(self) -> None:
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+        from cairn.server.observability.view_service import list_event_view
 
         project_id = "proj_view_default"
         execution_id = "exec_view_default"
@@ -550,12 +567,14 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(view.stats.hidden_by_kind, {"usage": 1})
 
     def test_event_view_empty_event_kinds_filter_returns_no_primary_events(self) -> None:
+        from cairn.server.observability.events_writer import append_event
+        from cairn.server.observability.executions import create_execution
         from cairn.server.observability.models import (
             CreateEventRequest,
             CreateExecutionRequest,
             ObservabilitySettings,
         )
-        from cairn.server.observability.repository import append_event, create_execution, list_event_view
+        from cairn.server.observability.view_service import list_event_view
 
         project_id = "proj_view_empty_kinds"
         execution_id = "exec_view_empty_kinds"
@@ -586,8 +605,8 @@ class ProjectFilesRouterTests(unittest.TestCase):
         self.project_root = Path(self.tmpdir.name) / "project-files"
         self.attachments_root = Path(self.tmpdir.name) / "attachments"
         self.yaml = TempYamlConfig()
-        self.yaml.dispatch["system"]["paths"]["project_files_root"] = str(self.project_root)
-        self.yaml.dispatch["system"]["paths"]["attachments_root"] = str(self.attachments_root)
+        self.yaml.dispatch["server"]["paths"]["project_files_root"] = str(self.project_root)
+        self.yaml.dispatch["server"]["paths"]["attachments_root"] = str(self.attachments_root)
         self.yaml.__enter__()
 
         from cairn.server import db

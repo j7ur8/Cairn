@@ -6,3 +6,4 @@ datas/
 .env
 dispatch.yaml
 dispatch.capabilities.yaml
+dispatch.resources.yaml

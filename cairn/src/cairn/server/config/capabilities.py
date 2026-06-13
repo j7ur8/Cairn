@@ -4,13 +4,13 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from cairn.server.config.files import load_resources_data, save_resources_data
+from cairn.server.models_pkg import CapabilityAdminRequest, CapabilityCatalogItem
 from cairn.shared.task_types import default_capability_task_type_names
-from cairn.server.config.files import load_capabilities_data, save_capabilities_data
-from cairn.server.models_pkg.capabilities import CapabilityAdminRequest, CapabilityCatalogItem
 
 
 def list_yaml_capabilities() -> list[CapabilityCatalogItem]:
-    data = load_capabilities_data()
+    data = load_resources_data()
     caps = data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
     result: list[CapabilityCatalogItem] = []
     for item in caps.get("mcp_servers") or []:
@@ -41,12 +41,12 @@ def list_yaml_capabilities() -> list[CapabilityCatalogItem]:
 def upsert_yaml_capability(kind: str, capability_id: str, body: CapabilityAdminRequest) -> CapabilityCatalogItem:
     if kind not in ("mcp_server", "skill"):
         raise HTTPException(400, f"unknown kind: {kind}")
-    data = load_capabilities_data()
+    data = load_resources_data()
     caps = data.setdefault("capabilities", {})
     section = "mcp_servers" if kind == "mcp_server" else "skills"
     entries = caps.setdefault(section, [])
     if not isinstance(entries, list):
-        raise HTTPException(500, f"dispatch.capabilities.yaml capabilities.{section} must be a list")
+        raise HTTPException(500, f"dispatch.resources.yaml capabilities.{section} must be a list")
     existing_idx = next((idx for idx, item in enumerate(entries) if isinstance(item, dict) and item.get("id") == capability_id), None)
     existing = entries[existing_idx] if existing_idx is not None else {}
     if existing_idx is not None and existing.get("source") not in (None, "user"):
@@ -57,26 +57,26 @@ def upsert_yaml_capability(kind: str, capability_id: str, body: CapabilityAdminR
         entries.append(payload)
     else:
         entries[existing_idx] = payload
-    save_capabilities_data(data)
+    save_resources_data(data)
     return next(item for item in list_yaml_capabilities() if item.kind == kind and item.id == capability_id)
 
 
 def delete_yaml_capability(kind: str, capability_id: str) -> None:
     if kind not in ("mcp_server", "skill"):
         raise HTTPException(400, f"unknown kind: {kind}")
-    data = load_capabilities_data()
+    data = load_resources_data()
     caps = data.setdefault("capabilities", {})
     section = "mcp_servers" if kind == "mcp_server" else "skills"
     entries = caps.setdefault(section, [])
     if not isinstance(entries, list):
-        raise HTTPException(500, f"dispatch.capabilities.yaml capabilities.{section} must be a list")
+        raise HTTPException(500, f"dispatch.resources.yaml capabilities.{section} must be a list")
     for idx, item in enumerate(entries):
         if not isinstance(item, dict) or item.get("id") != capability_id:
             continue
         if item.get("source") not in (None, "user"):
             raise HTTPException(409, f"{kind}/{capability_id} is built-in and cannot be deleted")
         entries.pop(idx)
-        save_capabilities_data(data)
+        save_resources_data(data)
         return
     raise HTTPException(404, f"{kind} not found: {capability_id}")
 
@@ -150,4 +150,3 @@ def _strip_empty_values(value: dict[str, Any]) -> dict[str, Any]:
         for key, item in value.items()
         if item not in (None, "", [], {})
     }
-

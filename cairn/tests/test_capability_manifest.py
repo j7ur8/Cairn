@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 
@@ -15,7 +16,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class CapabilityManifestTests(unittest.TestCase):
     def test_manifest_lists_selected_mcp_and_skills_without_secrets(self) -> None:
-        from cairn.dispatcher.tasks.runner import capability_manifest_payload
+        from cairn.shared.capability_projection import capability_manifest_payload
 
         payload = capability_manifest_payload(
             "proj_001",
@@ -84,7 +85,7 @@ class CapabilityManifestTests(unittest.TestCase):
         self.assertNotIn("TOKEN", rendered)
 
     def test_manifest_empty_when_selection_unavailable(self) -> None:
-        from cairn.dispatcher.tasks.runner import capability_manifest_payload
+        from cairn.shared.capability_projection import capability_manifest_payload
 
         payload = capability_manifest_payload("proj_002", "bootstrap", None)
 
@@ -94,8 +95,9 @@ class CapabilityManifestTests(unittest.TestCase):
 
     def test_dispatcher_catalog_payload_carries_probe_and_routing_fields(self) -> None:
         from cairn.dispatcher.capabilities import catalog_payload
-        from cairn.shared.dispatch_config import (
-            McpServerCapabilityConfig, SkillCapabilityConfig,
+        from cairn.shared.config import (
+            McpServerCapabilityConfig,
+            SkillCapabilityConfig,
         )
         config = SimpleNamespace(
             capabilities=SimpleNamespace(
@@ -152,11 +154,13 @@ class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
     """catalog_payload carries required_skill_ids for MCP entries."""
 
     def test_payload_includes_required_skill_ids(self) -> None:
-        from cairn.dispatcher.capabilities import catalog_payload
-        from cairn.shared.dispatch_config import (
-            McpServerCapabilityConfig, SkillCapabilityConfig,
-        )
         from types import SimpleNamespace
+
+        from cairn.dispatcher.capabilities import catalog_payload
+        from cairn.shared.config import (
+            McpServerCapabilityConfig,
+            SkillCapabilityConfig,
+        )
         config = SimpleNamespace(
             capabilities=SimpleNamespace(
                 mcp_servers=[
@@ -187,10 +191,10 @@ class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
 
 class CapabilityInstructionRenderingTests(unittest.TestCase):
     def test_execute_instructions_render_dynamic_routing_metadata(self) -> None:
-        from cairn.dispatcher.capabilities import _instructions
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
+        from cairn.dispatcher.capability_instructions import instructions
+        from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
-        text = _instructions(
+        text = instructions(
             "/tmp/cap/mcp.json",
             "/tmp/cap/skills",
             [
@@ -228,10 +232,10 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         self.assertIn("Read SKILL.md before using the paired browser MCP.", text)
 
     def test_reason_instructions_render_metadata_without_paths(self) -> None:
-        from cairn.dispatcher.capabilities import _reason_instructions
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
+        from cairn.dispatcher.capability_instructions import reason_instructions
+        from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
-        text = _reason_instructions(
+        text = reason_instructions(
             [
                 McpServerCapabilityConfig(
                     id="chrome-devtools-host",

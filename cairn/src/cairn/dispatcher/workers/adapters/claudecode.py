@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cairn.shared.dispatch_config import WorkerConfig
 from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
 from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
-
+from cairn.shared.config import WorkerConfig
 
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -124,7 +123,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
             "stream-json",
             "--verbose",
             "--tools",
-            "",
+            "Read",
             *effort_args,
             "--",
             prompt,

@@ -1,7 +1,7 @@
 """Per-project caches used by the scheduler loop.
 
 Three pieces of dispatcher state used to live as raw ``dict`` fields
-on :class:`cairn.dispatcher.scheduler.loop.DispatcherLoop`:
+on the main dispatcher loop object:
 
 * ``_project_proxy_cache`` — resolved :class:`ProxyConfig` per project.
 * ``_project_ai_cache`` — ordered AI profile chains per project / task.
@@ -25,10 +25,7 @@ underlying dicts directly.
 """
 from __future__ import annotations
 
-from typing import Any
-
-from cairn.shared.protocol_models import ProjectAiProfileSnapshot
-from cairn.shared.protocol_models import ProxyConfig
+from cairn.shared.contracts import ProjectAiProfileSnapshot, ProxyConfig
 
 
 class ProjectCaches:

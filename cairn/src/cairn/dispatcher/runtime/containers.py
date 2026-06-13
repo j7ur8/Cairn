@@ -1,30 +1,61 @@
 from __future__ import annotations
 
-import io
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from pathlib import PurePosixPath
-import tarfile
-import threading
-from typing import Callable
+from typing import TYPE_CHECKING
 
-import docker
-from docker.errors import APIError, DockerException, NotFound
-from docker.models.containers import Container
+if TYPE_CHECKING:
+    from docker.models.containers import Container
 
-from cairn.shared.dispatch_config import ContainerConfig
+try:
+    import docker
+    from docker.errors import APIError, DockerException, NotFound
+except ModuleNotFoundError:  # Allows scheduler pure logic to import without Docker SDK.
+    docker = None  # type: ignore[assignment]
+
+    class DockerException(Exception):
+        pass
+
+    class APIError(DockerException):
+        pass
+
+    class NotFound(DockerException):
+        pass
+
+from cairn.dispatcher.runtime.archive_writer import directory_archive, text_file_archive
+from cairn.dispatcher.runtime.bind_mount_validation import (
+    mount_mismatches as inspect_mount_mismatches,
+)
+from cairn.dispatcher.runtime.bind_mount_validation import (
+    validate_bind_mounts as validate_config_bind_mounts,
+)
+from cairn.dispatcher.runtime.container_access import DockerAccess
+from cairn.dispatcher.runtime.container_cleanup import ContainerCleanup
+from cairn.dispatcher.runtime.container_env import proxy_environment
+from cairn.dispatcher.runtime.container_exec import ContainerExec
+from cairn.dispatcher.runtime.container_files import ContainerFiles
+from cairn.dispatcher.runtime.container_lifecycle import ContainerLifecycle
+from cairn.dispatcher.runtime.docker_labels import (
+    CONTAINER_PREFIX,
+    LABEL_MANAGED,
+    STARTUP_CONTAINER_NAME,
+    STARTUP_PROJECT_ID,
+    container_name,
+    is_startup_container,
+)
+from cairn.dispatcher.runtime.mounts import docker_volumes, render_bind_mounts
 from cairn.dispatcher.runtime.process import ManagedProcess
+from cairn.shared.config import ContainerConfig
 
 LOG = logging.getLogger(__name__)
 
 
 class ContainerManager:
-    _PREFIX = "cairn-worker-"
-    _STARTUP_NAME = "cairn-worker-startup-healthcheck"
-    _STARTUP_PROJECT_ID = "startup-healthcheck"
-    _LABEL_MANAGED = "cairn.managed"
-    _LABEL_PROJECT_ID = "cairn.project_id"
-    _LABEL_STARTUP = "cairn.startup_healthcheck"
+    _PREFIX = CONTAINER_PREFIX
+    _STARTUP_NAME = STARTUP_CONTAINER_NAME
+    _STARTUP_PROJECT_ID = STARTUP_PROJECT_ID
+    _LABEL_MANAGED = LABEL_MANAGED
 
     def __init__(
         self,
@@ -33,10 +64,39 @@ class ContainerManager:
     ):
         self._config = config
         self._proxy_resolver = proxy_resolver
+        if docker is None:
+            raise RuntimeError("Docker SDK is required for container runtime operations")
         self._client = docker.from_env()
-        self._ensure_running_locks: dict[str, threading.Lock] = {}
-        self._ensure_running_locks_guard = threading.Lock()
         self._logged_mount_mismatches: set[tuple[str, str]] = set()
+        self._access = DockerAccess(
+            self._client,
+            docker_exception_type=DockerException,
+            not_found_type=NotFound,
+        )
+        self._lifecycle = ContainerLifecycle(
+            config=self._config,
+            access=self._access,
+            api_error_type=APIError,
+            docker_exception_type=DockerException,
+            proxy_environment=self._proxy_environment,
+            inspect_state=self.inspect_state,
+            log_mount_mismatches=self.log_mount_mismatches,
+        )
+        self._cleanup = ContainerCleanup(
+            config=self._config,
+            access=self._access,
+            docker_exception_type=DockerException,
+            not_found_type=NotFound,
+            prefix=self._PREFIX,
+            inspect_state=self.inspect_state,
+            container_name=self.container_name,
+        )
+        self._files = ContainerFiles(access=self._access, docker_exception_type=DockerException)
+        self._exec = ContainerExec(
+            config=self._config,
+            access=self._access,
+            require_container=lambda name: self._require_container(name),
+        )
 
     def _proxy_environment(self, project_id: str) -> dict[str, str]:
         """Resolve the per-project proxy at container-launch time.
@@ -46,103 +106,27 @@ class ContainerManager:
         proxy config from the Server without a long-lived cache in
         ``ContainerManager``.
         """
-        if self._proxy_resolver is None:
-            return {}
-        resolved = self._proxy_resolver(project_id) or {}
-        return dict(resolved)
+        return proxy_environment(self._proxy_resolver, project_id)
 
     def close(self) -> None:
         self._client.close()
 
     def container_name(self, project_id: str) -> str:
-        sanitized = project_id.replace("/", "-")
-        return f"{self._PREFIX}{sanitized}"
+        return container_name(project_id)
 
     def ensure_running(self, project_id: str) -> str:
-        name = self.container_name(project_id)
-        with self._ensure_running_lock(name):
-            return self._ensure_running_locked(project_id, name)
-
-    def _ensure_running_locked(self, project_id: str, name: str) -> str:
-        state = self.inspect_state(name)
-        if state == "running":
-            self.log_mount_mismatches(name, project_id)
-            LOG.debug("container already running project=%s container=%s", project_id, name)
-            return name
-        if state is not None:
-            self.log_mount_mismatches(name, project_id)
-            LOG.info("starting existing container project=%s container=%s state=%s", project_id, name, state)
-            self._start_existing(name, project_id=project_id)
-            return name
-        LOG.info("creating container project=%s container=%s image=%s", project_id, name, self._config.image)
-        try:
-            volumes = self._docker_volumes(project_id)
-            self._client.containers.run(
-                self._config.image,
-                ["sleep", "infinity"],
-                detach=True,
-                name=name,
-                network_mode=self._config.network_mode,
-                cap_add=self._config.cap_add or None,
-                volumes=volumes or None,
-                environment=self._proxy_environment(project_id) or None,
-                user=self._config.user,
-                labels=self._container_labels(project_id),
-            )
-            LOG.info("created container project=%s container=%s", project_id, name)
-            return name
-        except APIError as exc:
-            if not self._is_name_conflict(exc):
-                raise RuntimeError(f"failed to create container {name}: {exc}") from exc
-        LOG.info("container name conflict, reusing existing container project=%s container=%s", project_id, name)
-        state = self.inspect_state(name)
-        if state == "running":
-            self.log_mount_mismatches(name, project_id)
-            return name
-        if state is not None:
-            self.log_mount_mismatches(name, project_id)
-            LOG.info("starting conflicted existing container project=%s container=%s state=%s", project_id, name, state)
-            self._start_existing(name, project_id=project_id)
-            return name
-        raise RuntimeError(f"failed to create container {name}")
-
-    def _ensure_running_lock(self, name: str) -> threading.Lock:
-        with self._ensure_running_locks_guard:
-            lock = self._ensure_running_locks.get(name)
-            if lock is None:
-                lock = threading.Lock()
-                self._ensure_running_locks[name] = lock
-            return lock
+        return self._lifecycle.ensure_running(project_id)
 
     def create_startup_container(self) -> str:
         name = self._STARTUP_NAME
-        LOG.debug("creating startup healthcheck container container=%s image=%s", name, self._config.image)
-        self.remove_container(name, force=True)
-        try:
-            volumes = self._docker_volumes(self._STARTUP_PROJECT_ID)
-            self._client.containers.run(
-                self._config.image,
-                ["sleep", "infinity"],
-                detach=True,
-                name=name,
-                network_mode=self._config.network_mode,
-                cap_add=self._config.cap_add or None,
-                volumes=volumes or None,
-                environment=self._proxy_environment(self._STARTUP_PROJECT_ID) or None,
-                user=self._config.user,
-                labels=self._container_labels(self._STARTUP_PROJECT_ID, startup=True),
-            )
-        except DockerException as exc:
-            raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
-        return name
+        return self._lifecycle.create_startup_container(name, self._STARTUP_PROJECT_ID)
 
     def validate_bind_mounts(self, container_name: str, project_id: str) -> list[str]:
-        errors: list[str] = []
-        for mount in self._render_bind_mounts(project_id):
-            probe = self._probe_bind_mount(container_name, mount["container_path"], mount["read_only"])
-            if probe:
-                errors.append(f"{mount['name']} {probe}")
-        return errors
+        return validate_config_bind_mounts(
+            config=self._config,
+            project_id=project_id,
+            probe=lambda container_path, read_only: self._probe_bind_mount(container_name, container_path, read_only),
+        )
 
     def log_managed_container_mount_mismatches(self) -> None:
         for name in self.managed_container_names():
@@ -159,169 +143,39 @@ class ContainerManager:
             LOG.warning("container bind mount mismatch container=%s project=%s %s", container_name, project_id, mismatch)
 
     def mount_mismatches(self, container_name: str, project_id: str) -> list[str]:
-        expected = self._render_bind_mounts(project_id)
-        if not expected:
-            return []
-        container = self._get_container(container_name)
-        if container is None:
-            return []
-        try:
-            container.reload()
-        except DockerException as exc:
-            return [f"failed to inspect mounts: {exc}"]
-        actual_by_destination = {
-            str(mount.get("Destination")): mount
-            for mount in container.attrs.get("Mounts", [])
-            if mount.get("Destination")
-        }
-        mismatches: list[str] = []
-        for mount in expected:
-            actual = actual_by_destination.get(mount["container_path"])
-            if actual is None:
-                mismatches.append(f"missing {mount['name']} at {mount['container_path']}")
-                continue
-            actual_source = str(Path(str(actual.get("Source", ""))).resolve(strict=False))
-            if actual_source != mount["host_path"]:
-                mismatches.append(
-                    f"{mount['name']} source mismatch expected={mount['host_path']} actual={actual_source}"
-                )
-            actual_rw = bool(actual.get("RW"))
-            expected_rw = not mount["read_only"]
-            if actual_rw != expected_rw:
-                mismatches.append(
-                    f"{mount['name']} mode mismatch expected={'rw' if expected_rw else 'ro'} actual={'rw' if actual_rw else 'ro'}"
-                )
-        return mismatches
-
-    def inspect_state(self, name: str) -> str | None:
-        container = self._get_container(name)
-        if container is None:
-            return None
-        try:
-            container.reload()
-        except DockerException as exc:
-            raise RuntimeError(f"failed to inspect container {name}: {exc}") from exc
-        state = container.attrs.get("State", {}).get("Status")
-        return str(state) if state else None
-
-    def cleanup_completed(self, project_id: str) -> bool:
-        name = self.container_name(project_id)
-        state = self.inspect_state(name)
-        if state is None:
-            return True
-        container = self._require_container(name)
-        if self._config.completed_action == "remove":
-            LOG.info("removing completed project container project=%s container=%s", project_id, name)
-            try:
-                container.remove(force=True)
-            except NotFound:
-                return True
-            except DockerException as exc:
-                LOG.warning("failed to remove container=%s error=%s", name, exc)
-                return False
-            return self.inspect_state(name) is None
-        elif state == "running":
-            LOG.info("stopping completed project container project=%s container=%s", project_id, name)
-            try:
-                container.stop(timeout=1)
-            except NotFound:
-                return True
-            except DockerException as exc:
-                LOG.warning("failed to stop container=%s error=%s", name, exc)
-                return False
-            return self.inspect_state(name) != "running"
-        return True
-
-    def cleanup_stopped(self, project_id: str) -> bool:
-        name = self.container_name(project_id)
-        state = self.inspect_state(name)
-        if state is None:
-            return True
-        container = self._require_container(name)
-        if self._config.stopped_action == "remove":
-            LOG.info("removing stopped project container project=%s container=%s", project_id, name)
-            try:
-                container.remove(force=True)
-            except NotFound:
-                return True
-            except DockerException as exc:
-                LOG.warning("failed to remove stopped project container=%s error=%s", name, exc)
-                return False
-            return self.inspect_state(name) is None
-
-        if state != "running":
-            return True
-        LOG.info("stopping stopped project container project=%s container=%s", project_id, name)
-        try:
-            container.stop(timeout=1)
-        except NotFound:
-            return True
-        except DockerException as exc:
-            LOG.warning("failed to stop stopped project container=%s error=%s", name, exc)
-            return False
-        return self.inspect_state(name) != "running"
-
-    def cleanup_orphan(self, name: str) -> bool:
-        state = self.inspect_state(name)
-        if state is None:
-            return True
-        LOG.info("removing orphan project container container=%s state=%s", name, state)
-        container = self._require_container(name)
-        try:
-            container.remove(force=True)
-        except NotFound:
-            return True
-        except DockerException as exc:
-            LOG.warning("failed to remove orphan container=%s error=%s", name, exc)
-            return False
-        return self.inspect_state(name) is None
-
-    def managed_container_names(self) -> list[str]:
-        try:
-            containers = self._client.containers.list(
-                all=True,
-                filters={
-                    "label": [
-                        f"{self._LABEL_MANAGED}=true",
-                    ],
-                },
-            )
-        except DockerException as exc:
-            LOG.warning("failed to list managed containers error=%s", exc)
-            return []
-        return sorted(
-            container.name
-            for container in containers
-            if container.name.startswith(self._PREFIX) and not self._is_startup_container(container)
+        return inspect_mount_mismatches(
+            config=self._config,
+            project_id=project_id,
+            container=self._get_container(container_name),
+            docker_exception_type=DockerException,
         )
 
+    def inspect_state(self, name: str) -> str | None:
+        return self._lifecycle.inspect_state_value(name)
+
+    def cleanup_completed(self, project_id: str) -> bool:
+        return self._cleanup.cleanup_completed(project_id)
+
+    def cleanup_stopped(self, project_id: str) -> bool:
+        return self._cleanup.cleanup_stopped(project_id)
+
+    def cleanup_orphan(self, name: str) -> bool:
+        return self._cleanup.cleanup_orphan(name)
+
+    def managed_container_names(self) -> list[str]:
+        return self._cleanup.managed_container_names()
+
     def _is_startup_container(self, container: Container) -> bool:
-        if container.name == self._STARTUP_NAME:
-            return True
-        labels = getattr(container, "labels", None)
-        if isinstance(labels, dict) and labels.get(self._LABEL_STARTUP) == "true":
-            return True
-        return False
+        return is_startup_container(container)
 
     def needs_completed_cleanup(self, project_id: str) -> bool:
-        name = self.container_name(project_id)
-        state = self.inspect_state(name)
-        if state is None:
-            return False
-        if self._config.completed_action == "remove":
-            return True
-        return state == "running"
+        return self._cleanup.needs_completed_cleanup(project_id)
 
     def needs_orphan_cleanup(self, name: str) -> bool:
-        return self.inspect_state(name) is not None
+        return self._cleanup.needs_orphan_cleanup(name)
 
     def needs_stopped_cleanup(self, project_id: str) -> bool:
-        state = self.inspect_state(self.container_name(project_id))
-        if state is None:
-            return False
-        if self._config.stopped_action == "remove":
-            return True
-        return state == "running"
+        return self._cleanup.needs_stopped_cleanup(project_id)
 
     def build_exec_process(
         self,
@@ -333,92 +187,36 @@ class ContainerManager:
         tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess:
-        container = self._require_container(container_name)
-        argv: list[str] = []
-        if timeout_seconds is not None:
-            argv.extend(
-                [
-                    "timeout",
-                    "-k",
-                    f"{kill_after_seconds}s",
-                    f"{timeout_seconds}s",
-                ]
-            )
-        argv.extend(command)
-        return ManagedProcess(container, argv, env, user=self._config.exec_user, tty=tty, on_output=on_output)
+        return self._exec.build_exec_process(
+            container_name,
+            env,
+            command,
+            timeout_seconds=timeout_seconds,
+            kill_after_seconds=kill_after_seconds,
+            tty=tty,
+            on_output=on_output,
+        )
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
-        archive_path, archive = self._text_file_archive(path, content)
-        container = self._require_container(container_name)
-        try:
-            ok = container.put_archive(archive_path, archive)
-        except DockerException as exc:
-            raise RuntimeError(f"failed to write container file {path}: {exc}") from exc
-        if not ok:
-            raise RuntimeError(f"failed to write container file {path}")
+        self._files.write_text_file(container_name, path, content)
 
     def write_directory(self, container_name: str, path: str, source: Path) -> None:
-        archive_path, archive = self._directory_archive(path, source)
-        container = self._require_container(container_name)
-        try:
-            ok = container.put_archive(archive_path, archive)
-        except DockerException as exc:
-            raise RuntimeError(f"failed to write container directory {path}: {exc}") from exc
-        if not ok:
-            raise RuntimeError(f"failed to write container directory {path}")
+        self._files.write_directory(container_name, path, source)
 
     def remove_container(self, name: str, *, force: bool = True) -> None:
-        container = self._get_container(name)
-        if container is None:
-            return
-        try:
-            container.remove(force=force)
-        except NotFound:
-            return
-        except DockerException as exc:
-            LOG.warning("failed to remove container=%s error=%s", name, exc)
+        self._lifecycle.remove_container(name, force=force)
 
     def _start_existing(self, name: str, *, project_id: str | None = None) -> None:
-        LOG.debug("starting container=%s", name)
-        container = self._require_container(name)
-        try:
-            container.start()
-            return
-        except DockerException as exc:
-            if self.inspect_state(name) == "running":
-                return
-            raise RuntimeError(f"failed to start container {name}: {exc}") from exc
+        self._lifecycle.start_existing(name)
 
     def _get_container(self, name: str) -> Container | None:
-        try:
-            return self._client.containers.get(name)
-        except NotFound:
-            return None
-        except DockerException as exc:
-            raise RuntimeError(f"failed to get container {name}: {exc}") from exc
+        return self._access.get_container(name)
 
     def _require_container(self, name: str) -> Container:
-        container = self._get_container(name)
-        if container is None:
-            raise RuntimeError(f"container not found: {name}")
-        return container
+        return self._access.require_container(name)
 
     def _docker_volumes(self, project_id: str) -> dict[str, dict[str, str]]:
-        volumes: dict[str, dict[str, str]] = {}
-        for mount in self._render_bind_mounts(project_id):
-            host_path = Path(mount["host_path"])
-            volumes[str(host_path)] = {
-                "bind": mount["container_path"],
-                "mode": "ro" if mount["read_only"] else "rw",
-            }
-        return volumes
-
-    def _container_labels(self, project_id: str, *, startup: bool = False) -> dict[str, str]:
-        return {
-            self._LABEL_MANAGED: "true",
-            self._LABEL_PROJECT_ID: project_id,
-            self._LABEL_STARTUP: "true" if startup else "false",
-        }
+        return docker_volumes(self._config, project_id)
 
     def _render_bind_mounts(self, project_id: str) -> list[dict[str, object]]:
         return self._render_bind_mounts_for(self._config, project_id)
@@ -427,19 +225,7 @@ class ContainerManager:
     def _render_bind_mounts_for(
         config: ContainerConfig, project_id: str,
     ) -> list[dict[str, object]]:
-        rendered: list[dict[str, object]] = []
-        for index, mount in enumerate(config.bind_mounts):
-            name = mount.name or f"bind_mount[{index}]"
-            host_path = mount.host_path.replace("{project_id}", project_id)
-            rendered.append(
-                {
-                    "name": name,
-                    "host_path": str(Path(host_path).expanduser().resolve(strict=False)),
-                    "container_path": mount.container_path,
-                    "read_only": mount.read_only,
-                }
-            )
-        return rendered
+        return render_bind_mounts(config, project_id)
 
     def _probe_bind_mount(self, container_name: str, container_path: str, read_only: bool) -> str | None:
         script = (
@@ -469,73 +255,12 @@ class ContainerManager:
 
     @staticmethod
     def _is_name_conflict(exc: APIError) -> bool:
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
-        explanation = str(getattr(exc, "explanation", "") or exc)
-        return status_code == 409 or "is already in use" in explanation
+        return ContainerLifecycle.is_name_conflict(exc)
 
     @staticmethod
     def _text_file_archive(path: str, content: str) -> tuple[str, bytes]:
-        target = PurePosixPath(path)
-        if not target.is_absolute() or target.name in ("", ".", ".."):
-            raise ValueError(f"container file path must be absolute: {path}")
-        parts = target.parts[1:]
-        if not parts or any(part in ("", ".", "..") for part in parts):
-            raise ValueError(f"invalid container file path: {path}")
-        if len(parts) == 1:
-            archive_path = "/"
-            archive_parts = parts
-        else:
-            archive_path = f"/{parts[0]}"
-            archive_parts = parts[1:]
-
-        payload = content.encode("utf-8")
-        stream = io.BytesIO()
-        with tarfile.open(fileobj=stream, mode="w") as archive:
-            parent = ""
-            for part in archive_parts[:-1]:
-                parent = f"{parent}/{part}" if parent else part
-                info = tarfile.TarInfo(parent)
-                info.type = tarfile.DIRTYPE
-                info.mode = 0o755
-                archive.addfile(info)
-
-            file_name = "/".join(archive_parts)
-            info = tarfile.TarInfo(file_name)
-            info.size = len(payload)
-            info.mode = 0o644
-            archive.addfile(info, io.BytesIO(payload))
-        return archive_path, stream.getvalue()
+        return text_file_archive(path, content)
 
     @staticmethod
     def _directory_archive(path: str, source: Path) -> tuple[str, bytes]:
-        target = PurePosixPath(path)
-        if not target.is_absolute() or target.name in ("", ".", ".."):
-            raise ValueError(f"container directory path must be absolute: {path}")
-        parts = target.parts[1:]
-        if not parts or any(part in ("", ".", "..") for part in parts):
-            raise ValueError(f"invalid container directory path: {path}")
-        source = source.resolve(strict=True)
-        if not source.is_dir():
-            raise ValueError(f"source must be a directory: {source}")
-        archive_path = f"/{parts[0]}" if len(parts) > 1 else "/"
-        prefix = "/".join(parts[1:]) if len(parts) > 1 else parts[0]
-
-        stream = io.BytesIO()
-        with tarfile.open(fileobj=stream, mode="w") as archive:
-            root_info = tarfile.TarInfo(prefix)
-            root_info.type = tarfile.DIRTYPE
-            root_info.mode = 0o755
-            archive.addfile(root_info)
-            for item in sorted(source.rglob("*")):
-                relative = item.relative_to(source)
-                if any(part in ("", ".", "..") for part in relative.parts):
-                    continue
-                arcname = f"{prefix}/{relative}"
-                if item.is_dir():
-                    info = tarfile.TarInfo(arcname)
-                    info.type = tarfile.DIRTYPE
-                    info.mode = 0o755
-                    archive.addfile(info)
-                elif item.is_file():
-                    archive.add(item, arcname=arcname, recursive=False)
-        return archive_path, stream.getvalue()
+        return directory_archive(path, source)

@@ -2,37 +2,21 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 
-from cairn.shared.dispatch_config import DispatchConfig, WorkerConfig
-from cairn.dispatcher.capabilities import inject_project_capabilities
-from cairn.dispatcher.roles import inject_project_role
-from cairn.dispatcher.contracts import parse_json_output, validate_reason_payload
-from cairn.dispatcher.observability.reporter import ExecutionReporter
-from cairn.dispatcher.prompting import (
-    format_fact_ids,
-    format_open_intents,
-    load_prompt,
-    render_prompt,
-)
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
-from cairn.dispatcher.tasks.common import (
-    best_effort_release_reason,
-    cancel_reason,
-    did_timeout,
-    preview,
-    process_state_for_task_outcome,
-    run_healthcheck,
-    run_worker_process,
-    write_graph_snapshot_reference,
-)
-from cairn.dispatcher.tasks.runner import project_capability_data, project_execution_config, project_role_data
-from cairn.dispatcher.tasks.runner import project_task_timeout
+from cairn.dispatcher.tasks.lifecycle import TaskLifecycle, TaskRunContext
+from cairn.dispatcher.tasks.reason_prompt import build_reason_execute_prompt
+from cairn.dispatcher.tasks.reason_result import apply_reason_result
+from cairn.dispatcher.tasks.runner import prepare_task_execution
+from cairn.dispatcher.tasks.task_outcome import cancel_reason, did_timeout
+from cairn.dispatcher.tasks.task_process import run_healthcheck, run_worker_process
+from cairn.dispatcher.tasks.task_release import best_effort_release_reason
+from cairn.dispatcher.tasks.task_text import preview
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.shared.protocol_models import ProjectDetail
+from cairn.shared.config import DispatchConfig, WorkerConfig
+from cairn.shared.contracts import ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -44,6 +28,7 @@ def run_reason_task(
     project: ProjectDetail,
     export_yaml: str,
     worker: WorkerConfig,
+    execution_config: dict,
     reason_run_id: str,
     reason_trigger: str,
     reason_trigger_hash: str,
@@ -53,22 +38,25 @@ def run_reason_task(
     cancellation: TaskCancellation,
 ) -> str:
     driver = get_driver(worker.type)
-    reporter = ExecutionReporter(
-        client,
-        config.observability,
-        project_id=project.project.id,
-        intent_id=None,
-        task_type="reason",
-        worker=worker.name,
-    ) if config.observability.enabled else ExecutionReporter.disabled()
-    reporter.start()
+    lifecycle = TaskLifecycle(
+        TaskRunContext(
+            config=config,
+            client=client,
+            project_id=project.project.id,
+            task_type="reason",
+            worker=worker,
+            intent_id=None,
+            reason_run_id=reason_run_id,
+        )
+    )
+    reporter = lifecycle.reporter
     outcome = "failed"
     reason_finish_outcome = "failed"
     reason_finish_error: str | None = None
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
-    lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, config.runtime.interval, reason_run_id)
-    lease.start()
+    lease = lifecycle.lease
+    lifecycle.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
 
@@ -126,70 +114,33 @@ def run_reason_task(
             reason_finish_error = preview(healthcheck.result.stderr)
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
-        execution_config = project_execution_config(client, project.project.id, "reason", reporter, "reason_execute")
-        task_timeout = project_task_timeout(execution_config, "reason_execute", reporter)
-        if task_timeout is None:
+        prepared = prepare_task_execution(
+            config=config,
+            client=client,
+            container_manager=container_manager,
+            container_name=container_name,
+            project_id=project.project.id,
+            task_type="reason",
+            capability_scope=f"reason-{worker.name}-{reason_run_id[:12]}",
+            reporter=reporter,
+            phase="reason_execute",
+            preloaded_execution_config=execution_config,
+        )
+        if prepared is None:
             outcome = "failed"
             reason_finish_outcome = "failed"
             reason_finish_error = "execution config missing task_timeout"
             return outcome
-        capabilities = inject_project_capabilities(
-            config,
-            container_manager,
-            container_name,
-            project.project.id,
-            "reason",
-            f"reason-{worker.name}-{uuid.uuid4().hex[:12]}",
-            project_capability_data(execution_config),
-        )
-        if capabilities.summary:
-            reporter.emit_result("capabilities", capabilities.summary)
-        for error in capabilities.errors:
-            reporter.emit_error("capabilities", "error", error)
-        role = inject_project_role(
-            project.project.id,
-            "reason",
-            project_role_data(execution_config),
-        )
-        if role.summary:
-            reporter.emit_result("role", role.summary)
-        for error in role.errors or []:
-            reporter.emit_error("role", "error", error)
-        open_intents = [
-            {
-                "id": intent.id,
-                "from": intent.from_,
-                "description": intent.description,
-                "worker": intent.worker,
-            }
-            for intent in project.intents
-            if intent.to is None
-        ]
-        allowed_fact_ids = [fact.id for fact in project.facts if fact.id != "goal"]
-        LOG.debug(
-            "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_intents=%s",
-            project.project.id,
-            worker.name,
-            len(project.facts),
-            len(allowed_fact_ids),
-            len(project.hints),
-            len(open_intents),
-        )
-        prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "reason.md"),
-            {
-                "graph_yaml": write_graph_snapshot_reference(
-                    container_manager,
-                    container_name,
-                    export_yaml.strip(),
-                    phase="reason_execute",
-                ),
-                "fact_ids": format_fact_ids(allowed_fact_ids),
-                "open_intents": format_open_intents(open_intents),
-                "max_intents": str(config.tasks.reason.max_intents),
-                "capability_instructions": capabilities.instructions,
-                "role_instructions": role.instructions,
-            },
+        task_timeout = prepared.task_timeout
+        capabilities = prepared.capabilities
+        prompt, open_intents, _allowed_fact_ids = build_reason_execute_prompt(
+            config=config,
+            container_manager=container_manager,
+            container_name=container_name,
+            project=project,
+            export_yaml=export_yaml,
+            prepared=prepared,
+            worker=worker,
         )
         reporter.emit_prompt("reason_execute", prompt)
 
@@ -270,143 +221,21 @@ def run_reason_task(
             reason_finish_error = f"command failed returncode={result.returncode}"
             reporter.emit_error("reason_execute", "error", f"command failed returncode={result.returncode}\n{result.stderr}")
             return outcome
-        try:
-            model_output = driver.extract_response_text(result.stdout, result.stderr)
-            reporter.emit_result("reason_execute", model_output)
-            payload = parse_json_output(model_output)
-            kind, data = validate_reason_payload(
-                payload, open_intents_empty=not open_intents, max_intents=config.tasks.reason.max_intents,
-            )
-        except Exception as exc:
-            LOG.warning(
-                "reason parse failed project=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
-                project.project.id,
-                worker.name,
-                exc,
-                execute_ms,
-                total_ms,
-                preview(result.stdout),
-                preview(result.stderr),
-            )
-            outcome = "failed"
-            reason_finish_outcome = "failed"
-            reason_finish_error = str(exc)
-            reporter.emit_error("reason_execute", "parse_error", str(exc))
-            return outcome
-        if kind == "rejected":
-            LOG.warning(
-                "reason rejected project=%s worker=%s execute_ms=%s total_ms=%s stdout_preview=%s",
-                project.project.id,
-                worker.name,
-                execute_ms,
-                total_ms,
-                preview(result.stdout),
-            )
-            outcome = "rejected"
-            reason_finish_outcome = "rejected"
-            reason_finish_error = "model rejected task"
-            reporter.emit_error("reason_execute", "error", "model rejected task")
-            return outcome
-        if kind == "complete":
-            response = client.complete(project.project.id, data["from"], data["description"], worker.name)
-            if response.status_code == 403:
-                LOG.info("project became inactive during reason complete project=%s worker=%s", project.project.id, worker.name)
-                outcome = "success"
-                reason_finish_outcome = "complete"
-                return outcome
-            if not response.ok:
-                LOG.warning(
-                    "reason complete write failed project=%s worker=%s status=%s body=%s",
-                    project.project.id,
-                    worker.name,
-                    response.status_code,
-                    response.text,
-                )
-                outcome = "failed"
-                reason_finish_outcome = "failed"
-                reason_finish_error = f"complete write failed status={response.status_code}"
-                reporter.emit_error("reason_execute", "error", f"complete write failed status={response.status_code} body={response.text}")
-                return outcome
-            LOG.info(
-                "project completed project=%s worker=%s from=%s execute_ms=%s total_ms=%s",
-                project.project.id,
-                worker.name,
-                data["from"],
-                execute_ms,
-                total_ms,
-            )
-            outcome = "success"
-            reason_finish_outcome = "complete"
-            reporter.emit_result("reason_write", data["description"], produced_fact_id="goal")
-            return outcome
-        if kind == "intents":
-            created = 0
-            created_ids: list[str] = []
-            for intent_data in data:
-                response = client.create_intent(project.project.id, intent_data["from"], intent_data["description"], worker.name)
-                if response.status_code == 403:
-                    LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
-                    outcome = "success"
-                    reason_finish_outcome = "intents" if created else "noop"
-                    return outcome
-                if response.status_code == 409:
-                    LOG.info("reason intent lost race project=%s worker=%s from=%s", project.project.id, worker.name, intent_data["from"])
-                    continue
-                if not response.ok:
-                    LOG.warning(
-                        "reason intent write failed project=%s worker=%s status=%s body=%s",
-                        project.project.id,
-                        worker.name,
-                        response.status_code,
-                        response.text,
-                    )
-                    continue
-                created += 1
-                if isinstance(response.data, dict) and isinstance(response.data.get("id"), str):
-                    created_ids.append(response.data["id"])
-                LOG.info(
-                    "reason created intent project=%s worker=%s from=%s description=%s",
-                    project.project.id,
-                    worker.name,
-                    intent_data["from"],
-                    intent_data["description"],
-                )
-            LOG.info(
-                "reason finished project=%s worker=%s created_intents=%s/%s execute_ms=%s total_ms=%s",
-                project.project.id,
-                worker.name,
-                created,
-                len(data),
-                execute_ms,
-                total_ms,
-            )
-            if created == 0:
-                LOG.warning(
-                    "reason created no intents project=%s worker=%s attempted=%s execute_ms=%s total_ms=%s",
-                    project.project.id,
-                    worker.name,
-                    len(data),
-                    execute_ms,
-                    total_ms,
-                )
-                outcome = "failed"
-                reason_finish_outcome = "failed"
-                reason_finish_error = f"created no intents attempted={len(data)}"
-                reporter.emit_error("reason_write", "error", f"created no intents attempted={len(data)}")
-                return outcome
-            outcome = "success"
-            reason_finish_outcome = "intents"
-            reporter.emit_result("reason_write", f"created {created} intents", created_intent_ids=created_ids)
-            return outcome
-        LOG.info(
-            "reason finished without graph change project=%s worker=%s execute_ms=%s total_ms=%s",
-            project.project.id,
-            worker.name,
-            execute_ms,
-            total_ms,
+        step = apply_reason_result(
+            client=client,
+            driver=driver,
+            project_id=project.project.id,
+            worker_name=worker.name,
+            result=result,
+            open_intents=open_intents,
+            max_intents=config.tasks.reason.max_intents,
+            execute_ms=execute_ms,
+            total_ms=total_ms,
+            reporter=reporter,
         )
-        outcome = "success"
-        reason_finish_outcome = "noop"
+        outcome = step.outcome
+        reason_finish_outcome = step.finish_outcome
+        reason_finish_error = step.finish_error
         return outcome
     finally:
         finish = client.finish_reason(
@@ -429,6 +258,5 @@ def run_reason_task(
                 finish.status_code,
                 finish.text,
             )
-        reporter.finish(process_state_for_task_outcome(outcome), error_kind=None if outcome == "success" else outcome)
-        lease.stop()
+        lifecycle.finish(outcome)
         best_effort_release_reason(client, project.project.id, worker.name, reason_run_id)

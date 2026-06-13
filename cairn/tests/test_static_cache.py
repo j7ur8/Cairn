@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
-import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -26,6 +26,7 @@ class StaticCacheTests(unittest.TestCase):
 
     def test_static_assets_are_no_store(self) -> None:
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
 
         with TestClient(app) as client:
@@ -126,6 +127,7 @@ class StaticCacheTests(unittest.TestCase):
 
     def test_health_reports_postgres_status(self) -> None:
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
 
         with TestClient(app) as client:
@@ -136,6 +138,7 @@ class StaticCacheTests(unittest.TestCase):
 
     def test_health_reports_database_errors_as_degraded(self) -> None:
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
 
         with patch("cairn.server.app.db.postgres_status", side_effect=RuntimeError("postgres unavailable")), TestClient(app) as client:
@@ -149,8 +152,8 @@ class StaticCacheTests(unittest.TestCase):
     def test_database_unavailable_handler_returns_degraded_json(self) -> None:
         import asyncio
 
-        from cairn.server.db import DatabaseUnavailable
         from cairn.server.app import database_unavailable_handler
+        from cairn.server.db import DatabaseUnavailable
 
         r = asyncio.run(database_unavailable_handler(None, DatabaseUnavailable("postgres unavailable")))
         self.assertEqual(r.status_code, 503)

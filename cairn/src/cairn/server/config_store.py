@@ -14,19 +14,19 @@ from fastapi import HTTPException
 @dataclass(slots=True)
 class ConfigStore:
     dispatch_path: Path
-    capabilities_path: Path
+    resources_path: Path
 
     def load_dispatch(self) -> dict[str, Any]:
         return self._read_yaml(self.dispatch_path)
 
-    def load_capabilities(self) -> dict[str, Any]:
-        return self._read_yaml(self.capabilities_path)
+    def load_resources(self) -> dict[str, Any]:
+        return self._read_yaml(self.resources_path)
 
     def save_dispatch(self, data: dict[str, Any]) -> None:
         self._write_yaml(self.dispatch_path, data)
 
-    def save_capabilities(self, data: dict[str, Any]) -> None:
-        self._write_yaml(self.capabilities_path, data)
+    def save_resources(self, data: dict[str, Any]) -> None:
+        self._write_yaml(self.resources_path, data)
 
     @staticmethod
     def _read_yaml(path: Path) -> dict[str, Any]:

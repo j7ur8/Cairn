@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
-
 # ---------------------------------------------------------------------------
 # Schema: ContainerConfig.user
 # ---------------------------------------------------------------------------
@@ -26,7 +25,7 @@ class _ContainerConfigHarness:
 
     @staticmethod
     def _build(user=None):
-        from cairn.shared.dispatch_config import BindMountConfig, ContainerConfig
+        from cairn.shared.config import BindMountConfig, ContainerConfig
 
         return ContainerConfig(
             image="cairn/test:latest",
@@ -69,7 +68,7 @@ class ContainerConfigUserSchemaTests(unittest.TestCase, _ContainerConfigHarness)
         self.assertEqual(cfg.user, "1000")
 
     def test_empty_string_rejected(self):
-        from cairn.shared.dispatch_config import ContainerConfig, BindMountConfig
+        from cairn.shared.config import BindMountConfig, ContainerConfig
 
         with self.assertRaises(ValidationError):
             ContainerConfig(
@@ -124,8 +123,8 @@ class _ListedContainer:
 
 class ContainerUserRuntimeTests(unittest.TestCase):
     def _make_manager(self, user, exec_user=None):
-        from cairn.shared.dispatch_config import BindMountConfig, ContainerConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
+        from cairn.shared.config import BindMountConfig, ContainerConfig
 
         cfg = ContainerConfig(
             image="cairn/test:latest",
@@ -268,7 +267,8 @@ class ContainerUserRuntimeTests(unittest.TestCase):
 
 
 _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE = """\
-system:
+server:
+  base_url: "http://127.0.0.1:8000"
   database:
     url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
   auth:
@@ -276,16 +276,22 @@ system:
     dispatcher_api_token: test-dispatcher-token
   paths:
     datas_root: "$HOST_DATAS"
+  settings:
+    intent_timeout: 5
+    reason_timeout: 5
 
-server: "http://127.0.0.1:8000"
-
-runtime:
-  interval: 3
-  max_workers: 1
-  max_running_projects: 1
-  max_project_workers: 1
-  healthcheck_timeout: 1
-  prompt_group: "mock"
+dispatcher:
+  health_addr: "127.0.0.1:9100"
+  reload:
+    url: "http://127.0.0.1:9100/reload"
+    enabled: false
+  runtime:
+    interval: 3
+    max_workers: 1
+    max_running_projects: 1
+    max_project_workers: 1
+    healthcheck_timeout: 1
+    prompt_group: "mock"
 
 tasks:
   bootstrap:
@@ -309,47 +315,37 @@ observability:
   retention_days: 1
   redaction_patterns: []
 
-remote_support:
-  enabled: false
-  dnslog:
-    url: ""
-  ssh:
-    host: ""
-    port: 22
-    username: ""
-    password: ""
+worker_runtime:
+  common_env: {}
+  container:
+    image: "cairn/test:latest"
+    network_mode: "cairn"
+    completed_action: "stop"
+    bind_mounts:
+      - name: "ctf-attachments"
+        host_path: "$HOST_DATAS/attachments"
+        container_path: "/home/kali/workspace/attachments"
+        read_only: true
+      - name: "project-files"
+        host_path: "$HOST_DATAS/project-files/{project_id}"
+        container_path: "/home/kali/workspace/project"
+        read_only: false
 
-capabilities:
-  mcp_servers: []
-  skills: []
-
-container:
-  image: "cairn/test:latest"
-  network_mode: "cairn"
-  completed_action: "stop"
-  bind_mounts:
-    - name: "ctf-attachments"
-      host_path: "$HOST_DATAS/attachments"
-      container_path: "/home/kali/workspace/attachments"
-      read_only: true
-    - name: "project-files"
-      host_path: "$HOST_DATAS/project-files/{project_id}"
-      container_path: "/home/kali/workspace/project"
-      read_only: false
-
-workers:
-  - name: "mock-w"
-    type: "mock"
-    task_types: [bootstrap, reason, explore]
-    max_running: 1
-    priority: 0
-    env:
-      MOCK_HEALTHCHECK: '{"delay":[0,1],"outcomes":{"ok":1.0,"fail":0.0}}'
-      MOCK_BOOTSTRAP: '{"delay":[0,1],"outcomes":{"complete":0.0,"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
-      MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
-      MOCK_REASON: '{"delay":[0,1],"outcomes":{"complete":0.0,"intent":1.0,"noop":0.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
-      MOCK_EXPLORE_EXECUTE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
-      MOCK_EXPLORE_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+worker_pool:
+  proxies: []
+  workers:
+    - name: "mock-w"
+      type: "mock"
+      task_types: [bootstrap, reason, explore]
+      max_running: 1
+      priority: 0
+      env:
+        MOCK_HEALTHCHECK: '{"delay":[0,1],"outcomes":{"ok":1.0,"fail":0.0}}'
+        MOCK_BOOTSTRAP: '{"delay":[0,1],"outcomes":{"complete":0.0,"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+        MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+        MOCK_REASON: '{"delay":[0,1],"outcomes":{"complete":0.0,"intent":1.0,"noop":0.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+        MOCK_EXPLORE_EXECUTE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+        MOCK_EXPLORE_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
 """
 
 
@@ -372,7 +368,7 @@ class BindMountHostPathConfigTests(unittest.TestCase):
             _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", str(self.datas_dir)),
             encoding="utf-8",
         )
-        (self.tmp / "dispatch.capabilities.yaml").write_text(
+        (self.tmp / "dispatch.resources.yaml").write_text(
             "capabilities:\n  mcp_servers: []\n  skills: []\nroles: []\n",
             encoding="utf-8",
         )
@@ -381,7 +377,7 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_host_path_uses_yaml_value(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         cfg = DispatchConfig.load(self.config_path)
         mounts = {m.name: m for m in cfg.container.bind_mounts}
@@ -405,8 +401,8 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         ``ContainerManager._render_bind_mounts_for``. Consuming it during
         config load would break per-project isolation.
         """
-        from cairn.shared.dispatch_config import DispatchConfig
         from cairn.dispatcher.runtime.containers import ContainerManager
+        from cairn.shared.config import DispatchConfig
 
         cfg = DispatchConfig.load(self.config_path)
         host_path = next(
@@ -422,21 +418,21 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         self.assertIn(f"{expected_root}/project-files/proj-xyz", rendered_paths)
 
     def test_deleted_dispatcher_fields_are_rejected(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         data = self.config_path.read_text(encoding="utf-8")
         data = data.replace('  health_addr: "127.0.0.1:9100"\n', '  health_addr: "127.0.0.1:9100"\n  leader_ttl_seconds: 15\n')
-        data = data.replace('  image: "cairn/test:latest"\n', '  image: "cairn/test:latest"\n  dispatcher_id: "old"\n')
+        data = data.replace('    image: "cairn/test:latest"\n', '    image: "cairn/test:latest"\n    dispatcher_id: "old"\n')
         self.config_path.write_text(data, encoding="utf-8")
 
         with self.assertRaises(ValidationError):
             DispatchConfig.load(self.config_path)
 
     def test_unknown_runtime_field_is_rejected(self) -> None:
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         data = self.config_path.read_text(encoding="utf-8")
-        data = data.replace('  prompt_group: "mock"\n', '  prompt_group: "mock"\n  unknown_runtime_field: true\n')
+        data = data.replace('    prompt_group: "mock"\n', '    prompt_group: "mock"\n    unknown_runtime_field: true\n')
         self.config_path.write_text(data, encoding="utf-8")
 
         with self.assertRaises(ValidationError):

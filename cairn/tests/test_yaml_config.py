@@ -20,7 +20,7 @@ class YamlConfigWriteTests(unittest.TestCase):
         from cairn.server.config.files import _atomic_write_yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            target = Path(tmpdir) / "dispatch.capabilities.yaml"
+            target = Path(tmpdir) / "dispatch.resources.yaml"
             target.write_text("roles: []\n", encoding="utf-8")
 
             with patch.object(Path, "replace", side_effect=OSError(errno.EBUSY, "busy")):
@@ -36,11 +36,11 @@ class YamlConfigWriteTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "dispatch.yaml"
-            target.write_text("workers: []\n", encoding="utf-8")
+            target.write_text("worker_pool:\n  workers: []\n", encoding="utf-8")
 
             with patch.object(Path, "replace", side_effect=OSError(errno.EACCES, "denied")):
                 with self.assertRaises(OSError):
-                    _atomic_write_yaml(target, {"workers": []})
+                    _atomic_write_yaml(target, {"worker_pool": {"workers": []}})
 
 
 class SettingsConfigTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class SettingsConfigTests(unittest.TestCase):
         from cairn.server.models_pkg.common import Settings
 
         dispatch = TempYamlConfig().dispatch
-        dispatch["server_settings"] = {"intent_timeout": 90, "reason_timeout": 300}
+        dispatch["server"]["settings"] = {"intent_timeout": 90, "reason_timeout": 300}
         dispatch["tasks"]["explore"]["conclude_timeout"] = 17
         dispatch["tasks"]["reason"]["timeout"] = 23
         with TempYamlConfig(dispatch=dispatch) as cfg:
@@ -59,7 +59,7 @@ class SettingsConfigTests(unittest.TestCase):
 
             update_yaml_settings(Settings(intent_timeout=111, reason_timeout=222))
             data = yaml.safe_load(cfg.dispatch_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["server_settings"], {"intent_timeout": 111, "reason_timeout": 222})
+            self.assertEqual(data["server"]["settings"], {"intent_timeout": 111, "reason_timeout": 222})
             self.assertEqual(data["tasks"]["explore"]["conclude_timeout"], 17)
             self.assertEqual(data["tasks"]["reason"]["timeout"], 23)
 
@@ -69,10 +69,11 @@ class SettingsConfigTests(unittest.TestCase):
 
     def test_settings_require_server_settings_fields(self) -> None:
         from fastapi import HTTPException
+
         from cairn.server.config.settings import get_yaml_settings
 
         dispatch = TempYamlConfig().dispatch
-        dispatch.pop("server_settings", None)
+        dispatch["server"].pop("settings", None)
         with TempYamlConfig(dispatch=dispatch):
             with self.assertRaises(HTTPException) as ctx:
                 get_yaml_settings()

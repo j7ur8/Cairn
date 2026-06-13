@@ -1,4 +1,5 @@
-system:
+server:
+  base_url: http://cairn-server:8000
   database:
     url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
     pool_size: 5
@@ -15,24 +16,27 @@ system:
     attachments_root: /tmp/cairn-test/attachments
     project_files_root: /tmp/cairn-test/project-files
     worker_attachments_root: /home/kali/workspace/attachments
-  dispatcher:
-    reload_url: http://127.0.0.1:9100/reload
-    reload_enabled: false
-    health_addr: 127.0.0.1:9100
-  server:
-    log_level: INFO
-    log_format: text
-    retention_loop_enabled: false
-    retention_interval_seconds: 21600
-server: http://cairn-server:8000
-common_env: {}
-runtime:
-  interval: 2
-  max_workers: 4
-  max_running_projects: 3
-  max_project_workers: 2
-  healthcheck_timeout: 10
-  prompt_group: mock
+  log:
+    level: INFO
+    format: text
+  retention:
+    enabled: false
+    interval_seconds: 21600
+  settings:
+    intent_timeout: 90
+    reason_timeout: 300
+dispatcher:
+  health_addr: 127.0.0.1:9100
+  reload:
+    url: http://127.0.0.1:9100/reload
+    enabled: false
+  runtime:
+    interval: 2
+    max_workers: 4
+    max_running_projects: 3
+    max_project_workers: 2
+    healthcheck_timeout: 10
+    prompt_group: mock
 tasks:
   bootstrap:
     timeout: 120
@@ -56,34 +60,38 @@ observability:
   flush_max_bytes: 8192
   retention_days: 14
   redaction_patterns: []
-container:
-  image: cairn-worker-container:mcp-camoufox
-  user: 0:0
-  exec_user: kali
-  network_mode: cairn
-  completed_action: stop
-  stopped_action: remove
-  bind_mounts:
-  - name: ctf-attachments
-    host_path: /tmp/cairn-test/attachments
-    container_path: /home/kali/workspace/attachments
-    read_only: true
-  - name: project-files
-    host_path: /tmp/cairn-test/project-files/{project_id}
-    container_path: /home/kali/workspace/project
-    read_only: false
-workers:
-- name: mock-regression
-  type: mock
-  task_types:
-  - bootstrap
-  - reason
-  - explore
-  max_running: 4
-  priority: 0
-  env:
-    MOCK_BOOTSTRAP: '{"delay":[0.05,0.12],"outcomes":{"complete":"1.0","fact":"0.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
-    MOCK_REASON: '{"delay":[0.05,0.12],"outcomes":{"complete":"0.0","intent":"1.0","noop":"0.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
-    MOCK_EXPLORE_EXECUTE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
-    MOCK_EXPLORE_CONCLUDE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
-    MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+worker_runtime:
+  container:
+    image: cairn-worker-container:mcp-camoufox
+    user: 0:0
+    exec_user: kali
+    network_mode: cairn
+    completed_action: stop
+    stopped_action: remove
+    bind_mounts:
+    - name: ctf-attachments
+      host_path: /tmp/cairn-test/attachments
+      container_path: /home/kali/workspace/attachments
+      read_only: true
+    - name: project-files
+      host_path: /tmp/cairn-test/project-files/{project_id}
+      container_path: /home/kali/workspace/project
+      read_only: false
+  common_env: {}
+worker_pool:
+  proxies: []
+  workers:
+  - name: mock-regression
+    type: mock
+    task_types:
+    - bootstrap
+    - reason
+    - explore
+    max_running: 4
+    priority: 0
+    env:
+      MOCK_BOOTSTRAP: '{"delay":[0.05,0.12],"outcomes":{"complete":"1.0","fact":"0.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+      MOCK_REASON: '{"delay":[0.05,0.12],"outcomes":{"complete":"0.0","intent":"1.0","noop":"0.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+      MOCK_EXPLORE_EXECUTE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+      MOCK_EXPLORE_CONCLUDE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+      MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0.05,0.12],"outcomes":{"fact":"1.0","rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'

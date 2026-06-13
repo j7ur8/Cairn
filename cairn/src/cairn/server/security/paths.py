@@ -18,12 +18,10 @@ FastAPI app.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException
-
 
 PROJECT_ID_RE = re.compile(r"^proj_[A-Za-z0-9_-]{1,64}$")
 REL_PATH_RE = re.compile(r"^(?!\.)[A-Za-z0-9._/-]{1,512}$")

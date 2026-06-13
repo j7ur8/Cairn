@@ -1,14 +1,24 @@
 from __future__ import annotations
 
-from contextlib import suppress
-from dataclasses import dataclass
 import logging
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from docker.errors import APIError, DockerException
-from docker.models.containers import Container
+if TYPE_CHECKING:
+    from docker.models.containers import Container
+
+try:
+    from docker.errors import APIError, DockerException
+except ModuleNotFoundError:  # Allows scheduler pure logic to import without Docker SDK.
+    class DockerException(Exception):
+        pass
+
+    class APIError(DockerException):
+        pass
 
 LOG = logging.getLogger(__name__)
 EXEC_KILL_JOIN_TIMEOUT_SECONDS = 5.0

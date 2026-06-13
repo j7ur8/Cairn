@@ -5,8 +5,6 @@ from typing import Literal as _Literal  # noqa: F401
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
-from cairn.shared.task_types import TASK_TYPE_REGISTRY, is_known_task_type
-
 ProcessState = Literal["running", "completed", "failed", "timeout", "cancelled", "stale"]
 TaskType = str  # any name registered in TASK_TYPE_REGISTRY
 EventKind = Literal[

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import HTTPException
 
+from cairn.server.config.ai_profiles import list_yaml_ai_profiles
 from cairn.server.models_pkg.ai_profiles import (
     AiProfile,
     AiProfileSelection,
@@ -12,7 +11,6 @@ from cairn.server.models_pkg.ai_profiles import (
     ai_selections_from_snapshots,
     canonical_auth_env,
 )
-from cairn.server.config.ai_profiles import list_yaml_ai_profiles
 from cairn.shared.task_types import builtin_task_type_names
 
 

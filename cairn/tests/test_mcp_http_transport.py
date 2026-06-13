@@ -15,7 +15,7 @@ class McpServerCapabilityConfigHttpTests(unittest.TestCase):
     """Schema validation for transport=http and direct headers."""
 
     def setUp(self):
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig
+        from cairn.shared.config import McpServerCapabilityConfig
         self.McpServerCapabilityConfig = McpServerCapabilityConfig
 
     def test_transport_is_required(self):
@@ -79,10 +79,11 @@ class DispatchConfigInterpTests(unittest.TestCase):
         return path
 
     def test_dispatch_yaml_values_are_not_interpolated_from_env(self):
-        from cairn.shared.dispatch_config import DispatchConfig
+        from cairn.shared.config import DispatchConfig
 
         yaml = """
-system:
+server:
+  base_url: "http://x"
   database:
     url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
   auth:
@@ -90,33 +91,44 @@ system:
     dispatcher_api_token: test-dispatcher-token
   paths:
     datas_root: /tmp/cairn-test
-server: "http://x"
-runtime:
-  interval: 3
-  max_workers: 1
-  max_running_projects: 1
-  max_project_workers: 1
-  healthcheck_timeout: 1
-  prompt_group: "default"
+  settings:
+    intent_timeout: 5
+    reason_timeout: 5
+dispatcher:
+  health_addr: "127.0.0.1:9100"
+  reload:
+    url: "http://127.0.0.1:9100/reload"
+    enabled: false
+  runtime:
+    interval: 3
+    max_workers: 1
+    max_running_projects: 1
+    max_project_workers: 1
+    healthcheck_timeout: 1
+    prompt_group: "default"
 tasks:
   bootstrap: {timeout: 1, conclude_timeout: 1}
   reason: {timeout: 1, max_intents: 1}
   explore: {timeout: 1, conclude_timeout: 1}
-container:
-  image: "x:latest"
-  network_mode: "cairn"
-  completed_action: "stop"
-workers:
-  - name: "m"
-    type: "mock"
-    task_types: [bootstrap, reason, explore]
-    max_running: 1
-    priority: 0
-    env: {}
+worker_runtime:
+  common_env: {}
+  container:
+    image: "x:latest"
+    network_mode: "cairn"
+    completed_action: "stop"
+worker_pool:
+  proxies: []
+  workers:
+    - name: "m"
+      type: "mock"
+      task_types: [bootstrap, reason, explore]
+      max_running: 1
+      priority: 0
+      env: {}
 """
         p = self._write_yaml(yaml)
         try:
-            (p.parent / "dispatch.capabilities.yaml").write_text(
+            (p.parent / "dispatch.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers:
@@ -142,19 +154,19 @@ roles: []
 
 
 class McpInjectionTests(unittest.TestCase):
-    """_mcp_config_detail / _mcp_json / _mcp_detail shape per transport."""
+    """MCP config and worker adapter detail shape per transport."""
 
     def setUp(self):
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig
+        from cairn.shared.config import McpServerCapabilityConfig
         self.McpServerCapabilityConfig = McpServerCapabilityConfig
 
     def test_stdio_detail_shape(self):
-        from cairn.dispatcher.capabilities import _mcp_config_detail
+        from cairn.dispatcher.capability_mcp import mcp_config_detail
         m = self.McpServerCapabilityConfig(
             id="x", name="x", transport="stdio", command="/bin/true",
             args=["--flag"], env={"K": "V"},
         )
-        d = _mcp_config_detail(m, "/cap")
+        d = mcp_config_detail(m, "/cap")
         self.assertEqual(d["command"], "/bin/true")
         self.assertEqual(d["args"], ["--flag"])
         self.assertEqual(d["env"], {"K": "V"})
@@ -163,27 +175,27 @@ class McpInjectionTests(unittest.TestCase):
         self.assertNotIn("url", d)
 
     def test_http_detail_without_bearer(self):
-        from cairn.dispatcher.capabilities import _mcp_config_detail
+        from cairn.dispatcher.capability_mcp import mcp_config_detail
         m = self.McpServerCapabilityConfig(
             id="x", name="x", transport="http", url="https://example.com/mcp",
         )
-        d = _mcp_config_detail(m, "/cap")
+        d = mcp_config_detail(m, "/cap")
         self.assertEqual(d["type"], "http")
         self.assertEqual(d["url"], "https://example.com/mcp")
         self.assertNotIn("headers", d)
 
     def test_http_detail_with_headers(self):
-        from cairn.dispatcher.capabilities import _mcp_config_detail
+        from cairn.dispatcher.capability_mcp import mcp_config_detail
         m = self.McpServerCapabilityConfig(
             id="x", name="x", transport="http", url="https://example.com/mcp",
             headers={"Authorization": "Bearer tk-1"},
         )
-        d = _mcp_config_detail(m, "/cap")
+        d = mcp_config_detail(m, "/cap")
         self.assertEqual(d["type"], "http")
         self.assertEqual(d["headers"], {"Authorization": "Bearer tk-1"})
 
     def test_mcp_json_for_mixed_transport(self):
-        from cairn.dispatcher.capabilities import _mcp_json
+        from cairn.dispatcher.capability_mcp import mcp_json
         stdio = self.McpServerCapabilityConfig(
             id="s", name="s", transport="stdio", command="/bin/true",
         )
@@ -191,7 +203,7 @@ class McpInjectionTests(unittest.TestCase):
             id="h", name="h", transport="http", url="https://example.com/mcp",
             headers={"Authorization": "Bearer tk-1"},
         )
-        rendered = _mcp_json([stdio, http], "/cap")
+        rendered = mcp_json([stdio, http], "/cap")
         parsed = json.loads(rendered)
         self.assertIn("mcpServers", parsed)
         self.assertEqual(parsed["mcpServers"]["s"]["command"], "/bin/true")
@@ -202,18 +214,18 @@ class McpInjectionTests(unittest.TestCase):
         )
 
     def test_mcp_detail_includes_transport_and_headers(self):
-        from cairn.dispatcher.capabilities import _mcp_detail
+        from cairn.dispatcher.capability_mcp import mcp_detail
         m = self.McpServerCapabilityConfig(
             id="h", name="h", transport="http", url="https://example.com",
             headers={"Authorization": "Bearer tk-1"},
         )
-        d = _mcp_detail(m, "/cap")
+        d = mcp_detail(m, "/cap")
         self.assertEqual(d["id"], "h")
         self.assertEqual(d["transport"], "http")
         self.assertEqual(d["headers"], {"Authorization": "Bearer tk-1"})
 
     def test_chrome_devtools_stdio_args_resolve_host_alias(self):
-        from cairn.dispatcher.capabilities import _mcp_config_detail, _mcp_detail
+        from cairn.dispatcher.capability_mcp import mcp_config_detail, mcp_detail
         m = self.McpServerCapabilityConfig(
             id="chrome-devtools-host",
             name="Host Chrome",
@@ -227,8 +239,8 @@ class McpInjectionTests(unittest.TestCase):
             task_types=["bootstrap"],
         )
         with patch("socket.gethostbyname", return_value="0.250.250.254"):
-            mcp_json_detail = _mcp_config_detail(m, "/cap")
-            adapter_detail = _mcp_detail(m, "/cap")
+            mcp_json_detail = mcp_config_detail(m, "/cap")
+            adapter_detail = mcp_detail(m, "/cap")
         self.assertEqual(
             mcp_json_detail["args"],
             ["--browserUrl=http://0.250.250.254:9222"],
@@ -253,7 +265,8 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
     def _config(self, task_types):
         from types import SimpleNamespace
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig, SkillCapabilityConfig
+
+        from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         return SimpleNamespace(
             capabilities=SimpleNamespace(
@@ -331,8 +344,9 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
     def test_cypher_ctf_injection_uses_bundled_sub_skill_directory(self):
         from types import SimpleNamespace
+
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.dispatch_config import SkillCapabilityConfig
+        from cairn.shared.config import SkillCapabilityConfig
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
         config = SimpleNamespace(
@@ -386,8 +400,9 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
     def test_cypher_pentest_injection_uses_bundled_sub_skill_directory(self):
         from types import SimpleNamespace
+
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.dispatch_config import SkillCapabilityConfig
+        from cairn.shared.config import SkillCapabilityConfig
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
         config = SimpleNamespace(
@@ -569,33 +584,33 @@ class RedactionTests(unittest.TestCase):
 
 
 class HttpProbeTests(unittest.TestCase):
-    """_probe_http_url uses socket.create_connection."""
+    """probe_http_url uses socket.create_connection."""
 
     def test_unreachable_host_returns_false(self):
-        from cairn.dispatcher.capabilities import _probe_http_url
+        from cairn.dispatcher.capability_probe import probe_http_url
         # 192.0.2.0/24 is TEST-NET-1, guaranteed not to be routed
-        ok, reason = _probe_http_url("http://192.0.2.1:1/mcp", 0.5)
+        ok, reason = probe_http_url("http://192.0.2.1:1/mcp", 0.5)
         self.assertFalse(ok)
         self.assertNotEqual(reason, "")
 
     def test_localhost_reachable_or_unreachable_based_on_env(self):
         # We can't reliably start a server in this unit test, so we just
         # verify the function runs without exception and returns (bool, str).
-        from cairn.dispatcher.capabilities import _probe_http_url
-        ok, reason = _probe_http_url("http://127.0.0.1:1/mcp", 0.2)
+        from cairn.dispatcher.capability_probe import probe_http_url
+        ok, reason = probe_http_url("http://127.0.0.1:1/mcp", 0.2)
         # Either ok=True (something is listening) or ok=False with a reason
         self.assertIsInstance(ok, bool)
         self.assertIsInstance(reason, str)
 
     def test_url_with_no_host_returns_false(self):
-        from cairn.dispatcher.capabilities import _probe_http_url
-        ok, reason = _probe_http_url("http:///nopath", 0.2)
+        from cairn.dispatcher.capability_probe import probe_http_url
+        ok, reason = probe_http_url("http:///nopath", 0.2)
         self.assertFalse(ok)
         self.assertEqual(reason, "url has no host")
 
     def test_validate_selected_mcp_uses_chrome_devtools_probe(self):
-        from cairn.dispatcher.capabilities import _validate_selected_mcp
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig
+        from cairn.dispatcher.capability_probe import validate_selected_mcp
+        from cairn.shared.config import McpServerCapabilityConfig
         mcp = McpServerCapabilityConfig(
             id="chrome-devtools-host",
             name="Host Chrome",
@@ -612,15 +627,15 @@ class HttpProbeTests(unittest.TestCase):
         response.read.return_value = b'{"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/browser/abc"}'
         with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = response
-            self.assertIsNone(_validate_selected_mcp(mcp, "bootstrap"))
+            self.assertIsNone(validate_selected_mcp(mcp, "bootstrap"))
         self.assertEqual(
             mock_urlopen.call_args.args[0],
             "http://0.250.250.254:9222/json/version",
         )
 
     def test_validate_selected_mcp_reports_missing_devtools_key(self):
-        from cairn.dispatcher.capabilities import _validate_selected_mcp
-        from cairn.shared.dispatch_config import McpServerCapabilityConfig
+        from cairn.dispatcher.capability_probe import validate_selected_mcp
+        from cairn.shared.config import McpServerCapabilityConfig
         mcp = McpServerCapabilityConfig(
             id="chrome-devtools-host",
             name="Host Chrome",
@@ -637,7 +652,7 @@ class HttpProbeTests(unittest.TestCase):
         response.read.return_value = b'{"Browser":"Chrome"}'
         with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = response
-            error = _validate_selected_mcp(mcp, "bootstrap")
+            error = validate_selected_mcp(mcp, "bootstrap")
         self.assertEqual(
             error,
             "mcp_server:chrome-devtools-host: chrome devtools probe failed: missing json key: webSocketDebuggerUrl",

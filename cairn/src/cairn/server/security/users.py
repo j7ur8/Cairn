@@ -8,10 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-
 from cairn.server import db
 from cairn.server.repositories.users import UserRecord, UserRepository
-
 
 UserRow = UserRecord
 

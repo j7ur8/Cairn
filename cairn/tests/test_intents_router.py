@@ -48,13 +48,13 @@ class IntentRouterTests(unittest.TestCase):
             )
 
     def test_cross_module_response_models_rebuild(self) -> None:
-        from cairn.server.models_pkg.intents import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
+        from cairn.server.models_pkg import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
 
         for model in (ConcludeResponse, ReopenResponse, ReplayRunCreateResponse):
             model.model_rebuild(raise_errors=True)
 
     def test_conclude_returns_response_model(self) -> None:
-        from cairn.server.models_pkg.intents import ConcludeRequest, CreateIntentRequest
+        from cairn.server.models_pkg import ConcludeRequest, CreateIntentRequest
         from cairn.server.routers import intents
 
         self._create_project()
@@ -79,6 +79,60 @@ class IntentRouterTests(unittest.TestCase):
         self.assertEqual(response.fact.description, "confirmed fact")
         self.assertEqual(response.intent.to, response.fact.id)
         self.assertEqual(response.intent.id, created.id)
+
+    def test_claim_and_heartbeat_are_separate(self) -> None:
+        from cairn.server.domain.errors import DomainError
+        from cairn.server.models_pkg import CreateIntentRequest, HeartbeatRequest
+        from cairn.server.routers import intents
+
+        self._create_project()
+        created = intents.create_intent(
+            "proj_t",
+            CreateIntentRequest(
+                **{
+                    "from": ["origin"],
+                    "description": "investigate origin",
+                    "creator": "worker_a",
+                    "worker": None,
+                }
+            ),
+        )
+
+        with self.assertRaises(DomainError) as heartbeat_ctx:
+            intents.heartbeat("proj_t", created.id, HeartbeatRequest(worker="worker_a"))
+        self.assertEqual(heartbeat_ctx.exception.status_code, 409)
+
+        claimed = intents.claim("proj_t", created.id, HeartbeatRequest(worker="worker_a"))
+        self.assertEqual(claimed.worker, "worker_a")
+
+        renewed = intents.heartbeat("proj_t", created.id, HeartbeatRequest(worker="worker_a"))
+        self.assertEqual(renewed.worker, "worker_a")
+
+    def test_project_reads_do_not_expire_leases(self) -> None:
+        from cairn.server.routers import projects
+
+        self._create_project()
+        self.assertFalse(hasattr(projects, "expire_workers"))
+        projects.list_projects()
+        projects.get_project("proj_t")
+
+    def test_export_read_does_not_expire_leases(self) -> None:
+        from unittest.mock import patch
+
+        from cairn.server.application import export
+
+        self._create_project()
+        with (
+            patch("cairn.server.repositories.export.require_project") as get_project,
+            patch("cairn.server.repositories.leases.LeaseRepository.expire_workers") as expire_workers,
+            patch("cairn.server.repositories.leases.LeaseRepository.expire_reason_leases") as expire_reason_leases,
+        ):
+            with self.db.session_scope() as conn:
+                export.export_project_yaml(conn, "proj_t")
+
+        get_project.assert_called_once()
+        expire_workers.assert_not_called()
+        expire_reason_leases.assert_not_called()
 
 
 if __name__ == "__main__":

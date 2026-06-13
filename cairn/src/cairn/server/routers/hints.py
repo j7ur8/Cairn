@@ -1,10 +1,9 @@
 from fastapi import APIRouter
 
 from cairn.server import db
-from cairn.server.models_pkg.intents import CreateHintRequest
+from cairn.server.application.project_io import create_hint as create_hint_command
+from cairn.server.models_pkg import CreateHintRequest
 from cairn.server.models_pkg.projects import Hint
-from cairn.server.repositories import sql
-from cairn.server.services import check_project_hint_writable, next_hint_id, utcnow
 
 router = APIRouter(tags=["hints"])
 
@@ -16,22 +15,4 @@ router = APIRouter(tags=["hints"])
 )
 def create_hint(project_id: str, body: CreateHintRequest):
     with db.session_scope() as conn:
-        check_project_hint_writable(conn, project_id)
-
-        now = utcnow()
-        hid = next_hint_id(conn, project_id)
-        sql.execute(
-            conn,
-            """
-            INSERT INTO hints (id, project_id, content, creator, created_at)
-            VALUES (:id, :project_id, :content, :creator, :created_at)
-            """,
-            {
-                "id": hid,
-                "project_id": project_id,
-                "content": body.content,
-                "creator": body.creator,
-                "created_at": now,
-            },
-        )
-        return Hint(id=hid, content=body.content, creator=body.creator, created_at=now)
+        return create_hint_command(conn, project_id, body)

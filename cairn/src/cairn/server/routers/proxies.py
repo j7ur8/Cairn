@@ -1,16 +1,10 @@
 """CRUD endpoints for the YAML-backed system-wide proxy pool."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 
 from cairn.server import db
-from cairn.server.models_pkg.proxies import (
-    ProxyConfig,
-    ProxyCreate,
-    ProxySummary,
-    ProxyUpdate,
-)
-from cairn.server.repositories import sql
+from cairn.server.application.proxies import detach_proxy_from_projects
 from cairn.server.config.proxies import (
     create_yaml_proxy,
     delete_yaml_proxy,
@@ -18,6 +12,13 @@ from cairn.server.config.proxies import (
     list_yaml_proxies,
     update_yaml_proxy,
 )
+from cairn.server.models_pkg.proxies import (
+    ProxyConfig,
+    ProxyCreate,
+    ProxySummary,
+    ProxyUpdate,
+)
+from cairn.server.security.deps import current_active_superuser
 
 router = APIRouter(tags=["proxies"])
 
@@ -28,30 +29,23 @@ def list_proxies():
 
 
 @router.post("/proxies", response_model=ProxyConfig, status_code=201)
-def create_proxy(body: ProxyCreate):
+def create_proxy(body: ProxyCreate, _superuser=Depends(current_active_superuser)):
     return create_yaml_proxy(body)
 
 
 @router.get("/proxies/{proxy_id}", response_model=ProxyConfig)
-def get_proxy(proxy_id: str):
+def get_proxy(proxy_id: str, _superuser=Depends(current_active_superuser)):
     return get_yaml_proxy(proxy_id)
 
 
 @router.put("/proxies/{proxy_id}", response_model=ProxyConfig)
-def update_proxy(proxy_id: str, body: ProxyUpdate):
+def update_proxy(proxy_id: str, body: ProxyUpdate, _superuser=Depends(current_active_superuser)):
     return update_yaml_proxy(proxy_id, body)
 
 
 @router.delete("/proxies/{proxy_id}", status_code=204)
-def delete_proxy(proxy_id: str):
-    try:
-        delete_yaml_proxy(proxy_id)
-    except HTTPException:
-        raise
+def delete_proxy(proxy_id: str, _superuser=Depends(current_active_superuser)):
+    delete_yaml_proxy(proxy_id)
     with db.session_scope() as conn:
-        sql.execute(
-            conn,
-            "UPDATE projects SET proxy_id = NULL WHERE proxy_id = :proxy_id",
-            {"proxy_id": proxy_id},
-        )
+        detach_proxy_from_projects(conn, proxy_id)
     return None

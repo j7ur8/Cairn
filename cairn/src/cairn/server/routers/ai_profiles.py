@@ -9,20 +9,28 @@ primary → fallback ordering before the existing worker priority.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
-
-from fastapi import APIRouter, HTTPException
-from cairn.server.security.deps import current_user_optional
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 
 from cairn.server import db
-from cairn.server.ai_profile_service import (
-    task_ai_selections_from_snapshots,
+from cairn.server.application.ai_profiles import (
+    claim_ai_profile_check_request as claim_ai_profile_check_request_command,
 )
-from cairn.server.execution_config_service import (
-    execution_ai_snapshots,
-    load_worker_execution_configs,
+from cairn.server.application.ai_profiles import (
+    complete_ai_profile_check_request as complete_ai_profile_check_request_command,
+)
+from cairn.server.application.ai_profiles import (
+    project_ai_profiles,
+    trigger_ai_profile_check_request,
+)
+from cairn.server.config.ai_profiles import (
+    create_yaml_ai_profile,
+    delete_yaml_ai_profile,
+    get_yaml_ai_profile,
+    list_yaml_ai_profiles,
+    update_yaml_ai_profile,
+    update_yaml_ai_profile_health,
+    update_yaml_ai_profile_models,
+    yaml_ai_profile_secret,
 )
 from cairn.server.models_pkg.ai_profiles import (
     AiProfile,
@@ -37,30 +45,9 @@ from cairn.server.models_pkg.ai_profiles import (
     HealthCheckResult,
     ProjectAiProfilesResponse,
 )
-from cairn.server.repositories import sql
-from cairn.server.config.ai_profiles import (
-    create_yaml_ai_profile,
-    delete_yaml_ai_profile,
-    get_yaml_ai_profile,
-    list_yaml_ai_profiles,
-    update_yaml_ai_profile_health,
-    update_yaml_ai_profile_models,
-    update_yaml_ai_profile,
-    yaml_ai_profile_secret,
-)
-
+from cairn.server.security.deps import current_active_superuser
 
 router = APIRouter(tags=["ai-profiles"])
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _new_check_request_id() -> str:
-    import uuid
-
-    return f"aicheck_{uuid.uuid4().hex[:12]}"
 
 
 @router.get("/ai-profiles", response_model=list[AiProfile])
@@ -68,21 +55,8 @@ def list_ai_profiles():
     return list_yaml_ai_profiles()
 
 
-def _row_to_check_request(row: Any) -> AiProfileCheckRequest:
-    return AiProfileCheckRequest(
-        id=row["id"],
-        profile_id=row["profile_id"],
-        status=row["status"],
-        requested_at=row["requested_at"],
-        started_at=row["started_at"],
-        finished_at=row["finished_at"],
-        requested_by=row["requested_by"] or "",
-        error_message=row["error_message"] or "",
-    )
-
-
 @router.post("/ai-profiles", response_model=AiProfileWithHealth, status_code=201)
-def create_ai_profile(body: AiProfileCreate):
+def create_ai_profile(body: AiProfileCreate, _superuser=Depends(current_active_superuser)):
     profile = create_yaml_ai_profile(body)
     dump = profile.model_dump()
     dump["sk"] = profile.sk  # exclude=True stripped it; restore for re-wrap
@@ -98,12 +72,12 @@ def get_ai_profile(profile_id: str):
 
 
 @router.get("/ai-profiles/{profile_id}/secret")
-def get_ai_profile_secret(profile_id: str) -> dict[str, str | None]:
+def get_ai_profile_secret(profile_id: str, _superuser=Depends(current_active_superuser)) -> dict[str, str | None]:
     return {"value": yaml_ai_profile_secret(profile_id)}
 
 
 @router.put("/ai-profiles/{profile_id}", response_model=AiProfileWithHealth)
-def update_ai_profile(profile_id: str, body: AiProfileUpdate):
+def update_ai_profile(profile_id: str, body: AiProfileUpdate, _superuser=Depends(current_active_superuser)):
     profile = update_yaml_ai_profile(profile_id, body)
     dump = profile.model_dump()
     dump["sk"] = profile.sk  # exclude=True stripped it; restore for re-wrap
@@ -114,109 +88,42 @@ def update_ai_profile(profile_id: str, body: AiProfileUpdate):
 
 
 @router.delete("/ai-profiles/{profile_id}", status_code=204)
-def delete_ai_profile(profile_id: str):
+def delete_ai_profile(profile_id: str, _superuser=Depends(current_active_superuser)):
     delete_yaml_ai_profile(profile_id)
     return None
 
 
 @router.post("/ai-profiles/{profile_id}/check", response_model=AiProfileCheckTriggerResponse, status_code=202)
-def trigger_ai_profile_check(profile_id: str, user=Depends(current_user_optional)):
-    request_id = _new_check_request_id()
-    now = _utcnow()
+def trigger_ai_profile_check(profile_id: str, user=Depends(current_active_superuser)):
     requested_by = getattr(user, "email", None) or getattr(user, "id", None) or "unknown"
     with db.session_scope() as conn:
         get_yaml_ai_profile(profile_id)
-        existing = sql.fetchone(
+        return trigger_ai_profile_check_request(
             conn,
-            """
-            SELECT *
-            FROM ai_profile_check_requests
-            WHERE profile_id = :profile_id
-              AND status IN ('pending', 'running')
-            ORDER BY requested_at DESC
-            LIMIT 1
-            """,
-            {"profile_id": profile_id},
+            profile_id=profile_id,
+            requested_by=requested_by,
         )
-        if existing is not None:
-            current = _row_to_check_request(existing)
-            return AiProfileCheckTriggerResponse(request_id=current.id, status=current.status)
-        sql.execute(
-            conn,
-            """
-            INSERT INTO ai_profile_check_requests (
-                id, profile_id, status, requested_at, requested_by
-            ) VALUES (:id, :profile_id, 'pending', :requested_at, :requested_by)
-            """,
-            {
-                "id": request_id,
-                "profile_id": profile_id,
-                "requested_at": now,
-                "requested_by": requested_by,
-            },
-        )
-    return AiProfileCheckTriggerResponse(request_id=request_id, status="pending")
 
 
 @router.post("/ai-profiles/check-requests/claim", response_model=AiProfileCheckRequest | None)
-def claim_ai_profile_check_request():
-    now = _utcnow()
+def claim_ai_profile_check_request(_superuser=Depends(current_active_superuser)):
     with db.session_scope() as conn:
-        row = sql.execute(
-            conn,
-            """
-            UPDATE ai_profile_check_requests
-            SET status = 'running',
-                started_at = :started_at,
-                error_message = ''
-            WHERE id = (
-                SELECT id
-                FROM ai_profile_check_requests
-                WHERE status = 'pending'
-                ORDER BY requested_at ASC
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING *
-            """,
-            {"started_at": now},
-        ).mappings().fetchone()
-        if row is None:
-            return None
-    return _row_to_check_request(row)
+        return claim_ai_profile_check_request_command(conn)
 
 
 @router.post("/ai-profiles/check-requests/{request_id}/complete", status_code=204)
-def complete_ai_profile_check_request(request_id: str, body: AiProfileCheckCompleteRequest):
-    now = _utcnow()
-    status = "completed" if body.ok else "failed"
+def complete_ai_profile_check_request(
+    request_id: str,
+    body: AiProfileCheckCompleteRequest,
+    _superuser=Depends(current_active_superuser),
+):
     with db.session_scope() as conn:
-        row = sql.fetchone(
-            conn,
-            "SELECT id FROM ai_profile_check_requests WHERE id = :id",
-            {"id": request_id},
-        )
-        if row is None:
-            raise HTTPException(404, f"ai profile check request not found: {request_id}")
-        sql.execute(
-            conn,
-            """
-            UPDATE ai_profile_check_requests
-            SET status = :status, finished_at = :finished_at, error_message = :error_message
-            WHERE id = :id
-            """,
-            {
-                "status": status,
-                "finished_at": now,
-                "error_message": (body.message or "")[:1000],
-                "id": request_id,
-            },
-        )
+        complete_ai_profile_check_request_command(conn, request_id=request_id, body=body)
     return None
 
 
 @router.post("/ai-profiles/health-report", status_code=204)
-def post_health_report(body: AiProfileHealthReportRequest):
+def post_health_report(body: AiProfileHealthReportRequest, _superuser=Depends(current_active_superuser)):
     """Dispatcher-side probe results, applied to the catalog.
 
     The dispatcher runs the real probe (env var resolution + TCP connect)
@@ -225,14 +132,13 @@ def post_health_report(body: AiProfileHealthReportRequest):
     """
     if not body.reports:
         return None
-    now = _utcnow()
     for report in body.reports:
         update_yaml_ai_profile_health(report.profile_id, ok=report.ok, message=report.message or "")
     return None
 
 
 @router.post("/ai-profiles/models-report", status_code=204)
-def post_models_report(body: AiProfileModelsReportRequest):
+def post_models_report(body: AiProfileModelsReportRequest, _superuser=Depends(current_active_superuser)):
     """Dispatcher-side model list observations, cached for project creation."""
     if not body.reports:
         return None
@@ -275,20 +181,4 @@ def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
 @router.get("/projects/{project_id}/ai-profiles", response_model=ProjectAiProfilesResponse)
 def get_project_ai_profiles(project_id: str):
     with db.session_scope() as conn:
-        if sql.fetchone(conn, "SELECT 1 FROM projects WHERE id = :project_id", {"project_id": project_id}) is None:
-            raise HTTPException(404, f"project not found: {project_id}")
-        configs = load_worker_execution_configs(conn, project_id)
-        catalog = list_yaml_ai_profiles()
-        snapshots = execution_ai_snapshots(configs)
-        selections = task_ai_selections_from_snapshots(snapshots)
-        available_ids = {item.id for item in catalog if item.available}
-        unavailable = sorted({
-            snap.profile_id for snap in snapshots
-            if snap.profile_id not in available_ids
-        })
-        return ProjectAiProfilesResponse(
-            catalog=catalog,
-            selections=selections,
-            snapshots=snapshots,
-            unavailable_profile_ids=unavailable,
-        )
+        return project_ai_profiles(conn, project_id)

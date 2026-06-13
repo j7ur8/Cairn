@@ -4,6 +4,8 @@ from typing import Any
 
 from cairn.dispatcher.output_parser import extract_json_objects
 
+PROTOCOL_SENTINEL = "32173462130721312360912"
+
 
 def parse_json_output(stdout: str) -> dict[str, Any]:
     objects = _candidate_protocol_payloads(stdout)
@@ -12,6 +14,40 @@ def parse_json_output(stdout: str) -> dict[str, Any]:
         if normalized is not None:
             return normalized
     raise ValueError("no JSON object found in output")
+
+
+def parse_sentinel_fact_output(stdout: str) -> str:
+    facts = _sentinel_text_segments(stdout)
+    if not facts:
+        raise ValueError("no sentinel fact found in output")
+    if len(facts) > 1:
+        raise ValueError("multiple sentinel facts found in output")
+    description = facts[0].strip()
+    if not description:
+        raise ValueError("sentinel fact must not be empty")
+    if _looks_like_json_text(description):
+        raise ValueError("sentinel fact must be plain text, not JSON")
+    return description
+
+
+def _sentinel_text_segments(text: str) -> list[str]:
+    facts: list[str] = []
+    start = 0
+    while True:
+        left = text.find(PROTOCOL_SENTINEL, start)
+        if left < 0:
+            return facts
+        content_start = left + len(PROTOCOL_SENTINEL)
+        right = text.find(PROTOCOL_SENTINEL, content_start)
+        if right < 0:
+            return facts
+        facts.append(text[content_start:right])
+        start = right + len(PROTOCOL_SENTINEL)
+
+
+def _looks_like_json_text(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("{") or stripped.startswith("[")
 
 
 def _candidate_protocol_payloads(stdout: str) -> list[dict[str, Any]]:
@@ -159,25 +195,6 @@ def validate_bootstrap_execute_payload(payload: dict[str, Any]) -> tuple[str, di
         raise ValueError("complete.description is required")
     result["complete_description"] = complete_description.strip()
     return "complete", result
-
-
-def validate_bootstrap_conclude_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
-    if payload.get("accepted") is False:
-        return "rejected", None
-    if payload.get("accepted") is not True:
-        raise ValueError("accepted must be true or false")
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        raise ValueError("data must be an object")
-    if data.get("complete") is not None:
-        raise ValueError("complete is not allowed")
-    fact = data.get("fact")
-    if not isinstance(fact, dict):
-        raise ValueError("fact is required")
-    fact_description = fact.get("description")
-    if not isinstance(fact_description, str) or not fact_description.strip():
-        raise ValueError("fact.description is required")
-    return "fact", fact_description.strip()
 
 
 def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
