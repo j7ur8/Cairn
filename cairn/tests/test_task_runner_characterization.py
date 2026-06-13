@@ -107,6 +107,7 @@ def _worker():
 import contextlib
 
 import cairn.dispatcher.tasks.bootstrap as bootstrap_mod
+import cairn.dispatcher.tasks.intent_task as intent_task_mod
 
 
 @contextlib.contextmanager
@@ -124,18 +125,20 @@ def _patch_bootstrap(
 ):
     es = contextlib.ExitStack()
     p = es.enter_context
-    p(mock.patch.object(bootstrap_mod, "get_driver", return_value=_FakeDriver()))
-    p(mock.patch.object(bootstrap_mod, "TaskLifecycle", _FakeLifecycle))
-    p(mock.patch.object(bootstrap_mod, "run_intent_healthcheck_gate", return_value=healthcheck_outcome))
-    p(mock.patch.object(bootstrap_mod, "prepare_task_execution", return_value=_prepared() if prepared else None))
+    # Shared lifecycle collaborators now live in the intent_task template.
+    p(mock.patch.object(intent_task_mod, "get_driver", return_value=_FakeDriver()))
+    p(mock.patch.object(intent_task_mod, "TaskLifecycle", _FakeLifecycle))
+    p(mock.patch.object(intent_task_mod, "run_intent_healthcheck_gate", return_value=healthcheck_outcome))
+    p(mock.patch.object(intent_task_mod, "prepare_task_execution", return_value=_prepared() if prepared else None))
+    p(mock.patch.object(intent_task_mod, "run_worker_process", return_value=process_result))
+    release = p(mock.patch.object(intent_task_mod, "best_effort_release"))
+    # Type-specific hooks remain on the bootstrap module.
     p(mock.patch.object(bootstrap_mod, "render_prompt", return_value="PROMPT"))
     p(mock.patch.object(bootstrap_mod, "load_prompt", return_value="TMPL"))
     p(mock.patch.object(bootstrap_mod, "bootstrap_prompt_replacements", return_value={}))
     p(mock.patch.object(bootstrap_mod, "format_remote_support_instructions", return_value=""))
     p(mock.patch.object(bootstrap_mod, "project_capability_data", return_value={}))
     p(mock.patch.object(bootstrap_mod, "capability_manifest_payload", return_value={}))
-    p(mock.patch.object(bootstrap_mod, "run_worker_process", return_value=process_result))
-    release = p(mock.patch.object(bootstrap_mod, "best_effort_release"))
     fallback = p(mock.patch.object(bootstrap_mod, "run_bootstrap_conclude_fallback", return_value="failed"))
     if validate_raises:
         p(mock.patch.object(bootstrap_mod, "parse_json_output", side_effect=ValueError("bad json")))
@@ -243,13 +246,15 @@ def _patch_explore(
 ):
     es = contextlib.ExitStack()
     p = es.enter_context
-    p(mock.patch.object(explore_mod, "get_driver", return_value=_FakeDriver()))
-    p(mock.patch.object(explore_mod, "TaskLifecycle", _FakeLifecycle))
-    p(mock.patch.object(explore_mod, "run_intent_healthcheck_gate", return_value=healthcheck_outcome))
-    p(mock.patch.object(explore_mod, "prepare_task_execution", return_value=_prepared() if prepared else None))
+    # Shared lifecycle collaborators live in the intent_task template.
+    p(mock.patch.object(intent_task_mod, "get_driver", return_value=_FakeDriver()))
+    p(mock.patch.object(intent_task_mod, "TaskLifecycle", _FakeLifecycle))
+    p(mock.patch.object(intent_task_mod, "run_intent_healthcheck_gate", return_value=healthcheck_outcome))
+    p(mock.patch.object(intent_task_mod, "prepare_task_execution", return_value=_prepared() if prepared else None))
+    p(mock.patch.object(intent_task_mod, "run_worker_process", return_value=process_result))
+    release = p(mock.patch.object(intent_task_mod, "best_effort_release"))
+    # Type-specific hooks remain on the explore module.
     p(mock.patch.object(explore_mod, "build_explore_execute_prompt", return_value="PROMPT"))
-    p(mock.patch.object(explore_mod, "run_task_process", return_value=process_result))
-    release = p(mock.patch.object(explore_mod, "best_effort_release"))
     fallback = p(mock.patch.object(explore_mod, "run_explore_conclude_fallback", return_value="failed"))
     if validate_raises:
         p(mock.patch.object(explore_mod, "parse_json_output", side_effect=ValueError("bad json")))
