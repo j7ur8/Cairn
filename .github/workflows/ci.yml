@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - "cairn/**"
+      - "dispatch.test.yaml"
+      - ".github/workflows/ci.yml"
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cairn
+          POSTGRES_PASSWORD: cairn
+          POSTGRES_DB: cairn
+        ports:
+          - 5432:5432
+        # Wait until Postgres is accepting connections before tests run.
+        options: >-
+          --health-cmd "pg_isready -U cairn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        # pyproject.toml, uv.lock and the test suite all live under cairn/.
+        working-directory: cairn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint (ruff)
+        run: uv run ruff check src tests
+
+      - name: Type check (mypy, advisory)
+        # Incremental adoption: type errors are surfaced in the log but do
+        # not fail the build yet. Remove continue-on-error to enforce once
+        # the annotated surface is clean.
+        continue-on-error: true
+        run: uv run mypy src
+
+      - name: Tests (pytest, with PostgreSQL)
+        env:
+          # Mirrors tests/helpers.py minimal_server_config().
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: cairn
+          PGPASSWORD: cairn
+          PGDATABASE: cairn
+        run: uv run python -m pytest -q
