@@ -39,6 +39,7 @@ packages = ["src/cairn"]
 dev = [
     "httpx>=0.27",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "ruff>=0.6",
     "mypy>=1.11",
 ]

@@ -28,7 +28,13 @@ def list_project_summaries(conn: Any) -> list[ProjectSummary]:
 def list_project_work_summaries(conn: Any) -> list[ProjectWorkSummary]:
     projects = ProjectRepository(conn)
     rows = projects.list_work_summaries()
-    return [project_work_summary_from_row(conn, projects, row) for row in rows]
+    batch = IntentRepository(conn).list_open_intent_projections_batch(
+        [row["id"] for row in rows]
+    )
+    return [
+        project_work_summary_from_row(projects, row, batch.get(row["id"], []))
+        for row in rows
+    ]
 
 
 def get_project_detail(conn: Any, project_id: str) -> ProjectDetail:
@@ -61,9 +67,9 @@ def project_summary_from_row(row: Any) -> ProjectSummary:
 
 
 def project_work_summary_from_row(
-    conn: Any,
     projects: ProjectRepository,
     row: Any,
+    open_intents: list[dict[str, Any]],
 ) -> ProjectWorkSummary:
     project_id = row["id"]
     return ProjectWorkSummary(
@@ -78,10 +84,7 @@ def project_work_summary_from_row(
         unclaimed_intent_count=row["unclaimed_intent_count"],
         hint_count=row["hint_count"],
         config_version=row["config_version"],
-        open_intents=[
-            intent_to_model(intent)
-            for intent in IntentRepository(conn).list_open_intent_projections(project_id)
-        ],
+        open_intents=[intent_to_model(i) for i in open_intents],
         llm_hidden_event_kinds=parse_llm_hidden_event_kinds(
             row["llm_hidden_event_kinds"]
             if "llm_hidden_event_kinds" in row.keys()

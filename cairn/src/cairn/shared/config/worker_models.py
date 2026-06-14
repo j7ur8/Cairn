@@ -67,6 +67,13 @@ class ContainerConfig(BaseModel):
     stopped_action: ContainerInactiveAction = "stop"
     cap_add: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMountConfig] = Field(default_factory=list)
+    mem_limit: str | None = None
+    """Memory limit for the container, e.g. ``2g``. Passed directly to the
+    Docker API :meth:`~docker.api.container.ContainerApiMixin.create_host_config`
+    ``mem_limit`` kwarg. When ``None`` (the default), Docker imposes no limit."""
+    pids_limit: int | None = None
+    """Maximum number of processes inside the container (``--pids-limit``).
+    When ``None`` (the default), Docker imposes no limit."""
 
     @field_validator("user", "exec_user")
     @classmethod

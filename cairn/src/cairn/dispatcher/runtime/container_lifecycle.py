@@ -63,6 +63,8 @@ class ContainerLifecycle:
                 environment=self.proxy_environment(project_id) or None,
                 user=self.config.user,
                 labels=container_labels(project_id),
+                mem_limit=self.config.mem_limit,
+                pids_limit=self.config.pids_limit,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -96,6 +98,8 @@ class ContainerLifecycle:
                 environment=self.proxy_environment(project_id) or None,
                 user=self.config.user,
                 labels=container_labels(project_id, startup=True),
+                mem_limit=self.config.mem_limit,
+                pids_limit=self.config.pids_limit,
             )
         except self.docker_exception_type as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc

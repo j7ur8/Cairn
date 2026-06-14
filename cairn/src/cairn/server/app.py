@@ -285,10 +285,29 @@ async def _domain_error_handler(_request: Request, exc: DomainError) -> JSONResp
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add baseline security response headers to every response.
+
+    These headers are safe over both HTTP and HTTPS; none of them
+    depends on TLS being available. Strict-Transport-Security is
+    omitted intentionally — it should be injected by a terminating
+    reverse proxy (nginx / Traefik / Cloudflare) rather than by the
+    backend when HTTPS is in play.
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
+
 # Middleware order matters: Starlette runs the *last added* middleware
 # first on the way in. RequestIdMiddleware must run before everything
 # else so a panic in a downstream handler still carries a trace id.
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 def _database_error_response(exc: Exception) -> JSONResponse:

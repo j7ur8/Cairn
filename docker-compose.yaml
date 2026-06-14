@@ -17,6 +17,7 @@ services:
       retries: 20
       start_period: 5s
     restart: unless-stopped
+    mem_limit: 512m
     networks:
       - cairn
 
@@ -38,7 +39,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
+      - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml
     depends_on:
@@ -55,6 +56,7 @@ services:
       retries: 12
       start_period: 3s
     restart: unless-stopped
+    mem_limit: 512m
     networks:
       - cairn
     command: ["uv", "run", "cairn", "serve", "--host", "0.0.0.0", "--no-access-log"]
@@ -80,7 +82,7 @@ services:
       - ./dispatch.yaml:/cairn/dispatch.yaml
       - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
-      - /Users/jmac/Documents/GitHub/Cairn/datas:/cairn/datas
+      - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       cairn-worker-image:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: 512m
     healthcheck:
       test:
         - "CMD"

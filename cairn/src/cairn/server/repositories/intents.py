@@ -272,24 +272,30 @@ class IntentRepository:
         )
         if not rows:
             return []
-        intent_ids = {row["id"] for row in rows}
-        sources_by_intent: dict[str, list[str]] = {
-            intent_id: []
-            for intent_id in intent_ids
-        }
-        for source in sql.fetchall(
+        return _hydrate_intent_sources(self.conn, project_id, rows)
+
+    def list_open_intent_projections_batch(
+        self, project_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Like :meth:`list_open_intent_projections` but fetches open intents
+        and their source facts for *all* the given projects in two queries
+        instead of 2\\ :math:`\\times`\\ N. Returns a ``{project_id: [intent, ...]}``
+        dict; projects with no open intents are omitted."""
+        if not project_ids:
+            return {}
+        rows = sql.fetchall(
             self.conn,
             """
-            SELECT intent_id, fact_id
-            FROM intent_sources
-            WHERE project_id = :project_id
-            ORDER BY intent_id, position, fact_id
+            SELECT *
+            FROM intents
+            WHERE project_id = ANY(:project_ids) AND to_fact_id IS NULL
+            ORDER BY created_at
             """,
-            {"project_id": project_id},
-        ):
-            if source["intent_id"] in sources_by_intent:
-                sources_by_intent[source["intent_id"]].append(source["fact_id"])
-        return [_intent_projection(row, sources_by_intent) for row in rows]
+            {"project_ids": project_ids},
+        )
+        if not rows:
+            return {}
+        return _hydrate_intent_sources_batch(self.conn, rows)
 
     def source_fact_ids(self, project_id: str, intent_id: str) -> list[str]:
         rows = sql.fetchall(
@@ -303,3 +309,52 @@ class IntentRepository:
             {"intent_id": intent_id, "project_id": project_id},
         )
         return [row["fact_id"] for row in rows]
+
+
+def _hydrate_intent_sources(
+    conn: Any, project_id: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach ``source_ids`` to each intent row via a single intent_sources query."""
+    intent_ids = {row["id"] for row in rows}
+    sources_by_intent = {iid: [] for iid in intent_ids}
+    for source in sql.fetchall(
+        conn,
+        """
+        SELECT intent_id, fact_id
+        FROM intent_sources
+        WHERE project_id = :project_id
+        ORDER BY intent_id, position, fact_id
+        """,
+        {"project_id": project_id},
+    ):
+        bid = sources_by_intent.get(source["intent_id"])
+        if bid is not None:
+            bid.append(source["fact_id"])
+    return [_intent_projection(row, sources_by_intent) for row in rows]
+
+
+def _hydrate_intent_sources_batch(
+    conn: Any, rows: list[dict[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Same as :func:`_hydrate_intent_sources` but for intents spanning many
+    projects. Returns ``{project_id: [intent, …]}``."""
+    intent_ids = {row["id"] for row in rows}
+    sources_by_intent = {iid: [] for iid in intent_ids}
+    for source in sql.fetchall(
+        conn,
+        """
+        SELECT intent_id, fact_id
+        FROM intent_sources
+        WHERE intent_id = ANY(:intent_ids)
+        ORDER BY intent_id, position, fact_id
+        """,
+        {"intent_ids": list(intent_ids)},
+    ):
+        bid = sources_by_intent.get(source["intent_id"])
+        if bid is not None:
+            bid.append(source["fact_id"])
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        pid = row["project_id"]
+        result.setdefault(pid, []).append(_intent_projection(row, sources_by_intent))
+    return result

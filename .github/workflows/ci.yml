@@ -72,4 +72,4 @@ jobs:
           # The CI Postgres service is a throwaway container, so the
           # schema-dropping DB integration tests are allowed to run here.
           CAIRN_ALLOW_DB_RESET: "1"
-        run: uv run python -m pytest -q
+        run: uv run python -m pytest -q --cov=cairn --cov-report=term-missing --cov-report=xml
