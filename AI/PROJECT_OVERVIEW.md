@@ -52,8 +52,6 @@ Cairn/
 ├── container/
 │   ├── Dockerfile                    # Worker 容器镜像
 │   └── bin/                          # MCP stdio wrapper
-└── scripts/
-    └── run-local-regression.sh       # 本地回归脚本
 ```
 
 ## 4. 快速开始
