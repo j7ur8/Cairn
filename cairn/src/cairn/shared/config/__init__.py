@@ -24,6 +24,7 @@ from cairn.shared.config.mock_behavior import (
     MOCK_DEFAULT_BEHAVIOR,
     resolve_mock_behavior,
 )
+from cairn.shared.config.preflight import PreflightResult, check_dispatch_config
 from cairn.shared.config.remote_support_models import (
     RemoteDnslogConfig,
     RemoteSshConfig,
@@ -87,6 +88,7 @@ __all__ = [
     "RemoteSshConfig",
     "RemoteSupportConfig",
     "ResourceConfig",
+    "PreflightResult",
     "RoleConfig",
     "RuntimeConfig",
     "ServerConfig",
@@ -109,6 +111,7 @@ __all__ = [
     "WorkerType",
     "ConfigError",
     "load_dispatch_config",
+    "check_dispatch_config",
     "resolve_mock_behavior",
     "validate_capability_resources",
     "validate_role_resources",

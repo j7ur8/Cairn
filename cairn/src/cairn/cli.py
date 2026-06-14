@@ -8,11 +8,38 @@ from cairn.dispatcher.logging import configure_logging
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
 from cairn.shared.config import ConfigError
+from cairn.shared.config.preflight import check_dispatch_config
 
 
 @click.group()
 def main():
     """Cairn - Fact-graph based collaborative exploration protocol."""
+
+
+@main.group("config")
+def config_commands():
+    """Configuration validation commands."""
+
+
+@config_commands.command("check")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Dispatcher config path",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Treat best-effort checks, such as missing local worker images, as errors.",
+)
+def config_check(config_path: Path, strict: bool):
+    """Validate dispatch.yaml before starting Cairn."""
+    result = check_dispatch_config(config_path, strict=strict)
+    click.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if not result.ok:
+        raise click.exceptions.Exit(1)
 
 
 @main.command()
