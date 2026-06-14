@@ -1,0 +1,271 @@
+<!-- New Project -->
+<section x-show="view === 'newProject'" x-cloak class="min-w-0 flex-1 flex flex-col overflow-hidden bg-[#eef2f3]">
+  <header class="h-12 shrink-0 border-b border-slate-200 bg-white/90 backdrop-blur px-3 sm:px-4 flex items-center gap-3">
+    <button type="button" class="md:hidden h-8 w-8 rounded-lg border border-slate-200 text-slate-500 inline-flex items-center justify-center" @click="mobileNavOpen = true" title="Open navigation" aria-label="Open navigation">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <div class="min-w-0">
+      <div class="text-sm font-semibold text-slate-800 truncate">New Project</div>
+      <div class="text-[10px] text-slate-400 truncate">Create project configuration</div>
+    </div>
+    <div class="flex-1"></div>
+    <div class="hidden sm:flex items-center gap-3 text-[11px]">
+      <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>connected</span>
+      <span class="text-slate-500" title="Active projects"><span class="tabular-nums font-semibold" x-text="countProjectsByStatus('active')"></span> active</span>
+      <span class="text-slate-500" title="Running executions"><span class="tabular-nums font-semibold" x-text="runningExecutionCount()"></span> running</span>
+      <span class="text-slate-500" title="Errors"><span class="tabular-nums font-semibold" x-text="errorEventCount()"></span> errors</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div x-show="currentUser" x-cloak class="hidden sm:block min-w-0 max-w-[220px] text-right">
+        <div class="truncate text-xs font-medium text-slate-700" x-text="accountLabel()"></div>
+      </div>
+      <button x-show="currentUser" x-cloak type="button" data-testid="logout-button-new-project" @click="logout()" class="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">Logout</button>
+    </div>
+  </header>
+  <div class="min-h-0 flex-1 overflow-hidden px-4 pb-4 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
+  <div class="h-full w-full rounded-none border-0 bg-transparent p-4 sm:p-5 flex flex-col overflow-hidden">
+    <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div class="w-full">
+      <section class="space-y-3">
+        <div class="flex items-center gap-3">
+          <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">Basic</div>
+          <div class="h-px flex-1 bg-slate-200"></div>
+        </div>
+        <div class="space-y-3">
+        <input data-testid="new-project-title" x-model="newProject.title" placeholder="Project title" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <textarea data-testid="new-project-origin" x-model="newProject.origin" placeholder="Origin — starting point" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+        <textarea data-testid="new-project-goal" x-model="newProject.goal" placeholder="Goal — what to achieve" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+
+        <div>
+          <label class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-1.5 block">Primary Role</label>
+          <select data-testid="new-project-role" x-model="newProject.role_id" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="">No role selected</option>
+            <template x-for="role in newProjectRoleItems()" :key="role.id">
+              <option :value="role.id" x-text="role.name"></option>
+            </template>
+          </select>
+          <template x-if="newProjectRoleItems().length === 0">
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.resources.yaml.</p>
+          </template>
+        </div>
+
+        <div>
+          <label class="text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-1.5 block">Outbound Proxy</label>
+          <select data-testid="new-project-proxy" x-model="newProject.proxy_id" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="">No proxy (direct connection)</option>
+            <template x-for="p in proxies" :key="p.id">
+              <option :value="p.id" x-text="`${p.name} — ${p.type}://${p.host}:${p.port}${p.has_auth ? ' (auth)' : ''}`"></option>
+            </template>
+          </select>
+          <p class="text-[11px] text-slate-400 mt-1.5">
+            <template x-if="!newProject.proxy_id">
+              <span>Workers will reach the network directly. Add a proxy in Settings first if you need one.</span>
+            </template>
+            <template x-if="newProject.proxy_id">
+              <span>Workers will route outbound traffic through this proxy at task-launch time.</span>
+            </template>
+          </p>
+        </div>
+
+        <div class="rounded-lg border border-dashed border-slate-200 bg-white p-3 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Attachments (optional)</div>
+              <p class="text-[11px] text-slate-400 mt-1">Uploaded files are mounted read-only for workers under <span class="font-mono text-slate-500">/home/kali/workspace/attachments/&lt;project_id&gt;/</span>.</p>
+            </div>
+            <label class="shrink-0 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-500 hover:bg-slate-50 cursor-pointer transition">
+              Choose files
+              <input data-testid="new-project-attachments" type="file" multiple class="hidden" @change="handleNewProjectAttachmentFiles($event)">
+            </label>
+          </div>
+          <template x-if="newProject.attachments.length === 0">
+            <p class="text-xs text-slate-300">No attachments selected</p>
+          </template>
+          <div class="space-y-2">
+            <template x-for="(attachment, idx) in newProject.attachments" :key="attachment.key">
+              <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto] gap-2 items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-slate-700 truncate" x-text="attachment.file.name"></div>
+                  <div class="text-[10px] text-slate-400" x-text="formatBytes(attachment.file.size)"></div>
+                </div>
+                <input x-model="attachment.description" placeholder="用途，如 源码 / 爆破字典" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+                <button type="button" @click="newProject.attachments.splice(idx, 1)" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Hints (optional)</span>
+            <button type="button" @click="newProject.hints.push({ content: '' })" class="text-[11px] text-brand-500 hover:text-brand-600 font-medium">+ Add</button>
+          </div>
+          <template x-for="(hint, idx) in newProject.hints" :key="idx">
+            <div class="flex gap-2">
+              <input x-model="hint.content" placeholder="Hint content" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+              <button type="button" @click="newProject.hints.splice(idx, 1)" x-show="newProject.hints.length > 1" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+            </div>
+          </template>
+          <p class="text-[11px] text-slate-400">Hint creator uses local actor: <span class="font-medium text-slate-600" x-text="actorName()"></span></p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+          <div>
+            <div class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Task Timeouts</div>
+            <p class="text-[11px] text-slate-400 mt-1">Worker command limits for this project. Defaults come from dispatch.yaml tasks.</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Bootstrap run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.bootstrap.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Bootstrap conclude</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.bootstrap.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Reason run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.reason.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Intent run</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.explore.timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Intent conclude</span>
+              <input type="number" min="1" step="1" x-model.number="newProject.task_timeouts.explore.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="mt-5 border-t border-slate-200 pt-5 space-y-3">
+        <div class="flex items-center gap-3">
+          <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">Capabilities</div>
+          <div class="h-px flex-1 bg-slate-200"></div>
+        </div>
+          <div class="grid grid-cols-3 gap-2 p-1 rounded-lg border border-slate-200 bg-white/80">
+            <template x-for="task in capabilityTaskTypes()" :key="`new-cap-tab:${task.key}`">
+              <button type="button" @click="newProjectCapabilityPanel = task.key"
+                class="px-3 py-2 rounded-md text-xs font-medium transition text-left"
+                :class="newProjectCapabilityPanel === task.key ? 'bg-slate-100 text-slate-700 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-50'">
+                <span x-text="task.label"></span>
+              </button>
+            </template>
+          </div>
+          <template x-for="task in capabilityTaskTypes()" :key="`new-cap:${task.key}`">
+            <section x-show="newProjectCapabilityPanel === task.key" class="rounded-lg border border-slate-200 bg-white p-3">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-700" x-text="task.label"></div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full"
+                  :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                  x-text="capabilityTaskHealthStatus(task.key)"></span>
+              </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div>
+                  <div class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    <template x-for="item in capabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'mcp_server')" :key="`new:${task.key}:mcp:${item.id}`">
+                      <label class="block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 hover:bg-slate-100 transition">
+                        <div class="flex items-start gap-2">
+                          <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100"
+                            :checked="userCapabilitySelected(task.key, 'mcp_server', item.id)"
+                            @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                          <div class="min-w-0 flex-1">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          </div>
+                        </div>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+                <div>
+                  <div class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    <template x-for="item in selectableCapabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'skill')" :key="`new:${task.key}:skill:${item.id}`">
+                      <label class="block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 hover:bg-slate-100 transition">
+                        <div class="flex items-start gap-2">
+                          <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100"
+                            :checked="userCapabilitySelected(task.key, 'skill', item.id)"
+                            @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                          <div class="min-w-0 flex-1">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          </div>
+                        </div>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-3 space-y-1">
+                <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`new:${task.key}:health:${entry.capability_id}`">
+                  <div class="text-[10px]"
+                    :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                    x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
+                </template>
+              </div>
+            </section>
+          </template>
+      </section>
+
+      <section class="mt-5 border-t border-slate-200 pt-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3 flex-1">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">AI Worker Chains</div>
+            <div class="h-px flex-1 bg-slate-200"></div>
+          </div>
+          <button type="button" x-show="taskAiProfileSelectionsHasValue(newProject.ai_profiles)" @click="clearNewProjectAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+        </div>
+        <template x-if="newProjectAiProfileItems().length === 0">
+          <p class="text-xs text-rose-500 rounded-xl border border-dashed border-rose-200 bg-rose-50 px-3 py-3">Add an available AI Profile in Settings before creating a project.</p>
+        </template>
+        <div x-show="newProjectAiProfileItems().length > 0" class="space-y-2">
+          <div class="hidden sm:grid grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <span>Task</span>
+            <span>AI Profile</span>
+            <span>AI Model</span>
+            <span>Thinking Level</span>
+          </div>
+          <template x-for="task in aiProfileTaskTypes()" :key="task.key">
+            <div class="grid grid-cols-1 sm:grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 items-center rounded-lg border border-slate-100 bg-white p-2">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500" x-text="task.label"></div>
+              <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_profile_id" @change="selectNewProjectAiProfile($event.target.value, task.key)" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                <template x-for="item in newProjectAiProfileItems()" :key="`${task.key}:profile:${item.id}`">
+                  <option :value="item.id" x-text="item.name"></option>
+                </template>
+              </select>
+              <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_model" @change="setTaskAiModel(newProject, task.key, $event.target.value)" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                <template x-for="model in taskAiModelOptions(newProject, task.key, newProjectAiProfileItems())" :key="`${task.key}:model:${model}`">
+                  <option :value="model" x-text="model"></option>
+                </template>
+              </select>
+              <select x-model="ensureTaskAiProfileSelections(newProject)[task.key].primary_reasoning_type" @change="setTaskAiReasoning(newProject, task.key, $event.target.value)" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+                <option value="">Select level</option>
+                <template x-for="option in aiReasoningTypeOptions()" :key="`${task.key}:reasoning:${option}`">
+                  <option :value="option" x-text="option"></option>
+                </template>
+              </select>
+            </div>
+          </template>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+          <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">Execution Log Default Visible Events</div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            <template x-for="kind in llmEventKindOptions()" :key="`new-ai-log-kind:${kind}`">
+              <label class="inline-flex min-w-0 items-center gap-2 rounded-lg border border-violet-50 bg-violet-50/50 px-2 py-1.5 text-[11px] text-slate-600">
+                <input type="checkbox" class="h-3.5 w-3.5 rounded border-violet-200 text-violet-600 focus:ring-violet-100"
+                  :checked="llmVisibleKindSelected(newProject, kind)"
+                  @change="toggleLlmVisibleKind(newProject, kind, $event.target.checked)">
+                <span class="truncate" x-text="llmEventKindLabel(kind)"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      </div>
+    </div>
+    <div class="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200/70 bg-[#eef2f3]/95 px-0 py-3">
+      <button data-testid="new-project-cancel" @click="cancelNewProject()" :disabled="isCreatingProject" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+      <button data-testid="new-project-create" @click="createProject()" :disabled="!canCreateProject()"
+        class="px-5 py-2 text-sm bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 shadow-sm shadow-brand-200" x-text="isCreatingProject ? 'Creating...' : 'Create'"></button>
+    </div>
+  </div>
+</section>
+

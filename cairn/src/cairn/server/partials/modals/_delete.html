@@ -1,0 +1,25 @@
+<!-- Delete Project -->
+<div x-show="showDeleteModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="closeDeleteModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-slate-200/60" @click.stop>
+    <div class="flex items-start gap-3">
+      <div class="w-10 h-10 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6"/><path d="M19 6l-.63 11.338A2 2 0 0 1 16.37 19.5H7.63a2 2 0 0 1-1.997-2.162L5 6"/><path d="M10 10.5v5"/><path d="M14 10.5v5"/></svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <h3 class="text-base font-semibold text-slate-700">Delete Project</h3>
+        <p class="text-sm text-slate-500 mt-1 leading-relaxed">
+          This will permanently remove
+          <span class="font-medium text-slate-700 break-all" x-text="deleteConfirmLabel()"></span>.
+        </p>
+        <p class="text-xs text-slate-400 mt-3">This action cannot be undone.</p>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-6">
+      <button @click="closeDeleteModal()" :disabled="isDeletingProject" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+      <button data-testid="delete-confirm" @click="confirmDeleteProject()" :disabled="isDeletingProject" class="px-4 py-2 text-sm bg-rose-500 text-white rounded-xl font-medium hover:bg-rose-600 transition shadow-sm shadow-rose-200 disabled:opacity-40 disabled:cursor-not-allowed">
+        <span x-text="isDeletingProject ? 'Deleting...' : 'Delete'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+

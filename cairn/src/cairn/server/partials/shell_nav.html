@@ -1,0 +1,41 @@
+  <aside
+    class="fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-slate-800/80 bg-[#111820] text-slate-300 transition-[width,transform] duration-200 md:static"
+    :class="[
+      navCollapsed ? 'md:w-16 w-[264px]' : 'w-[264px]',
+      mobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+    ]">
+    <div class="h-12 px-3 border-b border-white/10 flex items-center gap-2">
+      <button type="button" @click="navCollapsed = !navCollapsed; saveNavPrefs()" class="h-8 w-8 rounded-lg border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07] inline-flex items-center justify-center" title="Toggle navigation" aria-label="Toggle navigation">
+        <img src="/static/favicon.svg" alt="" class="w-4 h-4 block">
+      </button>
+      <div x-show="!navCollapsed" x-cloak class="min-w-0">
+        <div class="text-sm font-semibold tracking-tight text-white">Cairn</div>
+        <div class="text-[10px] uppercase tracking-[0.18em] text-cyan-300/70">Operations Desk</div>
+      </div>
+    </div>
+
+    <nav class="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-4">
+      <section class="space-y-1">
+        <button type="button" data-testid="nav-projects" @click="navigateProjects()" class="w-full h-9 rounded-lg px-2 flex items-center gap-2 text-sm transition" :class="view === 'list' ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'" title="Projects">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 6.5h16"/><path d="M4 12h16"/><path d="M4 17.5h16"/></svg>
+          <span x-show="!navCollapsed" x-cloak class="truncate">Projects</span>
+        </button>
+        <button type="button" data-testid="nav-new-project" @click="openNewProject()" class="w-full h-9 rounded-lg px-2 flex items-center gap-2 text-sm transition" :class="view === 'newProject' ? 'bg-cyan-400/12 text-cyan-100' : 'text-cyan-200 hover:bg-cyan-400/10'" title="New Project">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          <span x-show="!navCollapsed" x-cloak class="truncate">New Project</span>
+        </button>
+      </section>
+
+      <section x-show="!navCollapsed" x-cloak class="space-y-1">
+        <div class="px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Admin</div>
+        <template x-for="item in adminNavItems()" :key="item.section">
+          <button type="button" :data-testid="`nav-settings-${item.section}`" @click="navigateSettings(item.section)" class="w-full h-8 rounded-lg px-2 flex items-center gap-2 text-xs transition" :class="view === 'settings' && settingsSection === item.section ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'">
+            <span class="w-4 h-4 shrink-0 inline-flex items-center justify-center text-[10px] font-mono" x-text="item.icon"></span>
+            <span x-text="item.label"></span>
+          </button>
+        </template>
+      </section>
+    </nav>
+  </aside>
+  <div x-show="mobileNavOpen" x-cloak @click="mobileNavOpen = false" class="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm md:hidden"></div>
+

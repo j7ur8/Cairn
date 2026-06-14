@@ -1,0 +1,835 @@
+<!-- ═══════════ GRAPH VIEW ═══════════ -->
+<template x-if="view === 'graph'">
+<div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
+  <template x-if="!project || !project.project">
+    <div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
+      <header class="bg-white/80 backdrop-blur border-b border-slate-200/60 px-4 py-2.5 flex items-center gap-3 shrink-0 z-20">
+        <button @click="backToList()" class="p-1.5 rounded-lg hover:bg-slate-100 transition text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="min-w-0">
+          <div class="text-[11px] font-mono text-slate-400" x-text="selectedProjectId || 'project'"></div>
+          <h2 class="text-[15px] font-semibold text-slate-700 truncate" x-text="projectLoadError || 'Loading project…'"></h2>
+        </div>
+        <div class="flex-1"></div>
+        <button @click="backToList()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Projects</button>
+      </header>
+      <div class="flex-1 min-h-0 grid place-items-center bg-slate-50/40">
+        <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-8 py-10 text-center shadow-sm max-w-md">
+          <p class="text-sm font-semibold text-slate-600" x-text="projectLoadError || 'Loading project…'"></p>
+          <p class="text-xs text-slate-400 mt-2">The project detail panel is hidden until a project is available.</p>
+        </div>
+      </div>
+    </div>
+  </template>
+  <template x-if="project && project.project">
+  <div class="h-full min-h-0 flex-1 flex flex-col overflow-hidden">
+  <header class="bg-white/80 backdrop-blur border-b border-slate-200/60 px-4 py-2.5 flex items-center gap-3 shrink-0 z-20">
+    <button @click="backToList()" class="p-1.5 rounded-lg hover:bg-slate-100 transition text-slate-400 hover:text-slate-600">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+    </button>
+    <div class="title-action-trigger flex items-center gap-2 min-w-0">
+      <span class="text-[11px] font-mono text-slate-400" x-text="project.project.id"></span>
+      <h2 class="text-[15px] font-semibold text-slate-700 truncate" x-text="project.project.title"></h2>
+      <button x-show="!replay.active" @click="openRenameProject(project.project.id, project.project.title)"
+        class="title-action-button inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400"
+        title="Rename project"
+        :aria-label="`Rename ${project.project.title}`">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m16.862 4.487 1.65-1.65a1.875 1.875 0 1 1 2.652 2.652l-9.193 9.193a4.5 4.5 0 0 1-1.897 1.13L6 17l1.188-4.074a4.5 4.5 0 0 1 1.13-1.897l8.544-8.542Z"/><path d="M19.5 7.125 16.875 4.5"/><path d="M5.25 18.75h13.5"/></svg>
+      </button>
+      <span class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em] shrink-0"
+        :class="projectStatusBadgeClass(project.project.status)"
+        x-text="project.project.status"></span>
+    </div>
+    <div class="flex-1"></div>
+    <div class="flex items-center gap-4 text-xs text-slate-400">
+      <span x-text="`${project.facts.length} facts`"></span>
+      <span x-text="`${project.intents.length} intents`"></span>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <template x-if="!replay.active">
+        <button @click="handleReplayClick()" class="px-2.5 py-1 rounded-lg border border-violet-200 text-xs text-violet-600 hover:bg-violet-50 transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/><path d="M4 5v14"/></svg>
+          Replay
+        </button>
+      </template>
+      <template x-if="replay.active">
+        <div class="flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50/80 px-2 py-1 text-xs text-violet-700">
+          <span class="font-medium whitespace-nowrap" x-text="replayProgressLabel()"></span>
+          <button @click="toggleProjectReplayPlayback()" class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-violet-200 bg-white/80 hover:bg-white transition" :title="replay.playing ? 'Pause replay' : 'Resume replay'">
+            <svg x-show="replay.playing" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6h3v12H8zM13 6h3v12h-3z"/></svg>
+            <svg x-show="!replay.playing" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+          </button>
+          <button @click="restartProjectReplay()" class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-violet-200 bg-white/80 hover:bg-white transition" title="Restart replay">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 3v6h6"/></svg>
+          </button>
+          <select x-model="replay.stepMs" @change="updateReplaySpeed()" class="h-6 rounded-md border border-violet-200 bg-white/80 px-1.5 text-[11px] text-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-100">
+            <option value="700">Fast</option>
+            <option value="1100">Normal</option>
+            <option value="1600">Slow</option>
+          </select>
+          <button @click="exitProjectReplay()" class="inline-flex h-6 items-center justify-center rounded-md border border-violet-200 bg-white/80 px-2 hover:bg-white transition">
+            Exit
+          </button>
+        </div>
+      </template>
+      <button @click="viewProjectYaml(selectedProjectId, project.project.title)" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/><path d="M8.25 12h7.5M8.25 15h5.25"/></svg>
+        Snapshot
+      </button>
+      <template x-if="!replay.active && project.project.status !== 'completed'">
+        <button @click="toggleProjectStop()"
+          class="px-2.5 py-1 rounded-lg border text-xs transition flex items-center gap-1.5"
+          :class="project.project.status === 'active'
+            ? 'border-amber-200 text-amber-600 hover:bg-amber-50'
+            : 'border-teal-200 text-teal-600 hover:bg-teal-50'">
+          <svg x-show="project.project.status === 'active'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+          <svg x-show="project.project.status === 'stopped'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+          <span x-text="project.project.status === 'active' ? 'Stop' : 'Resume'"></span>
+        </button>
+      </template>
+      <template x-if="!replay.active && project.project.status === 'completed'">
+        <button @click="openReopenProject(project.project.id, project.project.title)"
+          class="px-2.5 py-1 rounded-lg border border-sky-200 text-xs text-sky-600 hover:bg-sky-50 transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 3v6h6"/></svg>
+          Reopen
+        </button>
+      </template>
+      <button x-show="!replay.active" @click="deleteProject()" class="px-2.5 py-1 rounded-lg border border-rose-200 text-xs text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6"/><path d="M19 6l-.63 11.338A2 2 0 0 1 16.37 19.5H7.63a2 2 0 0 1-1.997-2.162L5 6"/><path d="M10 10.5v5"/><path d="M14 10.5v5"/></svg>
+        Delete
+      </button>
+    </div>
+    <div class="flex items-center gap-1.5 ml-1">
+      <button @click="showLocalPrefs = true" class="h-7 max-w-40 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition inline-flex items-center shrink-0">
+        <span class="truncate block" x-text="actorName()"></span>
+      </button>
+      <button @click="openSettings()" class="h-7 w-7 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition inline-flex items-center justify-center shrink-0">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0-3 3 0 0 1 6 0Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="min-h-0 flex-1 flex overflow-hidden" id="graphLayout">
+    <!-- LLM Execution panel -->
+    <div x-show="graphMode === 'log' || !llmPanelCollapsed"
+      class="border-r border-slate-200/70 bg-white flex flex-col overflow-hidden shrink-0 relative z-20"
+      :style="graphMode === 'log' ? { width: '100%', minWidth: '100%', flexBasis: '100%' } : { width: llmPanelWidth + 'px', minWidth: llmPanelWidth + 'px', flexBasis: llmPanelWidth + 'px' }">
+      <div class="h-11 border-b border-slate-100 px-3 flex items-center gap-2 shrink-0">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-700">Execution Log</div>
+          <div class="text-[10px] text-slate-400" x-text="llmPanelSummary()"></div>
+        </div>
+        <button @click="toggleLlmPolling()" class="h-7 w-7 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600 inline-flex items-center justify-center" :title="llmPollingPaused ? 'Resume log polling' : 'Pause log polling'">
+          <svg x-show="!llmPollingPaused" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6h3v12H8zM13 6h3v12h-3z"/></svg>
+          <svg x-show="llmPollingPaused" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+        </button>
+        <button @click="collapseLlmPanel()" class="h-7 w-7 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600 inline-flex items-center justify-center" title="Collapse Execution Log">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0 space-y-2">
+        <select
+          x-model="llmSelectedExecutionId"
+          @focus="beginLlmExecutionSelectionInteraction()"
+          @blur="endLlmExecutionSelectionInteraction()"
+          @mousedown="beginLlmExecutionSelectionInteraction()"
+          @keydown="beginLlmExecutionSelectionInteraction()"
+          @change="handleLlmExecutionSelectionChange()"
+          class="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-mono text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100">
+          <option :value="ALL_LLM_EXECUTIONS_VALUE">All executions</option>
+          <template x-for="execution in llmExecutions" :key="execution.id">
+            <option :value="execution.id" x-text="llmExecutionOptionLabel(execution)"></option>
+          </template>
+        </select>
+        <div class="grid grid-cols-5 gap-1 text-[10px]">
+          <template x-for="filter in llmEventKindFilters" :key="filter.id">
+            <button type="button"
+              @click="llmEventKindFilter = filter.id"
+              class="h-7 rounded-lg border px-1 font-medium transition truncate"
+              :class="llmEventKindFilter === filter.id ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'"
+              x-text="filter.label"></button>
+          </template>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 select-none">
+          <input type="checkbox" x-model="showUsageLogs" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100">
+          <span>Show Hidden</span>
+        </label>
+        <div x-show="llmViewModel().hiddenSummary" class="text-[10px] text-slate-400 truncate" x-text="llmViewModel().hiddenSummary"></div>
+        <div class="grid grid-cols-3 gap-1.5 text-[10px]">
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Running</div>
+            <div class="font-semibold text-sky-600 tabular-nums" x-text="llmExecutionCount('running')"></div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Errors</div>
+            <div class="font-semibold text-rose-600 tabular-nums" x-text="llmErrorCount()"></div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+            <div class="text-slate-400">Events</div>
+            <div class="font-semibold text-slate-600 tabular-nums" x-text="llmViewModel().eventCount"></div>
+          </div>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/25">
+        <template x-if="llmViewModel().showEmpty">
+          <p class="text-sm text-slate-300 text-center mt-12">No execution log yet</p>
+        </template>
+        <template x-if="llmViewModel().eventCount === 0 && llmViewModel().usage">
+          <div class="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-700">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="px-1.5 py-0.5 rounded bg-white/80 text-[9px] font-semibold uppercase tracking-wide text-sky-700 shrink-0">Active</span>
+              <span class="font-semibold truncate" x-text="llmViewModel().usage.title"></span>
+              <span class="flex-1"></span>
+              <span class="font-mono text-[10px] text-sky-500 shrink-0" x-text="`#${llmViewModel().usage.sequence}`"></span>
+            </div>
+            <div class="mt-1 text-sky-600" x-text="llmViewModel().usage.detail"></div>
+            <div class="mt-1 text-[10px] text-sky-400" x-text="formatTime(llmViewModel().usage.created_at)"></div>
+          </div>
+        </template>
+        <template x-if="llmViewModel().eventCount === 0 && llmViewModel().hasFilterHiddenEvents">
+          <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700">
+            Current filter hides available execution events. Switch to All or adjust filters.
+          </div>
+        </template>
+        <template x-for="event in llmViewModel().events" :key="event.sequence">
+          <article class="rounded-lg border bg-white shadow-sm overflow-hidden" :class="llmEventBorderClass(event)">
+            <button type="button" @click="toggleLlmEvent(event.sequence)" class="w-full px-3 py-2 text-left hover:bg-slate-50 transition">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide shrink-0" :class="llmEventBadgeClass(event)" x-text="llmEventLabel(event)"></span>
+                <span class="text-[10px] text-slate-400 font-mono shrink-0" x-text="`#${event.sequence}`"></span>
+                <span class="text-[11px] font-medium text-slate-600 truncate" x-show="llmEventHeaderText(event)" :title="llmEventHeaderTitle(event)" x-text="llmEventHeaderText(event)"></span>
+                <span class="flex-1"></span>
+                <span class="text-[10px] text-slate-300 shrink-0" x-text="formatTime(event.created_at)"></span>
+              </div>
+              <div class="mt-1 text-[11px] text-slate-400 truncate" x-text="llmEventSubHeaderText(event)"></div>
+            </button>
+            <div x-show="llmEventExpanded(event)" class="border-t border-slate-100 bg-slate-950 text-slate-100">
+              <template x-if="llmEventContentMode(event) === 'json_card'">
+                <div class="p-3" x-data="{ card: llmEventParsedCard(event) }">
+                  <div class="space-y-3" x-show="card">
+                    <div x-show="card && card.summary" class="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                      <div class="text-[10px] uppercase tracking-wide text-slate-400">Summary</div>
+                      <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="card.summary"></div>
+                    </div>
+                    <div x-show="card && card.inlineFields && card.inlineFields.length > 0" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <template x-for="field in (card?.inlineFields || [])" :key="field.label">
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                          <div class="text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                          <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></div>
+                        </div>
+                      </template>
+                    </div>
+                    <div x-show="card && card.blockFields && card.blockFields.length > 0" class="space-y-2">
+                      <template x-for="field in (card?.blockFields || [])" :key="field.label">
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
+                          <div class="border-b border-slate-800 px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                          <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></pre>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template x-if="llmEventContentMode(event) === 'json_lines'">
+                <div class="p-3 space-y-3">
+                  <template x-for="(card, index) in llmEventParsedCards(event)" :key="`${event.sequence}-${index}`">
+                    <div class="rounded-lg border border-slate-800 bg-slate-900/70 p-3 space-y-3">
+                      <div x-show="card.summary" class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                        <div class="text-[10px] uppercase tracking-wide text-slate-400">Summary</div>
+                        <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="card.summary"></div>
+                      </div>
+                      <div x-show="card.inlineFields && card.inlineFields.length > 0" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <template x-for="field in (card.inlineFields || [])" :key="field.label">
+                          <div class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                            <div class="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></div>
+                          </div>
+                        </template>
+                      </div>
+                      <div x-show="card.blockFields && card.blockFields.length > 0" class="space-y-2">
+                        <template x-for="field in (card.blockFields || [])" :key="field.label">
+                          <div class="rounded-lg border border-slate-800 bg-slate-950/70 overflow-hidden">
+                            <div class="border-b border-slate-800 px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400" x-text="field.label"></div>
+                            <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="field.value"></pre>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="llmEventContentMode(event) === 'plain_text'">
+                <pre class="max-h-72 overflow-auto p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words" x-text="event.content"></pre>
+              </template>
+              <div x-show="event.truncated || event.redacted" class="px-3 pb-2 flex gap-1.5 text-[10px]">
+                <span x-show="event.truncated" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">truncated</span>
+                <span x-show="event.redacted" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">redacted</span>
+              </div>
+            </div>
+          </article>
+        </template>
+        <button x-show="llmViewModel().canLoadMore" type="button" @click="showMoreLlmEvents()"
+          class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 transition">
+          Show more events
+        </button>
+      </div>
+    </div>
+
+    <div x-show="graphMode === 'graph' && llmPanelCollapsed" class="w-14 border-r border-slate-200/70 bg-white flex flex-col items-center gap-2 py-3 shrink-0">
+      <button @click="expandLlmPanel()" class="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center" title="Expand Execution Log">
+        <span class="text-[11px] font-semibold">LLM</span>
+      </button>
+      <span class="px-1.5 py-0.5 rounded bg-sky-50 text-[10px] font-semibold text-sky-700 tabular-nums" x-text="llmExecutionCount('running')"></span>
+      <span class="px-1.5 py-0.5 rounded bg-rose-50 text-[10px] font-semibold text-rose-700 tabular-nums" x-text="llmErrorCount()"></span>
+    </div>
+
+    <div @pointerdown.prevent="startLlmPanelResize($event)" x-show="graphMode === 'graph' && !llmPanelCollapsed" class="w-2 shrink-0 cursor-col-resize group flex items-stretch justify-center touch-none relative z-20">
+      <div class="w-px bg-slate-200/70 transition group-hover:bg-brand-300" :class="{ 'bg-brand-400': isResizingLlmPanel }"></div>
+    </div>
+
+    <!-- Graph -->
+    <div x-show="graphMode === 'graph'" class="min-h-0 flex-1 relative min-w-0">
+      <div class="absolute top-3 left-3 z-10 flex items-center gap-1.5">
+        <button @click="fitGraph()" class="h-7 w-7 bg-white/90 backdrop-blur rounded-lg shadow-sm border border-slate-200/60 text-slate-500 hover:text-slate-700 hover:bg-white transition inline-flex items-center justify-center" title="Fit graph" aria-label="Fit graph">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+        </button>
+        <select x-model="layoutMode" @change="applySelectedLayout()"
+          :disabled="layoutLoading"
+          class="h-7 bg-white/90 backdrop-blur rounded-lg shadow-sm border border-slate-200/60 px-2.5 text-xs text-slate-600 hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-300 transition">
+          <option value="dagre_tb">Dagre ↓</option>
+          <option value="dagre_lr">Dagre →</option>
+          <option value="klay_tb">Klay ↓</option>
+          <option value="klay_lr">Klay →</option>
+          <option value="elk_tb">ELK ↓</option>
+          <option value="elk_lr">ELK →</option>
+        </select>
+      </div>
+
+      <template x-if="project.project.reason">
+        <div class="absolute top-14 right-3 z-10 max-w-80">
+          <div class="reason-panel-running relative overflow-hidden rounded-2xl border border-sky-200/80 bg-white/92 px-3.5 py-3 shadow-lg shadow-sky-100/60 backdrop-blur">
+            <div class="flex items-start gap-3">
+              <span class="reason-beacon mt-1 shrink-0"></span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-500">Reason Running</div>
+                <div class="mt-0.5 text-sm font-semibold text-slate-700 truncate" x-text="project.project.reason.worker"></div>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                  <span x-show="project.project.reason.trigger" x-text="`Trigger ${project.project.reason.trigger}`"></span>
+                  <span x-text="`Heartbeat ${formatTime(project.project.reason.last_heartbeat_at)}`"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="project.project.reason">
+        <div class="reason-graph-scan z-[1]">
+          <span class="reason-graph-grid"></span>
+          <span class="reason-graph-ambient"></span>
+          <span class="reason-graph-scanline"></span>
+          <span class="reason-graph-sweep"></span>
+        </div>
+      </template>
+
+      <div class="absolute top-3 right-3 z-10 flex flex-wrap justify-end gap-2">
+        <div class="flex gap-1.5" x-show="projectIsActive()">
+          <button data-testid="graph-open-intent" @click="openCreateIntent()" :disabled="!canActOnSelectedFacts()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-brand-200 text-brand-600 rounded-lg shadow-sm text-xs font-medium hover:bg-brand-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+            Intent
+          </button>
+          <button data-testid="graph-open-complete" @click="openCompleteProject()" :disabled="!canActOnSelectedFacts()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-teal-200 text-teal-600 rounded-lg shadow-sm text-xs font-medium hover:bg-teal-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+            Complete
+          </button>
+        </div>
+        <div class="flex gap-1.5" x-show="projectCanWriteHints()">
+          <button data-testid="graph-open-hint" @click="openHintModal()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-amber-200 text-amber-600 rounded-lg shadow-sm text-xs font-medium hover:bg-amber-50 transition flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547Z"/></svg>
+            Hint
+          </button>
+        </div>
+        <div class="flex gap-1.5" x-show="projectIsActive()">
+          <button data-testid="graph-heartbeat" @click="sendHeartbeatForSelectedIntent()" :disabled="!selectedActionableOpenIntentRecord()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-slate-200 text-slate-600 rounded-lg shadow-sm text-xs font-medium hover:bg-slate-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 12h3.5l2.75-6 3.5 12 2.75-7H21"/></svg>
+            <span x-text="selectedIntentPrimaryActionLabel()"></span>
+          </button>
+          <button data-testid="graph-release-intent" @click="releaseSelectedIntent()" :disabled="!selectedReleasableOpenIntentRecord()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-amber-200 text-amber-700 rounded-lg shadow-sm text-xs font-medium hover:bg-amber-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 10V7.75A3.75 3.75 0 1 1 16.5 7"/><path d="M7.5 10.5h9A1.5 1.5 0 0 1 18 12v6A1.5 1.5 0 0 1 16.5 19.5h-9A1.5 1.5 0 0 1 6 18v-6A1.5 1.5 0 0 1 7.5 10.5Z"/><path d="M12 14.25v1.5"/></svg>
+            Release
+          </button>
+          <button data-testid="graph-open-conclude" @click="selectedActionableOpenIntentRecord() && openConclude(selectedActionableOpenIntentRecord())" :disabled="!selectedActionableOpenIntentRecord()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-teal-200 text-teal-600 rounded-lg shadow-sm text-xs font-medium hover:bg-teal-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/><path d="M9 13.5 10.875 15.375 15 11.25"/></svg>
+            Conclude
+          </button>
+        </div>
+      </div>
+
+      <div id="cy" class="relative z-0 h-full min-h-0 w-full"></div>
+    </div>
+
+    <div x-show="graphMode === 'graph'" @pointerdown.prevent="startPanelResize($event)" class="w-2 shrink-0 cursor-col-resize group flex items-stretch justify-center touch-none relative z-20">
+      <div class="w-px bg-slate-200/70 transition group-hover:bg-brand-300" :class="{ 'bg-brand-400': isResizingPanel }"></div>
+    </div>
+
+    <!-- Side panel -->
+    <div x-show="graphMode === 'graph'" class="border-l border-slate-200/60 bg-white flex flex-col overflow-hidden shrink-0 relative z-20" :style="{ width: sidePanelWidth + 'px', minWidth: sidePanelWidth + 'px', flexBasis: sidePanelWidth + 'px' }">
+      <div class="flex border-b border-slate-100 shrink-0">
+        <button @click="switchSideTab('detail')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'detail' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Detail</button>
+        <button @click="switchSideTab('hints')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'hints' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
+          Hints <span class="ml-0.5 text-[10px] opacity-60" x-text="project.hints.length"></span>
+        </button>
+        <button @click="switchSideTab('files')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'files' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
+          Files <span class="ml-0.5 text-[10px] opacity-60" x-show="projectFiles.length > 0" x-text="projectFiles.length"></span>
+        </button>
+        <button @click="switchSideTab('capabilities')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'capabilities' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Caps</button>
+        <button @click="switchSideTab('log')" class="flex-1 px-2 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'log' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">Log</button>
+      </div>
+
+      <!-- Detail -->
+      <div x-show="sideTab === 'detail'" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/40">
+        <template x-if="!selectedNode">
+          <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-5 py-10 text-center shadow-sm">
+            <p class="text-sm text-slate-400">Click a node or edge</p>
+            <p class="text-xs text-slate-300 mt-1">Shift+click for multi-select</p>
+          </div>
+        </template>
+        <template x-if="selectedNode && selectedNode.type === 'fact' && selectedFacts.length > 1">
+          <div class="space-y-3">
+            <template x-for="fact in selectedFactRecords()" :key="fact.id">
+              <article class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm font-mono font-bold break-all"
+                        :class="{
+                          'text-teal-700': fact.id === 'origin',
+                          'text-rose-600': fact.id === 'goal',
+                          'text-brand-700': fact.id !== 'origin' && fact.id !== 'goal'
+                        }" x-text="factDisplayTitle(fact)"></div>
+                      <div class="mt-1 text-[11px] break-all"
+                        :class="{
+                          'text-teal-600': fact.id === 'origin',
+                          'text-rose-500': fact.id === 'goal',
+                          'text-brand-600': fact.id !== 'origin' && fact.id !== 'goal'
+                        }" x-text="factDisplaySubtitle(fact)"></div>
+                    </div>
+                    <button type="button" @click="removeFactSelection(fact.id)"
+                      class="text-[11px] text-slate-400 hover:text-slate-600 transition">Remove</button>
+                  </div>
+                </div>
+                <div class="p-4 space-y-4">
+                  <div class="space-y-2">
+                    <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                    <template x-if="summaryCardViewModel(fact.description, 'fact').hasMeta">
+                      <div class="flex flex-wrap gap-1.5">
+                        <template x-for="item in summaryCardViewModel(fact.description, 'fact').metaItems" :key="`${fact.id}-${item.key}-${item.value}`">
+                          <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                            <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                            <span class="break-all" x-text="item.value"></span>
+                          </span>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="fact.description">
+                      <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="fact.description"></p>
+                    </template>
+                  </div>
+                  <template x-if="factRelationSummary(fact)">
+                    <div class="pt-4 border-t border-slate-100">
+                      <div class="flex items-start justify-between gap-3 text-xs">
+                        <span class="text-slate-400 shrink-0">Relation</span>
+                        <span class="text-slate-600 text-right break-words" x-text="factRelationSummary(fact)"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </article>
+            </template>
+          </div>
+        </template>
+        <template x-if="selectedNode && selectedNode.type === 'fact' && selectedFactRecord() && selectedFacts.length <= 1">
+          <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+              <div class="min-w-0">
+                <div class="text-sm font-mono font-bold break-all"
+                  :class="{
+                    'text-teal-700': selectedFactId() === 'origin',
+                    'text-rose-600': selectedFactId() === 'goal',
+                    'text-brand-700': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
+                  }" x-text="factDisplayTitle(selectedFactRecord())"></div>
+                <div class="mt-1 text-[11px] break-all"
+                  :class="{
+                    'text-teal-600': selectedFactId() === 'origin',
+                    'text-rose-500': selectedFactId() === 'goal',
+                    'text-brand-600': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
+                  }" x-text="factDisplaySubtitle(selectedFactRecord())"></div>
+              </div>
+            </div>
+            <div class="p-4 space-y-4">
+              <div class="space-y-2">
+                <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                <template x-if="summaryCardViewModel(selectedFactRecord().description, 'fact').hasMeta">
+                  <div class="flex flex-wrap gap-1.5">
+                    <template x-for="item in summaryCardViewModel(selectedFactRecord().description, 'fact').metaItems" :key="`${selectedFactId()}-${item.key}-${item.value}`">
+                      <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                        <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                        <span class="break-all" x-text="item.value"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="selectedFactRecord().description">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
+                </template>
+              </div>
+              <template x-if="hasProjectFileRefs(selectedFactRecord().description)">
+                <button type="button" @click="viewProjectFiles()" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700 transition">
+                  View referenced files
+                </button>
+              </template>
+              <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
+                <template x-if="selectedFactId() === 'origin'">
+                  <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project starting point</span></div>
+                  </div>
+                </template>
+                <template x-if="selectedFactId() === 'goal'">
+                  <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Relation</span><span class="text-slate-600 text-right break-words">Project target fact</span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project target fact</span></div>
+                    <template x-if="selectedFactProducingIntent()">
+                      <div class="pt-1 space-y-3">
+                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Completed By</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
+                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().worker || '—'"></span></div>
+                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactProducingIntent().concluded_at || selectedFactProducingIntent().created_at)"></span></div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="selectedFactId() !== 'origin' && selectedFactId() !== 'goal' && selectedFactProducingIntent()">
+                  <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Relation</span><span class="text-slate-600 text-right break-words" x-text="factRelationSummary(selectedFactRecord())"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Intent</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().creator"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().worker || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactProducingIntent().concluded_at || selectedFactProducingIntent().created_at)"></span></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </section>
+        </template>
+        <template x-if="selectedNode && selectedNode.type === 'intent' && selectedIntentRecord()">
+          <section class="rounded-2xl border border-violet-200/80 bg-white shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-violet-100 bg-violet-50/70">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-sm font-mono font-bold text-violet-700 break-all" x-text="selectedIntentId()"></div>
+                  <div class="mt-1 text-[11px] text-violet-600 break-all" x-text="intentDisplaySubtitle(selectedIntentRecord())"></div>
+                </div>
+                <span class="shrink-0 text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
+              </div>
+            </div>
+            <div class="p-4 space-y-4">
+              <div class="space-y-2">
+                <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Summary</p>
+                <template x-if="summaryCardViewModel(selectedIntentRecord().description, 'intent').hasMeta">
+                  <div class="flex flex-wrap gap-1.5">
+                    <template x-for="item in summaryCardViewModel(selectedIntentRecord().description, 'intent').metaItems" :key="`${selectedIntentId()}-${item.key}-${item.value}`">
+                      <span class="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">
+                        <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                        <span class="break-all" x-text="item.value"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="selectedIntentRecord().description">
+                  <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedIntentRecord().description"></p>
+                </template>
+              </div>
+              <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(' ')"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().creator"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Heartbeat</span><span class="text-slate-600 text-right break-words" x-text="selectedIntentRecord().last_heartbeat_at ? formatTime(selectedIntentRecord().last_heartbeat_at) : '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().created_at)"></span></div>
+                <template x-if="selectedIntentRecord().concluded_at">
+                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().concluded_at)"></span></div>
+                </template>
+              </div>
+            </div>
+          </section>
+        </template>
+      </div>
+
+      <!-- Hints -->
+      <div x-show="sideTab === 'hints'" class="flex-1 overflow-y-auto p-4 space-y-3 bg-amber-50/25">
+        <template x-if="project.hints.length === 0">
+          <div class="rounded-2xl border border-dashed border-amber-200 bg-white/80 px-5 py-10 text-center shadow-sm">
+            <p class="text-sm text-slate-300">No hints yet</p>
+          </div>
+        </template>
+        <template x-for="h in project.hints" :key="h.id">
+          <button type="button" @click="openHintTimelineEntry(h.id)"
+            class="w-full text-left rounded-2xl border border-amber-200/80 bg-white shadow-sm overflow-hidden transition hover:bg-amber-50/40">
+            <div class="px-4 py-3 border-b border-amber-100 bg-amber-50/80">
+              <div class="flex items-center justify-between gap-3 text-[11px]">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+                  <span class="font-medium text-amber-800 truncate" x-text="h.creator"></span>
+                </div>
+                <span class="text-amber-600/80 shrink-0 tabular-nums" x-text="formatTime(h.created_at)"></span>
+              </div>
+            </div>
+            <div class="p-4">
+              <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="h.content"></p>
+            </div>
+          </button>
+        </template>
+      </div>
+
+      <!-- Files -->
+      <div x-show="sideTab === 'files'" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/40">
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold text-slate-700">Project Files</div>
+              <div class="text-[10px] text-slate-400">Download reports, exploit scripts, PoCs, and uploaded attachments</div>
+            </div>
+            <button @click="loadProjectFiles(true)" :disabled="filesLoading" class="px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-medium text-slate-500 hover:bg-slate-50 transition disabled:opacity-40">Refresh</button>
+          </div>
+          <div class="p-4 space-y-4">
+            <template x-if="filesError">
+              <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" x-text="filesError"></div>
+            </template>
+            <template x-if="!filesLoading && !filesError && projectFiles.length === 0">
+              <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center">
+                <p class="text-sm text-slate-300">No downloadable files yet</p>
+                <p class="text-xs text-slate-300 mt-1">Worker outputs under /home/kali/workspace/project and uploaded attachments will appear here.</p>
+              </div>
+            </template>
+            <template x-for="group in projectFileGroups()" :key="group.id">
+              <section x-show="group.files.length > 0" class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest" x-text="group.label"></div>
+                  <span class="text-[10px] text-slate-300" x-text="`${group.files.length} file${group.files.length === 1 ? '' : 's'}`"></span>
+                </div>
+                <div class="space-y-2">
+                  <template x-for="file in group.files" :key="`${file.source}:${file.path}`">
+                    <article class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                      <div class="flex items-start gap-3">
+                        <div class="min-w-0 flex-1">
+                          <div class="text-xs font-semibold text-slate-700 truncate" x-text="file.name"></div>
+                          <div class="mt-0.5 text-[10px] font-mono text-slate-400 break-all" x-text="projectFileDisplayPath(file)"></div>
+                          <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-slate-400">
+                            <span x-text="formatBytes(file.size)"></span>
+                            <span x-text="formatTime(file.modified_at)"></span>
+                          </div>
+                        </div>
+                        <button type="button" @click="downloadProjectFile(file)" class="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-700 transition">Download</button>
+                      </div>
+                    </article>
+                  </template>
+                </div>
+              </section>
+            </template>
+          </div>
+        </section>
+      </div>
+
+      <!-- Capabilities -->
+      <div x-show="sideTab === 'capabilities'" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/40">
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold text-slate-700">Project Capabilities</div>
+              <div class="text-[10px] text-slate-400">MCP servers and skills enabled for this project</div>
+            </div>
+            <button @click="saveCapabilities()" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white text-[11px] font-medium hover:bg-slate-700 transition">Save</button>
+          </div>
+          <div class="p-4 space-y-5">
+            <template x-if="(capabilities.unavailable?.mcp_server_ids || []).length || (capabilities.unavailable?.skill_ids || []).length">
+              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <span x-text="`${(capabilities.unavailable?.mcp_server_ids || []).length} MCP + ${(capabilities.unavailable?.skill_ids || []).length} skill ids not in catalog`"></span>
+              </div>
+            </template>
+            <template x-for="task in capabilityTaskTypes()" :key="task.key">
+              <section class="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <div>
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-700" x-text="task.label"></div>
+                    <div class="text-[10px] text-slate-400" x-text="`task_type=${task.key}`"></div>
+                  </div>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full"
+                    :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                    x-text="capabilityTaskHealthStatus(task.key)"></span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'mcp_server')" :key="`${task.key}:mcp:${item.id}`">
+                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                          <div class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'mcp_server', item.id)" @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                            <div class="min-w-0 flex-1">
+                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                            </div>
+                          </div>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'skill')" :key="`${task.key}:skill:${item.id}`">
+                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
+                          <div class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'skill', item.id)" @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                            <div class="min-w-0 flex-1">
+                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                            </div>
+                          </div>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-2 space-y-1">
+                  <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`${task.key}:health:${entry.capability_id}`">
+                    <div class="text-[10px]"
+                      :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                      x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
+                  </template>
+                </div>
+              </section>
+            </template>
+          </div>
+        </section>
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold text-slate-700">AI Worker Chain</div>
+              <div class="text-[10px] text-slate-400">Read-only snapshot set when the project was created. Replays inherit this chain when profiles are still available.</div>
+            </div>
+          </div>
+          <div class="p-4 space-y-3">
+            <template x-if="capabilities.projectAiProfiles.unavailable_profile_ids && capabilities.projectAiProfiles.unavailable_profile_ids.length > 0">
+              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700" x-text="`Some referenced profiles are unavailable: ${capabilities.projectAiProfiles.unavailable_profile_ids.join(', ')}`"></div>
+            </template>
+            <template x-if="!capabilities.projectAiProfiles || (capabilities.projectAiProfiles.snapshots || []).length === 0">
+              <p class="text-xs text-slate-300">No AI chain configured — workers are selected from the global pool.</p>
+            </template>
+            <div class="space-y-2">
+              <template x-for="(snap, idx) in (capabilities.projectAiProfiles?.snapshots || [])" :key="`${snap.profile_id}-${idx}`">
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded" :class="snap.role === 'primary' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'" x-text="snap.role"></span>
+                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="snap.snapshot_name"></div>
+                        <span class="text-[10px] font-mono text-slate-400" x-text="snap.snapshot_worker_type"></span>
+                      </div>
+                      <div class="text-[10px] font-mono text-slate-400 mt-0.5" x-text="`${snap.snapshot_model}${snap.snapshot_base_url ? ' @ ' + snap.snapshot_base_url : ''}`"></div>
+                      <div class="text-[10px] text-slate-400 mt-0.5" x-text="`key env: ${snap.snapshot_api_key_env}${snap.snapshot_provider ? ' · provider: ' + snap.snapshot_provider : ''}`"></div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Log -->
+      <div x-show="sideTab === 'log'" class="flex-1 overflow-y-auto p-4 space-y-3">
+        <template x-if="selectedTimelineSummary()">
+          <section class="sticky top-0 z-10 rounded-2xl border border-slate-200 bg-white/95 backdrop-blur px-4 py-3 shadow-sm">
+            <div class="space-y-2.5">
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-3 text-[11px]">
+                  <span class="text-slate-400">Sequence</span>
+                  <span class="font-mono text-slate-600" x-text="selectedTimelineSummary().sequenceLabel"></span>
+                </div>
+                <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full bg-brand-400 transition-all duration-300" :style="`width:${selectedTimelineSummary().sequencePercent}%`"></div>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-3 text-[11px]">
+                  <span class="text-slate-400">Time Span</span>
+                  <span class="font-mono text-slate-600 text-right" x-text="selectedTimelineSummary().timeLabel"></span>
+                </div>
+                <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full bg-teal-400 transition-all duration-300" :style="`width:${selectedTimelineSummary().timePercent}%`"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+        <template x-if="timelineViewModel().empty">
+          <p class="text-sm text-slate-300 text-center mt-12">No activity yet</p>
+        </template>
+        <template x-for="entry in timelineViewModel().events" :key="entry.id">
+          <div class="flex items-stretch gap-3" :id="timelineEntryDomId(entry.id)">
+            <div class="flex flex-col items-center shrink-0">
+              <div class="w-2.5 h-2.5 rounded-full mt-1.5" :class="timelineEventDotClass(entry)"></div>
+              <div class="w-px flex-1 bg-slate-100 mt-2" x-show="!entry.isLast"></div>
+            </div>
+            <button type="button" @click="openTimelineEntry(entry)"
+              class="min-w-0 flex-1 text-left rounded-xl px-0.5 py-0.5 transition"
+              :class="timelineEntryButtonClass(entry)">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[11px] font-medium text-slate-400 tabular-nums" x-text="formatTime(entry.timestamp)"></span>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide"
+                  :class="timelineEventBadgeClass(entry)" x-text="timelineEventBadge(entry)"></span>
+                <span class="text-[11px] text-slate-300" x-text="formatTimelineDate(entry.timestamp)"></span>
+              </div>
+              <template x-if="entry.title">
+                <p class="text-sm text-slate-700 leading-relaxed break-words mt-1" x-text="entry.title"></p>
+              </template>
+              <template x-if="entry.subtitle">
+                <p class="text-[11px] text-slate-500 break-words mt-1" x-text="entry.subtitle"></p>
+              </template>
+              <template x-if="entry.summary">
+                <div class="mt-2 space-y-1">
+                  <template x-if="summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).hasMeta">
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="item in summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).metaItems" :key="`${entry.id}-${item.key}-${item.value}`">
+                        <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                          <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+                          <span class="break-all" x-text="item.value"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </template>
+                  <p class="text-sm text-slate-600 leading-relaxed break-words whitespace-pre-wrap" x-text="entry.summary"></p>
+                </div>
+              </template>
+              <template x-if="entry.actor || entry.meta.length > 0">
+                <p class="text-[11px] text-slate-400 mt-1 break-words" x-text="[entry.actor, ...entry.meta].filter(Boolean).join(' · ')"></p>
+              </template>
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
+</template>
+</div>
+</template>
+

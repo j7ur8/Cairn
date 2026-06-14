@@ -1,0 +1,214 @@
+<!-- ═══════════ MODALS ═══════════ -->
+
+<!-- Replay Configuration -->
+<div x-show="showReplayConfigModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay p-4" @click.self="if (!isCreatingReplayRun) showReplayConfigModal = false">
+  <div class="bg-white rounded-2xl shadow-2xl w-[960px] max-w-[calc(100vw-2rem)] h-[760px] max-h-[calc(100vh-2rem)] overflow-hidden border border-slate-200/60 flex flex-col" @click.stop>
+    <div class="shrink-0 px-6 pt-6">
+      <h3 class="text-base font-semibold text-slate-700 mb-1">Replay Configuration</h3>
+      <p class="text-xs text-slate-400 mb-4" x-text="projectLabel(replayConfig.sourceProjectId, replayConfig.sourceProjectTitle)"></p>
+    </div>
+    <div class="flex-1 min-h-0 px-6 pb-4 flex flex-col gap-3">
+      <div class="shrink-0 grid grid-cols-2 sm:grid-cols-3 gap-2 p-1 rounded-xl border border-violet-100 bg-violet-50/50">
+        <template x-for="panel in projectModalPanels()" :key="`rep-panel:${panel.key}`">
+          <button type="button" @click="replayConfigPanel = panel.key"
+            class="px-3 py-2 rounded-lg text-xs font-medium transition text-left"
+            :class="replayConfigPanel === panel.key ? 'bg-white text-violet-700 shadow-sm border border-violet-100' : 'text-violet-500 hover:bg-white/70'">
+            <span x-text="panel.label"></span>
+          </button>
+        </template>
+      </div>
+
+      <div class="relative flex-1 min-h-0 overflow-hidden">
+      <section x-show="replayConfigPanel === 'basic'" class="absolute inset-0 flex flex-col rounded-2xl border border-violet-200 bg-violet-50/40 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+        <input x-model="replayConfig.title" placeholder="Replay project title" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <textarea x-model="replayConfig.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+        <textarea x-model="replayConfig.goal" placeholder="Goal — what to achieve" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+
+        <div>
+          <label class="text-[11px] text-violet-500 font-medium uppercase tracking-wider mb-1.5 block">Primary Role</label>
+          <select x-model="replayConfig.role_id" class="w-full px-3 py-2 border border-violet-100 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            <option value="">No role selected</option>
+            <template x-for="role in replayConfigRoleItems()" :key="role.id">
+              <option :value="role.id" x-text="role.name"></option>
+            </template>
+          </select>
+          <template x-if="replayConfigRoleItems().length === 0">
+            <p class="text-[11px] text-slate-400 mt-1.5">No roles configured yet. Add roles to dispatch.resources.yaml.</p>
+          </template>
+        </div>
+
+        <div class="rounded-2xl border border-dashed border-violet-100 bg-white p-3">
+          <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">Attachments</div>
+          <p class="text-[11px] text-slate-400 mt-1">Attachments are not edited here. Existing project attachments will be copied to the replay project and exposed under <span class="font-mono text-slate-500">/home/kali/workspace/attachments/&lt;new_project_id&gt;/</span>.</p>
+        </div>
+        <div class="rounded-2xl border border-violet-100 bg-white p-3 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">Hints</span>
+            <button type="button" @click="replayConfig.hints.push({ content: '' })" class="text-[11px] text-violet-500 hover:text-violet-600 font-medium">+ Add</button>
+          </div>
+          <template x-for="(hint, idx) in replayConfig.hints" :key="idx">
+            <div class="flex gap-2">
+              <input x-model="hint.content" placeholder="Hint content" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition placeholder:text-slate-300">
+              <button type="button" @click="replayConfig.hints.splice(idx, 1)" x-show="replayConfig.hints.length > 1" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+            </div>
+          </template>
+        </div>
+        <div class="rounded-2xl border border-violet-100 bg-white p-3 space-y-3">
+          <div>
+            <div class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">Task Timeouts</div>
+            <p class="text-[11px] text-slate-400 mt-1">Inherited from the source project and can be adjusted for this replay.</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Bootstrap run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.bootstrap.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Bootstrap conclude</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.bootstrap.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Reason run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.reason.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Intent run</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.explore.timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-violet-500/70 uppercase tracking-wider">Intent conclude</span>
+              <input type="number" min="1" step="1" x-model.number="replayConfig.task_timeouts.explore.conclude_timeout" class="mt-1 w-full px-3 py-1.5 border border-violet-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+            </label>
+          </div>
+        </div>
+        </div>
+        <div class="shrink-0 flex justify-end gap-2 px-4 py-4 border-t border-violet-100 bg-violet-50/60">
+          <button @click="showReplayConfigModal = false" :disabled="isCreatingReplayRun" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+          <button data-testid="replay-create" @click="createReplayRun()" :disabled="!canCreateReplayRun()"
+            class="px-5 py-2 text-sm bg-violet-500 text-white rounded-xl font-medium hover:bg-violet-600 transition disabled:opacity-30 shadow-sm shadow-violet-200" x-text="isCreatingReplayRun ? 'Starting...' : 'Start Worker Replay'"></button>
+        </div>
+      </section>
+
+      <section x-show="replayConfigPanel === 'capabilities'" class="absolute inset-0 flex flex-col rounded-2xl border border-violet-200 bg-violet-50/40 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+          <div class="grid grid-cols-3 gap-2 p-1 rounded-xl border border-violet-100 bg-white/80">
+            <template x-for="task in capabilityTaskTypes()" :key="`rep-cap-tab:${task.key}`">
+              <button type="button" @click="replayConfigCapabilityPanel = task.key"
+                class="px-3 py-2 rounded-lg text-xs font-medium transition text-left"
+                :class="replayConfigCapabilityPanel === task.key ? 'bg-white text-violet-700 shadow-sm border border-violet-100' : 'text-violet-500 hover:bg-violet-50'">
+                <span x-text="task.label"></span>
+              </button>
+            </template>
+          </div>
+          <template x-for="task in capabilityTaskTypes()" :key="`rep-cap:${task.key}`">
+            <section x-show="replayConfigCapabilityPanel === task.key" class="rounded-2xl border border-violet-100 bg-white p-3">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-700" x-text="task.label"></div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full"
+                  :class="capabilityTaskHealthStatus(task.key) === 'error' ? 'bg-rose-50 text-rose-700' : capabilityTaskHealthStatus(task.key) === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                  x-text="capabilityTaskHealthStatus(task.key)"></span>
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div>
+                  <div class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    <template x-for="item in capabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'mcp_server')" :key="`rep:${task.key}:mcp:${item.id}`">
+                      <label class="block rounded-lg border border-violet-100 bg-violet-50/40 px-2 py-1.5 hover:bg-violet-50 transition">
+                        <div class="flex items-start gap-2">
+                          <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100"
+                            :checked="userCapabilitySelected(task.key, 'mcp_server', item.id)"
+                            @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
+                          <div class="min-w-0 flex-1">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          </div>
+                        </div>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+                <div>
+                  <div class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    <template x-for="item in selectableCapabilitiesForTask(task.key, replayConfig.catalog?.capabilities || []).filter(i => i.kind === 'skill')" :key="`rep:${task.key}:skill:${item.id}`">
+                      <label class="block rounded-lg border border-violet-100 bg-violet-50/40 px-2 py-1.5 hover:bg-violet-50 transition">
+                        <div class="flex items-start gap-2">
+                          <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-100"
+                            :checked="userCapabilitySelected(task.key, 'skill', item.id)"
+                            @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
+                          <div class="min-w-0 flex-1">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                          </div>
+                        </div>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-3 space-y-1">
+                <template x-for="entry in (capabilities.health || {})[task.key] || []" :key="`rep:${task.key}:health:${entry.capability_id}`">
+                  <div class="text-[10px]"
+                    :class="entry.status === 'error' ? 'text-rose-600' : entry.status === 'warn' ? 'text-amber-600' : 'text-emerald-600'"
+                    x-text="`${entry.capability_id}: ${entry.message || entry.status}`"></div>
+                </template>
+              </div>
+            </section>
+          </template>
+        </div>
+        <div class="shrink-0 flex justify-end gap-2 px-4 py-4 border-t border-violet-100 bg-violet-50/60">
+          <button @click="showReplayConfigModal = false" :disabled="isCreatingReplayRun" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+          <button @click="createReplayRun()" :disabled="!canCreateReplayRun()"
+            class="px-5 py-2 text-sm bg-violet-500 text-white rounded-xl font-medium hover:bg-violet-600 transition disabled:opacity-30 shadow-sm shadow-violet-200" x-text="isCreatingReplayRun ? 'Starting...' : 'Start Worker Replay'"></button>
+        </div>
+      </section>
+
+      <section x-show="replayConfigPanel === 'ai'" class="absolute inset-0 flex flex-col rounded-2xl border border-violet-200 bg-violet-50/40 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-violet-500 font-medium uppercase tracking-wider">AI Worker Chains</span>
+          <button type="button" x-show="taskAiProfileSelectionsHasValue(replayConfig.ai_profiles)" @click="clearReplayConfigAiProfiles()" class="text-[11px] text-slate-400 hover:text-slate-500 transition">Clear</button>
+        </div>
+        <template x-if="replayConfigAiProfileItems().length === 0">
+          <p class="text-xs text-rose-500 rounded-xl border border-dashed border-rose-200 bg-rose-50 px-3 py-3">Add an available AI Profile in Settings before creating a replay project.</p>
+        </template>
+        <div x-show="replayConfigAiProfileItems().length > 0" class="space-y-2">
+          <div class="hidden sm:grid grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-500/70">
+            <span>Task</span>
+            <span>AI Profile</span>
+            <span>AI Model</span>
+            <span>Thinking Level</span>
+          </div>
+          <template x-for="task in aiProfileTaskTypes()" :key="task.key">
+            <div class="grid grid-cols-1 sm:grid-cols-[92px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,150px)] gap-2 items-center rounded-xl border border-violet-100 bg-white p-2">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-violet-500" x-text="task.label"></div>
+              <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_profile_id" @change="selectReplayConfigAiProfile($event.target.value, task.key)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                <template x-for="item in replayConfigAiProfileItems()" :key="`${task.key}:profile:${item.id}`">
+                  <option :value="item.id" x-text="item.name"></option>
+                </template>
+              </select>
+              <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_model" @change="setTaskAiModel(replayConfig, task.key, $event.target.value)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                <template x-for="model in taskAiModelOptions(replayConfig, task.key, replayConfigAiProfileItems())" :key="`${task.key}:model:${model}`">
+                  <option :value="model" x-text="model"></option>
+                </template>
+              </select>
+              <select x-model="ensureTaskAiProfileSelections(replayConfig)[task.key].primary_reasoning_type" @change="setTaskAiReasoning(replayConfig, task.key, $event.target.value)" class="w-full rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300 transition">
+                <option value="">Select level</option>
+                <template x-for="option in aiReasoningTypeOptions()" :key="`${task.key}:reasoning:${option}`">
+                  <option :value="option" x-text="option"></option>
+                </template>
+              </select>
+            </div>
+          </template>
+        </div>
+        </div>
+        <div class="shrink-0 flex justify-end gap-2 px-4 py-4 border-t border-violet-100 bg-violet-50/60">
+          <button @click="showReplayConfigModal = false" :disabled="isCreatingReplayRun" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+          <button @click="createReplayRun()" :disabled="!canCreateReplayRun()"
+            class="px-5 py-2 text-sm bg-violet-500 text-white rounded-xl font-medium hover:bg-violet-600 transition disabled:opacity-30 shadow-sm shadow-violet-200" x-text="isCreatingReplayRun ? 'Starting...' : 'Start Worker Replay'"></button>
+        </div>
+      </section>
+
+      </div>
+      </div>
+    </div>
+  </div>
+</div>
+

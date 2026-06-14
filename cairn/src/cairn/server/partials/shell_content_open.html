@@ -1,0 +1,26 @@
+  <div x-show="view !== 'newProject'" x-cloak class="min-w-0 flex-1 flex flex-col overflow-hidden">
+    <header class="h-12 shrink-0 border-b border-slate-200 bg-white/90 backdrop-blur px-3 sm:px-4 flex items-center gap-3">
+      <button type="button" class="md:hidden h-8 w-8 rounded-lg border border-slate-200 text-slate-500 inline-flex items-center justify-center" @click="mobileNavOpen = true" title="Open navigation" aria-label="Open navigation">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="flex-1"></div>
+      <div class="hidden sm:flex items-center gap-3 text-[11px]">
+        <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>connected</span>
+        <span class="text-slate-500" title="All projects"><span class="tabular-nums font-semibold" x-text="projects.length"></span> all</span>
+        <span class="text-slate-500" title="Active projects"><span class="tabular-nums font-semibold text-teal-700" x-text="countProjectsByStatus('active')"></span> active</span>
+        <span class="text-slate-500" title="Stopped projects"><span class="tabular-nums font-semibold text-amber-700" x-text="countProjectsByStatus('stopped')"></span> stopped</span>
+        <span class="text-slate-500" title="Completed projects"><span class="tabular-nums font-semibold" x-text="countProjectsByStatus('completed')"></span> completed</span>
+        <span class="text-slate-500" title="Running executions"><span class="tabular-nums font-semibold" x-text="runningExecutionCount()"></span> running</span>
+        <span class="text-slate-500" title="Errors"><span class="tabular-nums font-semibold" x-text="errorEventCount()"></span> errors</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button x-show="!currentUser" x-cloak type="button" data-testid="open-login" @click="showLogin = true" class="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">Login</button>
+        <div x-show="currentUser" x-cloak class="hidden sm:block min-w-0 max-w-[220px] text-right">
+          <div class="truncate text-xs font-medium text-slate-700" x-text="accountLabel()"></div>
+        </div>
+        <button x-show="currentUser" x-cloak type="button" data-testid="logout-button" @click="logout()" class="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">Logout</button>
+      </div>
+    </header>
+
+    <main x-show="view !== 'newProject'" x-cloak class="min-h-0 flex-1 overflow-hidden">
+

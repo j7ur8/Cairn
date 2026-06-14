@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -48,6 +48,44 @@ from cairn.shared.observability.trace import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+PARTIALS_DIR = Path(__file__).parent / "partials"
+
+# The SPA shell is authored as verbatim HTML fragments under partials/ and
+# concatenated here in document order. The fragments are not individually
+# well-formed and are never served by URL; only this join produces the page.
+# This tuple is the document order; partials/ is the source of truth.
+INDEX_PARTIALS = (
+    "_doc_open.html",
+    "shell_nav.html",
+    "shell_content_open.html",
+    "view_list.html",
+    "view_graph.html",
+    "view_settings.html",
+    "shell_main_close.html",
+    "view_new_project.html",
+    "shell_close.html",
+    "modals/_replay_config.html",
+    "modals/_intent.html",
+    "modals/_conclude.html",
+    "modals/_complete.html",
+    "modals/_hint.html",
+    "modals/_reopen.html",
+    "modals/_rename.html",
+    "modals/_local_prefs.html",
+    "modals/_export_yaml.html",
+    "modals/_delete.html",
+    "login.html",
+    "toast.html",
+    "_doc_close.html",
+)
+
+
+def assemble_index() -> str:
+    """Concatenate the SPA shell fragments into the full index document."""
+    return "".join(
+        (PARTIALS_DIR / name).read_text(encoding="utf-8")
+        for name in INDEX_PARTIALS
+    )
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -111,6 +149,10 @@ async def lifespan(app: FastAPI):
         fmt=runtime.server.log_format,
         component="cairn.server",
     )
+    # Assemble the SPA shell from partials once at startup; the route serves
+    # this cached string. Frozen here so per-request handling stays allocation
+    # free and the fragment reads never hit the hot path.
+    app.state.index_html = assemble_index()
     db.configure()
     try:
         bootstrap_superuser_if_configured()
@@ -315,12 +357,15 @@ app.include_router(observability_routers.router)
 
 
 @app.get("/", include_in_schema=False)
-def index():
+def index(request: Request):
     # Force the browser to always revalidate the SPA shell. Without
     # this, every frontend edit shows up only after a hard reload.
-    response = FileResponse(STATIC_DIR / "index.html")
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    # DEBUG path falls back to a live reassemble so partial edits show
+    # up without a server restart.
+    html = getattr(request.app.state, "index_html", None)
+    if html is None:
+        html = assemble_index()
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 app.mount("/static", NoStoreStaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -16,6 +16,25 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 from helpers import reset_postgres_db
 
 
+def _frontend_source() -> str:
+    """The full shipped frontend surface as one searchable string.
+
+    The SPA was split out of a single index.html into partials/*.html (markup,
+    assembled by assemble_index()) and static/js/*.js (the cairnApp component
+    sliced into CairnParts.*). Behavioral assertions below grep this combined
+    surface, exactly as they used to grep the monolithic index.html.
+    """
+    from cairn.server.app import STATIC_DIR, assemble_index
+
+    html = assemble_index()
+    js = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted((STATIC_DIR / "js").glob("*.js"))
+    )
+    return html + "\n" + js
+
+
+
 class StaticCacheTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_postgres_db()
@@ -35,25 +54,19 @@ class StaticCacheTests(unittest.TestCase):
         self.assertEqual(r.headers.get("cache-control"), "no-store, must-revalidate")
 
     def test_project_file_download_uses_authenticated_fetch(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("downloadProjectFile(file)", html)
         self.assertIn("async downloadProjectFile(file)", html)
         self.assertNotIn(':href="projectFileDownloadUrl(file)"', html)
 
     def test_text_export_uses_authenticated_fetch(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("async fetchText(path)", html)
         self.assertIn("await this.authFetch(path, { method: 'GET' })", html)
         self.assertNotIn("const r = await fetch(path);", html)
 
     def test_attachment_upload_uses_authenticated_fetch(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("async uploadProjectAttachments(projectId, attachments, actor)", html)
         self.assertIn(
             "await this.authFetch(`/projects/${encodeURIComponent(projectId)}/attachments`, { method: 'POST', body: form })",
@@ -61,9 +74,7 @@ class StaticCacheTests(unittest.TestCase):
         )
 
     def test_capabilities_save_uses_per_task_payload_once(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertEqual(html.count("async saveCapabilities()"), 1)
         self.assertIn("const body = { capabilities: this.selectedCapabilitiesForPayload(this.capabilities.tasks) };", html)
         self.assertIn("tasks: this.taskCapabilitiesFromServerTasks(data.tasks)", html)
@@ -71,9 +82,7 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn("ai_profile_selections", html)
 
     def test_project_capability_picker_hides_role_default_top_level_skills(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("roleDefaultTopLevelSkillIds()", html)
         self.assertIn("return ['cypher-ctf', 'cypher-pentest', 'cypher-vuln-research'];", html)
         self.assertIn("selectableCapabilitiesForTask(task, items)", html)
@@ -83,9 +92,7 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("skill_ids: this.sanitizeUserSkillIdsForProjectPayload(entry.user_skill_ids || []),", html)
 
     def test_llm_event_queries_use_visible_event_kind_allowlist(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("currentLlmVisibleEventKinds()", html)
         self.assertIn("params.append('event_kinds', kind);", html)
         self.assertIn("/llm-events/view?", html)
@@ -93,9 +100,7 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn("include_low_signal", html)
 
     def test_execution_log_all_selection_uses_sentinel(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("const ALL_LLM_EXECUTIONS_VALUE = '__all__';", html)
         self.assertIn("<option :value=\"ALL_LLM_EXECUTIONS_VALUE\">All executions</option>", html)
         self.assertIn("selectedLlmExecutionIdForQuery()", html)
@@ -103,9 +108,7 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn("const running = next.find(execution => execution.process_state === 'running');", html)
 
     def test_detail_and_timeline_cards_render_full_text_without_summary_headline(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn('x-text="fact.description"', html)
         self.assertIn('x-text="selectedFactRecord().description"', html)
         self.assertIn('x-text="selectedIntentRecord().description"', html)
@@ -116,9 +119,7 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn("summaryCardViewModel(entry.summary, timelineSummaryKind(entry)).headline", html)
 
     def test_capability_admin_save_builds_kind_specific_payload(self) -> None:
-        html = (Path(__file__).resolve().parents[1] / "src" / "cairn" / "server" / "static" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        html = _frontend_source()
         self.assertIn("const normalizeStringList = (value) => {", html)
         self.assertIn("args: normalizeStringList(this.capabilityForm.args),", html)
         self.assertIn("required_skill_ids: normalizeStringList(this.capabilityForm.required_skill_ids),", html)

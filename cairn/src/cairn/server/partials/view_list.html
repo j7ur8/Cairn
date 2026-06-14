@@ -1,0 +1,121 @@
+<!-- ═══════════ PROJECT LIST VIEW ═══════════ -->
+<div x-show="view === 'list'" x-cloak class="flex-1 flex flex-col overflow-hidden">
+  <div x-ref="projectListScroll" @scroll.passive="rememberProjectListScroll()" class="flex-1 overflow-y-auto p-4">
+    <template x-if="projects.length === 0">
+      <div class="flex flex-col items-center justify-center h-full text-slate-400">
+        <img src="/static/favicon.svg" alt="" class="w-20 h-20 mb-5 opacity-30">
+        <p class="text-lg font-medium text-slate-500">No projects yet</p>
+        <p class="text-sm mt-1">Create a project to start exploring</p>
+      </div>
+    </template>
+
+    <div class="space-y-2">
+      <template x-for="p in projects" :key="p.id">
+        <div @click="openProject(p.id)"
+          class="group bg-white rounded-xl border border-slate-200/70 px-3 py-2 cursor-pointer transition hover:shadow-sm hover:border-slate-300">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 min-w-0">
+            <span class="text-[11px] font-mono text-slate-400 tracking-wide" x-text="p.id"></span>
+            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em]"
+              :class="projectStatusBadgeClass(p.status)"
+              x-text="p.status"></span>
+              </div>
+            <div class="title-action-trigger flex items-start gap-2">
+              <h3 class="min-w-0 flex-1 text-[15px] font-semibold text-slate-700 break-words [overflow-wrap:anywhere] group-hover:text-brand-600 transition-colors" x-text="p.title"></h3>
+              <button type="button"
+                data-testid="rename-project-list"
+                @click.stop="openRenameProject(p.id, p.title)"
+                class="title-action-button mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400"
+                title="Rename project"
+                :aria-label="`Rename ${p.title}`">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="m16.862 4.487 1.65-1.65a1.875 1.875 0 1 1 2.652 2.652l-9.193 9.193a4.5 4.5 0 0 1-1.897 1.13L6 17l1.188-4.074a4.5 4.5 0 0 1 1.13-1.897l8.544-8.542Z"/><path d="M19.5 7.125 16.875 4.5"/><path d="M5.25 18.75h13.5"/></svg>
+              </button>
+            </div>
+            </div>
+            <div class="flex items-center gap-3 text-[11px] text-slate-400 shrink-0">
+              <span x-text="`${p.fact_count} facts`"></span>
+              <span x-text="`${p.intent_count} intents`"></span>
+              <span x-show="p.hint_count > 0" x-text="`${p.hint_count} hints`"></span>
+            </div>
+          </div>
+          <div>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+              <template x-if="p.reason">
+                <div class="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-700 reason-chip-running">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M18.364 5.636 16.95 7.05"/><path d="M21 12h-3"/><path d="m18.364 18.364-1.414-1.414"/><path d="M12 21v-3"/><path d="m7.05 16.95-1.414 1.414"/><path d="M6 12H3"/><path d="M7.05 7.05 5.636 5.636"/><circle cx="12" cy="12" r="3.5"/></svg>
+                  <span x-text="reasonBadgeText(p.reason, true)"></span>
+                </div>
+              </template>
+              <template x-if="p.working_intent_count > 0">
+                <div class="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 intent-chip-running">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="8.5"/></svg>
+                  <span x-text="workingIntentBadgeText(p.working_intent_count)"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 text-[11px] text-slate-400">
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m10-10h-4M6 12H2m15.07-7.07l-2.83 2.83M9.76 14.24l-2.83 2.83m11.14 0l-2.83-2.83M9.76 9.76L6.93 6.93"/></svg>
+              <span x-text="p.fact_count"></span>
+            </span>
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+              <span x-text="p.intent_count"></span>
+            </span>
+            <template x-if="p.working_intent_count > 0">
+              <span class="flex items-center gap-1 text-amber-500">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg>
+                <span x-text="p.working_intent_count"></span>
+              </span>
+            </template>
+            <template x-if="p.unclaimed_intent_count > 0">
+              <span class="flex items-center gap-1 text-slate-400">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+                <span x-text="p.unclaimed_intent_count"></span>
+              </span>
+            </template>
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547Z"/></svg>
+              <span x-text="p.hint_count"></span>
+            </span>
+          </div>
+          <div class="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M8 2v3M16 2v3"/><path d="M3.5 9.5h17"/><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M8 13h3M8 16h6"/></svg>
+            <span x-text="formatDate(p.created_at)"></span>
+          </div>
+          <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end gap-1.5">
+            <div class="flex items-center justify-end gap-1.5 flex-wrap">
+              <button type="button" data-testid="project-snapshot-list" @click.stop="viewProjectYaml(p.id, p.title)"
+                class="px-2 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/><path d="M8.25 12h7.5M8.25 15h5.25"/></svg>
+                Snapshot
+              </button>
+              <template x-if="p.status === 'completed'">
+                <button type="button" data-testid="project-reopen-list" @click.stop="openReopenProject(p.id, p.title)"
+                  class="px-2 py-1 rounded-lg border border-sky-200 text-[11px] text-sky-600 hover:bg-sky-50 transition flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 3v6h6"/></svg>
+                  Reopen
+                </button>
+              </template>
+              <template x-if="p.status === 'active'">
+                <button type="button" data-testid="project-stop-list" @click.stop="toggleProjectStopById(p.id, p.status)"
+                  class="px-2 py-1 rounded-lg border border-amber-200 text-[11px] text-amber-600 hover:bg-amber-50 transition flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                  Stop Active
+                </button>
+              </template>
+              <button type="button" data-testid="project-delete-list" @click.stop="deleteProjectById(p.id, p.title)"
+                class="px-2 py-1 rounded-lg border border-rose-200 text-[11px] text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6"/><path d="M19 6l-.63 11.338A2 2 0 0 1 16.37 19.5H7.63a2 2 0 0 1-1.997-2.162L5 6"/><path d="M10 10.5v5"/><path d="M14 10.5v5"/></svg>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+

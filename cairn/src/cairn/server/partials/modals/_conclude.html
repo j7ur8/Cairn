@@ -1,0 +1,19 @@
+<!-- Conclude -->
+<div x-show="showConcludeModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showConcludeModal = false">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
+    <h3 class="text-base font-semibold text-slate-700 mb-1">Conclude Intent</h3>
+    <p class="text-xs text-slate-400 mb-4 font-mono" x-text="concludeForm.intentId"></p>
+    <div class="space-y-3">
+      <textarea data-testid="conclude-description" x-model="concludeForm.description" placeholder="What did you find? (new fact)" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
+        Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showConcludeModal = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
+      <button data-testid="conclude-submit" @click="concludeIntent()" :disabled="!concludeForm.description"
+        class="px-5 py-2 text-sm bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-30 shadow-sm shadow-teal-200">Conclude</button>
+    </div>
+  </div>
+</div>
+

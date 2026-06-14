@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cairn</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<script src="/static/vendor/tailwindcss.js"></script>
+<script src="/static/js/tailwind.config.js"></script>
+<script src="/static/vendor/dagre.min.js"></script>
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/vendor/cytoscape-dagre.js"></script>
+<script defer src="/static/vendor/alpine.min.js"></script>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="bg-[#eef2f3] text-slate-800 h-screen overflow-hidden" :class="{ 'select-none cursor-col-resize': isResizingPanel || isResizingLlmPanel }" x-data="cairnApp()">
+<div x-show="appShellVisible()" x-cloak class="h-screen min-h-0 flex overflow-hidden">
