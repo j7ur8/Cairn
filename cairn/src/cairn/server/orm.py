@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -251,6 +252,23 @@ class ProjectExecutionCapabilityRow(Base):
     project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     task_type: Mapped[str] = mapped_column(Text, primary_key=True)
     capabilities_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class HealthCheckResultRow(Base):
+    __tablename__ = "health_check_results"
+    __table_args__ = (
+        Index("idx_health_check_results_profile_checked", "profile_id", "checked_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    profile_id: Mapped[str] = mapped_column(Text, nullable=False)
+    checked_at: Mapped[str] = mapped_column(Text, nullable=False)
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    error_type: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    check_type: Mapped[str] = mapped_column(Text, nullable=False, default="manual", server_default="manual")
 
 
 class AiProfileCheckRequestRow(Base):

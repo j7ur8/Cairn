@@ -180,11 +180,19 @@ class AiProfileWithHealth(AiProfile):
 
 
 class AiProfileHealthReport(BaseModel):
-    """One per-profile health observation reported by the dispatcher."""
+    """One per-profile health observation reported by the dispatcher.
+
+    Carries the speedtest result (latency, HTTP status, error classification)
+    so the DB-backed health result is complete.
+    """
 
     profile_id: str
     ok: bool
+    latency_ms: int | None = None
+    http_status: int | None = None
+    error_type: str | None = None
     message: str = ""
+    check_type: str = "manual"
 
 
 class AiProfileHealthReportRequest(BaseModel):

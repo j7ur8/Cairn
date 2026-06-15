@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from cairn.dispatcher.ai_health import run_profile_worker_healthcheck
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.runtime.startup_healthcheck import (
-    format_failure_summary,
-    run_startup_healthchecks,
-)
+from cairn.dispatcher.speedtest import SpeedtestService, SpeedtestResult, bulk_speedtest
 from cairn.shared.config import DispatchConfig
 from cairn.shared.contracts import AiProfile
 
@@ -78,29 +74,32 @@ class DispatcherHealthCoordinator:
             )
             return
         profile = AiProfile.model_validate(raw)
-        try:
-            cached_secret = self.client.get_ai_profile_secret(profile.id)
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ai profile check: secret lookup failed profile_id=%s error=%s", profile.id, exc)
-            cached_secret = None
-        health = run_profile_worker_healthcheck(
-            profile,
-            config=self.config,
-            container_manager=self.container_manager,
-            cached_secret=cached_secret,
-            timeout_seconds=self.config.runtime.healthcheck_timeout,
+        secret = self._resolve_secret(profile)
+        result = SpeedtestService().test_profile(profile, secret)
+        self._post_result(result)
+        self.client.complete_ai_profile_check_request(
+            request_id, ok=result.ok, message=result.error_message or "ok",
         )
-        message = health.message or ("ok" if health.ok else "worker healthcheck failed")
+
+    def _resolve_secret(self, profile: AiProfile) -> str:
+        try:
+            return self.client.get_ai_profile_secret(profile.id) or ""
+        except Exception as exc:
+            LOG.warning("ai profile check: secret lookup failed profile_id=%s error=%s", profile.id, exc)
+            return ""
+
+    def _post_result(self, result: SpeedtestResult) -> None:
         self.client.post_ai_health_report({
             "reports": [{
-                "profile_id": profile.id,
-                "ok": health.ok,
-                "message": message[:1000],
+                "profile_id": result.profile_id,
+                "ok": result.ok,
+                "latency_ms": result.latency_ms,
+                "http_status": result.http_status,
+                "error_type": result.error_type,
+                "message": result.error_message or "",
+                "check_type": "manual",
             }],
         })
-        self.client.complete_ai_profile_check_request(
-            request_id, ok=health.ok, message=message[:1000],
-        )
 
     def validate_server_settings(self) -> None:
         settings = self.client.get_settings()
@@ -128,11 +127,59 @@ class DispatcherHealthCoordinator:
             )
 
     def run_startup_healthchecks(self, *, show_commands: bool) -> None:
-        results = run_startup_healthchecks(
-            self.config,
-            self.container_manager,
-            show_commands=show_commands,
-        )
-        if any(result.ok for result in results):
+        """Run in-process HTTP speedtests against all AI profiles at startup.
+
+        Replaces the old container-based startup healthcheck (which created
+        temporary Docker containers).  Profiles without a base_url are
+        skipped (they are seeded from dispatch.yaml workers, not real APIs).
+        """
+        try:
+            response = self.client.list_ai_profiles()
+        except Exception as exc:
+            LOG.warning("startup health: cannot list ai profiles error=%s", exc)
             return
-        LOG.warning(format_failure_summary(results))
+        if not response.ok or not isinstance(response.data, list):
+            return
+        profiles: list[tuple[AiProfile, str]] = []
+        for raw in response.data:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                profile = AiProfile.model_validate(raw)
+            except Exception:
+                continue
+            if not profile.base_url or not profile.base_url.strip():
+                LOG.debug("startup health: skipping profile_id=%s (no base_url)", profile.id)
+                continue
+            secret = self._resolve_secret(profile)
+            if not secret:
+                LOG.info("startup health: skipping profile_id=%s (no secret)", profile.id)
+                continue
+            profiles.append((profile, secret))
+        if not profiles:
+            LOG.info("startup health: no profiles with base_url to check")
+            return
+        results = bulk_speedtest(profiles)
+        reports = [
+            {
+                "profile_id": r.profile_id,
+                "ok": r.ok,
+                "latency_ms": r.latency_ms,
+                "http_status": r.http_status,
+                "error_type": r.error_type,
+                "message": r.error_message or "",
+                "check_type": "startup",
+            }
+            for r in results
+        ]
+        try:
+            self.client.post_ai_health_report({"reports": reports})
+        except Exception as exc:
+            LOG.warning("startup health: post failed error=%s", exc)
+        ok_count = sum(1 for r in results if r.ok)
+        fail_count = len(results) - ok_count
+        LOG.info("startup health: %d/%d profiles ok, %d failed", ok_count, len(results), fail_count)
+        for r in results:
+            if not r.ok:
+                LOG.warning("startup health FAIL profile_id=%s error_type=%s msg=%s",
+                            r.profile_id, r.error_type, r.error_message)

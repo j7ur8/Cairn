@@ -123,16 +123,24 @@ def complete_ai_profile_check_request(
 
 @router.post("/ai-profiles/health-report", status_code=204)
 def post_health_report(body: AiProfileHealthReportRequest, _superuser=Depends(current_active_superuser)):
-    """Dispatcher-side probe results, applied to the catalog.
-
-    The dispatcher runs the real probe (env var resolution + TCP connect)
-    because the server cannot see the operator's secrets. After this
-    endpoint is called, ``available`` reflects the latest probe outcome.
-    """
+    """Dispatcher-side probe results, applied to the catalog and DB."""
     if not body.reports:
         return None
-    for report in body.reports:
-        update_yaml_ai_profile_health(report.profile_id, ok=report.ok, message=report.message or "")
+    from cairn.server.repositories.health_results import HealthCheckResultRepository
+
+    with db.session_scope() as conn:
+        repo = HealthCheckResultRepository(conn)
+        for report in body.reports:
+            update_yaml_ai_profile_health(report.profile_id, ok=report.ok, message=report.message or "")
+            repo.insert(
+                profile_id=report.profile_id,
+                ok=report.ok,
+                latency_ms=report.latency_ms,
+                http_status=report.http_status,
+                error_type=report.error_type,
+                error_message=report.message or "",
+                check_type=getattr(report, "check_type", "manual"),
+            )
     return None
 
 
@@ -148,33 +156,62 @@ def post_models_report(body: AiProfileModelsReportRequest, _superuser=Depends(cu
 
 
 def list_ai_profiles_with_health() -> list[AiProfileWithHealth]:
-    """Return all profiles wrapped in ``AiProfileWithHealth``.
-
-    The server does not run the probe itself; the dispatcher is the
-    authoritative source of truth for the probe (because it has the env
-    vars and the network). This helper just rolls the last known
-    ``last_health_*`` columns into a ``HealthCheckResult`` payload so the
-    UI can render a single "health" badge per row.
-    """
+    """Return all profiles wrapped in ``AiProfileWithHealth`` (DB-backed)."""
+    from cairn.server.repositories.health_results import HealthCheckResultRepository
     from cairn.shared.contracts import HealthCheckItem
+
     profiles = list_yaml_ai_profiles()
     result: list[AiProfileWithHealth] = []
+    with db.session_scope() as conn:
+        repo = HealthCheckResultRepository(conn)
+        all_latest = {r["profile_id"]: r for r in repo.all_latest()}
     for profile in profiles:
-        ok = bool(profile.last_health_ok) if profile.last_health_ok is not None else True
-        checks: list[HealthCheckItem] = []
-        if profile.last_health_at is not None:
-            checks.append(HealthCheckItem(
-                name="dispatcher_probe",
-                ok=ok,
-                message=profile.last_health_message or "ok",
-            ))
+        latest = all_latest.get(profile.id)
+        if latest is not None:
+            ok = bool(latest["ok"])
+            checks = _build_health_checks(latest)
+        else:
+            ok = bool(profile.last_health_ok) if profile.last_health_ok is not None else True
+            yaml_checks: list[HealthCheckItem] = []
+            if profile.last_health_at is not None:
+                yaml_checks.append(HealthCheckItem(
+                    name="dispatcher_probe",
+                    ok=ok,
+                    message=profile.last_health_message or "ok",
+                ))
+            checks = yaml_checks
         dump = profile.model_dump()
-        dump["sk"] = profile.sk  # exclude=True stripped it; restore
+        dump["sk"] = profile.sk
         result.append(AiProfileWithHealth(
             **dump,
             health=HealthCheckResult(ok=ok, checks=checks),
         ))
     return result
+
+
+def _build_health_checks(row: dict) -> list:
+    from cairn.shared.contracts import HealthCheckItem
+
+    checks: list[HealthCheckItem] = []
+    if row.get("latency_ms") is not None:
+        checks.append(HealthCheckItem(
+            name="latency",
+            ok=True,
+            message=f"{row['latency_ms']}ms",
+        ))
+    if row.get("error_type"):
+        checks.append(HealthCheckItem(
+            name="error",
+            ok=False,
+            message=f"{row['error_type']}: {row.get('error_message', '')}"[:500],
+        ))
+    if not checks:
+        checks.append(HealthCheckItem(
+            name="health",
+            ok=bool(row["ok"]),
+            message=row.get("error_message") or "ok",
+        ))
+    return checks
 
 
 @router.get("/projects/{project_id}/ai-profiles", response_model=ProjectAiProfilesResponse)
