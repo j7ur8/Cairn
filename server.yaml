@@ -1,0 +1,41 @@
+server:
+  base_url: http://cairn-server:8000
+  database:
+    url: postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+  auth:
+    jwt_secret: Dk-YXm4TySPofrMNVxbbLASnMBdtXWwyHRAR7NEqmW12OwfOXfpRiggJz3ILXK8f
+    dispatcher_api_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaXNwYXRjaGVyIiwiaWF0IjoxNzgwNzQzMDg3LCJuYmYiOjE3ODA3NDMwODcsImV4cCI6MTgxMjI3OTA4NywianRpIjoiMmI1NDhlMWYyY2ViNGJiZmI1Mzk5ZGFiZGRiY2I2ZGUiLCJyb2xlIjoic2VydmljZSJ9.y1x_9yApeftba28q_hckY8lSjcHqhbKKJKcYkGLo0FQ
+  initial_admin:
+    email: admin@123.com
+    password: Aa123123
+  paths:
+    datas_root: /cairn/datas
+    attachments_root: /cairn/datas/attachments
+    project_files_root: /cairn/datas/project-files
+    worker_attachments_root: /home/kali/workspace/attachments
+dispatcher:
+  health_addr: 0.0.0.0:9100
+  reload:
+    url: http://cairn-dispatcher:9100/reload
+    enabled: true
+worker_runtime:
+  container:
+    image: cairn-worker-container:mcp-camoufox
+    user: 0:0
+    exec_user: kali
+    network_mode: cairn
+    completed_action: stop
+    stopped_action: remove
+    bind_mounts:
+    - name: ctf-attachments
+      host_path: ./datas/attachments
+      container_path: /home/kali/workspace/attachments
+      read_only: true
+    - name: project-files
+      host_path: ./datas/project-files/{project_id}
+      container_path: /home/kali/workspace/project
+      read_only: false
+  common_env: {}
