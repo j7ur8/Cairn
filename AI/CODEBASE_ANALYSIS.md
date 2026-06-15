@@ -39,7 +39,7 @@ Cairn 的核心不是固定渗透测试流程，而是一个通用 problem-solvi
 | HTTP Client | requests, tenacity | Dispatcher 调 Server |
 | 认证 | PyJWT, bcrypt | JWT + 密码 hash |
 | 观测 | prometheus-client | HTTP/Dispatcher/Worker metrics |
-| 前端 | Static HTML, Alpine, Tailwind, Cytoscape | 无构建静态资源 |
+| 前端 | Static HTML partials, Alpine, Tailwind, Cytoscape | `server/partials/*` 启动时由 `assemble_index()` 拼装为 SPA shell；无构建静态资源 |
 | 测试 | pytest + unittest 风格测试文件 | dev 依赖声明 `pytest`，统一入口为 `python -m pytest` |
 
 ## 2. 工程目录结构
@@ -296,7 +296,7 @@ erDiagram
 
 ## 7. API 端点
 
-项目没有独立 OpenAPI 文件，FastAPI 运行时可生成 schema。当前扫描到 `@router`/`@app` 装饰器约 75 个。
+项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器约 75 个。
 
 | 分组 | 主要端点 | 用途 | 认证 |
 |------|----------|------|------|
@@ -312,6 +312,7 @@ erDiagram
 | Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities` | 能力和角色管理 | Bearer |
 | AI Profiles | `/ai-profiles/*`, `/projects/{id}/ai-profiles` | AI profile catalog、secret、health check | Bearer |
 | Proxies/Settings | `/proxies/*`, `/settings` | 系统代理和超时配置 | Bearer |
+| System Config | `/runtime-limits`, `/container-limits`, `/task-timeouts`, `/observability`, `/server-log-retention` | YAML-backed runtime、container、timeout、observability、log retention 配置 | GET Bearer；PUT superuser |
 | Observability | `/projects/{id}/llm-executions*`, `/llm-events*` | LLM execution/event 记录与查询 | Bearer |
 
 ## 8. 错误处理策略
@@ -376,6 +377,7 @@ docker compose up --build
 | 日志 | Python logging，Server/Dispatcher 分别配置 |
 | Metrics | `prometheus-client`，Server `/metrics`，Dispatcher health server `/metrics` |
 | Trace | contextvars trace id，HTTP 响应 `X-Request-Id` |
+| Security headers | `SecurityHeadersMiddleware` 为每个响应补充 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer` |
 | Redaction | Server/Dispatcher 观测模块脱敏 token/key |
 | 文件安全 | project_id/path 校验、symlink escape 检查、download size cap、危险 MIME 强制 attachment |
 | 静态资源缓存 | SPA 和 static vendor 资源 `Cache-Control: no-store` |
@@ -403,9 +405,9 @@ docker compose up --build
 
 当前验证状态：
 
-- 仓库有 31 个 `test_*.py` 测试文件。
-- 2026-06-13 当前环境使用 `python -m compileall -q cairn/src/cairn` 通过。
-- 2026-06-13 当前环境使用 `uv run python -m pytest -q -m 'not db'` 通过：158 passed, 23 skipped, 129 deselected, 7 subtests passed；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
+- 仓库有 47 个 `test_*.py` 测试文件。
+- CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src` 和 pytest coverage。
+- 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
 

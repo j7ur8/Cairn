@@ -5,6 +5,60 @@
 
 # 更新日志
 
+## 2026-06-15 — lint 与 AI 文档漂移修复
+
+- 执行 `uv run ruff check src tests --fix`，修复 dispatcher health 和 auth/projects router 测试中的 import 排序问题，解除 CI lint 阻塞。
+- 同步 `ARCHITECTURE.md`：SPA 描述改为 `server/partials/* + assemble_index()`，启动链路记录 partials 拼装并缓存到 `app.state.index_html`。
+- 同步认证架构描述：公开路径收窄为 `/`、`/auth/login`、`/health`、`/metrics` 和 `/static/*`；其他 `/auth/*` 不再整体豁免。
+- 同步 `CODEBASE_ANALYSIS.md`：记录 `/docs`、`/redoc`、`/openapi.json` 已禁用，补充 system-config 端点、安全响应头、当前 47 个测试文件和 CI blocking 检查。
+
+---
+
+## 2026-06-14 — 工程加固与类型清零
+
+### P0 配置健壮性
+- `_read_yaml()` 增加 `exists()`/`is_file()`/`is_dir()` 预检；目录场景给出 bind-mount 源缺失的 actionable 报错
+- 新增 `ConfigError` 漏斗类型：所有 load 失败（缺文件、无效 YAML、schema 违反、资源路径检查）统一走此类型
+- CLI 捕获 `ConfigError`，输出单行致命日志而非裸 traceback 崩溃循环
+- `_read_yaml` 同时捕获 `yaml.YAMLError` 和 `OSError`
+
+### P1 并发 + 测试缺口
+- `HeartbeatLease._failure` 改为在 `_lock` 内读写（跨线程字段）
+- `TaskCancellation` 记录 snapshot-under-lock 不变式（无真实 bug，加注释防"简化"）
+- 新增 `test_lease_concurrency.py`（6 tests）、`test_hints_router.py`（4 DB tests）、`test_task_types_router.py`（2 DB-free tests）、`test_project_io_helpers.py`（15 tests）、`test_config_loader.py`（8 failure-path tests）
+
+### P2 可维护性
+- 共享 `_jsonl.py` helper 模块，消除 claudecode/codex 适配器 78 行重复
+- Mock worker 在 import 时 `compile()` 语法检查
+- `_remote_support_env_from_raw` 收窄 `except Exception` → `except ValidationError`
+
+### mypy 清零 + CI blocking（116 → 0 错误，245 源文件）
+- 修复变量复用类型污染（McpServerCapabilityConfig vs SkillCapabilityConfig）
+- YAML `Any`/`dict`/`list`/`None` union 窄化模式（bind-to-local）
+- `render_capability_path` None 崩溃修复（`@overload`）
+- `AnyReporter` 类型别名（ExecutionReporter | DisabledExecutionReporter）
+- 开启 `check_untyped_defs = true`、`warn_unused_ignores = true`
+- CI mypy 改为 blocking（去掉 `continue-on-error`）
+
+### 扫描索引（migration 0003）
+- `idx_facts_project` on facts(project_id)：消除 WHERE project_id 的表扫描
+- `idx_llm_executions_started` on llm_executions(started_at)：retention sweep 不再全表扫描
+- 幂等 `_index_exists` 守卫，对称 downgrade，orm.py 同步
+
+### DB 安全隐患修复
+- `reset_postgres_db()` 要求 `CAIRN_ALLOW_DB_RESET=1` 环境变量，无它则 skip 而非 drop schema
+
+### models_pkg shim 淘汰
+- 删除 5 个 models_pkg 文件中的 re-export shim（`common.py`、`proxies.py`、`reason_models.py`、`ai_profiles.py`、`projects.py`）
+- 28 个 server 文件的 import 改为直接从 `shared/contracts` 获取共享本体
+- 架构文档明确分层约定：跨进程本体在 `shared/contracts`，HTTP 信封在 `models_pkg`
+
+### 文档漂移修复
+- `ARCHITECTURE.md` 和 `CODEBASE_ANALYSIS.md` 更新 Alembic head 引用
+- 新增 `test_architecture_boundaries` 中的 head-vs-doc 一致性测试
+
+---
+
 ## 2026-06-13 — compose migration head 修复
 
 - 修复 `docker compose up --build` migration 失败：原 `0002_project_execution_config_names` revision id 超过 Alembic 默认 `alembic_version.version_num VARCHAR(32)`，业务 DDL 成功后写版本号会报 `value too long for type character varying(32)`。
@@ -98,50 +152,5 @@
 - 识别模块数：9 个
 - 识别 API 端点数：76 个
 - 识别 TODO/问题数：11 个显式标记，5 个审查问题
-
----
-
-## 2026-06-14 — 工程加固与类型清零
-
-### P0 配置健壮性
-- `_read_yaml()` 增加 `exists()`/`is_file()`/`is_dir()` 预检；目录场景给出 bind-mount 源缺失的 actionable 报错
-- 新增 `ConfigError` 漏斗类型：所有 load 失败（缺文件、无效 YAML、schema 违反、资源路径检查）统一走此类型
-- CLI 捕获 `ConfigError`，输出单行致命日志而非裸 traceback 崩溃循环
-- `_read_yaml` 同时捕获 `yaml.YAMLError` 和 `OSError`
-
-### P1 并发 + 测试缺口
-- `HeartbeatLease._failure` 改为在 `_lock` 内读写（跨线程字段）
-- `TaskCancellation` 记录 snapshot-under-lock 不变式（无真实 bug，加注释防"简化"）
-- 新增 `test_lease_concurrency.py`（6 tests）、`test_hints_router.py`（4 DB tests）、`test_task_types_router.py`（2 DB-free tests）、`test_project_io_helpers.py`（15 tests）、`test_config_loader.py`（8 failure-path tests）
-
-### P2 可维护性
-- 共享 `_jsonl.py` helper 模块，消除 claudecode/codex 适配器 78 行重复
-- Mock worker 在 import 时 `compile()` 语法检查
-- `_remote_support_env_from_raw` 收窄 `except Exception` → `except ValidationError`
-
-### mypy 清零 + CI blocking（116 → 0 错误，245 源文件）
-- 修复变量复用类型污染（McpServerCapabilityConfig vs SkillCapabilityConfig）
-- YAML `Any`/`dict`/`list`/`None` union 窄化模式（bind-to-local）
-- `render_capability_path` None 崩溃修复（`@overload`）
-- `AnyReporter` 类型别名（ExecutionReporter | DisabledExecutionReporter）
-- 开启 `check_untyped_defs = true`、`warn_unused_ignores = true`
-- CI mypy 改为 blocking（去掉 `continue-on-error`）
-
-### 扫描索引（migration 0003）
-- `idx_facts_project` on facts(project_id)：消除 WHERE project_id 的表扫描
-- `idx_llm_executions_started` on llm_executions(started_at)：retention sweep 不再全表扫描
-- 幂等 `_index_exists` 守卫，对称 downgrade，orm.py 同步
-
-### DB 安全隐患修复
-- `reset_postgres_db()` 要求 `CAIRN_ALLOW_DB_RESET=1` 环境变量，无它则 skip 而非 drop schema
-
-### models_pkg shim 淘汰
-- 删除 5 个 models_pkg 文件中的 re-export shim（`common.py`、`proxies.py`、`reason_models.py`、`ai_profiles.py`、`projects.py`）
-- 28 个 server 文件的 import 改为直接从 `shared/contracts` 获取共享本体
-- 架构文档明确分层约定：跨进程本体在 `shared/contracts`，HTTP 信封在 `models_pkg`
-
-### 文档漂移修复
-- `ARCHITECTURE.md` 和 `CODEBASE_ANALYSIS.md` 更新 Alembic head 引用
-- 新增 `test_architecture_boundaries` 中的 head-vs-doc 一致性测试
 
 ---

@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from cairn.server.ai_profile_service import task_ai_selections_from_snapshots
-from cairn.server.config.ai_profiles import list_yaml_ai_profiles
+from cairn.server.config.ai_profiles import list_yaml_ai_profiles, update_yaml_ai_profile_health
 from cairn.server.domain.errors import NotFoundError
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import execution_ai_snapshots, load_project_execution_configs
@@ -12,10 +12,14 @@ from cairn.server.models_pkg.ai_profiles import (
     AiProfileCheckCompleteRequest,
     AiProfileCheckRequest,
     AiProfileCheckTriggerResponse,
+    AiProfileHealthReportRequest,
+    AiProfileWithHealth,
     ProjectAiProfilesResponse,
 )
 from cairn.server.repositories.ai_profiles import AiProfileCheckRepository
+from cairn.server.repositories.health_results import HealthCheckResultRepository
 from cairn.server.repositories.projects import ProjectRepository
+from cairn.shared.contracts import HealthCheckItem, HealthCheckResult
 
 
 def new_check_request_id() -> str:
@@ -80,6 +84,88 @@ def complete_ai_profile_check_request(
         finished_at=utcnow(),
         error_message=(body.message or "")[:1000],
     )
+
+
+def apply_ai_profile_health_report(conn: Any, body: AiProfileHealthReportRequest) -> None:
+    repo = HealthCheckResultRepository(conn)
+    for report in body.reports:
+        update_yaml_ai_profile_health(
+            report.profile_id,
+            ok=report.ok,
+            message=report.message or "",
+        )
+        repo.insert(
+            profile_id=report.profile_id,
+            ok=report.ok,
+            latency_ms=report.latency_ms,
+            http_status=report.http_status,
+            error_type=report.error_type,
+            error_message=report.message or "",
+            check_type=getattr(report, "check_type", "manual"),
+        )
+
+
+def list_ai_profiles_with_health(conn: Any) -> list[AiProfileWithHealth]:
+    """Return all profiles wrapped in ``AiProfileWithHealth`` (DB-backed)."""
+    profiles = list_yaml_ai_profiles()
+    result: list[AiProfileWithHealth] = []
+    repo = HealthCheckResultRepository(conn)
+    all_latest = {row["profile_id"]: row for row in repo.all_latest()}
+    for profile in profiles:
+        latest = all_latest.get(profile.id)
+        checks: list[HealthCheckItem]
+        if latest is not None:
+            ok = bool(latest["ok"])
+            checks = _build_health_checks(latest)
+        else:
+            ok = bool(profile.last_health_ok) if profile.last_health_ok is not None else True
+            checks = []
+            if profile.last_health_at is not None:
+                checks.append(
+                    HealthCheckItem(
+                        name="dispatcher_probe",
+                        ok=ok,
+                        message=profile.last_health_message or "ok",
+                    )
+                )
+        dump = profile.model_dump()
+        dump["sk"] = profile.sk
+        result.append(
+            AiProfileWithHealth(
+                **dump,
+                health=HealthCheckResult(ok=ok, checks=checks),
+            )
+        )
+    return result
+
+
+def _build_health_checks(row: dict[str, Any]) -> list[HealthCheckItem]:
+    checks: list[HealthCheckItem] = []
+    if row.get("latency_ms") is not None:
+        checks.append(
+            HealthCheckItem(
+                name="latency",
+                ok=True,
+                message=f"{row['latency_ms']}ms",
+            )
+        )
+    if row.get("error_type"):
+        checks.append(
+            HealthCheckItem(
+                name="error",
+                ok=False,
+                message=f"{row['error_type']}: {row.get('error_message', '')}"[:500],
+            )
+        )
+    if not checks:
+        checks.append(
+            HealthCheckItem(
+                name="health",
+                ok=bool(row["ok"]),
+                message=row.get("error_message") or "ok",
+            )
+        )
+    return checks
 
 
 def project_ai_profiles(conn: Any, project_id: str) -> ProjectAiProfilesResponse:

@@ -25,6 +25,7 @@ class AuthRouterTests(unittest.TestCase):
 
     def _client(self):
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
         return TestClient(app)
 

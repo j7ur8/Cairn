@@ -316,7 +316,7 @@ def _hydrate_intent_sources(
 ) -> list[dict[str, Any]]:
     """Attach ``source_ids`` to each intent row via a single intent_sources query."""
     intent_ids = {row["id"] for row in rows}
-    sources_by_intent = {iid: [] for iid in intent_ids}
+    sources_by_intent: dict[str, list[str]] = {iid: [] for iid in intent_ids}
     for source in sql.fetchall(
         conn,
         """
@@ -339,7 +339,7 @@ def _hydrate_intent_sources_batch(
     """Same as :func:`_hydrate_intent_sources` but for intents spanning many
     projects. Returns ``{project_id: [intent, …]}``."""
     intent_ids = {row["id"] for row in rows}
-    sources_by_intent = {iid: [] for iid in intent_ids}
+    sources_by_intent: dict[str, list[str]] = {iid: [] for iid in intent_ids}
     for source in sql.fetchall(
         conn,
         """

@@ -4,7 +4,7 @@ import logging
 
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.speedtest import SpeedtestService, SpeedtestResult, bulk_speedtest
+from cairn.dispatcher.speedtest import SpeedtestResult, SpeedtestService, bulk_speedtest
 from cairn.shared.config import DispatchConfig
 from cairn.shared.contracts import AiProfile
 

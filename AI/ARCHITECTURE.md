@@ -19,7 +19,7 @@
 ```mermaid
 flowchart TB
     subgraph UI["前端展示层"]
-        SPA["静态 SPA\nserver/static/index.html"]
+        SPA["静态 SPA\nserver/partials/* + assemble_index()"]
     end
 
     subgraph API["Cairn Server / FastAPI"]
@@ -91,6 +91,7 @@ sequenceDiagram
     DB->>PG: create_engine + Alembic upgrade_head
     DB->>PG: seed_defaults()
     App->>DB: bootstrap_superuser_if_configured()
+    App->>App: assemble_index() 读取 partials 并缓存 app.state.index_html
     App->>Router: include_router(...)
     App->>App: register RequestIdMiddleware
     App->>Retention: optionally start retention_loop
@@ -243,7 +244,7 @@ sequenceDiagram
 
 | 位置 | 行为 |
 |------|------|
-| `server/app.py::_enforce_auth` | 全局依赖，保护除 `/`、`/auth/*`、`/health`、`/metrics`、`/static/*` 以外的路径 |
+| `server/app.py::_enforce_auth` | 全局依赖，保护除 `/`、`/auth/login`、`/health`、`/metrics`、`/static/*` 以外的路径；其他 `/auth/*` 不做 blanket 豁免 |
 | `server/security/deps.py::current_user` | 校验 Bearer token 并加载用户 |
 | `server/security/deps.py::current_active_superuser` | 要求 `is_superuser=True` |
 | `server/routers/auth.py` | 登录、刷新、注册用户 |

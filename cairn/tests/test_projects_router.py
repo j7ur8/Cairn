@@ -41,6 +41,7 @@ def _login_token(
         return r.json()["access_token"]
     # Rate-limited / no account yet — fall back to a synthetic JWT.
     import jwt as _jwt
+
     from cairn.server.security.jwt import _JWT_ALGORITHM
 
     secret = os.environ["CAIRN_JWT_SECRET"]
@@ -66,6 +67,7 @@ class ProjectsRouterTests(unittest.TestCase):
 
     def _client(self):
         from fastapi.testclient import TestClient
+
         from cairn.server.app import app
         return TestClient(app)
 
