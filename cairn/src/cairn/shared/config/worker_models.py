@@ -74,6 +74,10 @@ class ContainerConfig(BaseModel):
     pids_limit: int | None = None
     """Maximum number of processes inside the container (``--pids-limit``).
     When ``None`` (the default), Docker imposes no limit."""
+    nano_cpus: int | None = None
+    """CPU quota in units of 1e-9 CPUs, passed directly to the Docker API
+    ``nano_cpus`` kwarg.  e.g. 1_500_000_000 = 1.5 CPUs.  When ``None``
+    (the default), Docker imposes no CPU limit."""
 
     @field_validator("user", "exec_user")
     @classmethod

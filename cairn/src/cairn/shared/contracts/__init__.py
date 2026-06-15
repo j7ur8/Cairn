@@ -16,6 +16,7 @@ from cairn.shared.contracts.llm_events import (
     parse_llm_hidden_event_kinds,
     visible_kinds_from_hidden,
 )
+from cairn.shared.contracts.observability import ObservabilitySettings
 from cairn.shared.contracts.projects import (
     Fact,
     Hint,
@@ -28,7 +29,9 @@ from cairn.shared.contracts.projects import (
 )
 from cairn.shared.contracts.proxies import ProxyConfig, ProxySummary
 from cairn.shared.contracts.reason import ReasonState
+from cairn.shared.contracts.runtime_limits import ContainerLimits, RuntimeLimits
 from cairn.shared.contracts.settings import Settings
+from cairn.shared.contracts.system_config import ServerLogRetention
 from cairn.shared.contracts.timeouts import BootstrapTaskTimeouts, ExploreTaskTimeouts, ReasonTaskTimeouts, TaskTimeouts
 from cairn.shared.contracts.types import ReasoningType
 
@@ -45,6 +48,9 @@ __all__ = [
     "HealthCheckResult",
     "Hint",
     "Intent",
+    "ObservabilitySettings",
+    "ContainerLimits",
+    "RuntimeLimits",
     "ProjectAiProfileSnapshot",
     "ProjectDetail",
     "ProjectMeta",
@@ -56,6 +62,7 @@ __all__ = [
     "ReasonState",
     "ReasonTaskTimeouts",
     "ReasoningType",
+    "ServerLogRetention",
     "Settings",
     "TaskTimeouts",
     "auth_env_warning",

@@ -32,6 +32,7 @@ from cairn.server.routers import (
     settings,
     task_types,
 )
+from cairn.server.routers import system_config as system_config_router
 from cairn.server.runtime_config import system_config
 from cairn.server.security.deps import current_user_optional
 from cairn.server.security.users import bootstrap_superuser_if_configured
@@ -373,6 +374,7 @@ app.include_router(replay.router)
 app.include_router(capabilities.router)
 app.include_router(execution_configs.router)
 app.include_router(observability_routers.router)
+app.include_router(system_config_router.router)
 
 
 @app.get("/", include_in_schema=False)

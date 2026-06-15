@@ -65,6 +65,7 @@ class ContainerLifecycle:
                 labels=container_labels(project_id),
                 mem_limit=self.config.mem_limit,
                 pids_limit=self.config.pids_limit,
+                nano_cpus=self.config.nano_cpus,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -100,6 +101,7 @@ class ContainerLifecycle:
                 labels=container_labels(project_id, startup=True),
                 mem_limit=self.config.mem_limit,
                 pids_limit=self.config.pids_limit,
+                nano_cpus=self.config.nano_cpus,
             )
         except self.docker_exception_type as exc:
             raise RuntimeError(f"failed to create startup container {name}: {exc}") from exc
