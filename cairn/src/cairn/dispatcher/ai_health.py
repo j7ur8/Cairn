@@ -7,7 +7,7 @@ The snapshot/catalog probes are intentionally lightweight and side-effect free:
 * api key: a profile secret must be present in YAML / execution config.
 * base url: TCP connect to (host, port). 4xx/5xx responses are still
   treated as "reachable" — we only care that the endpoint is up.
-* worker type: must be declared in ``dispatch.yaml`` ``workers`` with
+* worker type: must be declared in ``config.yaml`` ``workers`` with
   type matching the profile.
 
 Manual UI checks additionally run the selected worker driver's real
@@ -85,7 +85,7 @@ def _check_auth_configured(env_name: str, secret: str | None) -> HealthCheckItem
         canonical = CANONICAL_AUTH_ENV.get("codex") if env_name == "OPENAI_API_KEY" else CANONICAL_AUTH_ENV.get("claudecode") if env_name == "ANTHROPIC_AUTH_TOKEN" else None
         if canonical is not None:
             guidance = (
-                f"; define {canonical} directly in dispatch.yaml worker env"
+                f"; define {canonical} directly in config.yaml worker env"
             )
         return HealthCheckItem(
             name=name, ok=False,
@@ -119,11 +119,11 @@ def _check_worker_type(
     if not matching:
         return HealthCheckItem(
             name=name, ok=False,
-            message=f"worker_type '{worker_type}' is not declared in dispatch.yaml workers",
+            message=f"worker_type '{worker_type}' is not declared in config.yaml workers",
         )
     return HealthCheckItem(
         name=name, ok=True,
-        message=f"{len(matching)} dispatch.yaml worker(s) of type '{worker_type}'",
+        message=f"{len(matching)} config.yaml worker(s) of type '{worker_type}'",
     )
 
 
@@ -197,7 +197,7 @@ def run_profile_worker_healthcheck(
 
     candidates = [worker for worker in config.workers if worker.type == profile.worker_type]
     if not candidates:
-        message = f"worker_type '{profile.worker_type}' is not declared in dispatch.yaml workers"
+        message = f"worker_type '{profile.worker_type}' is not declared in config.yaml workers"
         return ProfileWorkerHealthcheckResult(
             ok=False,
             worker_name="-",

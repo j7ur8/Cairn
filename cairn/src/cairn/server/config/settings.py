@@ -14,7 +14,7 @@ def get_yaml_settings() -> Settings:
     server_settings = settings_raw if isinstance(settings_raw, dict) else {}
     missing = [key for key in ("intent_timeout", "reason_timeout") if key not in server_settings]
     if missing:
-        raise HTTPException(500, f"dispatch.yaml server.settings missing required fields: {', '.join(missing)}")
+        raise HTTPException(500, f"config.yaml server.settings missing required fields: {', '.join(missing)}")
     return Settings(
         intent_timeout=int(server_settings["intent_timeout"]),
         reason_timeout=int(server_settings["reason_timeout"]),
@@ -25,7 +25,7 @@ def update_yaml_settings(body: Settings) -> Settings:
     data = load_dispatch_data()
     server = data.setdefault("server", {})
     if not isinstance(server, dict):
-        raise HTTPException(500, "dispatch.yaml server must be a mapping")
+        raise HTTPException(500, "config.yaml server must be a mapping")
     server["settings"] = {
         "intent_timeout": body.intent_timeout,
         "reason_timeout": body.reason_timeout,
@@ -55,4 +55,4 @@ def get_yaml_task_timeouts() -> TaskTimeouts:
             }
         )
     except Exception as exc:
-        raise HTTPException(500, f"dispatch.yaml tasks missing or invalid timeout fields: {exc}") from exc
+        raise HTTPException(500, f"config.yaml tasks missing or invalid timeout fields: {exc}") from exc

@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
 from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
@@ -262,7 +263,7 @@ class ContainerUserRuntimeTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# host_path env interpolation in dispatch.yaml
+# host_path env interpolation in config.yaml
 # ---------------------------------------------------------------------------
 
 
@@ -350,12 +351,12 @@ worker_pool:
 
 
 class BindMountHostPathConfigTests(unittest.TestCase):
-    """End-to-end: dispatch.yaml ``host_path`` values are used directly.
+    """End-to-end: config.yaml ``host_path`` values are used directly.
 
     Background: the dispatcher runs inside a container, so a relative
     path in ``host_path`` would resolve to the image's baked-in
     ``/cairn/datas/...`` and the bind mount silently degrades to an empty
-    overlay. The real host path is now stored directly in dispatch.yaml;
+    overlay. The real host path is now stored directly in config.yaml;
     ``{project_id}`` remains a runtime template for per-project isolation.
     """
 
@@ -363,12 +364,14 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="cairn-bind-mount-"))
         self.datas_dir = self.tmp / "datas"
         self.datas_dir.mkdir()
-        self.config_path = self.tmp / "dispatch.yaml"
-        self.config_path.write_text(
-            _BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", str(self.datas_dir)),
-            encoding="utf-8",
-        )
-        (self.tmp / "dispatch.resources.yaml").write_text(
+        self.config_path = self.tmp / "config.yaml"
+        from helpers import split_server_dispatch_config
+
+        combined = yaml.safe_load(_BIND_MOUNT_INTERPOLATION_YAML_TEMPLATE.replace("$HOST_DATAS", str(self.datas_dir)))
+        server, dispatch = split_server_dispatch_config(combined)
+        (self.tmp / "server.yaml").write_text(yaml.safe_dump(server, sort_keys=False), encoding="utf-8")
+        self.config_path.write_text(yaml.safe_dump(dispatch, sort_keys=False), encoding="utf-8")
+        (self.tmp / "config.resources.yaml").write_text(
             "capabilities:\n  mcp_servers: []\n  skills: []\nroles: []\n",
             encoding="utf-8",
         )
@@ -420,10 +423,11 @@ class BindMountHostPathConfigTests(unittest.TestCase):
     def test_deleted_dispatcher_fields_are_rejected(self) -> None:
         from cairn.shared.config import ConfigError, DispatchConfig
 
-        data = self.config_path.read_text(encoding="utf-8")
-        data = data.replace('  health_addr: "127.0.0.1:9100"\n', '  health_addr: "127.0.0.1:9100"\n  leader_ttl_seconds: 15\n')
-        data = data.replace('    image: "cairn/test:latest"\n', '    image: "cairn/test:latest"\n    dispatcher_id: "old"\n')
-        self.config_path.write_text(data, encoding="utf-8")
+        server_path = self.tmp / "server.yaml"
+        data = yaml.safe_load(server_path.read_text(encoding="utf-8"))
+        data["dispatcher"]["leader_ttl_seconds"] = 15
+        data["worker_runtime"]["container"]["dispatcher_id"] = "old"
+        server_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         with self.assertRaises(ConfigError):
             DispatchConfig.load(self.config_path)
@@ -431,9 +435,9 @@ class BindMountHostPathConfigTests(unittest.TestCase):
     def test_unknown_runtime_field_is_rejected(self) -> None:
         from cairn.shared.config import ConfigError, DispatchConfig
 
-        data = self.config_path.read_text(encoding="utf-8")
-        data = data.replace('    prompt_group: "mock"\n', '    prompt_group: "mock"\n    unknown_runtime_field: true\n')
-        self.config_path.write_text(data, encoding="utf-8")
+        data = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        data["dispatcher"]["runtime"]["unknown_runtime_field"] = True
+        self.config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         with self.assertRaises(ConfigError):
             DispatchConfig.load(self.config_path)

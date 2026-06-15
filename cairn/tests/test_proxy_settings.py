@@ -281,7 +281,7 @@ class ContainerManagerProxyWiringTests(unittest.TestCase):
 
 
 class ProxyDatabaseTests(unittest.TestCase):
-    """Server proxy CRUD persists in dispatch.yaml."""
+    """Server proxy CRUD persists in config.yaml."""
 
     def setUp(self) -> None:
         from helpers import TempYamlConfig, reset_postgres_db

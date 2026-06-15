@@ -266,12 +266,15 @@ class TaskSubmitterTests(unittest.TestCase):
             creator="dispatcher.bootstrap",
         )
 
-        def fake_run(_config, _client, _container_manager, run_project, run_intent, run_worker, execution_config, cancellation):
-            self.assertIs(run_project, project)
-            self.assertIs(run_intent, intent)
-            self.assertIs(run_worker, worker)
-            self.assertEqual(execution_config["config_version"], 7)
-            self.assertIsInstance(cancellation, TaskCancellation)
+        def fake_run(services, invocation):
+            self.assertIs(services.config, submitter.config)
+            self.assertIs(services.client, client)
+            self.assertIs(services.container_runtime, submitter.container_manager)
+            self.assertIs(invocation.project, project)
+            self.assertIs(invocation.intent, intent)
+            self.assertIs(invocation.worker, worker)
+            self.assertEqual(invocation.execution_config["config_version"], 7)
+            self.assertIsInstance(invocation.cancellation, TaskCancellation)
             return "success"
 
         try:

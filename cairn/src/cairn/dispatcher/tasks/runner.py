@@ -6,7 +6,7 @@ from cairn.dispatcher.capabilities import CapabilityInjection, inject_project_ca
 from cairn.dispatcher.observability.reporter import AnyReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.roles import RoleInjection, inject_project_role
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.shared.capability_projection import project_capability_data
 from cairn.shared.config import DispatchConfig
 
@@ -23,7 +23,7 @@ def prepare_task_execution(
     *,
     config: DispatchConfig,
     client: CairnClient,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     project_id: str,
     task_type: str,

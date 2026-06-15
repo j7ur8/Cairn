@@ -2,14 +2,12 @@
 
 Covers GET/PUT round-trips on:
 - /runtime-limits (max_workers, interval, prompt_group, etc.)
-- /container-limits (mem_limit, pids_limit, nano_cpus)
 - /task-timeouts (bootstrap/explore/reason lease timeouts)
 - /observability (record flags, byte caps, retention, redaction)
 - /server-log-retention (log level/format, retention loop)
 
 Also covers:
 - Validation rejection: max_project_workers > max_workers
-- ContainerConfig schema with nano_cpus
 - Observability record-set ↔ boolean-flag translation
 """
 from __future__ import annotations
@@ -178,10 +176,8 @@ class ContainerLimitsEndpointTests(unittest.TestCase):
         self.yaml.__enter__()
         from cairn.server.routers.system_config import (
             read_container_limits,
-            write_container_limits,
         )
         self.read = read_container_limits
-        self.write = write_container_limits
 
     def tearDown(self) -> None:
         self.yaml.__exit__(None, None, None)
@@ -192,32 +188,10 @@ class ContainerLimitsEndpointTests(unittest.TestCase):
         self.assertIsNone(c.pids_limit)
         self.assertIsNone(c.nano_cpus)
 
-    def test_put_round_trip(self) -> None:
-        from cairn.shared.contracts import ContainerLimits
+    def test_put_route_is_not_exported(self) -> None:
+        import cairn.server.routers.system_config as router_module
 
-        body = ContainerLimits(mem_limit="2g", pids_limit=512, nano_cpus=1_500_000_000)
-        result = self.write(body)
-        self.assertEqual(result.mem_limit, "2g")
-        self.assertEqual(result.pids_limit, 512)
-        self.assertEqual(result.nano_cpus, 1_500_000_000)
-        c = self.read()
-        self.assertEqual(c.mem_limit, "2g")
-        self.assertEqual(c.pids_limit, 512)
-        self.assertEqual(c.nano_cpus, 1_500_000_000)
-
-    def test_put_nulls_clear_previous_values(self) -> None:
-        from cairn.shared.contracts import ContainerLimits
-
-        # Set values first
-        body = ContainerLimits(mem_limit="2g", pids_limit=512, nano_cpus=1_500_000_000)
-        self.write(body)
-        # Then clear them
-        cleared = ContainerLimits(mem_limit=None, pids_limit=None, nano_cpus=None)
-        self.write(cleared)
-        c = self.read()
-        self.assertIsNone(c.mem_limit)
-        self.assertIsNone(c.pids_limit)
-        self.assertIsNone(c.nano_cpus)
+        self.assertFalse(hasattr(router_module, "write_container_limits"))
 
 
 class TaskTimeoutsEndpointTests(unittest.TestCase):
@@ -242,6 +216,7 @@ class TaskTimeoutsEndpointTests(unittest.TestCase):
         self.assertEqual(t.explore.timeout, 5)
         self.assertEqual(t.explore.conclude_timeout, 5)
         self.assertEqual(t.reason.timeout, 5)
+        self.assertEqual(t.reason.max_intents, 2)
 
     def test_put_round_trip(self) -> None:
         from cairn.shared.contracts import (
@@ -254,14 +229,35 @@ class TaskTimeoutsEndpointTests(unittest.TestCase):
         body = TaskTimeouts(
             bootstrap=BootstrapTaskTimeouts(timeout=600, conclude_timeout=120),
             explore=ExploreTaskTimeouts(timeout=600, conclude_timeout=120),
-            reason=ReasonTaskTimeouts(timeout=600),
+            reason=ReasonTaskTimeouts(timeout=600, max_intents=7),
         )
         result = self.write(body)
         self.assertEqual(result.bootstrap.timeout, 600)
         self.assertEqual(result.reason.timeout, 600)
+        self.assertEqual(result.reason.max_intents, 7)
         t = self.read()
         self.assertEqual(t.bootstrap.conclude_timeout, 120)
         self.assertEqual(t.explore.timeout, 600)
+        self.assertEqual(t.reason.max_intents, 7)
+
+    def test_put_without_max_intents_preserves_existing_value(self) -> None:
+        from cairn.shared.contracts import (
+            BootstrapTaskTimeouts,
+            ExploreTaskTimeouts,
+            ReasonTaskTimeouts,
+            TaskTimeouts,
+        )
+
+        body = TaskTimeouts(
+            bootstrap=BootstrapTaskTimeouts(timeout=600, conclude_timeout=120),
+            explore=ExploreTaskTimeouts(timeout=600, conclude_timeout=120),
+            reason=ReasonTaskTimeouts(timeout=600),
+        )
+        self.write(body)
+
+        t = self.read()
+        self.assertEqual(t.reason.timeout, 600)
+        self.assertEqual(t.reason.max_intents, 2)
 
 
 class ObservabilityEndpointTests(unittest.TestCase):
@@ -491,18 +487,26 @@ class ValidationPathResolutionTests(unittest.TestCase):
 
         from cairn.server import runtime_config
         from cairn.server.config import files as config_files
+        from helpers import split_server_dispatch_config
 
         dispatch, resources = self._dispatch_and_resources()
-        dispatch_path = self.root / "dispatch.yaml"
-        resources_path = self.root / "dispatch.resources.yaml"
+        server, dispatch = split_server_dispatch_config(dispatch)
+        server_path = self.root / "server.yaml"
+        dispatch_path = self.root / "config.yaml"
+        resources_path = self.root / "config.resources.yaml"
+        server_path.write_text(_yaml.safe_dump(server, sort_keys=False), encoding="utf-8")
         dispatch_path.write_text(_yaml.safe_dump(dispatch, sort_keys=False), encoding="utf-8")
         resources_path.write_text(_yaml.safe_dump(resources, sort_keys=False), encoding="utf-8")
 
-        old_dispatch = config_files.DISPATCH_YAML
-        old_resources = config_files.RESOURCES_YAML
+        old_server = config_files.SERVER_YAML
+        old_dispatch = config_files.CONFIG_YAML
+        old_resources = config_files.CONFIG_RESOURCES_YAML
+        old_runtime_server_path = runtime_config.DEFAULT_SERVER_CONFIG_PATH
         old_runtime_path = runtime_config.DEFAULT_DISPATCH_CONFIG_PATH
-        config_files.DISPATCH_YAML = dispatch_path
-        config_files.RESOURCES_YAML = resources_path
+        config_files.SERVER_YAML = server_path
+        config_files.CONFIG_YAML = dispatch_path
+        config_files.CONFIG_RESOURCES_YAML = resources_path
+        runtime_config.DEFAULT_SERVER_CONFIG_PATH = server_path
         runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = dispatch_path
         runtime_config.reset_runtime_config_cache()
         try:
@@ -512,8 +516,10 @@ class ValidationPathResolutionTests(unittest.TestCase):
             # the real config dir, where the skill dir actually exists.
             config_files._validate_dispatch_data(payload)
         finally:
-            config_files.DISPATCH_YAML = old_dispatch
-            config_files.RESOURCES_YAML = old_resources
+            config_files.SERVER_YAML = old_server
+            config_files.CONFIG_YAML = old_dispatch
+            config_files.CONFIG_RESOURCES_YAML = old_resources
+            runtime_config.DEFAULT_SERVER_CONFIG_PATH = old_runtime_server_path
             runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = old_runtime_path
             runtime_config.reset_runtime_config_cache()
 

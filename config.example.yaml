@@ -1,21 +1,6 @@
+# Runtime dispatch config. Contains settings that may be adjusted through the UI.
+# Saving this file through the UI can trigger a dispatcher reload.
 server:
-  base_url: http://cairn-server:8000
-  database:
-    url: postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn
-    pool_size: 5
-    max_overflow: 10
-    pool_timeout: 30
-  auth:
-    jwt_secret: change-me-generate-with-python-secrets-token-urlsafe-48
-    dispatcher_api_token: change-me-service-jwt-signed-with-jwt-secret
-  initial_admin:
-    email: admin@example.com
-    password: change-me-on-first-login
-  paths:
-    datas_root: datas
-    attachments_root: datas/attachments
-    project_files_root: datas/project-files
-    worker_attachments_root: /home/kali/workspace/attachments
   log:
     level: INFO
     format: text
@@ -26,10 +11,6 @@ server:
     intent_timeout: 90
     reason_timeout: 300
 dispatcher:
-  health_addr: 0.0.0.0:9100
-  reload:
-    url: http://cairn-dispatcher:9100/reload
-    enabled: true
   runtime:
     interval: 3
     max_workers: 8
@@ -60,27 +41,6 @@ observability:
   flush_max_bytes: 8192
   retention_days: 14
   redaction_patterns: []
-worker_runtime:
-  container:
-    image: cairn-worker-container:mcp-camoufox
-    user: 0:0
-    exec_user: kali
-    network_mode: cairn
-    completed_action: stop
-    stopped_action: remove
-    # mem_limit: 2g           # optional — Docker memory limit string
-    # pids_limit: 512         # optional — max processes inside container
-    # nano_cpus: 1500000000   # optional — CPU quota (1.5 CPUs = 1.5e9 nano_cpus)
-    bind_mounts:
-    - name: ctf-attachments
-      host_path: datas/attachments
-      container_path: /home/kali/workspace/attachments
-      read_only: true
-    - name: project-files
-      host_path: datas/project-files/{project_id}
-      container_path: /home/kali/workspace/project
-      read_only: false
-  common_env: {}
 worker_pool:
   proxies: []
   workers:

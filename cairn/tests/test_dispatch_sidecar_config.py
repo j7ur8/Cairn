@@ -9,7 +9,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
-DISPATCH_YAML = """
+CONFIG_YAML = """
 server:
   base_url: http://server
   database:
@@ -57,16 +57,22 @@ worker_pool:
 
 
 class DispatchSidecarConfigTests(unittest.TestCase):
+    def _write_dispatch(self, root: Path) -> None:
+        import yaml
+
+        from helpers import split_server_dispatch_config
+
+        server, dispatch = split_server_dispatch_config(yaml.safe_load(CONFIG_YAML))
+        (root / "server.yaml").write_text(yaml.safe_dump(server, sort_keys=False), encoding="utf-8")
+        (root / "config.yaml").write_text(yaml.safe_dump(dispatch, sort_keys=False), encoding="utf-8")
+
     def test_capabilities_sidecar_merges_into_dispatch_config(self) -> None:
         from cairn.shared.config import DispatchConfig
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "dispatch.yaml").write_text(
-                DISPATCH_YAML.strip(),
-                encoding="utf-8",
-            )
-            (root / "dispatch.resources.yaml").write_text(
+            self._write_dispatch(root)
+            (root / "config.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers:
@@ -89,7 +95,7 @@ remote_support:
 """.strip(),
                 encoding="utf-8",
             )
-            cfg = DispatchConfig.load(root / "dispatch.yaml")
+            cfg = DispatchConfig.load(root / "config.yaml")
         self.assertEqual(len(cfg.capabilities.mcp_servers), 1)
         self.assertEqual(cfg.capabilities.mcp_servers[0].id, "mcp1")
         self.assertEqual(len(cfg.roles), 1)
@@ -102,11 +108,8 @@ remote_support:
             root = Path(td)
             (root / "skill").mkdir()
             (root / "role.md").write_text("role prompt", encoding="utf-8")
-            (root / "dispatch.yaml").write_text(
-                DISPATCH_YAML.strip(),
-                encoding="utf-8",
-            )
-            (root / "dispatch.resources.yaml").write_text(
+            self._write_dispatch(root)
+            (root / "config.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers: []
@@ -122,7 +125,7 @@ roles:
 """.strip(),
                 encoding="utf-8",
             )
-            cfg = DispatchConfig.load(root / "dispatch.yaml")
+            cfg = DispatchConfig.load(root / "config.yaml")
 
         self.assertEqual(cfg.roles[0].default_skill_ids, ["skill1"])
 
@@ -132,11 +135,8 @@ roles:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "role.md").write_text("role prompt", encoding="utf-8")
-            (root / "dispatch.yaml").write_text(
-                DISPATCH_YAML.strip(),
-                encoding="utf-8",
-            )
-            (root / "dispatch.resources.yaml").write_text(
+            self._write_dispatch(root)
+            (root / "config.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers: []
@@ -150,14 +150,14 @@ roles:
                 encoding="utf-8",
             )
             with self.assertRaises(ConfigError) as ctx:
-                DispatchConfig.load(root / "dispatch.yaml")
+                DispatchConfig.load(root / "config.yaml")
 
         self.assertIn("missing-skill", str(ctx.exception))
 
     def test_repo_capability_routing_metadata_loads_from_sidecar(self) -> None:
         from cairn.shared.config import DispatchConfig
 
-        cfg = DispatchConfig.load(_REPO / "dispatch.yaml")
+        cfg = DispatchConfig.load(_REPO / "config.yaml")
 
         mcp_by_id = {item.id: item for item in cfg.capabilities.mcp_servers}
         skill_by_id = {item.id: item for item in cfg.capabilities.skills}

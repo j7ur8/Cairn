@@ -10,10 +10,10 @@ from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.prompting import load_prompt, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
 from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
 from cairn.dispatcher.tasks.conclude_fallback import ConcludeFallbackRunner
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.task_outcome import cancel_reason
 from cairn.dispatcher.tasks.task_process import run_worker_process
 from cairn.dispatcher.tasks.task_release import best_effort_release
@@ -117,7 +117,7 @@ def run_bootstrap_conclude_fallback(
     *,
     config: DispatchConfig,
     client: CairnClient,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     worker: WorkerConfig,
     driver: Any,
     project: ProjectDetail,

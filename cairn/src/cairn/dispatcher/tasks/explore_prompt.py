@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cairn.dispatcher.prompting import format_remote_support_instructions, load_prompt, render_prompt
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
 from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference
 from cairn.shared.config import DispatchConfig
@@ -11,7 +11,7 @@ from cairn.shared.contracts import Intent
 def build_explore_execute_prompt(
     *,
     config: DispatchConfig,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     export_yaml: str,
     intent: Intent,
@@ -38,7 +38,7 @@ def build_explore_execute_prompt(
 def build_explore_conclude_prompt(
     *,
     config: DispatchConfig,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     export_yaml: str,
     intent: Intent,

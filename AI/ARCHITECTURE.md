@@ -32,7 +32,7 @@ flowchart TB
 
     subgraph Data["数据层"]
         PG[("PostgreSQL\nfacts/intents/projects/users")]
-        YAML[("dispatch.yaml\ndispatch.resources.yaml")]
+        YAML[("config.yaml\nconfig.resources.yaml")]
         Files[("project-files\nattachments")]
     end
 
@@ -86,7 +86,7 @@ sequenceDiagram
     CLI->>App: cairn serve imports app
     CLI->>App: uvicorn.run(app)
     App->>Config: system_config()
-    Config->>Config: load /cairn/dispatch.yaml or repo dispatch.yaml
+    Config->>Config: load /cairn/config.yaml or repo config.yaml
     App->>DB: db.configure()
     DB->>PG: create_engine + Alembic upgrade_head
     DB->>PG: seed_defaults()
@@ -109,7 +109,7 @@ sequenceDiagram
     participant Health as HealthServer
     participant Docker as ContainerManager
 
-    CLI->>Loop: cairn dispatch --config dispatch.yaml
+    CLI->>Loop: cairn dispatch --config config.yaml
     Loop->>Config: DispatchConfig.load(config_path)
     Loop->>Client: init(server, dispatcher_api_token)
     Loop->>Health: start /healthz and /metrics
@@ -138,7 +138,7 @@ sequenceDiagram
 | Server | `cairn/src/cairn/server/` | HTTP API、应用用例、领域规则、仓储访问、配置管理、静态 UI | HTTP Request | HTTP Response, DB/YAML/文件变更 | FastAPI, SQLAlchemy, Pydantic |
 | Server Application | `cairn/src/cairn/server/application/` | 跨 repository 的用例编排：项目创建/读取/命令、intent/reason 命令、hints/files/attachments、execution config、capabilities、export、replay | Router 调用、DB connection | DTO/domain result | domain, repositories, mappers |
 | Server Domain | `cairn/src/cairn/server/domain/` | intent/reason/project 业务规则、ID、时间、lease 清理、业务异常 | repository row/state、命令参数 | domain result 或 `DomainError` | 纯 Python，无 SQL/FastAPI/repository import |
-| Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、结构化持久化、PATCH 和 dispatcher payload 组装 | `dispatch.yaml`, `dispatch.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
+| Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、结构化持久化、PATCH 和 dispatcher payload 组装 | `config.yaml`, `config.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
 | Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器、回写结果 | Server API, YAML config | HTTP writes, worker execution | requests, Docker SDK |
 | Dispatcher Scheduler | `cairn/src/cairn/dispatcher/scheduler/` | tick、reload、planner、submitter、worker selection、runtime state、replay coordination | Project summaries/config/runtime state | submitted tasks, releases, metrics | protocol client, runtime, tasks |
 | Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
@@ -206,7 +206,7 @@ sequenceDiagram
 |------|--------|--------|
 | projects/facts/intents/hints | Server routers, Dispatcher through API | SPA, Dispatcher, export/replay |
 | project_execution_configs | project creation/replay | Dispatcher, project detail APIs |
-| dispatch.yaml / dispatch.resources.yaml | Server config routers, operator | Server runtime, Dispatcher |
+| config.yaml / config.resources.yaml | Server config routers, operator | Server runtime, Dispatcher |
 | attachments/project-files | upload route, Worker container | SPA download, Worker |
 
 ## 5. 关键设计模式与架构风格
@@ -222,7 +222,7 @@ sequenceDiagram
 | Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用 execution config、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
 | Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
 | Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
-| Config-as-data | `dispatch.yaml`, `dispatch.resources.yaml` | Worker、能力、AI Profile、路径和运行参数由 YAML 驱动 |
+| Config-as-data | `config.yaml`, `config.resources.yaml` | Worker、能力、AI Profile、路径和运行参数由 YAML 驱动 |
 | Lease/Heartbeat | intents, reason lock | 用心跳和超时释放运行中工作 |
 
 总体架构风格是“中心化 Server + 独立调度器 + 容器化执行环境”的分层单体架构，不是微服务系统。边界通过 HTTP、PostgreSQL 和 Docker socket 连接。
@@ -234,7 +234,7 @@ sequenceDiagram
 | 项 | 实现 |
 |----|------|
 | Token | JWT HS256 |
-| 签名密钥 | `dispatch.yaml` 的 `server.auth.jwt_secret` |
+| 签名密钥 | `config.yaml` 的 `server.auth.jwt_secret` |
 | 默认有效期 | 1 小时 |
 | 密码 | bcrypt hash |
 | 服务账号 | JWT claim `role=service`，映射为 synthetic superuser |

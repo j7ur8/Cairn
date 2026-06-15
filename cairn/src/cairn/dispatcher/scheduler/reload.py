@@ -8,7 +8,7 @@ from typing import Any
 
 from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.shared.config import DispatchConfig
+from cairn.shared.config import load_dispatch_config
 
 LOG = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class DispatcherReloader:
         if expected and authorization != f"Bearer {expected}":
             raise PermissionError("invalid reload token")
         with self.lock:
-            next_config = DispatchConfig.load(self.config_path)
+            next_config = load_dispatch_config(self.config_path)
             validate_prompt_resources(next_config.runtime.prompt_group)
             next_container_manager = ContainerManager(
                 next_config.container,

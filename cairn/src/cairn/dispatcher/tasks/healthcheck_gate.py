@@ -5,8 +5,8 @@ import logging
 from cairn.dispatcher.observability.reporter import AnyReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.task_outcome import cancel_reason
 from cairn.dispatcher.tasks.task_process import run_healthcheck
 from cairn.dispatcher.tasks.task_release import best_effort_release
@@ -20,7 +20,7 @@ def run_intent_healthcheck_gate(
     *,
     task_type: str,
     client: CairnClient,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     project_id: str,
     intent_id: str,

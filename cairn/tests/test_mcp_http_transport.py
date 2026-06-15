@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
+
 # Allow running tests without installing the package.
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -73,9 +75,13 @@ class DispatchConfigInterpTests(unittest.TestCase):
     """Dispatch config loading keeps YAML values literal."""
 
     def _write_yaml(self, body: str) -> Path:
+        from helpers import split_server_dispatch_config
+
         root = Path(tempfile.mkdtemp(prefix="cairn-mcp-config-"))
-        path = root / "dispatch.yaml"
-        path.write_text(body, encoding="utf-8")
+        path = root / "config.yaml"
+        server, dispatch = split_server_dispatch_config(yaml.safe_load(body))
+        (root / "server.yaml").write_text(yaml.safe_dump(server, sort_keys=False), encoding="utf-8")
+        path.write_text(yaml.safe_dump(dispatch, sort_keys=False), encoding="utf-8")
         return path
 
     def test_dispatch_yaml_values_are_not_interpolated_from_env(self):
@@ -128,7 +134,7 @@ worker_pool:
 """
         p = self._write_yaml(yaml)
         try:
-            (p.parent / "dispatch.resources.yaml").write_text(
+            (p.parent / "config.resources.yaml").write_text(
                 """
 capabilities:
   mcp_servers:

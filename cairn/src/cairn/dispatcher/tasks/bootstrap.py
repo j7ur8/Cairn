@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from cairn.dispatcher.contracts import parse_json_output, validate_bootstrap_execute_payload
 from cairn.dispatcher.prompting import format_remote_support_instructions, load_prompt, render_prompt
-from cairn.dispatcher.protocol.client import CairnClient
-from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
 from cairn.dispatcher.tasks.bootstrap_result import run_bootstrap_conclude_fallback, write_bootstrap_complete_result
+from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.intent_task import (
     IntentTaskContext,
     IntentTaskSpec,
@@ -14,8 +12,7 @@ from cairn.dispatcher.tasks.intent_task import (
     run_intent_task,
 )
 from cairn.shared.capability_projection import capability_manifest_payload, project_capability_data
-from cairn.shared.config import DispatchConfig, WorkerConfig
-from cairn.shared.contracts import Intent, ProjectDetail
+from cairn.shared.contracts import ProjectDetail
 
 
 def _emit_capability_manifest(reporter, project: ProjectDetail, execution_config: dict) -> None:
@@ -96,23 +93,12 @@ _BOOTSTRAP_SPEC = IntentTaskSpec(
 
 
 def run_bootstrap_task(
-    config: DispatchConfig,
-    client: CairnClient,
-    container_manager: ContainerManager,
-    project: ProjectDetail,
-    intent: Intent,
-    worker: WorkerConfig,
-    execution_config: dict,
-    cancellation: TaskCancellation,
+    services: TaskServices,
+    invocation: TaskInvocation,
 ) -> str:
+    assert invocation.intent is not None
     return run_intent_task(
         _BOOTSTRAP_SPEC,
-        config,
-        client,
-        container_manager,
-        project,
-        intent,
-        worker,
-        execution_config,
-        cancellation,
+        services,
+        invocation,
     )

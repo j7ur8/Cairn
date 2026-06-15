@@ -140,13 +140,13 @@ Pull the base image used to build Cairn:
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
 ```
  
-Edit `dispatch.yaml` and fill in your LLM endpoints and API keys, then start both services:
+Edit `config.yaml` and fill in your LLM endpoints and API keys, then start both services:
  
 ```bash
 docker compose up --build
 ```
  
-This builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher mounts `dispatch.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
+This builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher mounts `config.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
 
 Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP capability. On macOS / Docker Desktop, start Chrome on the host before running a project:
 
@@ -161,10 +161,10 @@ The worker container connects through Docker's host alias. Cairn resolves `host.
  
 ### Manual
  
-Edit `dispatch.yaml` and fill in your LLM endpoints and API keys, then:
+Edit `config.yaml` and fill in your LLM endpoints and API keys, then:
  
 ```bash
-# Build the worker image referenced by dispatch.yaml
+# Build the worker image referenced by config.yaml
 docker build ./container -t cairn-worker-container:mcp-camoufox
 
 # Create the shared Docker network used by Cairn service containers and
@@ -175,10 +175,10 @@ docker network create cairn
 uv run --project cairn cairn serve
 
 # Run the dispatcher
-uv run --project cairn cairn dispatch --config dispatch.yaml
+uv run --project cairn cairn dispatch --config config.yaml
  
 # Run startup health checks only
-uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
+uv run --project cairn cairn dispatch --config config.yaml --startup-healthcheck-only
 ```
 
 ## Disclaimer

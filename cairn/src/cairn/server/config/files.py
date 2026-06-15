@@ -12,31 +12,37 @@ import yaml
 from fastapi import HTTPException
 
 from cairn.server.config_store import ConfigStore
-from cairn.shared.config import DispatchConfig
+from cairn.shared.config import load_dispatch_config
 from cairn.shared.config.capability_models import prepare_capability_data
+from cairn.shared.config.loader import load_server_data
 from cairn.shared.config.role_models import prepare_role_data
 from cairn.shared.config.worker_models import prepare_bind_mount_data
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-DISPATCH_YAML = Path("/cairn/dispatch.yaml") if Path("/cairn/dispatch.yaml").exists() else _REPO_ROOT / "dispatch.yaml"
-RESOURCES_YAML = (
-    Path("/cairn/dispatch.resources.yaml")
-    if Path("/cairn/dispatch.resources.yaml").exists()
-    else _REPO_ROOT / "dispatch.resources.yaml"
+SERVER_YAML = Path("/cairn/server.yaml") if Path("/cairn/server.yaml").exists() else _REPO_ROOT / "server.yaml"
+CONFIG_YAML = Path("/cairn/config.yaml") if Path("/cairn/config.yaml").exists() else _REPO_ROOT / "config.yaml"
+CONFIG_RESOURCES_YAML = (
+    Path("/cairn/config.resources.yaml")
+    if Path("/cairn/config.resources.yaml").exists()
+    else _REPO_ROOT / "config.resources.yaml"
 )
 
 
-def dispatch_yaml_path() -> Path:
-    return DISPATCH_YAML
+def config_yaml_path() -> Path:
+    return CONFIG_YAML
+
+
+def server_yaml_path() -> Path:
+    return SERVER_YAML
 
 
 def resources_yaml_path() -> Path:
-    return RESOURCES_YAML
+    return CONFIG_RESOURCES_YAML
 
 
 def config_store() -> ConfigStore:
     return ConfigStore(
-        dispatch_path=dispatch_yaml_path(),
+        dispatch_path=config_yaml_path(),
         resources_path=resources_yaml_path(),
     )
 
@@ -49,6 +55,10 @@ def load_dispatch_data() -> dict[str, Any]:
     return config_store().load_dispatch()
 
 
+def load_server_config_data() -> dict[str, Any]:
+    return ConfigStore._read_yaml(server_yaml_path())
+
+
 def load_resources_data() -> dict[str, Any]:
     return config_store().load_resources()
 
@@ -56,7 +66,7 @@ def load_resources_data() -> dict[str, Any]:
 def save_dispatch_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> None:
     workers = (data.get("worker_pool") or {}).get("workers") if isinstance(data.get("worker_pool"), dict) else []
     if not (workers or []):
-        _atomic_write_yaml(dispatch_yaml_path(), data)
+        _atomic_write_yaml(config_yaml_path(), data)
         return
     _validate_dispatch_data(data)
     config_store().save_dispatch(data)
@@ -96,7 +106,8 @@ def trigger_dispatcher_reload() -> None:
 
 def config_revision() -> dict[str, str]:
     return {
-        "dispatch_sha256": _sha256(dispatch_yaml_path()),
+        "server_sha256": _sha256(server_yaml_path()),
+        "dispatch_sha256": _sha256(config_yaml_path()),
         "resources_sha256": _sha256(resources_yaml_path()),
     }
 
@@ -119,27 +130,32 @@ def _validate_dispatch_data(data: dict[str, Any]) -> None:
     # config directories before writing the validation copy. Otherwise the
     # loader resolves them against the throwaway temp dir below and rejects
     # capabilities/roles/bind-mounts whose files live next to the real YAML.
-    dispatch_payload = prepare_bind_mount_data(validation_data[0], dispatch_yaml_path().parent)
-    resources_payload = prepare_capability_data(validation_data[1], resources_yaml_path().parent)
+    server_payload = prepare_bind_mount_data(validation_data[0], server_yaml_path().parent)
+    dispatch_payload = validation_data[1]
+    resources_payload = prepare_capability_data(validation_data[2], resources_yaml_path().parent)
     resources_payload = prepare_role_data(resources_payload, resources_yaml_path().parent)
     with TemporaryDirectory(prefix="cairn-dispatch-validation-") as tmpdir:
-        validation_path = Path(tmpdir) / "dispatch.yaml"
-        validation_resources_path = Path(tmpdir) / "dispatch.resources.yaml"
+        validation_server_path = Path(tmpdir) / "server.yaml"
+        validation_path = Path(tmpdir) / "config.yaml"
+        validation_resources_path = Path(tmpdir) / "config.resources.yaml"
+        with validation_server_path.open("w", encoding="utf-8") as tmp:
+            yaml.safe_dump(server_payload, tmp, sort_keys=False, allow_unicode=True)
         with validation_path.open("w", encoding="utf-8") as tmp:
             yaml.safe_dump(dispatch_payload, tmp, sort_keys=False, allow_unicode=True)
         with validation_resources_path.open("w", encoding="utf-8") as tmp:
             yaml.safe_dump(resources_payload, tmp, sort_keys=False, allow_unicode=True)
         try:
-            DispatchConfig.load(validation_path)
+            load_dispatch_config(validation_path)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, f"invalid dispatch config: {exc}") from exc
 
 
-def _dispatch_validation_data(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _dispatch_validation_data(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     cleaned = deepcopy(data)
     resources = cleaned.pop("resources", None)
     if resources is None:
         resources = load_resources_data()
+    server_data = load_server_data(config_yaml_path())
     worker_pool_raw = cleaned.get("worker_pool")
     worker_pool = worker_pool_raw if isinstance(worker_pool_raw, dict) else {}
     for worker in worker_pool.get("workers") or []:
@@ -158,7 +174,7 @@ def _dispatch_validation_data(data: dict[str, Any]) -> tuple[dict[str, Any], dic
             "updated_at",
         ):
             worker.pop(key, None)
-    return cleaned, resources
+    return server_data, cleaned, resources
 
 
 def _sha256(path: Path) -> str:

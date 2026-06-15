@@ -503,7 +503,7 @@ class ProfileWarningsTests(unittest.TestCase):
         self.assertEqual(profile_warnings("claudecode", "ANTHROPIC_AUTH_TOKEN"), [])
 
 
-@unittest.skip("dispatcher-to-server AI profile sync was removed; dispatch.yaml is the AI profile source of truth")
+@unittest.skip("dispatcher-to-server AI profile sync was removed; config.yaml is the AI profile source of truth")
 class SyncPayloadTests(unittest.TestCase):
     def test_worker_models_are_trimmed_and_deduplicated(self) -> None:
         from cairn.shared.config import WorkerConfig
@@ -835,7 +835,7 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(result[0].name, "claude_ds")
 
     def test_sync_prunes_obsolete_seeded_profiles(self) -> None:
-        """Workers removed from dispatch.yaml must be pruned by sync.
+        """Workers removed from config.yaml must be pruned by sync.
 
         Pre-seeds an obsolete ``codex:gpt-5.4`` row the way an older
         dispatcher would have written it, then syncs the current

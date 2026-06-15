@@ -75,7 +75,6 @@ CairnParts.ui = function () {
       return [
         { section: 'server', label: 'Server Settings', icon: 'SV' },
         { section: 'runtime', label: 'Runtime & Limits', icon: 'RT' },
-        { section: 'container', label: 'Container Limits', icon: 'CT' },
         { section: 'tasks', label: 'Task Timeouts', icon: 'TS' },
         { section: 'observability', label: 'Observability', icon: 'OB' },
         { section: 'system', label: 'Log & Retention', icon: 'SY' },

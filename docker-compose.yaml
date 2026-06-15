@@ -40,8 +40,9 @@ services:
       - "8000:8000"
     volumes:
       - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
-      - ./dispatch.yaml:/cairn/dispatch.yaml
-      - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml
+      - ./server.yaml:/cairn/server.yaml
+      - ./config.yaml:/cairn/config.yaml
+      - ./config.resources.yaml:/cairn/config.resources.yaml
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -79,8 +80,9 @@ services:
       - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./dispatch.yaml:/cairn/dispatch.yaml
-      - ./dispatch.resources.yaml:/cairn/dispatch.resources.yaml:ro
+      - ./server.yaml:/cairn/server.yaml:ro
+      - ./config.yaml:/cairn/config.yaml
+      - ./config.resources.yaml:/cairn/config.resources.yaml:ro
       - ./capabilities:/cairn/capabilities:ro
       - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
     depends_on:
@@ -104,7 +106,7 @@ services:
       start_period: 3s
     networks:
       - cairn
-    command: ["/cairn/.venv/bin/cairn", "dispatch", "--config", "dispatch.yaml"]
+    command: ["/cairn/.venv/bin/cairn", "dispatch", "--config", "config.yaml"]
 
 networks:
   cairn:

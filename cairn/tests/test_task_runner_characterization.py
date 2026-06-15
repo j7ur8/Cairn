@@ -22,6 +22,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 from cairn.dispatcher.runtime.process import ProcessResult
+from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 
 
 @dataclass
@@ -104,6 +105,14 @@ def _worker():
     return mock.Mock(name="w", type="mock")
 
 
+def _services() -> TaskServices:
+    return TaskServices(
+        config=mock.Mock(),
+        client=mock.Mock(),
+        container_runtime=mock.Mock(),
+    )
+
+
 import contextlib
 
 import cairn.dispatcher.tasks.bootstrap as bootstrap_mod
@@ -165,8 +174,14 @@ def _run_bootstrap(cancellation, lease_failure=None):
             self.lease.failure = lease_failure
     with mock.patch.object(_FakeLifecycle, "start", start_with_failure):
         return bootstrap_mod.run_bootstrap_task(
-            mock.Mock(), mock.Mock(), mock.Mock(), _project(), _intent(),
-            _worker(), {"task_timeout": {}}, cancellation,
+            _services(),
+            TaskInvocation(
+                project=_project(),
+                intent=_intent(),
+                worker=_worker(),
+                execution_config={"task_timeout": {}},
+                cancellation=cancellation,
+            ),
         )
 
 
@@ -279,8 +294,15 @@ def _run_explore(cancellation, lease_failure=None):
             self.lease.failure = lease_failure
     with mock.patch.object(_FakeLifecycle, "start", start_with_failure):
         return explore_mod.run_explore_task(
-            mock.Mock(), mock.Mock(), mock.Mock(), _project(), "export_yaml",
-            _intent(), _worker(), {"task_timeout": {}}, cancellation,
+            _services(),
+            TaskInvocation(
+                project=_project(),
+                intent=_intent(),
+                worker=_worker(),
+                execution_config={"task_timeout": {}},
+                cancellation=cancellation,
+                export_yaml="export_yaml",
+            ),
         )
 
 

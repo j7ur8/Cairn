@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +154,45 @@ def test_task_submitter_delegates_claim_and_registration_details() -> None:
     assert offenders == []
 
 
+def test_task_runner_entrypoints_use_context_objects() -> None:
+    from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
+    from cairn.dispatcher.tasks.explore import run_explore_task
+    from cairn.dispatcher.tasks.reason import run_reason_task
+
+    offenders: list[str] = []
+    for runner in (run_bootstrap_task, run_explore_task, run_reason_task):
+        params = [
+            param
+            for param in inspect.signature(runner).parameters.values()
+            if param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        if len(params) > 2:
+            offenders.append(f"{runner.__module__}.{runner.__name__} has {len(params)} positional params")
+    assert offenders == []
+
+
+def test_task_modules_depend_on_container_runtime_protocol_not_manager() -> None:
+    offenders: list[str] = []
+    tasks_dir = SRC / "dispatcher" / "tasks"
+    allowed = {"context.py"}
+    forbidden = (
+        "from cairn.dispatcher.runtime.containers import ContainerManager",
+        "cairn.dispatcher.runtime.containers",
+    )
+    for path in _py_files(tasks_dir):
+        if path.name in allowed:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in source:
+                offenders.append(f"{path.relative_to(ROOT)} contains {token}")
+    assert offenders == []
+
+
 def test_removed_internal_import_paths_do_not_reappear() -> None:
     forbidden = (
         "cairn.dispatcher.tasks.common",
@@ -166,6 +206,39 @@ def test_removed_internal_import_paths_do_not_reappear() -> None:
             if token in source:
                 offenders.append(f"{path.relative_to(ROOT)} contains {token}")
     assert offenders == []
+
+
+def test_known_small_import_cycles_do_not_reappear() -> None:
+    """Keep cycle-prone boundaries acyclic after the decomposition cleanup."""
+    offenders: list[str] = []
+    checks = {
+        SRC / "dispatcher" / "capability_mcp.py": (
+            "cairn.dispatcher.capability_probe",
+            "from cairn.dispatcher.capability_probe",
+        ),
+        SRC / "dispatcher" / "capability_probe.py": (
+            "cairn.dispatcher.capability_mcp",
+            "from cairn.dispatcher.capability_mcp",
+        ),
+        SRC / "shared" / "config" / "loader.py": (
+            "from cairn.shared.config.root import DispatchConfig",
+        ),
+    }
+    for path, forbidden_tokens in checks.items():
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden_tokens:
+            if token in source:
+                offenders.append(f"{path.relative_to(ROOT)} contains {token}")
+    assert offenders == []
+
+
+def test_dto_boundary_docs_stay_visible() -> None:
+    server_models = (SRC / "server" / "models_pkg" / "__init__.py").read_text(encoding="utf-8")
+    shared_contracts = (SRC / "shared" / "contracts" / "__init__.py").read_text(encoding="utf-8")
+    assert "Server-private HTTP request/response" in server_models
+    assert "shared with the dispatcher" in server_models
+    assert "Wire contracts shared across Cairn processes" in shared_contracts
+    assert "Server-only" in shared_contracts
 
 
 def test_alembic_revision_ids_fit_default_version_column() -> None:

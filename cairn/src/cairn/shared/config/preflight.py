@@ -7,7 +7,7 @@ from typing import Any
 
 import jwt
 
-from cairn.shared.config.loader import ConfigError
+from cairn.shared.config.loader import ConfigError, load_dispatch_config
 from cairn.shared.config.root import DispatchConfig
 
 MIN_JWT_SECRET_LENGTH = 32
@@ -38,7 +38,7 @@ def check_dispatch_config(path: Path, *, strict: bool = False) -> PreflightResul
     result = PreflightResult()
     config_path = path.expanduser()
     try:
-        config = DispatchConfig.load(config_path)
+        config = load_dispatch_config(config_path)
     except ConfigError as exc:
         result.errors.append(str(exc))
         result.checked.append("dispatch_config")

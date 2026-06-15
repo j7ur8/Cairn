@@ -7,26 +7,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from cairn.dispatcher.capability_constants import HOST_DOCKER_INTERNAL
+from cairn.dispatcher.capability_url import is_chrome_devtools_probe, resolve_host_alias_url
 from cairn.shared.config import McpServerCapabilityConfig, TaskType
-
-
-def host_netloc(host: str, port: int | None) -> str:
-    netloc_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    return f"{netloc_host}:{port}" if port is not None else netloc_host
-
-
-def resolve_host_alias_url(url: str) -> tuple[str, str | None]:
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname
-    if not host or host.lower() != HOST_DOCKER_INTERNAL:
-        return url, None
-    try:
-        resolved = socket.gethostbyname(host)
-    except OSError as exc:
-        return url, f"resolve {host} failed: {type(exc).__name__}: {exc}"
-    netloc = host_netloc(resolved, parsed.port)
-    return urllib.parse.urlunparse(parsed._replace(netloc=netloc)), None
 
 
 def chrome_devtools_probe_url(probe_config: dict[str, Any]) -> tuple[str, str | None]:
@@ -73,8 +55,6 @@ def probe_http_json_key(url: str, timeout: float, required_key: str) -> tuple[bo
 
 
 def probe_config_error(mcp: McpServerCapabilityConfig) -> str | None:
-    from cairn.dispatcher.capability_mcp import is_chrome_devtools_probe
-
     if not is_chrome_devtools_probe(mcp.probe_config):
         return None
     url, resolve_error = chrome_devtools_probe_url(mcp.probe_config)

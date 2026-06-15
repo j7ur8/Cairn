@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
-from cairn.dispatcher.protocol.client import CairnClient
-from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.explore_prompt import build_explore_execute_prompt
 from cairn.dispatcher.tasks.explore_result import run_explore_conclude_fallback
 from cairn.dispatcher.tasks.intent_task import (
@@ -13,8 +11,6 @@ from cairn.dispatcher.tasks.intent_task import (
     run_intent_task,
 )
 from cairn.dispatcher.tasks.task_writeback import write_conclude_result_with_fact_id
-from cairn.shared.config import DispatchConfig, WorkerConfig
-from cairn.shared.contracts import Intent, ProjectDetail
 
 
 def _build_prompt(ctx: IntentTaskContext) -> str:
@@ -90,25 +86,13 @@ _EXPLORE_SPEC = IntentTaskSpec(
 
 
 def run_explore_task(
-    config: DispatchConfig,
-    client: CairnClient,
-    container_manager: ContainerManager,
-    project: ProjectDetail,
-    export_yaml: str,
-    intent: Intent,
-    worker: WorkerConfig,
-    execution_config: dict,
-    cancellation: TaskCancellation,
+    services: TaskServices,
+    invocation: TaskInvocation,
 ) -> str:
+    assert invocation.intent is not None
+    assert invocation.export_yaml is not None
     return run_intent_task(
         _EXPLORE_SPEC,
-        config,
-        client,
-        container_manager,
-        project,
-        intent,
-        worker,
-        execution_config,
-        cancellation,
-        export_yaml=export_yaml,
+        services,
+        invocation,
     )

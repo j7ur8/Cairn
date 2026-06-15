@@ -20,7 +20,7 @@ class YamlConfigWriteTests(unittest.TestCase):
         from cairn.server.config.files import _atomic_write_yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            target = Path(tmpdir) / "dispatch.resources.yaml"
+            target = Path(tmpdir) / "config.resources.yaml"
             target.write_text("roles: []\n", encoding="utf-8")
 
             with patch.object(Path, "replace", side_effect=OSError(errno.EBUSY, "busy")):
@@ -35,7 +35,7 @@ class YamlConfigWriteTests(unittest.TestCase):
         from cairn.server.config.files import _atomic_write_yaml
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            target = Path(tmpdir) / "dispatch.yaml"
+            target = Path(tmpdir) / "config.yaml"
             target.write_text("worker_pool:\n  workers: []\n", encoding="utf-8")
 
             with patch.object(Path, "replace", side_effect=OSError(errno.EACCES, "denied")):

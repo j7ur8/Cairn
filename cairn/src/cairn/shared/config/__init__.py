@@ -15,6 +15,9 @@ from cairn.shared.config.constants import (
 from cairn.shared.config.loader import (
     ConfigError,
     load_dispatch_config,
+    load_server_data,
+    merge_server_dispatch_data,
+    server_config_path,
     validate_capability_resources,
     validate_role_resources,
 )
@@ -111,6 +114,9 @@ __all__ = [
     "WorkerType",
     "ConfigError",
     "load_dispatch_config",
+    "load_server_data",
+    "merge_server_dispatch_data",
+    "server_config_path",
     "check_dispatch_config",
     "resolve_mock_behavior",
     "validate_capability_resources",

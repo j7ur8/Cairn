@@ -36,8 +36,8 @@ Cairn/
 ├── README.md                         # 项目说明与快速开始
 ├── Dockerfile                        # Cairn app 镜像
 ├── docker-compose.yaml               # PostgreSQL、Server、Dispatcher、Worker image 编排
-├── dispatch.yaml                     # 本地运行配置
-├── dispatch.resources.yaml           # remote support、能力、角色、MCP 配置
+├── config.yaml                     # 本地运行配置
+├── config.resources.yaml           # remote support、能力、角色、MCP 配置
 ├── cairn/
 │   ├── pyproject.toml                # Python 包、依赖和 CLI 入口
 │   ├── alembic.ini                   # Alembic 配置
@@ -67,7 +67,7 @@ docker compose up --build
 docker build ./container -t cairn-worker-container:mcp-camoufox
 docker network create cairn
 uv run --project cairn cairn serve
-uv run --project cairn cairn dispatch --config dispatch.yaml
+uv run --project cairn cairn dispatch --config config.yaml
 ```
 
 数据库维护：

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
 from cairn.shared.config.capability_models import prepare_capability_data
 from cairn.shared.config.role_models import prepare_role_data
 from cairn.shared.config.worker_models import prepare_bind_mount_data
-
-if TYPE_CHECKING:
-    from cairn.shared.config.root import DispatchConfig
 
 
 class ConfigError(ValueError):
@@ -23,20 +21,43 @@ class ConfigError(ValueError):
     """
 
 
-def load_dispatch_config(path: Path) -> DispatchConfig:
-    from pydantic import ValidationError
+def server_config_path(dispatch_path: Path) -> Path:
+    return dispatch_path.with_name("server.yaml")
 
-    from cairn.shared.config.root import DispatchConfig
+
+def load_server_data(dispatch_path: Path) -> dict[str, Any]:
+    server_path = server_config_path(dispatch_path)
+    data = _read_yaml(server_path, label="server config")
+    return prepare_bind_mount_data(data, server_path.parent)
+
+
+def merge_server_dispatch_data(server_data: dict[str, Any], dispatch_data: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(dispatch_data)
+    server_section = dict(server_data.get("server") or {})
+    server_section.update(payload.get("server") or {})
+    dispatcher_section = dict(server_data.get("dispatcher") or {})
+    dispatcher_section.update(payload.get("dispatcher") or {})
+    payload["server"] = server_section
+    payload["dispatcher"] = dispatcher_section
+    if "worker_runtime" in server_data:
+        payload["worker_runtime"] = server_data["worker_runtime"]
+    return payload
+
+
+def load_dispatch_config(path: Path) -> Any:
+    from pydantic import ValidationError
 
     try:
         data = _read_yaml(path, label="dispatch config")
-        resources_path = path.with_name("dispatch.resources.yaml")
+        server_data = load_server_data(path)
+        resources_path = path.with_name("config.resources.yaml")
         resources_data = _read_yaml(resources_path, label="resources config")
-        data = prepare_bind_mount_data(data, path.parent)
+        data = merge_server_dispatch_data(server_data, data)
         resources_data = prepare_capability_data(resources_data, resources_path.parent)
         resources_data = prepare_role_data(resources_data, resources_path.parent)
         payload = dict(data)
         payload["resources"] = resources_data
+        DispatchConfig = importlib.import_module("cairn.shared.config.root").DispatchConfig
         config = DispatchConfig.model_validate(payload)
         validate_capability_resources(config)
         validate_role_resources(config)
@@ -76,7 +97,7 @@ def _read_yaml(path: Path, *, label: str) -> dict[str, Any]:
     return data
 
 
-def validate_capability_resources(config: DispatchConfig) -> None:
+def validate_capability_resources(config: Any) -> None:
     for mcp in config.capabilities.mcp_servers:
         if not mcp.source_path:
             continue
@@ -93,7 +114,7 @@ def validate_capability_resources(config: DispatchConfig) -> None:
             raise ConfigError(f"capability skill {skill.id} source_path must be a directory: {path}")
 
 
-def validate_role_resources(config: DispatchConfig) -> None:
+def validate_role_resources(config: Any) -> None:
     for role in config.roles:
         if role.source_path is None:
             continue

@@ -25,8 +25,8 @@ from typing import Any
 
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.process import ProcessResult
+from cairn.dispatcher.tasks.context import ContainerRuntime, TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.healthcheck_gate import run_intent_healthcheck_gate
 from cairn.dispatcher.tasks.lifecycle import TaskLifecycle, TaskRunContext
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution, prepare_task_execution
@@ -47,7 +47,7 @@ class IntentTaskContext:
 
     config: DispatchConfig
     client: CairnClient
-    container_manager: ContainerManager
+    container_manager: ContainerRuntime
     container_name: str
     project: ProjectDetail
     intent: Intent
@@ -93,17 +93,19 @@ class IntentTaskSpec:
 
 def run_intent_task(
     spec: IntentTaskSpec,
-    config: DispatchConfig,
-    client: CairnClient,
-    container_manager: ContainerManager,
-    project: ProjectDetail,
-    intent: Intent,
-    worker: WorkerConfig,
-    execution_config: dict,
-    cancellation: TaskCancellation,
-    *,
-    export_yaml: str | None = None,
+    services: TaskServices,
+    invocation: TaskInvocation,
 ) -> str:
+    config = services.config
+    client = services.client
+    container_manager = services.container_runtime
+    project = invocation.project
+    intent = invocation.intent
+    assert intent is not None
+    worker = invocation.worker
+    execution_config = invocation.execution_config
+    cancellation = invocation.cancellation
+    export_yaml = invocation.export_yaml
     project_id = project.project.id
     driver = get_driver(worker.type)
     lifecycle = TaskLifecycle(
@@ -287,4 +289,3 @@ def _handle_result(
     best_effort_release(client, project_id, intent.id, worker.name)
     reporter.emit_error(spec.exec_phase, "error", f"command failed returncode={first.returncode}\n{first.stderr}")
     return "failed"
-

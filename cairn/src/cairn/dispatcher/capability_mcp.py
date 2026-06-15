@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, overload
 
-from cairn.dispatcher.capability_constants import CHROME_DEVTOOLS_PROBE_TYPE, CLAUDE_SESSION_PLUGIN_NAME
-from cairn.dispatcher.capability_probe import resolve_host_alias_url
+from cairn.dispatcher.capability_constants import CLAUDE_SESSION_PLUGIN_NAME
+from cairn.dispatcher.capability_url import is_chrome_devtools_probe, resolve_host_alias_url
 from cairn.shared.config import McpServerCapabilityConfig
 
 
@@ -77,12 +77,6 @@ def render_capability_path(value: str | None, capability_root: str) -> str | Non
     if value is None:
         return None
     return value.replace("{capability_root}", capability_root)
-
-
-def is_chrome_devtools_probe(probe_config: dict[str, Any] | None) -> bool:
-    if not isinstance(probe_config, dict):
-        return False
-    return str(probe_config.get("type") or "").strip() == CHROME_DEVTOOLS_PROBE_TYPE
 
 
 def runtime_mcp_args(item: McpServerCapabilityConfig, capability_root: str) -> list[str]:

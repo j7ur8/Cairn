@@ -89,7 +89,7 @@ class AiWorkerSelector:
                 if worker.type == snap.snapshot_worker_type
             ]
             if not matching_workers:
-                reason = f"{snap.profile_id}({snap.snapshot_worker_type}) no matching worker in dispatch.yaml"
+                reason = f"{snap.profile_id}({snap.snapshot_worker_type}) no matching worker in config.yaml"
                 last_unavailable_reasons.append(reason)
                 LOG.info("ai profile unavailable project=%s profile=%s reason=%s", project_id, snap.profile_id, reason)
                 continue

@@ -1,7 +1,7 @@
 # capabilities
 
 本目录用于集中存放 Cairn 项目的本地 MCP server 和 skill 资源。
-`dispatch.yaml` 的 `capabilities:` 节只引用这里的路径，不直接放二进制或大文件到 yaml。
+`config.yaml` 的 `capabilities:` 节只引用这里的路径，不直接放二进制或大文件到 yaml。
 
 ## 目录约定
 
@@ -15,7 +15,7 @@ skill 目录里**没有强制命名**的文件，但建议至少有一份说明�
 
 ## 引用方式
 
-`dispatch.yaml` 中：
+`config.yaml` 中：
 
 ```yaml
 capabilities:
@@ -42,12 +42,12 @@ roles:
     task_types: ["bootstrap", "explore", "reason"]
 ```
 
-相对路径 `./capabilities/skills/...` 相对于 `dispatch.yaml` 所在目录解析，详见 `cairn/src/cairn/dispatcher/config.py` 的 `prepare_capability_data()`。
-角色 `source_path` 同样相对于 `dispatch.yaml` 所在目录解析。
+相对路径 `./capabilities/skills/...` 相对于 `config.yaml` 所在目录解析，详见 `cairn/src/cairn/dispatcher/config.py` 的 `prepare_capability_data()`。
+角色 `source_path` 同样相对于 `config.yaml` 所在目录解析。
 
 ## 范围
 
-- 这里的资源只作为 skill 文件包或 MCP 启动资料；`dispatch.yaml` 仍然是 catalog 的真相源。
+- 这里的资源只作为 skill 文件包或 MCP 启动资料；`config.yaml` 仍然是 catalog 的真相源。
 - Role 属于项目控制面配置：创建项目时保存 role prompt 快照，运行时注入 `bootstrap` / `explore` / `reason` prompt，不改变 Fact / Intent / Hint 的黑板语义。
-- 敏感信息（API key、token、SSH 密码）继续写在 `dispatch.yaml` 之外的环境变量或 secrets 后端，yaml 里用 `{{PLACEHOLDER}}` 占位。
-- 多 Dispatcher 部署时各 `dispatch.yaml` 的 `capabilities` 与 `roles` 必须保持一致，否则会被后启动的 Dispatcher 全量覆盖。
+- 敏感信息（API key、token、SSH 密码）继续写在 `config.yaml` 之外的环境变量或 secrets 后端，yaml 里用 `{{PLACEHOLDER}}` 占位。
+- 多 Dispatcher 部署时各 `config.yaml` 的 `capabilities` 与 `roles` 必须保持一致，否则会被后启动的 Dispatcher 全量覆盖。

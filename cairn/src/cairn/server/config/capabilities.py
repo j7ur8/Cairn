@@ -47,7 +47,7 @@ def upsert_yaml_capability(kind: str, capability_id: str, body: CapabilityAdminR
     section = "mcp_servers" if kind == "mcp_server" else "skills"
     entries = caps.setdefault(section, [])
     if not isinstance(entries, list):
-        raise HTTPException(500, f"dispatch.resources.yaml capabilities.{section} must be a list")
+        raise HTTPException(500, f"config.resources.yaml capabilities.{section} must be a list")
     existing_idx = next((idx for idx, item in enumerate(entries) if isinstance(item, dict) and item.get("id") == capability_id), None)
     existing = entries[existing_idx] if existing_idx is not None else {}
     if existing_idx is not None and existing.get("source") not in (None, "user"):
@@ -70,7 +70,7 @@ def delete_yaml_capability(kind: str, capability_id: str) -> None:
     section = "mcp_servers" if kind == "mcp_server" else "skills"
     entries = caps.setdefault(section, [])
     if not isinstance(entries, list):
-        raise HTTPException(500, f"dispatch.resources.yaml capabilities.{section} must be a list")
+        raise HTTPException(500, f"config.resources.yaml capabilities.{section} must be a list")
     for idx, item in enumerate(entries):
         if not isinstance(item, dict) or item.get("id") != capability_id:
             continue

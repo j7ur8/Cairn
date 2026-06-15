@@ -1,4 +1,4 @@
-"""System-config CRUD endpoints for the YAML-backed dispatch.yaml sections."""
+"""System-config CRUD endpoints for the YAML-backed config.yaml sections."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from cairn.server.config.observability_config import get_observability, update_o
 from cairn.server.config.runtime_limits import (
     get_container_limits,
     get_runtime_limits,
-    update_container_limits,
     update_runtime_limits,
 )
 from cairn.server.config.system_config_svc import get_server_log_retention, update_server_log_retention
@@ -44,11 +43,6 @@ def write_runtime_limits(body: RuntimeLimits, _superuser=Depends(current_active_
 @router.get("/container-limits", response_model=ContainerLimits)
 def read_container_limits():
     return get_container_limits()
-
-
-@router.put("/container-limits", response_model=ContainerLimits)
-def write_container_limits(body: ContainerLimits, _superuser=Depends(current_active_superuser)):
-    return update_container_limits(body)
 
 
 # --- Task timeouts ---

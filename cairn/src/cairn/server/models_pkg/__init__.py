@@ -1,4 +1,9 @@
-"""Domain-scoped Pydantic model modules."""
+"""Server-private HTTP request/response Pydantic models.
+
+Models in this package belong to the FastAPI server surface only. Put DTOs
+shared with the dispatcher or other processes in ``cairn.shared.contracts``
+instead, and keep pure business decisions in domain/application code.
+"""
 
 from __future__ import annotations
 

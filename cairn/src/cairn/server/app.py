@@ -1,4 +1,3 @@
-import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
@@ -12,10 +11,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from cairn import __version__
 from cairn.server import db
+from cairn.server.background import BackgroundTasks
 from cairn.server.domain.errors import DomainError
 from cairn.server.observability import routers as observability_routers
-from cairn.server.observability.retention import retention_loop
-from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.routers import (
     ai_profiles,
     attachments,
@@ -160,60 +158,12 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 - never let bootstrap break startup
         import logging
         logging.getLogger(__name__).exception("superuser bootstrap failed")
-    # Observability retention loop. Started here (lifespan) rather
-    # than from the observability router so the loop dies with the
-    # FastAPI process instead of leaking past shutdown. The CLI
-    # dispatch path does not run lifespan, so retention stays a
-    # manual operation there.
-    retention_stop = asyncio.Event()
-    retention_task: asyncio.Task | None = None
-    if runtime.server.retention_loop_enabled:
-        retention_task = asyncio.create_task(
-            retention_loop(
-                retention_stop,
-                interval_seconds=runtime.server.retention_interval_seconds,
-            ),
-            name="cairn-retention",
-        )
-    lease_cleanup_stop = asyncio.Event()
-    lease_cleanup_task = asyncio.create_task(
-        lease_cleanup_loop(lease_cleanup_stop),
-        name="cairn-lease-cleanup",
-    )
+    background_tasks = BackgroundTasks(runtime)
+    background_tasks.start()
     try:
         yield
     finally:
-        lease_cleanup_stop.set()
-        try:
-            await lease_cleanup_task
-        except Exception:  # noqa: BLE001
-            import logging
-            logging.getLogger(__name__).exception("lease cleanup task crashed")
-        if retention_task is not None:
-            retention_stop.set()
-            try:
-                await retention_task
-            except Exception:  # noqa: BLE001
-                import logging
-                logging.getLogger(__name__).exception("retention task crashed")
-
-
-async def lease_cleanup_loop(stop: asyncio.Event, *, interval_seconds: float = 2.0) -> None:
-    import logging
-
-    log = logging.getLogger(__name__)
-    while not stop.is_set():
-        try:
-            with db.session_scope() as conn:
-                leases = LeaseRepository(conn)
-                leases.expire_workers()
-                leases.expire_reason_leases()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("lease cleanup failed error=%s", exc)
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
+        await background_tasks.stop()
 
 
 # Paths intentionally reachable without a bearer token. Keep this set

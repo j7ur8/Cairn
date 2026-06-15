@@ -61,8 +61,8 @@ Cairn/
 ├── container/                        # Worker 容器镜像与 MCP wrapper
 ├── datas/                            # 默认数据目录
 ├── README/                           # 图片和架构可视化素材
-├── dispatch.yaml                     # 主运行配置
-├── dispatch.resources.yaml           # remote_support、capabilities、roles 配置
+├── config.yaml                     # 主运行配置
+├── config.resources.yaml           # remote_support、capabilities、roles 配置
 ├── docker-compose.yaml               # 本地完整栈
 └── Dockerfile                        # app 镜像
 ```
@@ -87,7 +87,7 @@ Cairn/
 | `cairn/src/cairn/dispatcher/tasks/reason_result.py` | Reason 输出解析、complete/intents 写回和 finish outcome 映射 |
 | `cairn/src/cairn/dispatcher/protocol/` | Dispatcher 调 Server 的 HTTP client，按 project/task/AI profile/observability 子 API 拆分 |
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Worker 容器 facade；生命周期、cleanup、archive/file、exec/process 辅助拆到 runtime helper |
-| `cairn/src/cairn/shared/config/` | `dispatch.yaml` 与 `dispatch.resources.yaml` 配置模型、加载和资源校验 |
+| `cairn/src/cairn/shared/config/` | `config.yaml` 与 `config.resources.yaml` 配置模型、加载和资源校验 |
 | `cairn/src/cairn/shared/contracts/` | Server 与 Dispatcher 共享 HTTP DTO；按 settings/timeouts/proxies/AI profiles/LLM events/projects/reason 拆分 |
 
 ## 3. 关键入口点
@@ -339,17 +339,17 @@ erDiagram
 
 | 配置 | 加载位置 |
 |------|----------|
-| Server runtime system config | 优先 `/cairn/dispatch.yaml`，否则 repo 根 `dispatch.yaml`；只读取 `server` 和 `dispatcher` section |
-| Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `dispatch.resources.yaml` |
-| Resources config | `/cairn/dispatch.resources.yaml` 或 repo 根 `dispatch.resources.yaml`，包含 `remote_support`、`capabilities`、`roles` |
-| Docker Compose bind mount | 将 `dispatch.yaml` 和 `dispatch.resources.yaml` 挂载到 `/cairn/` |
+| Server runtime system config | 优先 `/cairn/config.yaml`，否则 repo 根 `config.yaml`；只读取 `server` 和 `dispatcher` section |
+| Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `config.resources.yaml` |
+| Resources config | `/cairn/config.resources.yaml` 或 repo 根 `config.resources.yaml`，包含 `remote_support`、`capabilities`、`roles` |
+| Docker Compose bind mount | 将 `config.yaml` 和 `config.resources.yaml` 挂载到 `/cairn/` |
 
 核心命令：
 
 ```bash
 uv run --project cairn cairn serve
-uv run --project cairn cairn dispatch --config dispatch.yaml
-uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
+uv run --project cairn cairn dispatch --config config.yaml
+uv run --project cairn cairn dispatch --config config.yaml --startup-healthcheck-only
 uv run --project cairn cairn db migrate
 docker compose up --build
 ```
@@ -368,7 +368,7 @@ docker compose up --build
 | `worker_runtime.container.*` | Worker image、network、capabilities、bind mounts |
 | `tasks.bootstrap/reason/explore` | 超时和 reason max intents |
 | `observability.*` | 记录范围、事件大小、retention |
-| `dispatch.resources.yaml` | remote support、MCP、skills、roles 和能力可用性 |
+| `config.resources.yaml` | remote support、MCP、skills、roles 和能力可用性 |
 
 ## 10. 基础设施与横切关注点
 
@@ -439,8 +439,8 @@ docker compose up --build
 |------|------|
 | 注意 | Server 的全局鉴权只区分 public 和 authenticated；是否需要 superuser 要由各 router 单独声明。 |
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
-| 注意 | `dispatch.yaml` 与 `dispatch.resources.yaml` 是强绑定 sidecar；不再兼容旧 `dispatch.capabilities.yaml`。 |
-| 注意 | `DispatchConfig.load(path)` 只读取同目录 `dispatch.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
+| 注意 | `config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
+| 注意 | `DispatchConfig.load(path)` 只读取同目录 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
 | 注意 | 当前 Alembic head 是 `0003_add_scan_indexes`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后可能成为 hot path。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit，但保留策略依赖 retention loop。 |

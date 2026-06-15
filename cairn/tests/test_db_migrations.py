@@ -14,7 +14,7 @@ os.environ.setdefault("CAIRN_SECRETS_KEY", "test-jwt-secret-do-not-use-in-prod-3
 from cairn.server import runtime_config
 from helpers import reset_postgres_db
 
-runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _REPO / "dispatch.test.yaml"
+runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _REPO / "config.test.yaml"
 runtime_config.reset_runtime_config_cache()
 
 

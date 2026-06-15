@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from cairn.dispatcher.observability.reporter import DisabledExecutionReporter, ExecutionReporter
 from cairn.dispatcher.observability.trace import make_trace_parser
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
 from cairn.dispatcher.runtime.process import ProcessResult
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.shared.config import WorkerConfig
 
 HEALTHCHECK_COMMUNICATE_GRACE_SECONDS = 10
@@ -28,7 +28,7 @@ def communicate_timeout(timeout_seconds: int, grace_seconds: int = PROCESS_COMMU
 
 
 def run_healthcheck(
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     worker: WorkerConfig,
     command: list[str],
@@ -63,7 +63,7 @@ def run_healthcheck(
 
 
 def run_worker_process(
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     worker: WorkerConfig,
     argv: list[str],

@@ -41,7 +41,7 @@ def user_to_public(user: UserRow) -> dict[str, Any]:
 
 
 def bootstrap_superuser_if_configured() -> UserRow | None:
-    """Create the initial superuser from dispatch.yaml if neither exists yet.
+    """Create the initial superuser from config.yaml if neither exists yet.
 
     Returns the new user on success, ``None`` if the env is unset or the
     superuser already exists. The password is consumed once and never

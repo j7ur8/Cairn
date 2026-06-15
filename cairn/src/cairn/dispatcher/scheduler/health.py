@@ -131,7 +131,7 @@ class DispatcherHealthCoordinator:
 
         Replaces the old container-based startup healthcheck (which created
         temporary Docker containers).  Profiles without a base_url are
-        skipped (they are seeded from dispatch.yaml workers, not real APIs).
+        skipped (they are seeded from config.yaml workers, not real APIs).
         """
         try:
             response = self.client.list_ai_profiles()

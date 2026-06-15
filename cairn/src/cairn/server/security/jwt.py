@@ -18,7 +18,7 @@ def _signing_key() -> str:
     from cairn.server.runtime_config import system_config
     key = system_config().auth.jwt_secret
     if not key:
-        raise JWTError("dispatch.yaml system.auth.jwt_secret is not set; cannot issue tokens")
+        raise JWTError("config.yaml system.auth.jwt_secret is not set; cannot issue tokens")
     return key
 
 

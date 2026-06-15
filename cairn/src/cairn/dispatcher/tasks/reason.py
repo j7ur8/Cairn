@@ -3,9 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
-from cairn.dispatcher.protocol.client import CairnClient
-from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.lifecycle import TaskLifecycle, TaskRunContext
 from cairn.dispatcher.tasks.reason_prompt import build_reason_execute_prompt
 from cairn.dispatcher.tasks.reason_result import apply_reason_result
@@ -15,28 +13,32 @@ from cairn.dispatcher.tasks.task_process import run_healthcheck, run_worker_proc
 from cairn.dispatcher.tasks.task_release import best_effort_release_reason
 from cairn.dispatcher.tasks.task_text import preview
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.shared.config import DispatchConfig, WorkerConfig
-from cairn.shared.contracts import ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
 
 def run_reason_task(
-    config: DispatchConfig,
-    client: CairnClient,
-    container_manager: ContainerManager,
-    project: ProjectDetail,
-    export_yaml: str,
-    worker: WorkerConfig,
-    execution_config: dict,
-    reason_run_id: str,
-    reason_trigger: str,
-    reason_trigger_hash: str,
-    fact_count: int,
-    hint_count: int,
-    open_intent_count: int,
-    cancellation: TaskCancellation,
+    services: TaskServices,
+    invocation: TaskInvocation,
 ) -> str:
+    config = services.config
+    client = services.client
+    container_manager = services.container_runtime
+    project = invocation.project
+    worker = invocation.worker
+    execution_config = invocation.execution_config
+    export_yaml = invocation.export_yaml
+    assert export_yaml is not None
+    reason_run_id = invocation.reason_run_id
+    reason_trigger = invocation.reason_trigger
+    reason_trigger_hash = invocation.reason_trigger_hash
+    assert reason_run_id is not None
+    assert reason_trigger is not None
+    assert reason_trigger_hash is not None
+    fact_count = invocation.fact_count
+    hint_count = invocation.hint_count
+    open_intent_count = invocation.open_intent_count
+    cancellation = invocation.cancellation
     driver = get_driver(worker.type)
     lifecycle = TaskLifecycle(
         TaskRunContext(

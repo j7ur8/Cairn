@@ -127,7 +127,7 @@
 ## 2026-06-13 — 增量同步
 
 - 同步一次性源码目录重建后的架构文档：Server 拆为 `application/domain/repositories/mappers/execution_config`，Dispatcher scheduler 拆为 loop shell + coordinators/submitter/resolvers/selectors。
-- 记录 `shared.config` 与 `shared.contracts` 新边界，以及 `dispatch.yaml` + `dispatch.resources.yaml` 的破坏性新配置格式；旧 `dispatch.capabilities.yaml` 和旧 shared 聚合模块路径不再兼容。
+- 记录 `shared.config` 与 `shared.contracts` 新边界，以及 `config.yaml` + `config.resources.yaml` 的破坏性新配置格式；旧 capabilities sidecar 和旧 shared 聚合模块路径不再兼容。
 - 更新执行配置说明：按 task 组装 dispatcher payload，`resources_sha256` 为对外 revision 字段。
 - 更新测试状态：2026-06-13 使用 `.venv` Python 顺序执行 `cairn/tests/test_*.py` 全量通过，DB 测试需顺序执行以避免 migration/reset 竞争。
 

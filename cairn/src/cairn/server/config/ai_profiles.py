@@ -106,10 +106,10 @@ def update_yaml_ai_profile_models(profile_id: str, models: list[str]) -> None:
 def _workers(data: dict[str, Any]) -> list[dict[str, Any]]:
     worker_pool = data.setdefault("worker_pool", {})
     if not isinstance(worker_pool, dict):
-        raise HTTPException(500, "dispatch.yaml worker_pool must be a mapping")
+        raise HTTPException(500, "config.yaml worker_pool must be a mapping")
     workers = worker_pool.setdefault("workers", [])
     if not isinstance(workers, list):
-        raise HTTPException(500, "dispatch.yaml worker_pool.workers must be a list")
+        raise HTTPException(500, "config.yaml worker_pool.workers must be a list")
     return workers
 
 

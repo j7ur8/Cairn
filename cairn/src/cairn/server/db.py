@@ -32,7 +32,7 @@ def database_url() -> str:
         from cairn.server.runtime_config import system_config
         url = system_config().database.url
     if not url:
-        raise DatabaseUnavailable("dispatch.yaml system.database.url is required")
+        raise DatabaseUnavailable("config.yaml system.database.url is required")
     if url.startswith("sqlite"):
         raise DatabaseUnavailable("SQLite URLs are not supported; configure PostgreSQL")
     return url

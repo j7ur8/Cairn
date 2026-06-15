@@ -35,7 +35,7 @@ def config_commands():
     help="Treat best-effort checks, such as missing local worker images, as errors.",
 )
 def config_check(config_path: Path, strict: bool):
-    """Validate dispatch.yaml before starting Cairn."""
+    """Validate config.yaml before starting Cairn."""
     result = check_dispatch_config(config_path, strict=strict)
     click.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if not result.ok:

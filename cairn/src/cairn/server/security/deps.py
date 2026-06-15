@@ -2,7 +2,7 @@
 
 The pattern matches the rest of Cairn: synchronous repository calls, the
 ``current_user`` dependency reads the ``Authorization: Bearer ...`` header,
-verifies the JWT against ``dispatch.yaml`` ``system.auth.jwt_secret``, looks up the user in
+verifies the JWT against ``config.yaml`` ``system.auth.jwt_secret``, looks up the user in
 PostgreSQL, and returns the public view. Active-user enforcement is the
 default; ``current_active_superuser`` adds the superuser check.
 

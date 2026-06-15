@@ -29,7 +29,7 @@ from cairn.dispatcher.scheduler.tick_coordinator import TickCoordinator
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
-from cairn.shared.config import DispatchConfig
+from cairn.shared.config import load_dispatch_config
 from cairn.shared.contracts import (
     ProjectDetail,
 )
@@ -55,7 +55,7 @@ class DispatcherLoop:
 
     def _init_core(self, config_path: Path) -> None:
         self.config_path = config_path
-        self.config = DispatchConfig.load(config_path)
+        self.config = load_dispatch_config(config_path)
         validate_prompt_resources(self.config.runtime.prompt_group)
         self.client = CairnClient(self.config.server_url, api_token=self.config.system.auth.dispatcher_api_token)
         self._last_tick_at: float | None = None

@@ -10,7 +10,7 @@ def get_observability() -> ObservabilitySettings:
     data = load_dispatch_data()
     obs = data.get("observability")
     if not isinstance(obs, dict):
-        raise HTTPException(500, "dispatch.yaml observability section missing")
+        raise HTTPException(500, "config.yaml observability section missing")
     record_set: set[str] = set(obs.get("record") or [])
     return ObservabilitySettings(
         enabled=bool(obs.get("enabled", True)),

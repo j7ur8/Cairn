@@ -1,3 +1,9 @@
+"""Wire contracts shared across Cairn processes.
+
+Only models used across the server/dispatcher boundary belong here. Server-only
+HTTP request/response DTOs stay in ``cairn.server.models_pkg``.
+"""
+
 from cairn.shared.contracts.ai_profiles import (
     CANONICAL_AUTH_ENV,
     AiProfile,

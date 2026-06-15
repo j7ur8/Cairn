@@ -8,9 +8,9 @@ from cairn.dispatcher.contracts import parse_sentinel_fact_output
 from cairn.dispatcher.observability.reporter import ExecutionReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
 from cairn.dispatcher.tasks.conclude_fallback import ConcludeFallbackRunner
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.explore_prompt import build_explore_conclude_prompt
 from cairn.dispatcher.tasks.process_runner import run_task_process
 from cairn.dispatcher.tasks.task_outcome import cancel_reason
@@ -27,7 +27,7 @@ def run_explore_conclude_fallback(
     *,
     config: DispatchConfig,
     client: CairnClient,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     worker: WorkerConfig,
     driver: Any,
     project_id: str,

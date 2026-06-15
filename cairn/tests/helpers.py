@@ -16,8 +16,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from cairn.server import runtime_config
 from cairn.shared.contracts import TaskTimeouts
 
-_TEST_DISPATCH_PATH = Path(__file__).resolve().parents[2] / "dispatch.test.yaml"
-runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _TEST_DISPATCH_PATH
+_TEST_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.test.yaml"
+_TEST_SERVER_PATH = Path(__file__).resolve().parents[2] / "server.test.yaml"
+runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _TEST_CONFIG_PATH
+runtime_config.DEFAULT_SERVER_CONFIG_PATH = _TEST_SERVER_PATH
 runtime_config.reset_runtime_config_cache()
 
 
@@ -145,11 +147,11 @@ def reset_postgres_db():
     if os.environ.get("CAIRN_ALLOW_DB_RESET") != "1":
         raise unittest.SkipTest(
             "DB integration tests skipped: set CAIRN_ALLOW_DB_RESET=1 and point "
-            "dispatch.test.yaml at a disposable database (these tests DROP the schema)."
+            "config.test.yaml at a disposable database (these tests DROP the schema)."
         )
 
     if not Path(runtime_config.DEFAULT_DISPATCH_CONFIG_PATH).exists():
-        runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _TEST_DISPATCH_PATH
+        runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _TEST_CONFIG_PATH
         runtime_config.reset_runtime_config_cache()
 
     database_url = system_config().database.url
@@ -179,14 +181,40 @@ def reset_postgres_db():
     return db
 
 
+def split_server_dispatch_config(dispatch: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    fixed_server_keys = ("base_url", "database", "auth", "initial_admin", "paths")
+    dynamic_server_keys = ("log", "retention", "settings")
+    fixed_dispatcher_keys = ("health_addr", "reload")
+    dynamic_dispatcher_keys = ("runtime",)
+    source_server = dispatch.get("server") if isinstance(dispatch.get("server"), dict) else {}
+    source_dispatcher = dispatch.get("dispatcher") if isinstance(dispatch.get("dispatcher"), dict) else {}
+    server = {
+        "server": {key: source_server[key] for key in fixed_server_keys if key in source_server},
+        "dispatcher": {key: source_dispatcher[key] for key in fixed_dispatcher_keys if key in source_dispatcher},
+    }
+    if "worker_runtime" in dispatch:
+        server["worker_runtime"] = dispatch["worker_runtime"]
+    dynamic = dict(dispatch)
+    dynamic.pop("worker_runtime", None)
+    dynamic["server"] = {key: source_server[key] for key in dynamic_server_keys if key in source_server}
+    dynamic["dispatcher"] = {key: source_dispatcher[key] for key in dynamic_dispatcher_keys if key in source_dispatcher}
+    return server, dynamic
+
+
 class TempYamlConfig:
-    def __init__(self, dispatch: dict[str, Any] | None = None, resources: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        dispatch: dict[str, Any] | None = None,
+        resources: dict[str, Any] | None = None,
+        server: dict[str, Any] | None = None,
+    ):
         self._tmp = TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self.dispatch_path = self.root / "dispatch.yaml"
-        self.resources_path = self.root / "dispatch.resources.yaml"
+        self.server_path = self.root / "server.yaml"
+        self.dispatch_path = self.root / "config.yaml"
+        self.resources_path = self.root / "config.resources.yaml"
         self.capabilities_path = self.resources_path
-        self.dispatch = dispatch or {
+        combined = dispatch or {
             "server": minimal_server_config(self.root / "datas"),
             "dispatcher": minimal_dispatcher_config(),
             "tasks": {
@@ -208,27 +236,41 @@ class TempYamlConfig:
                 "workers": [],
             },
         }
+        self.server = server
+        self.dispatch = combined
+        self.written_server: dict[str, Any] | None = None
+        self.written_dispatch: dict[str, Any] | None = None
         self.resources = resources or {"capabilities": {"mcp_servers": [], "skills": []}, "roles": []}
         from cairn.server.config import files as config_files
         self._old_dispatch_path = runtime_config.DEFAULT_DISPATCH_CONFIG_PATH
-        self._old_yaml_dispatch_path = config_files.DISPATCH_YAML
-        self._old_yaml_resources_path = config_files.RESOURCES_YAML
+        self._old_server_path = runtime_config.DEFAULT_SERVER_CONFIG_PATH
+        self._old_yaml_server_path = config_files.SERVER_YAML
+        self._old_yaml_dispatch_path = config_files.CONFIG_YAML
+        self._old_yaml_resources_path = config_files.CONFIG_RESOURCES_YAML
 
     def __enter__(self) -> TempYamlConfig:
         from cairn.server.config import files as config_files
 
-        self.dispatch_path.write_text(yaml.safe_dump(self.dispatch, sort_keys=False), encoding="utf-8")
+        split_server, split_dispatch = split_server_dispatch_config(self.dispatch)
+        self.written_server = self.server or split_server
+        self.written_dispatch = split_dispatch
+        self.server_path.write_text(yaml.safe_dump(self.written_server, sort_keys=False), encoding="utf-8")
+        self.dispatch_path.write_text(yaml.safe_dump(self.written_dispatch, sort_keys=False), encoding="utf-8")
         self.resources_path.write_text(yaml.safe_dump(self.resources, sort_keys=False), encoding="utf-8")
         runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = self.dispatch_path
+        runtime_config.DEFAULT_SERVER_CONFIG_PATH = self.server_path
         runtime_config.reset_runtime_config_cache()
-        config_files.DISPATCH_YAML = self.dispatch_path
-        config_files.RESOURCES_YAML = self.resources_path
+        config_files.SERVER_YAML = self.server_path
+        config_files.CONFIG_YAML = self.dispatch_path
+        config_files.CONFIG_RESOURCES_YAML = self.resources_path
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         from cairn.server.config import files as config_files
         runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = self._old_dispatch_path
+        runtime_config.DEFAULT_SERVER_CONFIG_PATH = self._old_server_path
         runtime_config.reset_runtime_config_cache()
-        config_files.DISPATCH_YAML = self._old_yaml_dispatch_path
-        config_files.RESOURCES_YAML = self._old_yaml_resources_path
+        config_files.SERVER_YAML = self._old_yaml_server_path
+        config_files.CONFIG_YAML = self._old_yaml_dispatch_path
+        config_files.CONFIG_RESOURCES_YAML = self._old_yaml_resources_path
         self._tmp.cleanup()

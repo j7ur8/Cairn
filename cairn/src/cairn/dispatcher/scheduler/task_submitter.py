@@ -8,45 +8,19 @@ from dataclasses import dataclass
 
 from cairn.dispatcher.models import RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
-from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.log_state import LogState
 from cairn.dispatcher.scheduler.runtime_state import RuntimeTaskRegistry
 from cairn.dispatcher.scheduler.submission_registry import TaskSubmissionRegistry
 from cairn.dispatcher.scheduler.task_claims import TaskClaimer
 from cairn.dispatcher.scheduler.worker_selection import WorkerSelection
+from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.shared.config import DispatchConfig, WorkerConfig
 from cairn.shared.contracts import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
-BootstrapRunner = Callable[
-    [DispatchConfig, CairnClient, ContainerManager, ProjectDetail, Intent, WorkerConfig, dict, TaskCancellation],
-    str,
-]
-ExploreRunner = Callable[
-    [DispatchConfig, CairnClient, ContainerManager, ProjectDetail, str, Intent, WorkerConfig, dict, TaskCancellation],
-    str,
-]
-ReasonRunner = Callable[
-    [
-        DispatchConfig,
-        CairnClient,
-        ContainerManager,
-        ProjectDetail,
-        str,
-        WorkerConfig,
-        dict,
-        str,
-        str,
-        str,
-        int,
-        int,
-        int,
-        TaskCancellation,
-    ],
-    str,
-]
+TaskRunner = Callable[[TaskServices, TaskInvocation], str]
 
 
 @dataclass(slots=True)
@@ -77,9 +51,9 @@ class TaskSubmitter:
         project_open_intent_count: Callable[[ProjectDetail], int],
         release_intent: Callable[[str, str, str], None],
         release_reason: Callable[[str, str, str | None], None],
-        bootstrap_runner: BootstrapRunner,
-        explore_runner: ExploreRunner,
-        reason_runner: ReasonRunner,
+        bootstrap_runner: TaskRunner,
+        explore_runner: TaskRunner,
+        reason_runner: TaskRunner,
     ) -> None:
         self.config = config
         self.client = client
@@ -154,20 +128,20 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.reason_runner,
-                self.config,
-                self.client,
-                self.container_manager,
-                project,
-                export_yaml,
-                context.worker,
-                context.execution_config,
-                run_id,
-                trigger,
-                trigger_hash,
-                fact_count,
-                hint_count,
-                open_intent_count,
-                cancellation,
+                self._task_services(),
+                TaskInvocation(
+                    project=project,
+                    worker=context.worker,
+                    execution_config=context.execution_config,
+                    cancellation=cancellation,
+                    export_yaml=export_yaml,
+                    reason_run_id=run_id,
+                    reason_trigger=trigger,
+                    reason_trigger_hash=trigger_hash,
+                    fact_count=fact_count,
+                    hint_count=hint_count,
+                    open_intent_count=open_intent_count,
+                ),
             ),
             running_task=lambda cancellation: RunningTask(
                 context.project_id,
@@ -214,14 +188,14 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.bootstrap_runner,
-                self.config,
-                self.client,
-                self.container_manager,
-                project,
-                intent,
-                context.worker,
-                context.execution_config,
-                cancellation,
+                self._task_services(),
+                TaskInvocation(
+                    project=project,
+                    intent=intent,
+                    worker=context.worker,
+                    execution_config=context.execution_config,
+                    cancellation=cancellation,
+                ),
             ),
             running_task=lambda cancellation: RunningTask(
                 context.project_id,
@@ -266,15 +240,15 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.explore_runner,
-                self.config,
-                self.client,
-                self.container_manager,
-                project,
-                export_yaml,
-                intent,
-                context.worker,
-                context.execution_config,
-                cancellation,
+                self._task_services(),
+                TaskInvocation(
+                    project=project,
+                    intent=intent,
+                    worker=context.worker,
+                    execution_config=context.execution_config,
+                    cancellation=cancellation,
+                    export_yaml=export_yaml,
+                ),
             ),
             running_task=lambda cancellation: RunningTask(
                 context.project_id,
@@ -289,6 +263,13 @@ class TaskSubmitter:
                 intent.id,
                 context.worker.name,
             ),
+        )
+
+    def _task_services(self) -> TaskServices:
+        return TaskServices(
+            config=self.config,
+            client=self.client,
+            container_runtime=self.container_manager,
         )
 
     def _prepare_submission(

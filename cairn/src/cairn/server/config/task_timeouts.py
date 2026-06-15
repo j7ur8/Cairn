@@ -10,7 +10,7 @@ def get_task_timeouts() -> TaskTimeouts:
     data = load_dispatch_data()
     tasks = data.get("tasks")
     if not isinstance(tasks, dict):
-        raise HTTPException(500, "dispatch.yaml tasks section missing")
+        raise HTTPException(500, "config.yaml tasks section missing")
     try:
         return TaskTimeouts(
             bootstrap=BootstrapTaskTimeouts(
@@ -23,23 +23,24 @@ def get_task_timeouts() -> TaskTimeouts:
             ),
             reason=ReasonTaskTimeouts(
                 timeout=int(tasks["reason"]["timeout"]),
+                max_intents=int(tasks["reason"].get("max_intents", 3)),
             ),
         )
     except (KeyError, TypeError) as exc:
-        raise HTTPException(500, f"dispatch.yaml tasks missing or invalid: {exc}") from exc
+        raise HTTPException(500, f"config.yaml tasks missing or invalid: {exc}") from exc
 
 
 def update_task_timeouts(body: TaskTimeouts) -> TaskTimeouts:
     data = load_dispatch_data()
     tasks = data.setdefault("tasks", {})
     if not isinstance(tasks, dict):
-        raise HTTPException(500, "dispatch.yaml tasks must be a mapping")
-    # Preserve reason.max_intents (not part of the timeouts contract) across the
-    # overwrite below, falling back to the schema default when absent.
+        raise HTTPException(500, "config.yaml tasks must be a mapping")
     reason_orig = tasks.get("reason")
-    max_intents = 3
-    if isinstance(reason_orig, dict) and "max_intents" in reason_orig:
-        max_intents = reason_orig["max_intents"]
+    max_intents = body.reason.max_intents
+    if "max_intents" not in body.reason.model_fields_set:
+        max_intents = 3
+        if isinstance(reason_orig, dict) and "max_intents" in reason_orig:
+            max_intents = int(reason_orig["max_intents"])
     tasks["bootstrap"] = {
         "timeout": body.bootstrap.timeout,
         "conclude_timeout": body.bootstrap.conclude_timeout,
@@ -53,4 +54,4 @@ def update_task_timeouts(body: TaskTimeouts) -> TaskTimeouts:
         "max_intents": max_intents,
     }
     save_dispatch_data(data)
-    return body
+    return get_task_timeouts()

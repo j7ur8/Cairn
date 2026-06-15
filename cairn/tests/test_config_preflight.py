@@ -121,13 +121,20 @@ def _resources_config() -> dict:
 
 class ConfigPreflightTests(unittest.TestCase):
     def _write(self, root: Path, dispatch: dict | None = None, *, resources: bool = True) -> Path:
-        path = root / "dispatch.yaml"
+        from helpers import split_server_dispatch_config
+
+        server, dynamic = split_server_dispatch_config(dispatch or _dispatch_config(root))
+        (root / "server.yaml").write_text(
+            yaml.safe_dump(server, sort_keys=False),
+            encoding="utf-8",
+        )
+        path = root / "config.yaml"
         path.write_text(
-            yaml.safe_dump(dispatch or _dispatch_config(root), sort_keys=False),
+            yaml.safe_dump(dynamic, sort_keys=False),
             encoding="utf-8",
         )
         if resources:
-            (root / "dispatch.resources.yaml").write_text(
+            (root / "config.resources.yaml").write_text(
                 yaml.safe_dump(_resources_config(), sort_keys=False),
                 encoding="utf-8",
             )
@@ -204,7 +211,7 @@ class ConfigPreflightTests(unittest.TestCase):
             result = check_dispatch_config(path)
 
         self.assertFalse(result.ok)
-        self.assertTrue(any("dispatch.resources.yaml" in error for error in result.errors))
+        self.assertTrue(any("config.resources.yaml" in error for error in result.errors))
 
     def test_cli_config_check_outputs_json_and_sets_exit_code(self) -> None:
         from cairn.cli import main

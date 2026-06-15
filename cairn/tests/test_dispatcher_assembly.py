@@ -20,7 +20,7 @@ from unittest import mock
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
-_DISPATCH_TEST_YAML = _REPO / "dispatch.test.yaml"
+_CONFIG_TEST_YAML = _REPO / "config.test.yaml"
 
 
 class DispatcherAssemblyTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class DispatcherAssemblyTests(unittest.TestCase):
                 mock.patch.object(loop_mod, "DispatcherHealthServer") as hs:
             cm.return_value = mock.Mock(name="ContainerManager")
             hs.return_value = mock.Mock(name="DispatcherHealthServer")
-            loop = loop_mod.DispatcherLoop(_DISPATCH_TEST_YAML)
+            loop = loop_mod.DispatcherLoop(_CONFIG_TEST_YAML)
             return loop, hs.return_value
 
     def test_all_collaborators_are_wired(self) -> None:

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.task_text import GRAPH_SNAPSHOT_ROOT
 
 
 def write_graph_snapshot_reference(
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     graph_yaml: str,
     *,

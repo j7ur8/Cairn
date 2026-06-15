@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from cairn.dispatcher.prompting import format_fact_ids, format_open_intents, load_prompt, render_prompt
-from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
 from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference
 from cairn.shared.config import DispatchConfig, WorkerConfig
@@ -32,7 +32,7 @@ def reason_allowed_fact_ids(project: ProjectDetail) -> list[str]:
 def build_reason_execute_prompt(
     *,
     config: DispatchConfig,
-    container_manager: ContainerManager,
+    container_manager: ContainerRuntime,
     container_name: str,
     project: ProjectDetail,
     export_yaml: str,

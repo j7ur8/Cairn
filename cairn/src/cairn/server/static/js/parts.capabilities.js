@@ -18,7 +18,6 @@ CairnParts.capabilities = function () {
     replayConfigCapabilityPanel: 'bootstrap',
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
     runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20, prompt_group: 'default' },
-    containerLimitsForm: { mem_limit: '', pids_limit: null, cpus: null },
     taskTimeoutsForm: {
       bootstrap_timeout: 300, bootstrap_conclude_timeout: 90,
       explore_timeout: 300, explore_conclude_timeout: 90,
@@ -79,7 +78,6 @@ CairnParts.capabilities = function () {
       } catch(e) { console.error(e); }
       await Promise.all([
         this.loadRuntimeLimits(),
-        this.loadContainerLimits(),
         this.loadTaskTimeouts(),
         this.loadObservability(),
         this.loadServerLogRetention(),
@@ -388,7 +386,7 @@ CairnParts.capabilities = function () {
       throw new Error('AI profile check timed out waiting for dispatcher result');
     },
 
-    // AI Profiles are edited directly in dispatch.yaml. The Check button
+    // AI Profiles are edited directly in config.yaml. The Check button
     // enqueues a dispatcher health probe; there is no dispatcher startup
     // sync or database mirror for profile definitions.
 
@@ -1008,14 +1006,6 @@ CairnParts.capabilities = function () {
         Object.assign(this.runtimeLimitsForm, r);
       } catch(e) { console.error(e); }
     },
-    async loadContainerLimits() {
-      try {
-        const c = await this.api('GET', '/container-limits');
-        this.containerLimitsForm.mem_limit = c.mem_limit || '';
-        this.containerLimitsForm.pids_limit = c.pids_limit;
-        this.containerLimitsForm.cpus = c.nano_cpus ? (c.nano_cpus / 1e9) : null;
-      } catch(e) { console.error(e); }
-    },
     async loadTaskTimeouts() {
       try {
         const t = await this.api('GET', '/task-timeouts');
@@ -1024,6 +1014,7 @@ CairnParts.capabilities = function () {
         this.taskTimeoutsForm.explore_timeout = t.explore.timeout;
         this.taskTimeoutsForm.explore_conclude_timeout = t.explore.conclude_timeout;
         this.taskTimeoutsForm.reason_timeout = t.reason.timeout;
+        this.taskTimeoutsForm.reason_max_intents = t.reason.max_intents;
       } catch(e) { console.error(e); }
     },
     async loadObservability() {
@@ -1046,23 +1037,12 @@ CairnParts.capabilities = function () {
         this.showToast('Runtime limits saved');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
-    async saveContainerLimits() {
-      try {
-        const payload = {
-          mem_limit: this.containerLimitsForm.mem_limit || null,
-          pids_limit: this.containerLimitsForm.pids_limit || null,
-          nano_cpus: this.containerLimitsForm.cpus ? Math.round(this.containerLimitsForm.cpus * 1e9) : null,
-        };
-        await this.api('PUT', '/container-limits', payload);
-        this.showToast('Container limits saved');
-      } catch(e) { this.showToast(e.message, 'error'); }
-    },
     async saveTaskTimeouts() {
       try {
         const payload = {
           bootstrap: { timeout: this.taskTimeoutsForm.bootstrap_timeout, conclude_timeout: this.taskTimeoutsForm.bootstrap_conclude_timeout },
           explore: { timeout: this.taskTimeoutsForm.explore_timeout, conclude_timeout: this.taskTimeoutsForm.explore_conclude_timeout },
-          reason: { timeout: this.taskTimeoutsForm.reason_timeout },
+          reason: { timeout: this.taskTimeoutsForm.reason_timeout, max_intents: this.taskTimeoutsForm.reason_max_intents },
         };
         await this.api('PUT', '/task-timeouts', payload);
         this.showToast('Task timeouts saved');

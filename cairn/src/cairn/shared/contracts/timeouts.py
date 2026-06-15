@@ -21,6 +21,7 @@ class ReasonTaskTimeouts(BaseModel):
     model_config = {"extra": "forbid"}
 
     timeout: int = Field(gt=0)
+    max_intents: int = Field(default=3, gt=0)
 
 
 class TaskTimeouts(BaseModel):

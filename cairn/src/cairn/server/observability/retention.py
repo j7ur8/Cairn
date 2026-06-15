@@ -19,7 +19,7 @@ DEFAULT_RETENTION_INTERVAL_SECONDS = 6 * 60 * 60  # 6 hours
 
 
 def retention_hours() -> int:
-    """Resolve the retention window from dispatch.yaml observability settings."""
+    """Resolve the retention window from config.yaml observability settings."""
     from cairn.server.runtime_config import dispatch_config_path
 
     path = dispatch_config_path()

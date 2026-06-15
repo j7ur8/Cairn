@@ -72,10 +72,10 @@ def delete_yaml_proxy(proxy_id: str) -> None:
 def _proxies(data: dict[str, Any]) -> list[dict[str, Any]]:
     worker_pool = data.setdefault("worker_pool", {})
     if not isinstance(worker_pool, dict):
-        raise DomainError("dispatch.yaml worker_pool must be a mapping", status_code=500)
+        raise DomainError("config.yaml worker_pool must be a mapping", status_code=500)
     proxies = worker_pool.setdefault("proxies", [])
     if not isinstance(proxies, list):
-        raise DomainError("dispatch.yaml worker_pool.proxies must be a list", status_code=500)
+        raise DomainError("config.yaml worker_pool.proxies must be a list", status_code=500)
     return proxies
 
 
