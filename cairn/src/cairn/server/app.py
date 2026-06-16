@@ -25,6 +25,7 @@ from cairn.server.routers import (
     hints,
     intents,
     projects,
+    prompt_groups,
     proxies,
     replay,
     settings,
@@ -315,6 +316,7 @@ app.include_router(task_types.router)
 app.include_router(ai_profiles.router)
 app.include_router(proxies.router)
 app.include_router(projects.router)
+app.include_router(prompt_groups.router)
 app.include_router(hints.router)
 app.include_router(attachments.router)
 app.include_router(intents.router)

@@ -10,6 +10,11 @@ function cairnApp() {
     CairnParts.graph(),
     CairnParts.llm_log(),
     CairnParts.projects(),
+    CairnParts.settings(),
+    CairnParts.settings_admin(),
+    CairnParts.prompts(),
+    CairnParts.ai_profiles(),
+    CairnParts.proxies(),
     CairnParts.capabilities(),
     CairnParts.ui(),
   ];

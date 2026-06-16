@@ -137,6 +137,67 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("capabilityItems('skill')", html)
         self.assertNotIn("data-testid=\"settings-capability-add\"", html)
 
+    def test_cairn_app_registers_settings_domain_slices_with_collision_guard(self) -> None:
+        app_js = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "cairn-app.js").read_text(
+            encoding="utf-8"
+        )
+        doc_close = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "_doc_close.html").read_text(
+            encoding="utf-8"
+        )
+
+        for slice_name in [
+            "settings",
+            "settings_admin",
+            "prompts",
+            "ai_profiles",
+            "proxies",
+            "capabilities",
+        ]:
+            self.assertIn(f"CairnParts.{slice_name}(),", app_js)
+            self.assertIn(f'<script src="/static/js/parts.{slice_name}.js"></script>', doc_close)
+        self.assertIn("duplicate CairnParts key overwritten", app_js)
+
+    def test_settings_navigation_uses_section_specific_loaders(self) -> None:
+        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings.js").read_text(
+            encoding="utf-8"
+        )
+        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.ui.js").read_text(
+            encoding="utf-8"
+        )
+        core = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.core.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("async navigateSettings(section = 'server')", settings)
+        self.assertIn("await this.loadSettingsSection(section);", settings)
+        self.assertIn("server: () => this.loadSettings()", settings)
+        self.assertIn("runtime: () => this.loadRuntimeLimits()", settings)
+        self.assertIn("prompts: async () => {", settings)
+        self.assertIn("tasks: () => this.loadTaskTimeouts()", settings)
+        self.assertIn("observability: () => this.loadObservability()", settings)
+        self.assertIn("system: () => this.loadServerLogRetention()", settings)
+        self.assertIn("ai: () => this.loadAiProfiles()", settings)
+        self.assertIn("capabilities: () => this.loadCapabilityAdmin()", settings)
+        self.assertIn("proxies: () => this.loadProxies()", settings)
+        self.assertNotIn("Promise.all([\n        this.loadSettings(),\n        this.loadAiProfiles(),", settings)
+        self.assertNotIn("async navigateSettings(section = 'server')", ui)
+        self.assertIn("await this.loadSettings();", core)
+        self.assertNotIn("await this.loadRuntimeLimits();", core)
+        self.assertNotIn("await this.loadCapabilityAdmin();", core)
+
+    def test_capabilities_slice_excludes_non_capability_admin_endpoints(self) -> None:
+        capabilities = (
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.capabilities.js"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("/prompt-groups", capabilities)
+        self.assertNotIn("/role-prompts", capabilities)
+        self.assertNotIn("/ai-profiles", capabilities)
+        self.assertNotIn("/proxies", capabilities)
+        self.assertNotIn("/runtime-limits", capabilities)
+        self.assertNotIn("/task-timeouts", capabilities)
+        self.assertIn("/capabilities/admin", capabilities)
+        self.assertIn("/projects/${this.selectedProjectId}/capabilities", capabilities)
+
     def test_health_reports_postgres_status(self) -> None:
         from fastapi.testclient import TestClient
 

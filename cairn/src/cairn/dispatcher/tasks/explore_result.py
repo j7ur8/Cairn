@@ -39,6 +39,7 @@ def run_explore_conclude_fallback(
     reporter: ExecutionReporter,
     conclude_timeout: int,
     capability_context: Any = None,
+    execution_config: dict | None = None,
 ) -> str:
     fallback = ConcludeFallbackRunner(
         client=client,
@@ -62,6 +63,8 @@ def run_explore_conclude_fallback(
         container_name=container_name,
         export_yaml=export_yaml,
         intent=intent,
+        execution_config=execution_config,
+        reporter=reporter,
     )
     reporter.emit_prompt("explore_conclude", prompt)
     conclude_argv = driver.build_conclude(worker, prompt, session, None)

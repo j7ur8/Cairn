@@ -5,6 +5,18 @@
 
 # 更新日志
 
+## 2026-06-16 — Prompts 与 Settings UI 更新
+
+- Settings 主保存/创建操作移动到对应 section 或编辑表单标题行右侧；Capabilities MCP/Skills 资源卡片改为固定高度并保持列表内部滚动。
+- Prompt group 管理支持递归 `.md` 文件读取和嵌套路径保存，执行配置 prompt snapshot hash 纳入全部 prompt group 内 Markdown 文件。
+- 前端 Settings 状态从 `parts.capabilities.js` 拆分为 `parts.settings.js`、`parts.settings_admin.js`、`parts.prompts.js`、`parts.ai_profiles.js`、`parts.proxies.js` 和 capability-only `parts.capabilities.js`；`cairn-app.js` 注册顺序同步更新并保留 duplicate key guard。
+- `navigateSettings(section)` 改为 section 专属 loader，进入 Settings 不再全量拉取 runtime、prompts、AI profiles、proxies、capabilities 等所有管理数据。
+- 同步 `ARCHITECTURE.md` 当前 Alembic head 为 `0004_prompt_snapshots`。
+- 同步 `ARCHITECTURE.md`、`CODEBASE_ANALYSIS.md`、`PROJECT_OVERVIEW.md` 的前端 slice 架构描述；补充静态测试覆盖 slice 注册、loader 隔离和 capability slice endpoint 边界。
+- 当前验证：`node --check` 覆盖新增/更新 JS；CairnParts VM 装载无重复 key；`uv run python -m pytest tests/test_prompt_group_admin.py` 通过；`tests/test_static_cache.py` 因本地 DB reset gate clean skip。
+
+---
+
 ## 2026-06-15 — lint 与 AI 文档漂移修复
 
 - 执行 `uv run ruff check src tests --fix`，修复 dispatcher health 和 auth/projects router 测试中的 import 排序问题，解除 CI lint 阻塞。

@@ -39,7 +39,7 @@ Cairn 的核心不是固定渗透测试流程，而是一个通用 problem-solvi
 | HTTP Client | requests, tenacity | Dispatcher 调 Server |
 | 认证 | PyJWT, bcrypt | JWT + 密码 hash |
 | 观测 | prometheus-client | HTTP/Dispatcher/Worker metrics |
-| 前端 | Static HTML partials, Alpine, Tailwind, Cytoscape | `server/partials/*` 启动时由 `assemble_index()` 拼装为 SPA shell；无构建静态资源 |
+| 前端 | Static HTML partials, Alpine, Tailwind, Cytoscape | `server/partials/*` 启动时由 `assemble_index()` 拼装为 SPA shell；Alpine root 由 `static/js/parts.*.js` slices 合并；无构建静态资源 |
 | 测试 | pytest + unittest 风格测试文件 | dev 依赖声明 `pytest`，统一入口为 `python -m pytest` |
 
 ## 2. 工程目录结构
@@ -73,6 +73,11 @@ Cairn/
 |------|------|
 | `cairn/src/cairn/cli.py` | CLI 入口，启动 Server、Dispatcher 和 DB 命令 |
 | `cairn/src/cairn/server/app.py` | FastAPI app、lifespan、全局鉴权、路由注册、静态文件 |
+| `cairn/src/cairn/server/partials/` | SPA HTML partials，由 `assemble_index()` 拼装 |
+| `cairn/src/cairn/server/static/js/cairn-app.js` | 合并 `CairnParts` slices，保留 duplicate key guard |
+| `cairn/src/cairn/server/static/js/parts.settings*.js` | Settings 导航和 server/runtime/task/observability/system 表单状态 |
+| `cairn/src/cairn/server/static/js/parts.prompts.js` | Prompt group / role prompt editor 状态和 API 调用 |
+| `cairn/src/cairn/server/static/js/parts.ai_profiles.js`, `parts.proxies.js`, `parts.capabilities.js` | AI Profile、Proxy、Capability 管理与项目选择状态拆分 |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
 | `cairn/src/cairn/server/orm.py` | 数据表、索引、约束定义 |
 | `cairn/src/cairn/server/application/` | 项目、intent、reason、hints/files/attachments、execution config、capabilities、export、replay 等 HTTP 用例编排；replay 已拆为 service、orchestration、route、attachments、step advancer |

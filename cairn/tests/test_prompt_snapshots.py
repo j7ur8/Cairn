@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+_REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO / "cairn" / "src"))
+
+
+class PromptSnapshotTests(unittest.TestCase):
+    def test_load_prompt_snapshot_hash_changes_with_content(self) -> None:
+        from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
+
+        first = load_prompt_snapshot("mock")
+        original = first["prompts"]["reason.md"]
+        prompts = dict(first["prompts"])
+        prompts["reason.md"] = f"{original}\nextra"
+        with tempfile.TemporaryDirectory() as tmp:
+            group_dir = Path(tmp) / "mock"
+            group_dir.mkdir()
+            for name, content in prompts.items():
+                (group_dir / name).write_text(content, encoding="utf-8")
+            with mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files") as files:
+                files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
+                changed = load_prompt_snapshot("mock")
+
+        self.assertEqual(
+            set(first["prompts"]),
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
+        )
+        self.assertEqual(first["prompt_group"], "mock")
+        self.assertNotEqual(first["prompts_sha256"], changed["prompts_sha256"])
+
+    def test_load_prompt_from_execution_config_uses_snapshot(self) -> None:
+        from cairn.dispatcher.prompting import load_prompt_from_execution_config
+
+        reporter = mock.Mock()
+        prompt = load_prompt_from_execution_config(
+            {"prompt_snapshot": {"prompts": {"reason.md": "SNAPSHOT"}}},
+            "reason.md",
+            "mock",
+            reporter,
+        )
+
+        self.assertEqual(prompt, "SNAPSHOT")
+        reporter.emit_error.assert_not_called()
+
+    def test_load_prompt_from_execution_config_falls_back_and_warns(self) -> None:
+        from cairn.dispatcher.prompting import load_prompt_from_execution_config
+
+        reporter = mock.Mock()
+        with mock.patch("cairn.dispatcher.prompting.load_prompt", return_value="CURRENT") as fallback:
+            prompt = load_prompt_from_execution_config({}, "reason.md", "mock", reporter)
+
+        self.assertEqual(prompt, "CURRENT")
+        fallback.assert_called_once_with("mock", "reason.md")
+        reporter.emit_error.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

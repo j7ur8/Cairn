@@ -2,7 +2,12 @@
 <div x-show="view === 'settings'" x-cloak class="h-full overflow-y-auto px-4 pb-4 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
   <div class="h-full w-full rounded-none border-0 bg-transparent p-4 sm:p-5">
     <section x-show="settingsSection === 'server'">
-    <h4 class="text-sm font-semibold text-slate-700 mb-3">Server Settings</h4>
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <div>
+        <h4 class="text-sm font-semibold text-slate-700">Server Settings</h4>
+      </div>
+      <button data-testid="server-settings-save" @click="saveServerSettings()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
+    </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
         <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent lease timeout (seconds)</label>
@@ -14,7 +19,6 @@
       </div>
       <p class="sm:col-span-2 text-[11px] text-slate-400">These values control server heartbeat leases. Worker command timeouts are set per project when creating or replaying a project.</p>
     </div>
-
     </section>
 
     <section x-show="settingsSection === 'proxies'">
@@ -27,6 +31,13 @@
       </div>
 
       <div x-show="proxyForm.id || proxyFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-slate-700" x-text="proxyForm.id ? 'Edit Proxy' : 'Create Proxy'"></div>
+          <div class="flex gap-2 shrink-0">
+            <button @click="cancelProxyEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+            <button data-testid="proxy-save" @click="saveProxy()" :disabled="!proxyForm.name.trim() || !proxyForm.host.trim() || !proxyForm.port" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="proxyForm.id ? 'Save' : 'Create'"></button>
+          </div>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
           <input data-testid="proxy-name" x-model="proxyForm.name" placeholder="Name (e.g. corp-socks)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           <select data-testid="proxy-type" x-model="proxyForm.type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
@@ -42,10 +53,6 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input x-model="proxyForm.username" placeholder="username (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           <input x-model="proxyForm.password" type="password" placeholder="password (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-        </div>
-        <div class="flex justify-end gap-2">
-          <button @click="cancelProxyEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
-          <button data-testid="proxy-save" @click="saveProxy()" :disabled="!proxyForm.name.trim() || !proxyForm.host.trim() || !proxyForm.port" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="proxyForm.id ? 'Save' : 'Create'"></button>
         </div>
       </div>
 
@@ -72,54 +79,55 @@
 
     </section>
 
-    <section x-show="settingsSection === 'capabilities'">
-      <div class="flex items-center justify-between gap-3 mb-3">
-        <div>
+    <section x-show="settingsSection === 'capabilities'" class="h-full min-h-0 flex flex-col gap-3">
+      <div class="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
           <h4 class="text-sm font-semibold text-slate-700">Capabilities</h4>
           <p class="text-[11px] text-slate-400 mt-0.5">Unified capability repository for MCP servers and Skills. This page edits <span class="font-mono">config.resources.yaml</span>; project snapshots are unchanged.</p>
         </div>
-        <div class="flex gap-2 shrink-0">
-          <button data-testid="settings-capability-refresh" @click="loadCapabilityAdmin()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Refresh</button>
-          <button data-testid="settings-capability-import" @click="openImportMcpJson()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">Import MCP JSON</button>
-          <button data-testid="settings-capability-add-mcp" @click="openCreateMcpServer()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add MCP</button>
-          <button data-testid="settings-capability-add-skill" @click="openCreateSkill()" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition">+ Add Skill</button>
-        </div>
-      </div>
-
-      <div x-show="capabilityImportOpen" x-cloak class="mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <div class="text-xs font-semibold text-slate-700">Import MCP JSON</div>
-            <div class="text-[11px] text-slate-400">Paste a standard <span class="font-mono">mcpServers</span> object. Existing user items can be updated in place.</div>
+        <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+          <div x-show="!capabilityFormOpen && !capabilityImportOpen" x-cloak class="flex flex-wrap items-center justify-end gap-2">
+            <button data-testid="settings-capability-refresh" @click="loadCapabilityAdmin()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Refresh</button>
+            <button data-testid="settings-capability-import" @click="openImportMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Import MCP JSON</button>
+            <button data-testid="settings-capability-add-mcp" @click="openCreateMcpServer()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">+ Add MCP</button>
+            <button data-testid="settings-capability-add-skill" @click="openCreateSkill()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">+ Add Skill</button>
           </div>
-          <div class="flex gap-2">
-            <button @click="cancelImportMcpJson()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
-            <button data-testid="capability-import-save" @click="importMcpJson()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition">Import</button>
+          <div x-show="capabilityImportOpen" x-cloak class="flex items-center gap-2">
+            <button @click="cancelImportMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
+            <button data-testid="capability-import-save" @click="importMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition">Import</button>
           </div>
-        </div>
-        <textarea x-model="capabilityImportText" rows="10" spellcheck="false" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition" placeholder='{"mcpServers": {}}'></textarea>
-      </div>
-
-      <div x-show="capabilityFormOpen" x-cloak class="space-y-3 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <div class="text-xs font-semibold text-slate-700" x-text="capabilityEditId ? `Edit ${capabilityForm.kind === 'mcp_server' ? 'MCP Server' : 'Skill'}` : `Create ${capabilityForm.kind === 'mcp_server' ? 'MCP Server' : 'Skill'}`"></div>
-            <div class="text-[11px] text-slate-400">Identity, routing metadata, and type-specific settings are grouped below.</div>
-          </div>
-          <div class="flex items-center gap-3">
+          <div x-show="capabilityFormOpen" x-cloak class="flex items-center gap-3">
             <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
               <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="capabilityForm.available">
               available
             </label>
-            <div class="flex gap-2">
-              <button @click="cancelCapabilityEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
-              <button data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
+            <div class="flex items-center gap-2">
+              <button @click="cancelCapabilityEdit()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
+              <button data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+      <div x-show="capabilityImportOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="flex min-h-full flex-col gap-3">
+          <div class="shrink-0 space-y-1.5">
+            <div class="text-xs font-semibold text-slate-700">Import MCP JSON</div>
+            <div class="text-[11px] text-slate-400">Paste a standard <span class="font-mono">mcpServers</span> object. Existing user items can be updated in place.</div>
+          </div>
+          <textarea x-model="capabilityImportText" rows="10" spellcheck="false" class="flex-1 min-h-[18rem] w-full resize-none px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition" placeholder='{"mcpServers": {}}'></textarea>
+        </div>
+      </div>
+
+      <div x-show="capabilityFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="flex min-h-full flex-col gap-3">
+          <div class="shrink-0 space-y-1.5">
+            <div class="min-w-0 text-xs font-semibold text-slate-700" x-text="capabilityEditId ? `Edit ${capabilityForm.kind === 'mcp_server' ? 'MCP Server' : 'Skill'}` : `Create ${capabilityForm.kind === 'mcp_server' ? 'MCP Server' : 'Skill'}`"></div>
+            <div class="text-[11px] text-slate-400">Identity, routing metadata, and type-specific settings are grouped below.</div>
+          </div>
+
+          <div class="grid flex-1 min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
             <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Identity</div>
             <div class="grid grid-cols-1 sm:grid-cols-[120px_minmax(0,1fr)] gap-2">
               <select x-model="capabilityForm.kind" :disabled="!!capabilityEditId" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition disabled:opacity-60 disabled:cursor-not-allowed">
@@ -213,72 +221,87 @@
             </div>
           </section>
         </div>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <section class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-          <div class="flex items-center justify-between">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">MCP Servers</div>
-            <input x-model="capabilitySearch.mcp" placeholder="Search" class="w-32 px-2 py-1 border border-slate-200 rounded-md text-[11px] focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+      <div x-show="!capabilityFormOpen && !capabilityImportOpen" x-cloak class="grid grid-cols-1 gap-3 flex-1 min-h-0 lg:grid-cols-2 lg:auto-rows-fr">
+        <section class="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm flex min-h-[22rem] flex-col lg:min-h-0">
+          <div class="flex items-center justify-between gap-3 shrink-0">
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-semibold">MCP Servers</div>
+              <div class="text-[11px] text-slate-500 mt-1" x-text="`${capabilityItems('mcp_server').length} items`"></div>
+            </div>
+            <input x-model="capabilitySearch.mcp" placeholder="Search MCP" class="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-[11px] focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
-          <template x-if="capabilityItems('mcp_server').length === 0">
-            <p class="text-xs text-slate-400 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3">No MCP servers configured.</p>
-          </template>
-          <div class="space-y-2 max-h-[calc(100vh-430px)] overflow-y-auto pr-1">
-            <template x-for="item in capabilityItems('mcp_server')" :key="`mcp:${item.id}`">
-              <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="inline-block h-2 w-2 rounded-full" :class="capabilityHealthDotClass(item)" :title="capabilityHealthTitle(item)"></span>
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                    </div>
-                    <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
-                    <div class="text-[10px] text-slate-500 truncate" x-text="[item.transport, item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
-                    <div class="text-[10px] text-slate-400 truncate" x-text="item.description || item.detail || '-' "></div>
-                    <div class="text-[10px] text-slate-400 truncate" x-text="item.transport === 'stdio' ? (item.command || '-') : (item.url || '-')"></div>
-                  </div>
-                  <div class="flex gap-1 shrink-0">
-                    <button @click="probeCapabilityAdmin(item.kind, item.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Probe</button>
-                    <button @click="openEditCapability(item)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
-                    <button x-show="item.source === 'user'" @click="deleteCapabilityAdmin(item.kind, item.id, item.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
-                  </div>
-                </div>
+          <div class="flex-1 min-h-0 overflow-y-auto pr-1 pt-3">
+            <template x-if="capabilityItems('mcp_server').length === 0">
+              <div class="h-full min-h-[14rem] rounded-lg border border-dashed border-slate-200 bg-white/90 px-4 py-6 flex items-center justify-center text-center">
+                <p class="text-xs text-slate-400">No MCP servers configured.</p>
               </div>
             </template>
+            <div x-show="capabilityItems('mcp_server').length > 0" class="space-y-2">
+              <template x-for="item in capabilityItems('mcp_server')" :key="`mcp:${item.id}`">
+                <article class="h-32 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                  <div class="flex h-full items-start justify-between gap-3 overflow-hidden">
+                    <div class="min-w-0 space-y-1.5">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-block h-2 w-2 rounded-full" :class="capabilityHealthDotClass(item)" :title="capabilityHealthTitle(item)"></span>
+                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                      </div>
+                      <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
+                      <div class="text-[10px] text-slate-500 truncate" x-text="[item.transport, item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
+                      <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="item.description || item.detail || '-' "></p>
+                      <p class="text-[10px] leading-4 text-slate-400 line-clamp-2 break-all" x-text="item.transport === 'stdio' ? (item.command || '-') : (item.url || '-')"></p>
+                    </div>
+                    <div class="flex gap-1 shrink-0 self-start">
+                      <button @click="probeCapabilityAdmin(item.kind, item.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Probe</button>
+                      <button @click="openEditCapability(item)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                      <button x-show="item.source === 'user'" @click="deleteCapabilityAdmin(item.kind, item.id, item.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+                    </div>
+                  </div>
+                </article>
+              </template>
+            </div>
           </div>
         </section>
 
-        <section class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-          <div class="flex items-center justify-between">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Skills</div>
-            <input x-model="capabilitySearch.skill" placeholder="Search" class="w-32 px-2 py-1 border border-slate-200 rounded-md text-[11px] focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <section class="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm flex min-h-[22rem] flex-col lg:min-h-0">
+          <div class="flex items-center justify-between gap-3 shrink-0">
+            <div>
+              <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Skills</div>
+              <div class="text-[11px] text-slate-500 mt-1" x-text="`${capabilityItems('skill').length} items`"></div>
+            </div>
+            <input x-model="capabilitySearch.skill" placeholder="Search Skills" class="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-[11px] focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
-          <template x-if="capabilityItems('skill').length === 0">
-            <p class="text-xs text-slate-400 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3">No skills configured.</p>
-          </template>
-          <div class="space-y-2 max-h-[calc(100vh-430px)] overflow-y-auto pr-1">
-            <template x-for="item in capabilityItems('skill')" :key="`skill:${item.id}`">
-              <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="inline-block h-2 w-2 rounded-full" :class="capabilityHealthDotClass(item)" :title="capabilityHealthTitle(item)"></span>
-                      <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                    </div>
-                    <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
-                    <div class="text-[10px] text-slate-500 truncate" x-text="[item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
-                    <div class="text-[10px] text-slate-400 truncate" x-text="item.description || item.detail || '-' "></div>
-                    <div class="text-[10px] text-slate-400 truncate" x-text="item.source_path || '-' "></div>
-                  </div>
-                  <div class="flex gap-1 shrink-0">
-                    <button @click="probeCapabilityAdmin(item.kind, item.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Probe</button>
-                    <button @click="openEditCapability(item)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
-                    <button x-show="item.source === 'user'" @click="deleteCapabilityAdmin(item.kind, item.id, item.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
-                  </div>
-                </div>
+          <div class="flex-1 min-h-0 overflow-y-auto pr-1 pt-3">
+            <template x-if="capabilityItems('skill').length === 0">
+              <div class="h-full min-h-[14rem] rounded-lg border border-dashed border-slate-200 bg-white/90 px-4 py-6 flex items-center justify-center text-center">
+                <p class="text-xs text-slate-400">No skills configured.</p>
               </div>
             </template>
+            <div x-show="capabilityItems('skill').length > 0" class="space-y-2">
+              <template x-for="item in capabilityItems('skill')" :key="`skill:${item.id}`">
+                <article class="h-32 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                  <div class="flex h-full items-start justify-between gap-3 overflow-hidden">
+                    <div class="min-w-0 space-y-1.5">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-block h-2 w-2 rounded-full" :class="capabilityHealthDotClass(item)" :title="capabilityHealthTitle(item)"></span>
+                        <div class="text-xs font-semibold text-slate-700 truncate" x-text="item.name"></div>
+                      </div>
+                      <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
+                      <div class="text-[10px] text-slate-500 truncate" x-text="[item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
+                      <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="item.description || item.detail || '-' "></p>
+                      <p class="text-[10px] leading-4 text-slate-400 line-clamp-2 break-all" x-text="item.source_path || '-' "></p>
+                    </div>
+                    <div class="flex gap-1 shrink-0 self-start">
+                      <button @click="probeCapabilityAdmin(item.kind, item.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Probe</button>
+                      <button @click="openEditCapability(item)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                      <button x-show="item.source === 'user'" @click="deleteCapabilityAdmin(item.kind, item.id, item.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+                    </div>
+                  </div>
+                </article>
+              </template>
+            </div>
           </div>
         </section>
       </div>
@@ -296,6 +319,19 @@
       </div>
 
       <div x-show="aiProfileForm.id || aiProfileFormOpen" x-cloak class="space-y-2 mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-slate-700" x-text="aiProfileForm.id ? 'Edit AI Profile' : 'Create AI Profile'"></div>
+          <div class="flex items-center gap-3">
+            <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
+              <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="aiProfileForm.available">
+              available
+            </label>
+            <div class="flex gap-2">
+              <button @click="cancelAiProfileEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
+              <button data-testid="ai-profile-save" @click="saveAiProfile()" :disabled="!aiProfileForm.name.trim() || !aiProfileForm.model.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="aiProfileForm.id ? 'Save' : 'Create'"></button>
+            </div>
+          </div>
+        </div>
         <div class="grid grid-cols-2 gap-1 p-1 rounded-lg bg-white border border-slate-200" role="tablist" aria-label="Worker type">
           <button type="button" @click="setAiProfileWorkerType('codex')" :disabled="!!aiProfileForm.id" :aria-pressed="aiProfileForm.worker_type === 'codex'" :class="aiProfileForm.worker_type === 'codex' ? 'bg-brand-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'" class="px-3 py-1.5 text-xs font-medium rounded-md transition disabled:cursor-not-allowed disabled:opacity-60">Codex</button>
           <button type="button" @click="setAiProfileWorkerType('claudecode')" :disabled="!!aiProfileForm.id" :aria-pressed="aiProfileForm.worker_type === 'claudecode'" :class="aiProfileForm.worker_type === 'claudecode' ? 'bg-brand-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'" class="px-3 py-1.5 text-xs font-medium rounded-md transition disabled:cursor-not-allowed disabled:opacity-60">Claude</button>
@@ -327,17 +363,9 @@
             <button type="button" x-show="aiProfileForm.id && aiProfileForm.skStoredPreview && !aiProfileForm.skTouched" @click="clearStoredAiProfileSk()" class="text-rose-500 hover:underline" title="Mark the stored key for clearing on save">clear stored key</button>
           </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center">
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2 items-center">
           <input x-model="aiProfileForm.description" placeholder="description (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           <input type="number" min="0.1" max="30" step="0.1" x-model.number="aiProfileForm.healthcheck_timeout" placeholder="probe timeout (s)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" title="Base URL / api env var probe timeout, in seconds (0.1-30)">
-          <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
-            <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="aiProfileForm.available">
-            available
-          </label>
-        </div>
-        <div class="flex justify-end gap-2">
-          <button @click="cancelAiProfileEdit()" class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition">Cancel</button>
-          <button data-testid="ai-profile-save" @click="saveAiProfile()" :disabled="!aiProfileForm.name.trim() || !aiProfileForm.model.trim()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="aiProfileForm.id ? 'Save' : 'Create'"></button>
         </div>
       </div>
 
@@ -379,8 +407,13 @@
 
     <!-- Runtime & Limits -->
     <section x-show="settingsSection === 'runtime'">
-      <h4 class="text-sm font-semibold text-slate-700 mb-3">Runtime Limits</h4>
-      <p class="text-[11px] text-slate-400 mb-3">Control the dispatcher's scheduling concurrency, interval, and health-check timeout. <code>max_project_workers</code> must not exceed <code>max_workers</code>.</p>
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Runtime Limits</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Control the dispatcher's scheduling concurrency, interval, and health-check timeout. <code>max_project_workers</code> must not exceed <code>max_workers</code>.</p>
+        </div>
+        <button data-testid="runtime-limits-save" @click="saveRuntimeLimits()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Workers</label>
@@ -408,27 +441,24 @@
         </div>
       </div>
       <div x-show="runtimeLimitsForm.max_project_workers > runtimeLimitsForm.max_workers" class="mt-2 text-[11px] text-rose-500 font-medium">max_project_workers cannot exceed max_workers</div>
-      <div class="flex justify-end gap-2 mt-5">
-        <button data-testid="runtime-limits-save" @click="saveRuntimeLimits()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Runtime</button>
-      </div>
     </section>
 
     <!-- Prompts -->
-    <section x-show="settingsSection === 'prompts'">
-      <div class="flex items-start justify-between gap-3 mb-3">
+    <section x-show="settingsSection === 'prompts'" class="h-full min-h-0 flex flex-col">
+      <div class="flex items-start justify-between gap-3 mb-3 shrink-0">
         <div>
           <h4 class="text-sm font-semibold text-slate-700">Prompt Templates</h4>
           <p class="text-[11px] text-slate-400 mt-0.5">Edit system prompt source templates for new execution snapshots. Existing project snapshots remain unchanged.</p>
         </div>
-        <div class="flex gap-2 shrink-0">
-          <button data-testid="prompts-reload" @click="loadPromptGroup(promptGroupSelected)" :disabled="promptEditorLoading || !promptGroupSelected" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed">Reload</button>
-          <button data-testid="prompts-save" @click="savePromptTemplate()" :disabled="promptEditorSaving || !promptGroupSelected || !promptTemplateSelected" class="px-2.5 py-1 rounded-lg bg-brand-500 text-xs text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed" x-text="promptEditorSaving ? 'Saving...' : 'Save'"></button>
+        <div class="flex items-center gap-2 shrink-0">
+          <button data-testid="prompts-reload" @click="loadPromptGroup(promptGroupSelected)" :disabled="promptEditorLoading || !promptGroupSelected" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed">Reload</button>
+          <button data-testid="prompts-save" @click="savePromptTemplate()" :disabled="promptEditorSaving || !promptGroupSelected || !promptTemplateSelected || !promptSelectedWritable()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed" x-text="promptEditorSaving ? 'Saving...' : 'Save'"></button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-3">
-        <div class="space-y-3">
-          <div>
+      <div class="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
+        <div class="min-h-0 flex flex-col gap-3">
+          <div class="shrink-0">
             <label class="text-[11px] text-slate-400 mb-1 block font-medium">Group</label>
             <select data-testid="prompts-group" x-model="promptGroupSelected" @change="loadPromptGroup(promptGroupSelected)" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
               <template x-for="group in promptGroups" :key="`prompt-group:${group}`">
@@ -436,19 +466,25 @@
               </template>
             </select>
           </div>
-          <div class="space-y-1">
-            <div class="text-[11px] text-slate-400 font-medium">Templates</div>
-            <template x-for="name in promptTemplateNames" :key="`prompt-template:${name}`">
-              <button type="button" @click="selectPromptTemplate(name)" class="w-full rounded-lg border px-3 py-2 text-left transition"
-                :class="promptTemplateSelected === name ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'">
-                <div class="text-xs font-semibold font-mono truncate" x-text="name"></div>
-                <div class="text-[10px] font-mono text-slate-400 truncate" x-text="promptTemplateSha(name) || '-'"></div>
-              </button>
+          <div class="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+            <div class="text-[11px] text-slate-400 font-medium">Resources</div>
+            <template x-if="promptTemplateNames.length === 0">
+              <p class="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-400">No markdown prompt resources found.</p>
+            </template>
+            <template x-for="(resource, index) in promptEditorResources()" :key="`prompt-template:${resource.key}`">
+              <div>
+                <div x-show="promptShowResourceGroup(resource, index)" class="pb-1 pt-2 text-[10px] uppercase tracking-wide text-slate-400 font-semibold" x-text="resource.groupLabel"></div>
+                <button type="button" @click="selectPromptTemplate(resource)" class="w-full rounded-lg border px-3 py-2 text-left transition"
+                  :class="promptTemplateSelected === resource.key ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'">
+                  <div class="text-xs font-semibold font-mono truncate" x-text="promptResourceDisplayName(resource)"></div>
+                  <div class="text-[10px] font-mono text-slate-400 truncate" x-text="resource.sha || '-'"></div>
+                </button>
+              </div>
             </template>
           </div>
         </div>
-        <div class="min-w-0 space-y-2">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div class="min-w-0 min-h-0 flex flex-col gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 shrink-0">
             <div class="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
               <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Template sha256</div>
               <div data-testid="prompts-template-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptTemplateSha() || '-'"></div>
@@ -458,15 +494,20 @@
               <div data-testid="prompts-group-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptGroupSha() || '-'"></div>
             </div>
           </div>
-          <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full min-h-[520px] px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>
+          <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>
         </div>
       </div>
     </section>
 
     <!-- Task Timeouts -->
     <section x-show="settingsSection === 'tasks'">
-      <h4 class="text-sm font-semibold text-slate-700 mb-3">Task Timeouts</h4>
-      <p class="text-[11px] text-slate-400 mb-3">Default lease timeouts for each task stage. These are the system-wide defaults; individual project creation can override them with execution config overrides.</p>
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Task Timeouts</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Default lease timeouts for each task stage. These are the system-wide defaults; individual project creation can override them with execution config overrides.</p>
+        </div>
+        <button data-testid="task-timeouts-save" @click="saveTaskTimeouts()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
+      </div>
       <div class="space-y-4">
         <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
           <legend class="text-xs font-semibold text-slate-600 px-1">Bootstrap</legend>
@@ -508,15 +549,17 @@
           </div>
         </fieldset>
       </div>
-      <div class="flex justify-end gap-2 mt-5">
-        <button data-testid="task-timeouts-save" @click="saveTaskTimeouts()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Timeouts</button>
-      </div>
     </section>
 
     <!-- Observability -->
     <section x-show="settingsSection === 'observability'">
-      <h4 class="text-sm font-semibold text-slate-700 mb-3">Observability</h4>
-      <p class="text-[11px] text-slate-400 mb-3">Control which worker streams are recorded, byte caps per execution, flush behaviour, retention, and redaction patterns (one per line).</p>
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Observability</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Control which worker streams are recorded, byte caps per execution, flush behaviour, retention, and redaction patterns (one per line).</p>
+        </div>
+        <button data-testid="observability-save" @click="saveObservability()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
+      </div>
       <div class="space-y-3">
         <div class="flex items-center gap-4 flex-wrap">
           <label class="inline-flex items-center gap-2 text-sm text-slate-600">
@@ -565,15 +608,17 @@
           <textarea x-model="observabilityForm.redaction_patterns_text" rows="3" placeholder="e.g. sk-[A-Za-z0-9]+" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
         </div>
       </div>
-      <div class="flex justify-end gap-2 mt-5">
-        <button data-testid="observability-save" @click="saveObservability()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Observability</button>
-      </div>
     </section>
 
     <!-- Server Log & Retention -->
     <section x-show="settingsSection === 'system'">
-      <h4 class="text-sm font-semibold text-slate-700 mb-3">Server Log & Retention</h4>
-      <p class="text-[11px] text-slate-400 mb-3">Server-side log format and retention-loop configuration. Changes take effect after a dispatcher reload.</p>
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">Server Log & Retention</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Server-side log format and retention-loop configuration. Changes take effect after a dispatcher reload.</p>
+        </div>
+        <button data-testid="log-retention-save" @click="saveServerLogRetention()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label class="text-[11px] text-slate-400 mb-1 block font-medium">Log Level</label>
@@ -603,13 +648,7 @@
           <input type="number" x-model.number="serverLogRetentionForm.retention_interval_seconds" min="60" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
         </div>
       </div>
-      <div class="flex justify-end gap-2 mt-5">
-        <button data-testid="log-retention-save" @click="saveServerLogRetention()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Log & Retention</button>
-      </div>
     </section>
 
-    <div x-show="view === 'settings' && settingsSection === 'server'" class="flex justify-end gap-2 mt-5">
-      <button data-testid="server-settings-save" @click="saveServerSettings()" class="px-4 py-2 text-sm bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save Server</button>
-    </div>
   </div>
 </div>

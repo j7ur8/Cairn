@@ -143,6 +143,7 @@ def run_reason_task(
             export_yaml=export_yaml,
             prepared=prepared,
             worker=worker,
+            reporter=reporter,
         )
         reporter.emit_prompt("reason_execute", prompt)
 

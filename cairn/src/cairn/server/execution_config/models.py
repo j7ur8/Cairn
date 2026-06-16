@@ -19,3 +19,4 @@ class ProjectExecutionConfigSnapshot:
     ai_by_task: dict[str, list[ProjectAiProfileSnapshot]]
     capabilities_by_task: dict[str, TaskCapabilities]
     revision: dict[str, str]
+    prompt_snapshot: dict[str, Any]

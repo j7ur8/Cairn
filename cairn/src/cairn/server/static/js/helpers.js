@@ -43,3 +43,11 @@ const defaultCapabilityForm = () => ({
   detail: '',
   available: true,
 });
+window.SETTINGS_UI_CLASSES = Object.freeze({
+  primaryButton: 'h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed',
+  secondaryButton: 'h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed',
+  panel: 'rounded-xl border border-slate-200 bg-slate-50/60 p-3',
+  card: 'rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm',
+  compactCard: 'rounded-xl border border-slate-200 bg-white px-3 py-2',
+  fieldInput: 'px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300',
+});

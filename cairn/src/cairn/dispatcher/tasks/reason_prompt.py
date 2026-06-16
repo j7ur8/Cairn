@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from cairn.dispatcher.prompting import format_fact_ids, format_open_intents, load_prompt, render_prompt
+from cairn.dispatcher.prompting import (
+    format_fact_ids,
+    format_open_intents,
+    load_prompt_from_execution_config,
+    render_prompt,
+)
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
 from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference
@@ -38,6 +44,7 @@ def build_reason_execute_prompt(
     export_yaml: str,
     prepared: PreparedTaskExecution,
     worker: WorkerConfig,
+    reporter: Any | None = None,
 ) -> tuple[str, list[dict[str, object]], list[str]]:
     open_intents = reason_open_intents(project)
     allowed_fact_ids = reason_allowed_fact_ids(project)
@@ -51,7 +58,12 @@ def build_reason_execute_prompt(
         len(open_intents),
     )
     prompt = render_prompt(
-        load_prompt(config.runtime.prompt_group, "reason.md"),
+        load_prompt_from_execution_config(
+            prepared.execution_config,
+            "reason.md",
+            config.runtime.prompt_group,
+            reporter,
+        ),
         {
             "graph_yaml": write_graph_snapshot_reference(
                 container_manager,

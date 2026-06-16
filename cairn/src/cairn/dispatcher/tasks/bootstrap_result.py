@@ -7,7 +7,7 @@ from typing import Any
 
 from cairn.dispatcher.contracts import parse_sentinel_fact_output
 from cairn.dispatcher.observability.reporter import ExecutionReporter
-from cairn.dispatcher.prompting import load_prompt, render_prompt
+from cairn.dispatcher.prompting import load_prompt_from_execution_config, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
@@ -128,6 +128,7 @@ def run_bootstrap_conclude_fallback(
     reporter: ExecutionReporter,
     conclude_timeout: int,
     capability_context: Any = None,
+    execution_config: dict | None = None,
 ) -> str:
     fallback = ConcludeFallbackRunner(
         client=client,
@@ -146,7 +147,12 @@ def run_bootstrap_conclude_fallback(
     container_name = container_manager.ensure_running(project.project.id)
 
     prompt = render_prompt(
-        load_prompt(config.runtime.prompt_group, "bootstrap_conclude.md"),
+        load_prompt_from_execution_config(
+            execution_config,
+            "bootstrap_conclude.md",
+            config.runtime.prompt_group,
+            reporter,
+        ),
         bootstrap_prompt_replacements(project),
     )
     reporter.emit_prompt("bootstrap_conclude", prompt)

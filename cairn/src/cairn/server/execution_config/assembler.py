@@ -76,7 +76,9 @@ def _assemble_task_payload(
     revision = {
         "dispatch_sha256": header["dispatch_sha256"],
         "resources_sha256": header["resources_sha256"],
+        "prompts_sha256": header["prompts_sha256"],
     }
+    prompt_snapshot = json.loads(header["prompts_json"]) if header["prompts_json"] else None
     task_timeouts = _task_timeouts_from_rows(timeout_by_task)
     timeout = timeout_by_task[task]
     task_timeout: dict[str, Any] = {"timeout": timeout["timeout"]}
@@ -95,6 +97,7 @@ def _assemble_task_payload(
         "health": {},
         "config_revision": revision,
         "config_version": int(header["version"]),
+        "prompt_snapshot": prompt_snapshot,
     }
 
 

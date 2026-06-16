@@ -31,7 +31,7 @@ class DbMigrationTests(unittest.TestCase):
 
             row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
             assert row is not None
-        self.assertEqual(row["version_num"], "0003_add_scan_indexes")
+        self.assertEqual(row["version_num"], "0004_prompt_snapshots")
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -75,13 +75,36 @@ class DbMigrationTests(unittest.TestCase):
                 WHERE table_schema = 'public'
                   AND (table_name, column_name) IN (
                     ('intent_sources', 'position'),
-                    ('ai_profile_check_requests', 'error_message')
+                    ('ai_profile_check_requests', 'error_message'),
+                    ('project_execution_configs', 'prompt_group'),
+                    ('project_execution_configs', 'prompts_sha256')
                   )
                 """
             )
         defaults = {(row["table_name"], row["column_name"]): row["column_default"] for row in rows}
         self.assertIn("0", defaults[("intent_sources", "position")])
         self.assertIn("''", defaults[("ai_profile_check_requests", "error_message")])
+        self.assertIn("''", defaults[("project_execution_configs", "prompt_group")])
+        self.assertIn("''", defaults[("project_execution_configs", "prompts_sha256")])
+
+    def test_prompt_snapshot_columns_exist(self) -> None:
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            rows = sql.fetchall(
+                conn,
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'project_execution_configs'
+                  AND column_name IN ('prompt_group', 'prompts_json', 'prompts_sha256')
+                """
+            )
+        self.assertEqual(
+            {row["column_name"] for row in rows},
+            {"prompt_group", "prompts_json", "prompts_sha256"},
+        )
 
 
 if __name__ == "__main__":

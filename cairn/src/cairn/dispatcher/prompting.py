@@ -1,14 +1,36 @@
 from __future__ import annotations
 
 import json
+import logging
 from importlib import resources
 from typing import Any
 
 from cairn.shared.config import RemoteSupportConfig
 
+LOG = logging.getLogger(__name__)
+
 
 def load_prompt(group: str, name: str) -> str:
     return resources.files("cairn.dispatcher.prompts").joinpath(group).joinpath(name).read_text(encoding="utf-8")
+
+
+def load_prompt_from_execution_config(
+    execution_config: dict | None,
+    name: str,
+    fallback_group: str,
+    reporter: Any | None = None,
+) -> str:
+    prompt_snapshot = execution_config.get("prompt_snapshot") if isinstance(execution_config, dict) else None
+    prompts = prompt_snapshot.get("prompts") if isinstance(prompt_snapshot, dict) else None
+    if isinstance(prompts, dict):
+        content = prompts.get(name)
+        if isinstance(content, str):
+            return content
+    message = f"execution config prompt snapshot missing {name}; using prompt group {fallback_group}"
+    LOG.warning(message)
+    if reporter is not None:
+        reporter.emit_error("prompt_snapshot", "warning", message)
+    return load_prompt(fallback_group, name)
 
 
 def render_prompt(template: str, replacements: dict[str, str]) -> str:

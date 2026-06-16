@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from cairn.dispatcher.contracts import parse_json_output, validate_bootstrap_execute_payload
-from cairn.dispatcher.prompting import format_remote_support_instructions, load_prompt, render_prompt
+from cairn.dispatcher.prompting import (
+    format_remote_support_instructions,
+    load_prompt_from_execution_config,
+    render_prompt,
+)
 from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
 from cairn.dispatcher.tasks.bootstrap_result import run_bootstrap_conclude_fallback, write_bootstrap_complete_result
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
@@ -25,7 +29,12 @@ def _emit_capability_manifest(reporter, project: ProjectDetail, execution_config
 def _build_prompt(ctx: IntentTaskContext) -> str:
     prepared = ctx.prepared
     return render_prompt(
-        load_prompt(ctx.config.runtime.prompt_group, "bootstrap.md"),
+        load_prompt_from_execution_config(
+            prepared.execution_config,
+            "bootstrap.md",
+            ctx.config.runtime.prompt_group,
+            ctx.reporter,
+        ),
         {
             **bootstrap_prompt_replacements(ctx.project),
             "remote_support_instructions": format_remote_support_instructions(ctx.config.remote_support),
@@ -76,6 +85,7 @@ def _conclude_fallback(ctx: IntentTaskContext) -> str:
         reporter=ctx.reporter,
         conclude_timeout=int(ctx.prepared.task_timeout["conclude_timeout"]),
         capability_context=ctx.prepared.capabilities.context,
+        execution_config=ctx.prepared.execution_config,
     )
 
 

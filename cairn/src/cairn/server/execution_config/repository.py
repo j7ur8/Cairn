@@ -32,10 +32,12 @@ def replace_project_execution_config(
         """
         INSERT INTO project_execution_configs (
             project_id, version, role_id, role_json, proxy_id,
-            dispatch_sha256, resources_sha256, created_at, updated_at
+            dispatch_sha256, resources_sha256, prompt_group, prompts_json,
+            prompts_sha256, created_at, updated_at
         ) VALUES (
             :project_id, :version, :role_id, :role_json, :proxy_id,
-            :dispatch_sha256, :resources_sha256, :created_at, :updated_at
+            :dispatch_sha256, :resources_sha256, :prompt_group, :prompts_json,
+            :prompts_sha256, :created_at, :updated_at
         )
         ON CONFLICT(project_id) DO UPDATE SET
             version = excluded.version,
@@ -44,6 +46,9 @@ def replace_project_execution_config(
             proxy_id = excluded.proxy_id,
             dispatch_sha256 = excluded.dispatch_sha256,
             resources_sha256 = excluded.resources_sha256,
+            prompt_group = excluded.prompt_group,
+            prompts_json = excluded.prompts_json,
+            prompts_sha256 = excluded.prompts_sha256,
             updated_at = excluded.updated_at
         """,
         {
@@ -54,6 +59,9 @@ def replace_project_execution_config(
             "proxy_id": snapshot.proxy_id,
             "dispatch_sha256": snapshot.revision["dispatch_sha256"],
             "resources_sha256": snapshot.revision["resources_sha256"],
+            "prompt_group": snapshot.prompt_snapshot["prompt_group"],
+            "prompts_json": json.dumps(snapshot.prompt_snapshot, ensure_ascii=False, sort_keys=True),
+            "prompts_sha256": snapshot.prompt_snapshot["prompts_sha256"],
             "created_at": now,
             "updated_at": now,
         },

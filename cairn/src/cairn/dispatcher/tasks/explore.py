@@ -24,6 +24,7 @@ def _build_prompt(ctx: IntentTaskContext) -> str:
         export_yaml=ctx.export_yaml,
         intent=ctx.intent,
         prepared=ctx.prepared,
+        reporter=ctx.reporter,
     )
 
 
@@ -69,6 +70,7 @@ def _conclude_fallback(ctx: IntentTaskContext) -> str:
         reporter=ctx.reporter,
         conclude_timeout=int(ctx.prepared.task_timeout["conclude_timeout"]),
         capability_context=ctx.prepared.capabilities.context,
+        execution_config=ctx.prepared.execution_config,
     )
 
 

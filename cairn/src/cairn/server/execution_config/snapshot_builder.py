@@ -10,8 +10,11 @@ from cairn.server.config.capabilities import list_yaml_capabilities
 from cairn.server.config.files import config_revision
 from cairn.server.config.roles import get_yaml_role_snapshot
 from cairn.server.execution_config.models import TASK_TYPES, ProjectExecutionConfigSnapshot
+from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
 from cairn.server.models_pkg import TaskCapabilitySelectionMap
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
+from cairn.server.runtime_config import dispatch_config_path
+from cairn.shared.config import load_dispatch_config
 from cairn.shared.contracts import TaskTimeouts
 
 
@@ -24,6 +27,8 @@ def build_project_execution_config_snapshot(
     task_timeouts: TaskTimeouts,
 ) -> ProjectExecutionConfigSnapshot:
     revision = config_revision()
+    dispatch_config = load_dispatch_config(dispatch_config_path())
+    prompt_snapshot = load_prompt_snapshot(dispatch_config.runtime.prompt_group)
     role = get_yaml_role_snapshot(role_id) if role_id else None
     role_default_skill_ids = [
         str(item).strip()
@@ -51,4 +56,5 @@ def build_project_execution_config_snapshot(
         ai_by_task=ai_by_task,
         capabilities_by_task=expanded_per_task,
         revision=revision,
+        prompt_snapshot=prompt_snapshot,
     )

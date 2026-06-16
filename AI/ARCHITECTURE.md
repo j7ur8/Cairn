@@ -19,7 +19,7 @@
 ```mermaid
 flowchart TB
     subgraph UI["前端展示层"]
-        SPA["静态 SPA\nserver/partials/* + assemble_index()"]
+        SPA["静态 SPA\npartials + Alpine CairnParts slices"]
     end
 
     subgraph API["Cairn Server / FastAPI"]
@@ -144,13 +144,16 @@ sequenceDiagram
 | Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
 | Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
 | Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；SQL 拆到 execution/event/view/usage/retention repository/query 模块 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
+| Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由 `CairnParts` slices 合并，Settings 按 settings/admin/prompts/AI profiles/proxies/capabilities 域拆分 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind, Cytoscape |
 | Shared Observability | `cairn/src/cairn/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
 | Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
 | Capabilities | `capabilities/` | 技能、角色、payload、模板、MCP 配置素材 | YAML/Markdown | Worker prompt context | Dispatcher, prompt builder |
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
 | Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
 
-当前 Alembic head 为 `0003_add_scan_indexes`。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+当前 Alembic head 为 `0004_prompt_snapshots`。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+
+前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，脚本按 `_doc_close.html` 顺序加载。`cairn-app.js` 只负责合并 `CairnParts` slices 并保留 duplicate key guard；Settings 数据加载入口在 `parts.settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
 
 ## 4. 内部模块间通信
 

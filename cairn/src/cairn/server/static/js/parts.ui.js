@@ -71,32 +71,6 @@ CairnParts.ui = function () {
       return this.appBootstrapped && !this.showLogin;
     },
 
-    adminNavItems() {
-      return [
-        { section: 'server', label: 'Server Settings', icon: 'SV' },
-        { section: 'runtime', label: 'Runtime & Limits', icon: 'RT' },
-        { section: 'tasks', label: 'Task Timeouts', icon: 'TS' },
-        { section: 'observability', label: 'Observability', icon: 'OB' },
-        { section: 'system', label: 'Log & Retention', icon: 'SY' },
-        { section: 'ai', label: 'AI Profiles', icon: 'AI' },
-        { section: 'capabilities', label: 'Capabilities', icon: 'CA' },
-        { section: 'proxies', label: 'Proxies', icon: 'PX' },
-      ];
-    },
-
-    async navigateSettings(section = 'server') {
-      this.settingsSection = section;
-      this.showSettings = false;
-      this.view = 'settings';
-      this.mobileNavOpen = false;
-      await Promise.all([
-        this.loadSettings(),
-        this.loadAiProfiles(),
-        this.loadProxies(),
-        this.loadCapabilityAdmin(),
-      ]);
-    },
-
     shellTitle() {
       if (this.view === 'newProject') return 'New Project';
       if (this.view === 'settings') return this.settingsSectionTitle();

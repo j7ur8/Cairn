@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -87,6 +88,15 @@ class ExecutionConfigSourceTests(unittest.TestCase):
                 """,
                 {"project_id": project.project.id},
             )
+            header = sql.fetchone(
+                conn,
+                """
+                SELECT prompt_group, prompts_json, prompts_sha256
+                FROM project_execution_configs
+                WHERE project_id = :project_id
+                """,
+                {"project_id": project.project.id},
+            )
             removed_tables = sql.fetchall(
                 conn,
                 """
@@ -114,11 +124,22 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual(next(row for row in timeout_rows if row["task_type"] == "explore")["timeout"], 11)
         self.assertEqual(next(row for row in timeout_rows if row["task_type"] == "explore")["conclude_timeout"], 12)
         self.assertEqual([row["task_type"] for row in ai_rows], ["bootstrap", "explore", "reason"])
+        assert header is not None
+        prompt_snapshot = json.loads(header["prompts_json"])
+        self.assertEqual(header["prompt_group"], "default")
+        self.assertEqual(prompt_snapshot["prompt_group"], "default")
+        self.assertEqual(
+            set(prompt_snapshot["prompts"]),
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
+        )
+        self.assertEqual(header["prompts_sha256"], prompt_snapshot["prompts_sha256"])
         self.assertEqual(removed_tables, [])
         self.assertEqual(explore_config["task_type"], "explore")
         self.assertEqual(explore_config["task_timeout"], {"timeout": 11, "conclude_timeout": 12})
         self.assertIn("ai_profiles", explore_config)
         self.assertIn("config_revision", explore_config)
+        self.assertEqual(explore_config["config_revision"]["prompts_sha256"], header["prompts_sha256"])
+        self.assertEqual(explore_config["prompt_snapshot"], prompt_snapshot)
         self.assertIn("task_timeouts", explore_config)
         self.assertNotIn("sk", explore_config["ai_profiles"][0])
         self.assertNotIn("test-key", str(explore_config))

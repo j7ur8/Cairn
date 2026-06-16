@@ -26,7 +26,7 @@ Cairn 采用 Blackboard Architecture。Server 维护事实、意图和提示构�
 | 调度与运行 | ThreadPoolExecutor, Docker SDK, requests |
 | 认证 | JWT, bcrypt |
 | 观测 | Prometheus metrics, 结构化日志, LLM execution events |
-| 前端 | 无构建 SPA, Alpine.js, Tailwind CDN/vendor, Cytoscape |
+| 前端 | 无构建 SPA, FastAPI partials, Alpine.js `CairnParts` slices, Tailwind CDN/vendor, Cytoscape |
 | 部署 | Docker Compose, uv |
 
 ## 3. 目录结构

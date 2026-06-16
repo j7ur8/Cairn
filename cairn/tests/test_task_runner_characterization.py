@@ -75,6 +75,7 @@ class _FakeDriver:
 
 @dataclass
 class _FakePrepared:
+    execution_config: dict
     task_timeout: dict
     capabilities: object
     role: object
@@ -83,7 +84,7 @@ class _FakePrepared:
 def _prepared() -> _FakePrepared:
     caps = mock.Mock(context={}, instructions="", summary="", errors=[])
     role = mock.Mock(instructions="", summary="", errors=[])
-    return _FakePrepared(task_timeout={"timeout": 5, "conclude_timeout": 5}, capabilities=caps, role=role)
+    return _FakePrepared(execution_config={}, task_timeout={"timeout": 5, "conclude_timeout": 5}, capabilities=caps, role=role)
 
 
 def _result(*, returncode=0, stdout="{}", stderr="", timed_out=False, cancelled=False, cancel_reason=None):
@@ -143,7 +144,7 @@ def _patch_bootstrap(
     release = p(mock.patch.object(intent_task_mod, "best_effort_release"))
     # Type-specific hooks remain on the bootstrap module.
     p(mock.patch.object(bootstrap_mod, "render_prompt", return_value="PROMPT"))
-    p(mock.patch.object(bootstrap_mod, "load_prompt", return_value="TMPL"))
+    p(mock.patch.object(bootstrap_mod, "load_prompt_from_execution_config", return_value="TMPL"))
     p(mock.patch.object(bootstrap_mod, "bootstrap_prompt_replacements", return_value={}))
     p(mock.patch.object(bootstrap_mod, "format_remote_support_instructions", return_value=""))
     p(mock.patch.object(bootstrap_mod, "project_capability_data", return_value={}))
