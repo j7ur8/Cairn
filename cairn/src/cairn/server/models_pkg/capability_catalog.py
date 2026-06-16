@@ -76,6 +76,7 @@ class CapabilityCatalogItem(BaseModel):
     transport: str | None = None
     command: str | None = None
     args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     last_probe_status: Literal["ok", "warn", "error"] | None = None

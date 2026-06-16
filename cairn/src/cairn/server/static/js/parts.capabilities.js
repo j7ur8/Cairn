@@ -12,6 +12,9 @@ CairnParts.capabilities = function () {
     capabilityForm: defaultCapabilityForm(),
     capabilityFormOpen: false,
     capabilityEditId: '',
+    capabilityImportOpen: false,
+    capabilityImportText: '',
+    capabilitySearch: { mcp: '', skill: '' },
     capabilitiesSaving: false,
     newProjectCapabilityPanel: 'bootstrap',
     showSettings: false,
@@ -35,6 +38,14 @@ CairnParts.capabilities = function () {
       log_level: 'INFO', log_format: 'text',
       retention_enabled: true, retention_interval_seconds: 21600,
     },
+    promptTemplateNames: ['bootstrap.md', 'bootstrap_conclude.md', 'explore.md', 'explore_conclude.md', 'reason.md'],
+    promptGroups: [],
+    promptGroupSelected: '',
+    promptTemplateSelected: 'bootstrap.md',
+    promptGroupDetail: null,
+    promptEditorContent: '',
+    promptEditorSaving: false,
+    promptEditorLoading: false,
     capabilityAdminPanel: 'bootstrap',
     proxyForm: { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' },
     proxyFormOpen: false,
@@ -475,6 +486,7 @@ CairnParts.capabilities = function () {
         requires_ids: [],
         required_skill_ids: [],
         use_when: [],
+        use_when_text: '',
         activation_hint: '',
         preferred_mcp_ids: [],
         transport: 'stdio',
@@ -483,23 +495,52 @@ CairnParts.capabilities = function () {
         url: '',
         authorization_header: '',
         source_path: '',
+        env_text: '',
         headers: {},
+        headers_text: '',
         probe_config: {},
+        probe_config_text: '{}',
         detail: '',
         available: true,
       };
     },
 
-    openCreateCapability() {
+    openCreateCapability(kind = 'mcp_server') {
+      if (kind === 'skill') return this.openCreateSkill();
+      return this.openCreateMcpServer();
+    },
+
+    openCreateMcpServer() {
       this.capabilityEditId = '';
       this.capabilityForm = this.defaultCapabilityForm();
+      this.capabilityForm.kind = 'mcp_server';
       this.capabilityFormOpen = true;
+      this.capabilityImportOpen = false;
+    },
+
+    openCreateSkill() {
+      this.capabilityEditId = '';
+      this.capabilityForm = this.defaultCapabilityForm();
+      this.capabilityForm.kind = 'skill';
+      this.capabilityFormOpen = true;
+      this.capabilityImportOpen = false;
     },
 
     cancelCapabilityEdit() {
       this.capabilityEditId = '';
       this.capabilityForm = this.defaultCapabilityForm();
       this.capabilityFormOpen = false;
+    },
+
+    openImportMcpJson() {
+      this.cancelCapabilityEdit();
+      this.capabilityImportOpen = true;
+      this.capabilityImportText = this.capabilityImportText || '{\n  "mcpServers": {\n  }\n}';
+    },
+
+    cancelImportMcpJson() {
+      this.capabilityImportOpen = false;
+      this.capabilityImportText = '';
     },
 
     openEditCapability(item) {
@@ -513,16 +554,21 @@ CairnParts.capabilities = function () {
         requires_ids: Array.isArray(item.requires_ids) ? [...item.requires_ids] : [],
         required_skill_ids: Array.isArray(item.required_skill_ids) ? [...item.required_skill_ids] : [],
         use_when: Array.isArray(item.use_when) ? [...item.use_when] : [],
+        use_when_text: Array.isArray(item.use_when) ? item.use_when.join('\n') : '',
         activation_hint: item.activation_hint || '',
         preferred_mcp_ids: Array.isArray(item.preferred_mcp_ids) ? [...item.preferred_mcp_ids] : [],
         transport: item.transport,
         command: item.command || '',
-        args: Array.isArray(item.args) ? item.args.join(' ') : (item.args || ''),
+        args: Array.isArray(item.args) ? item.args.join('\n') : (item.args || ''),
         url: item.url || '',
         source_path: item.source_path || '',
+        env: (item.env && typeof item.env === 'object') ? item.env : {},
+        env_text: this.keyValueObjectToText(item.env || {}),
         headers: (item.headers && typeof item.headers === 'object') ? item.headers : {},
+        headers_text: this.keyValueObjectToText(item.headers || {}),
         authorization_header: item.headers && typeof item.headers === 'object' ? (item.headers.Authorization || '') : '',
         probe_config: (item.probe_config && typeof item.probe_config === 'object') ? item.probe_config : {},
+        probe_config_text: this.jsonObjectToText(item.probe_config || {}),
         detail: item.detail || '',
         available: item.available !== false,
       };
@@ -539,7 +585,7 @@ CairnParts.capabilities = function () {
           return value.map(s => String(s || '').trim()).filter(Boolean);
         }
         if (typeof value === 'string') {
-          return value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+          return value.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
         }
         return [];
       };
@@ -551,7 +597,7 @@ CairnParts.capabilities = function () {
         task_types: normalizeStringList(this.capabilityForm.task_types),
         requires_ids: normalizeStringList(this.capabilityForm.requires_ids),
         required_skill_ids: normalizeStringList(this.capabilityForm.required_skill_ids),
-        use_when: normalizeStringList(this.capabilityForm.use_when),
+        use_when: normalizeStringList(this.capabilityForm.use_when_text || this.capabilityForm.use_when),
         activation_hint: this.capabilityForm.activation_hint || '',
         preferred_mcp_ids: normalizeStringList(this.capabilityForm.preferred_mcp_ids),
         detail: this.capabilityForm.detail || '',
@@ -567,15 +613,14 @@ CairnParts.capabilities = function () {
           url: this.capabilityForm.url || '',
           source_path: this.capabilityForm.source_path || '',
         };
-        payload.headers = (this.capabilityForm.headers && typeof this.capabilityForm.headers === 'object')
-          ? this.capabilityForm.headers : {};
+        payload.env = this.textToKeyValueObject(this.capabilityForm.env_text || '');
+        payload.headers = this.textToKeyValueObject(this.capabilityForm.headers_text || '');
         if (this.capabilityForm.authorization_header) {
           payload.headers.Authorization = this.capabilityForm.authorization_header;
         } else {
           delete payload.headers.Authorization;
         }
-        payload.probe_config = (this.capabilityForm.probe_config && typeof this.capabilityForm.probe_config === 'object')
-          ? this.capabilityForm.probe_config : {};
+        payload.probe_config = this.textToJsonObject(this.capabilityForm.probe_config_text || '{}');
       } else {
         payload = {
           ...basePayload,
@@ -586,6 +631,29 @@ CairnParts.capabilities = function () {
         await this.api('PUT', `/capabilities/admin/${payload.kind}/${encodeURIComponent(payload.id)}`, payload);
         this.showToast('Capability saved');
         this.cancelCapabilityEdit();
+        await this.loadCapabilityAdmin();
+        await this.loadNewProjectCatalog();
+        await this.loadCapabilities();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async importMcpJson() {
+      let payload;
+      try {
+        payload = JSON.parse(this.capabilityImportText || '{}');
+      } catch (e) {
+        this.showToast(`Invalid JSON: ${e.message}`, 'error');
+        return;
+      }
+      try {
+        const result = await this.api('POST', '/capabilities/admin/mcp/import-json', payload);
+        const created = (result.created || []).length;
+        const updated = (result.updated || []).length;
+        const conflicts = (result.conflicts || []).length;
+        this.showToast(`Imported MCP: ${created} created, ${updated} updated${conflicts ? `, ${conflicts} conflicts` : ''}`);
+        this.cancelImportMcpJson();
         await this.loadCapabilityAdmin();
         await this.loadNewProjectCatalog();
         await this.loadCapabilities();
@@ -624,6 +692,65 @@ CairnParts.capabilities = function () {
       } catch (e) {
         this.capabilityAdmin = { catalog: [], health: {} };
       }
+    },
+
+    capabilityItems(kind) {
+      const query = (kind === 'mcp_server' ? this.capabilitySearch.mcp : this.capabilitySearch.skill || '').toLowerCase();
+      const items = (this.capabilityAdmin.catalog || []).filter(item => item.kind === kind);
+      if (!query) return items;
+      return items.filter(item => [
+        item.id,
+        item.name,
+        item.description,
+        item.transport,
+        item.source_path,
+        item.command,
+        item.url,
+      ].some(value => String(value || '').toLowerCase().includes(query)));
+    },
+
+    capabilityDependencyOptions(kind) {
+      return (this.capabilityAdmin.catalog || []).filter(item => item.kind === kind && item.id !== this.capabilityForm.id);
+    },
+
+    toggleCapabilityListField(field, id, checked) {
+      const current = Array.isArray(this.capabilityForm[field]) ? this.capabilityForm[field] : [];
+      const set = new Set(current);
+      if (checked) set.add(id);
+      else set.delete(id);
+      this.capabilityForm[field] = Array.from(set);
+    },
+
+    keyValueObjectToText(value) {
+      if (!value || typeof value !== 'object') return '';
+      return Object.entries(value).map(([key, item]) => `${key}=${item}`).join('\n');
+    },
+
+    textToKeyValueObject(text) {
+      const out = {};
+      for (const raw of String(text || '').split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        const index = line.indexOf('=');
+        if (index <= 0) throw new Error(`Invalid key=value line: ${line}`);
+        const key = line.slice(0, index).trim();
+        const value = line.slice(index + 1).trim();
+        if (key) out[key] = value;
+      }
+      return out;
+    },
+
+    jsonObjectToText(value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return '{}';
+      return JSON.stringify(value, null, 2);
+    },
+
+    textToJsonObject(text) {
+      const value = JSON.parse(text || '{}');
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Probe config must be a JSON object');
+      }
+      return value;
     },
 
     aiProfileTaskTypes() {
@@ -1004,7 +1131,70 @@ CairnParts.capabilities = function () {
       try {
         const r = await this.api('GET', '/runtime-limits');
         Object.assign(this.runtimeLimitsForm, r);
+        if (!this.promptGroupSelected) this.promptGroupSelected = r.prompt_group || 'default';
       } catch(e) { console.error(e); }
+    },
+    async loadPromptGroups() {
+      this.promptEditorLoading = true;
+      try {
+        if (!this.runtimeLimitsForm.prompt_group) await this.loadRuntimeLimits();
+        const data = await this.api('GET', '/prompt-groups');
+        this.promptGroups = Array.isArray(data.groups) ? data.groups : [];
+        if (!this.promptGroupSelected) {
+          this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || this.promptGroups[0] || '';
+        }
+        if (this.promptGroupSelected) await this.loadPromptGroup(this.promptGroupSelected);
+      } catch(e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.promptEditorLoading = false;
+      }
+    },
+    async loadPromptGroup(group = this.promptGroupSelected) {
+      if (!group) return;
+      this.promptGroupSelected = group;
+      this.promptEditorLoading = true;
+      try {
+        const detail = await this.api('GET', `/prompt-groups/${encodeURIComponent(group)}`);
+        this.promptGroupDetail = detail;
+        if (!this.promptTemplateNames.includes(this.promptTemplateSelected)) {
+          this.promptTemplateSelected = this.promptTemplateNames[0];
+        }
+        this.promptEditorContent = detail.prompts?.[this.promptTemplateSelected] || '';
+      } catch(e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.promptEditorLoading = false;
+      }
+    },
+    selectPromptTemplate(name) {
+      if (!this.promptTemplateNames.includes(name)) return;
+      this.promptTemplateSelected = name;
+      this.promptEditorContent = this.promptGroupDetail?.prompts?.[name] || '';
+    },
+    promptTemplateSha(name = this.promptTemplateSelected) {
+      return this.promptGroupDetail?.prompt_sha256?.[name] || '';
+    },
+    promptGroupSha() {
+      return this.promptGroupDetail?.prompts_sha256 || '';
+    },
+    async savePromptTemplate() {
+      if (!this.promptGroupSelected || !this.promptTemplateSelected) return;
+      this.promptEditorSaving = true;
+      try {
+        const detail = await this.api(
+          'PUT',
+          `/prompt-groups/${encodeURIComponent(this.promptGroupSelected)}/${encodeURIComponent(this.promptTemplateSelected)}`,
+          { content: this.promptEditorContent || '' },
+        );
+        this.promptGroupDetail = detail;
+        this.promptEditorContent = detail.prompts?.[this.promptTemplateSelected] || '';
+        this.showToast('Prompt template saved');
+      } catch(e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.promptEditorSaving = false;
+      }
     },
     async loadTaskTimeouts() {
       try {

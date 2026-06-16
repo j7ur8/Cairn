@@ -22,6 +22,7 @@ class CapabilityAdminRequest(BaseModel):
     transport: str | None = None
     command: str | None = None
     args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
@@ -29,3 +30,13 @@ class CapabilityAdminRequest(BaseModel):
 class CapabilityAdminResponse(BaseModel):
     catalog: list[CapabilityCatalogItem]
     health: dict[str, list[CapabilityHealthEntry]] = Field(default_factory=dict)
+
+
+class McpImportRequest(BaseModel):
+    mcpServers: dict[str, dict] = Field(default_factory=dict)
+
+
+class McpImportResponse(BaseModel):
+    created: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)

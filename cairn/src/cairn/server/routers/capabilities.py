@@ -13,6 +13,7 @@ from cairn.server.application.capabilities import (
 from cairn.server.capability_health import probe_capability
 from cairn.server.config.capabilities import (
     delete_yaml_capability,
+    import_mcp_servers,
     list_yaml_capabilities,
     upsert_yaml_capability,
 )
@@ -22,6 +23,8 @@ from cairn.server.models_pkg import (
     CapabilityAdminResponse,
     CapabilityCatalogItem,
     CapabilityHealthEntry,
+    McpImportRequest,
+    McpImportResponse,
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectRoleResponse,
@@ -70,6 +73,14 @@ def upsert_admin_capability(
 @router.delete("/capabilities/admin/{kind}/{capability_id}", status_code=204)
 def delete_admin_capability(kind: str, capability_id: str, _superuser=Depends(current_active_superuser)):
     delete_yaml_capability(kind, capability_id)
+
+
+@router.post(
+    "/capabilities/admin/mcp/import-json",
+    response_model=McpImportResponse,
+)
+def import_admin_mcp_json(body: McpImportRequest, _superuser=Depends(current_active_superuser)):
+    return import_mcp_servers(body.mcpServers)
 
 
 @router.post(

@@ -7,7 +7,12 @@ instead, and keep pure business decisions in domain/application code.
 
 from __future__ import annotations
 
-from cairn.server.models_pkg.capability_admin import CapabilityAdminRequest, CapabilityAdminResponse
+from cairn.server.models_pkg.capability_admin import (
+    CapabilityAdminRequest,
+    CapabilityAdminResponse,
+    McpImportRequest,
+    McpImportResponse,
+)
 from cairn.server.models_pkg.capability_catalog import (
     CapabilityCatalogItem,
     CapabilityHealthEntry,

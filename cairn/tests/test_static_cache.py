@@ -122,9 +122,20 @@ class StaticCacheTests(unittest.TestCase):
         html = _frontend_source()
         self.assertIn("const normalizeStringList = (value) => {", html)
         self.assertIn("args: normalizeStringList(this.capabilityForm.args),", html)
+        self.assertIn("payload.env = this.textToKeyValueObject(this.capabilityForm.env_text || '');", html)
         self.assertIn("required_skill_ids: normalizeStringList(this.capabilityForm.required_skill_ids),", html)
         self.assertIn("preferred_mcp_ids: normalizeStringList(this.capabilityForm.preferred_mcp_ids),", html)
         self.assertNotIn("const payload = { ...this.capabilityForm };", html)
+
+    def test_capability_admin_ui_uses_two_columns_and_import_action(self) -> None:
+        html = _frontend_source()
+        self.assertIn("data-testid=\"settings-capability-add-mcp\"", html)
+        self.assertIn("data-testid=\"settings-capability-add-skill\"", html)
+        self.assertIn("data-testid=\"settings-capability-import\"", html)
+        self.assertIn("async importMcpJson()", html)
+        self.assertIn("capabilityItems('mcp_server')", html)
+        self.assertIn("capabilityItems('skill')", html)
+        self.assertNotIn("data-testid=\"settings-capability-add\"", html)
 
     def test_health_reports_postgres_status(self) -> None:
         from fastapi.testclient import TestClient

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from cairn.server.config.files import load_resources_data, save_resources_data
-from cairn.server.models_pkg import CapabilityAdminRequest, CapabilityCatalogItem
+from cairn.server.models_pkg import CapabilityAdminRequest, CapabilityCatalogItem, McpImportResponse
 from cairn.shared.task_types import default_capability_task_type_names
 
 
@@ -23,6 +23,7 @@ def list_yaml_capabilities() -> list[CapabilityCatalogItem]:
         payload.setdefault("detail", payload["transport"])
         payload.setdefault("source", "builtin")
         payload.setdefault("args", payload.get("args") or [])
+        payload.setdefault("env", payload.get("env") or {})
         payload.setdefault("headers", payload.get("headers") or {})
         payload.setdefault("required_skill_ids", payload.get("required_skill_ids") or [])
         payload.setdefault("preferred_mcp_ids", [])
@@ -50,16 +51,53 @@ def upsert_yaml_capability(kind: str, capability_id: str, body: CapabilityAdminR
         raise HTTPException(500, f"config.resources.yaml capabilities.{section} must be a list")
     existing_idx = next((idx for idx, item in enumerate(entries) if isinstance(item, dict) and item.get("id") == capability_id), None)
     existing = entries[existing_idx] if existing_idx is not None else {}
-    if existing_idx is not None and existing.get("source") not in (None, "user"):
+    if existing_idx is not None and existing.get("source") != "user":
         raise HTTPException(409, f"capability {kind}/{capability_id} is built-in and cannot be modified")
     _validate_capability_links(kind, capability_id, body)
-    payload = _capability_body_to_yaml(kind, capability_id, body)
+    payload = _capability_body_to_yaml(
+        kind,
+        capability_id,
+        body,
+        source=str(existing.get("source") or "builtin") if existing_idx is not None else "user",
+    )
     if existing_idx is None:
         entries.append(payload)
     else:
         entries[existing_idx] = payload
     save_resources_data(data)
     return next(item for item in list_yaml_capabilities() if item.kind == kind and item.id == capability_id)
+
+
+def import_mcp_servers(payload: dict[str, dict]) -> McpImportResponse:
+    data = load_resources_data()
+    caps = data.setdefault("capabilities", {})
+    entries = caps.setdefault("mcp_servers", [])
+    if not isinstance(entries, list):
+        raise HTTPException(500, "config.resources.yaml capabilities.mcp_servers must be a list")
+    created: list[str] = []
+    updated: list[str] = []
+    conflicts: list[str] = []
+    for raw_id, spec in payload.items():
+        capability_id = str(raw_id or "").strip()
+        if not capability_id:
+            continue
+        existing_idx = next((idx for idx, item in enumerate(entries) if isinstance(item, dict) and item.get("id") == capability_id), None)
+        existing = entries[existing_idx] if existing_idx is not None else {}
+        if existing_idx is not None and existing.get("source") != "user":
+            conflicts.append(capability_id)
+            continue
+        body = _mcp_import_spec_to_body(capability_id, spec)
+        _validate_capability_links("mcp_server", capability_id, body)
+        item = _capability_body_to_yaml("mcp_server", capability_id, body, source="user")
+        if existing_idx is None:
+            entries.append(item)
+            created.append(capability_id)
+        else:
+            entries[existing_idx] = item
+            updated.append(capability_id)
+    if created or updated:
+        save_resources_data(data)
+    return McpImportResponse(created=created, updated=updated, conflicts=conflicts)
 
 
 def delete_yaml_capability(kind: str, capability_id: str) -> None:
@@ -74,7 +112,7 @@ def delete_yaml_capability(kind: str, capability_id: str) -> None:
     for idx, item in enumerate(entries):
         if not isinstance(item, dict) or item.get("id") != capability_id:
             continue
-        if item.get("source") not in (None, "user"):
+        if item.get("source") != "user":
             raise HTTPException(409, f"{kind}/{capability_id} is built-in and cannot be deleted")
         entries.pop(idx)
         save_resources_data(data)
@@ -105,10 +143,18 @@ def _validate_capability_links(kind: str, capability_id: str, body: CapabilityAd
                 raise HTTPException(400, f"preferred MCP id not in catalog: {mcp_id}")
 
 
-def _capability_body_to_yaml(kind: str, capability_id: str, body: CapabilityAdminRequest) -> dict[str, Any]:
+def _capability_body_to_yaml(
+    kind: str,
+    capability_id: str,
+    body: CapabilityAdminRequest,
+    *,
+    source: str = "user",
+) -> dict[str, Any]:
+    _validate_capability_body(kind, capability_id, body)
     common: dict[str, Any] = {
         "id": capability_id,
         "name": body.name,
+        "source": source,
         "description": body.description,
         "task_types": body.task_types or list(default_capability_task_type_names()),
         "use_when": body.use_when,
@@ -129,6 +175,7 @@ def _capability_body_to_yaml(kind: str, capability_id: str, body: CapabilityAdmi
                 "source_path": body.source_path,
                 "command": body.command,
                 "args": body.args,
+                "env": body.env,
                 "url": body.url,
                 "headers": body.headers,
                 "required_skill_ids": body.required_skill_ids,
@@ -143,6 +190,46 @@ def _capability_body_to_yaml(kind: str, capability_id: str, body: CapabilityAdmi
             }
         )
     return _strip_empty_values(common)
+
+
+def _validate_capability_body(kind: str, capability_id: str, body: CapabilityAdminRequest) -> None:
+    if kind == "mcp_server":
+        if body.transport not in ("stdio", "http"):
+            raise HTTPException(400, "mcp_server transport must be 'stdio' or 'http'")
+        if body.transport == "stdio" and not (body.command or "").strip():
+            raise HTTPException(400, f"mcp_server {capability_id}: stdio transport requires command")
+        if body.transport == "http" and not (body.url or "").strip():
+            raise HTTPException(400, f"mcp_server {capability_id}: http transport requires url")
+    elif kind == "skill":
+        if not (body.source_path or "").strip():
+            raise HTTPException(400, f"skill {capability_id}: source_path is required")
+    else:
+        raise HTTPException(400, f"unknown kind: {kind}")
+
+
+def _mcp_import_spec_to_body(capability_id: str, spec: dict[str, Any]) -> CapabilityAdminRequest:
+    if not isinstance(spec, dict):
+        raise HTTPException(400, f"mcp server {capability_id}: spec must be an object")
+    source = dict(spec)
+    url = source.get("url") or source.get("httpUrl")
+    command = source.get("command")
+    transport = "http" if url and not command else "stdio"
+    args = source.get("args") if isinstance(source.get("args"), list) else []
+    env = source.get("env") if isinstance(source.get("env"), dict) else {}
+    headers = source.get("headers") if isinstance(source.get("headers"), dict) else {}
+    return CapabilityAdminRequest(
+        id=capability_id,
+        name=str(source.get("name") or capability_id),
+        description=str(source.get("description") or ""),
+        task_types=list(default_capability_task_type_names()),
+        transport=transport,
+        command=str(command or "") if command else None,
+        args=[str(item) for item in args],
+        env={str(key): str(value) for key, value in env.items()},
+        url=str(url or "") if url else None,
+        headers={str(key): str(value) for key, value in headers.items()},
+        available=True,
+    )
 
 
 def _strip_empty_values(value: dict[str, Any]) -> dict[str, Any]:

@@ -73,11 +73,78 @@ class CapabilityAdminTests(unittest.TestCase):
         items = {(item.kind, item.id): item for item in get_capability_catalog()}
         self.assertIn(("mcp_server", "my-mcp"), items)
         self.assertIn(("skill", "my-skill"), items)
+        self.assertEqual(items[("mcp_server", "my-mcp")].source, "user")
+        self.assertEqual(items[("skill", "my-skill")].source, "user")
 
         delete_admin_capability("skill", "my-skill")
         items = {(item.kind, item.id): item for item in get_capability_catalog()}
         self.assertIn(("mcp_server", "my-mcp"), items)
         self.assertNotIn(("skill", "my-skill"), items)
+
+    def test_admin_upsert_persists_mcp_env(self) -> None:
+        from cairn.server.models_pkg import CapabilityAdminRequest
+        from cairn.server.routers.capabilities import get_capability_catalog, upsert_admin_capability
+
+        upsert_admin_capability("mcp_server", "env-mcp", CapabilityAdminRequest(
+            id="env-mcp",
+            name="Env MCP",
+            task_types=["bootstrap", "explore"],
+            transport="stdio",
+            command="env-mcp",
+            env={"A": "1", "B": "two"},
+        ))
+
+        items = {(item.kind, item.id): item for item in get_capability_catalog()}
+        self.assertEqual(items[("mcp_server", "env-mcp")].env, {"A": "1", "B": "two"})
+
+    def test_import_mcp_json_creates_user_items(self) -> None:
+        from cairn.server.models_pkg import McpImportRequest
+        from cairn.server.routers.capabilities import get_capability_catalog, import_admin_mcp_json
+
+        result = import_admin_mcp_json(McpImportRequest(mcpServers={
+            "remote-http": {
+                "url": "https://example.test/mcp",
+                "headers": {"Authorization": "Bearer x"},
+            },
+            "local-stdio": {
+                "command": "/usr/local/bin/example-mcp",
+                "args": ["--flag"],
+                "env": {"K": "V"},
+            },
+        }))
+
+        self.assertEqual(sorted(result.created), ["local-stdio", "remote-http"])
+        items = {(item.kind, item.id): item for item in get_capability_catalog()}
+        self.assertEqual(items[("mcp_server", "remote-http")].transport, "http")
+        self.assertEqual(items[("mcp_server", "remote-http")].source, "user")
+        self.assertEqual(items[("mcp_server", "local-stdio")].env, {"K": "V"})
+
+    def test_import_mcp_json_rejects_builtin_conflict(self) -> None:
+        from cairn.server.models_pkg import McpImportRequest
+        from cairn.server.routers.capabilities import import_admin_mcp_json
+
+        result = import_admin_mcp_json(McpImportRequest(mcpServers={
+            "kali-server-mcp": {"command": "other"},
+        }))
+
+        self.assertEqual(result.conflicts, ["kali-server-mcp"])
+
+    def test_skill_source_path_is_required(self) -> None:
+        from fastapi import HTTPException
+
+        from cairn.server.models_pkg import CapabilityAdminRequest
+        from cairn.server.routers.capabilities import upsert_admin_capability
+
+        with self.assertRaises(HTTPException) as cm:
+            upsert_admin_capability("skill", "missing-path", CapabilityAdminRequest(
+                id="missing-path",
+                name="Missing Path",
+                task_types=["bootstrap"],
+                source_path="",
+            ))
+
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("source_path", cm.exception.detail)
 
     def test_expansion_auto_adds_required_skill(self) -> None:
         from cairn.server.capability_expansion import (
