@@ -143,10 +143,10 @@ docker pull ghcr.io/astral-sh/uv:python3.13-trixie
 Edit `config.yaml` and fill in your LLM endpoints and API keys, then start both services:
  
 ```bash
-docker compose up --build
+./start.sh
 ```
  
-This builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher mounts `config.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
+This exports the repository host path for Docker socket worker mounts, builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher loads `config.yaml` from the repository host path and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
 
 Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP capability. On macOS / Docker Desktop, start Chrome on the host before running a project:
 

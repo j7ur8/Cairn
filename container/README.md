@@ -12,7 +12,7 @@ Build from the repository root with a test tag:
 docker build ./container -t cairn-worker-container:mcp-camoufox
 ```
 
-When starting the full stack with `docker compose up --build`, Compose now builds the same `cairn-worker-container:mcp-camoufox` tag automatically via the `cairn-worker-image` helper service. The manual build command remains useful for isolated image debugging and smoke tests.
+When starting the full stack with `./start.sh` from the repository root, Compose builds the same `cairn-worker-container:mcp-camoufox` tag automatically via the `cairn-worker-image` helper service. The manual build command remains useful for isolated image debugging and smoke tests.
 
 Smoke tests:
 

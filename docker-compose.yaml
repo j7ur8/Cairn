@@ -67,6 +67,7 @@ services:
       dockerfile: Dockerfile
     image: cairn-app
     container_name: cairn-dispatcher
+    working_dir: ${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}
     environment:
       UV_CACHE_DIR: /tmp/uv-cache
       XDG_CACHE_HOME: /tmp/.cache
@@ -79,12 +80,8 @@ services:
     tmpfs:
       - /tmp
     volumes:
+      - .:${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./server.yaml:/cairn/server.yaml:ro
-      - ./config.yaml:/cairn/config.yaml
-      - ./config.resources.yaml:/cairn/config.resources.yaml:ro
-      - ./capabilities:/cairn/capabilities:ro
-      - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -106,7 +103,7 @@ services:
       start_period: 3s
     networks:
       - cairn
-    command: ["/cairn/.venv/bin/cairn", "dispatch", "--config", "config.yaml"]
+    command: ["/cairn/.venv/bin/cairn", "dispatch", "--config", "${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}/config.yaml"]
 
 networks:
   cairn:
