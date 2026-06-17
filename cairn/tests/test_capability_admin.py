@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -231,9 +232,13 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(boot_snapshots[0].capability_id, "role-skill")
         self.assertEqual(boot_snapshots[0].source, "role_default")
 
-    def test_probe_stdio_command_without_source_path_is_ok(self) -> None:
+    def test_probe_mcp_success_updates_yaml_status(self) -> None:
         from cairn.server.models_pkg import CapabilityAdminRequest
-        from cairn.server.routers.capabilities import probe_admin_capability, upsert_admin_capability
+        from cairn.server.routers.capabilities import (
+            get_capability_catalog,
+            probe_admin_capability,
+            upsert_admin_capability,
+        )
 
         upsert_admin_capability("mcp_server", "stdio-mcp", CapabilityAdminRequest(
             id="stdio-mcp",
@@ -242,34 +247,135 @@ class CapabilityAdminTests(unittest.TestCase):
             transport="stdio",
             command="/usr/local/bin/mcp-server",
         ))
-        entry = probe_admin_capability("mcp_server", "stdio-mcp")
-        self.assertEqual(entry.status, "ok")
-        self.assertEqual(entry.message, "stdio command configured")
 
-    def test_probe_chrome_devtools_http_reports_reachable(self) -> None:
+        response = MagicMock()
+        response.read.return_value = json.dumps({
+            "results": [
+                {"capability_id": "stdio-mcp", "status": "ok", "message": "initialize + tools/list ok"}
+            ]
+        }).encode("utf-8")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            entry = probe_admin_capability("mcp_server", "stdio-mcp")
+
+        self.assertEqual(entry.status, "ok")
+        self.assertEqual(entry.message, "initialize + tools/list ok")
+        items = {item.id: item for item in get_capability_catalog() if item.kind == "mcp_server"}
+        self.assertTrue(items["stdio-mcp"].available)
+        self.assertEqual(items["stdio-mcp"].last_probe_status, "ok")
+        self.assertEqual(items["stdio-mcp"].last_probe_message, "initialize + tools/list ok")
+        request = mock_urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:9100/mcp-probe")
+
+    def test_probe_mcp_failure_updates_yaml_status(self) -> None:
+        from cairn.server.models_pkg import CapabilityAdminRequest
+        from cairn.server.routers.capabilities import (
+            get_capability_catalog,
+            probe_admin_capability,
+            upsert_admin_capability,
+        )
+
+        upsert_admin_capability("mcp_server", "bad-mcp", CapabilityAdminRequest(
+            id="bad-mcp",
+            name="Bad MCP",
+            task_types=["bootstrap"],
+            transport="stdio",
+            command="bad-mcp",
+        ))
+
+        response = MagicMock()
+        response.read.return_value = json.dumps({
+            "results": [
+                {"capability_id": "bad-mcp", "status": "error", "message": "connection refused"}
+            ]
+        }).encode("utf-8")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            entry = probe_admin_capability("mcp_server", "bad-mcp")
+
+        self.assertEqual(entry.status, "error")
+        self.assertEqual(entry.message, "connection refused")
+        items = {item.id: item for item in get_capability_catalog() if item.kind == "mcp_server"}
+        self.assertFalse(items["bad-mcp"].available)
+        self.assertEqual(items["bad-mcp"].last_probe_status, "error")
+
+    def test_probe_all_mcp_updates_each_result(self) -> None:
+        from cairn.server.models_pkg import CapabilityAdminRequest
+        from cairn.server.routers.capabilities import (
+            get_capability_catalog,
+            probe_all_admin_mcp_servers,
+            upsert_admin_capability,
+        )
+
+        for capability_id in ("a-mcp", "b-mcp"):
+            upsert_admin_capability("mcp_server", capability_id, CapabilityAdminRequest(
+                id=capability_id,
+                name=capability_id,
+                task_types=["bootstrap"],
+                transport="stdio",
+                command=capability_id,
+            ))
+
+        response = MagicMock()
+        response.read.return_value = json.dumps({
+            "results": [
+                {"capability_id": "a-mcp", "status": "ok", "message": "ready"},
+                {"capability_id": "b-mcp", "status": "error", "message": "boom"},
+            ]
+        }).encode("utf-8")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value = response
+            results = probe_all_admin_mcp_servers()
+
+        by_id = {item.capability_id: item for item in results}
+        self.assertEqual(by_id["a-mcp"].status, "ok")
+        self.assertEqual(by_id["b-mcp"].status, "error")
+        request = mock_urlopen.call_args.args[0]
+        self.assertEqual(json.loads(request.data.decode("utf-8"))["server_ids"], ["a-mcp", "b-mcp"])
+        items = {item.id: item for item in get_capability_catalog() if item.kind == "mcp_server"}
+        self.assertTrue(items["a-mcp"].available)
+        self.assertFalse(items["b-mcp"].available)
+
+    def test_dispatcher_unreachable_marks_target_error(self) -> None:
+        from cairn.server.models_pkg import CapabilityAdminRequest
+        from cairn.server.routers.capabilities import (
+            get_capability_catalog,
+            probe_admin_capability,
+            upsert_admin_capability,
+        )
+
+        upsert_admin_capability("mcp_server", "offline-mcp", CapabilityAdminRequest(
+            id="offline-mcp",
+            name="Offline MCP",
+            task_types=["bootstrap"],
+            transport="stdio",
+            command="offline-mcp",
+        ))
+        with patch("urllib.request.urlopen", side_effect=OSError("dispatcher down")):
+            entry = probe_admin_capability("mcp_server", "offline-mcp")
+
+        self.assertEqual(entry.status, "error")
+        self.assertIn("dispatcher probe failed", entry.message)
+        items = {item.id: item for item in get_capability_catalog() if item.kind == "mcp_server"}
+        self.assertFalse(items["offline-mcp"].available)
+
+    def test_skill_probe_remains_local(self) -> None:
         from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import probe_admin_capability, upsert_admin_capability
 
-        upsert_admin_capability("mcp_server", "chrome-devtools-host", CapabilityAdminRequest(
-            id="chrome-devtools-host",
-            name="Host Chrome",
+        skill_dir = self.yaml.root / "skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        upsert_admin_capability("skill", "skill", CapabilityAdminRequest(
+            id="skill",
+            name="Skill",
             task_types=["bootstrap"],
-            transport="stdio",
-            command="chrome-devtools-mcp",
-            probe_config={
-                "type": "chrome_devtools_http",
-                "url": "http://host.docker.internal:9222/json/version",
-            },
+            source_path=str(skill_dir),
         ))
-        response = MagicMock()
-        response.status = 200
-        response.read.return_value = b'{"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/browser/abc"}'
-        with patch("socket.gethostbyname", return_value="0.250.250.254"), patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value = response
-            entry = probe_admin_capability("mcp_server", "chrome-devtools-host")
+
+        entry = probe_admin_capability("skill", "skill")
         self.assertEqual(entry.status, "ok")
-        self.assertEqual(entry.message, "chrome devtools endpoint reachable")
-        self.assertEqual(mock_urlopen.call_args.args[0], "http://0.250.250.254:9222/json/version")
+        self.assertEqual(entry.message, "skill manifest readable")
 
 
 class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):

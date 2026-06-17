@@ -48,11 +48,13 @@ class DispatcherHealthServer:
         state: DispatcherHealthState,
         *,
         reload_handler: Callable[[str | None], dict[str, object]] | None = None,
+        mcp_probe_handler: Callable[[str | None, dict[str, object]], dict[str, object]] | None = None,
     ):
         self.host = host
         self.port = port
         self.state = state
         self.reload_handler = reload_handler
+        self.mcp_probe_handler = mcp_probe_handler
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -68,6 +70,7 @@ class DispatcherHealthServer:
             return
         state = self.state
         reload_handler = self.reload_handler
+        mcp_probe_handler = self.mcp_probe_handler
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802 - stdlib API
@@ -109,8 +112,37 @@ class DispatcherHealthServer:
                     self.end_headers()
                     self.wfile.write(body)
                     return
+                if self.path == "/mcp-probe" and mcp_probe_handler is not None:
+                    auth = self.headers.get("Authorization")
+                    try:
+                        request_body = self._read_json_body()
+                        payload = mcp_probe_handler(auth, request_body)
+                        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        status = 200
+                    except PermissionError as exc:
+                        body = json.dumps({"ok": False, "error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                        status = 403
+                    except Exception as exc:  # noqa: BLE001
+                        body = json.dumps({"ok": False, "error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                        status = 400
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 self.send_response(404)
                 self.end_headers()
+
+            def _read_json_body(self) -> dict[str, object]:
+                length = int(self.headers.get("Content-Length") or "0")
+                if length <= 0:
+                    return {}
+                raw = self.rfile.read(length)
+                payload = json.loads(raw.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be a JSON object")
+                return payload
 
             def log_message(self, format: str, *args: object) -> None:  # noqa: A002
                 return

@@ -10,7 +10,7 @@ from cairn.server.application.capabilities import (
 from cairn.server.application.capabilities import (
     get_project_role as get_project_role_query,
 )
-from cairn.server.capability_health import probe_capability
+from cairn.server.capability_health import probe_all_mcp_via_dispatcher, probe_capability
 from cairn.server.config.capabilities import (
     delete_yaml_capability,
     import_mcp_servers,
@@ -81,6 +81,22 @@ def delete_admin_capability(kind: str, capability_id: str, _superuser=Depends(cu
 )
 def import_admin_mcp_json(body: McpImportRequest, _superuser=Depends(current_active_superuser)):
     return import_mcp_servers(body.mcpServers)
+
+
+@router.post(
+    "/capabilities/admin/mcp_server/{capability_id}/probe",
+    response_model=CapabilityHealthEntry,
+)
+def probe_admin_mcp_server(capability_id: str, _superuser=Depends(current_active_superuser)):
+    return probe_capability(None, "mcp_server", capability_id)
+
+
+@router.post(
+    "/capabilities/admin/mcp/probe-all",
+    response_model=list[CapabilityHealthEntry],
+)
+def probe_all_admin_mcp_servers(_superuser=Depends(current_active_superuser)):
+    return probe_all_mcp_via_dispatcher()
 
 
 @router.post(

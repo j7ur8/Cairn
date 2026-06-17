@@ -15,6 +15,8 @@ CairnParts.capabilities = function () {
     capabilityImportOpen: false,
     capabilityImportText: '',
     capabilitySearch: { mcp: '', skill: '' },
+    capabilityProbeBusy: {},
+    capabilityProbeAllBusy: false,
     capabilitiesSaving: false,
     newProjectCapabilityPanel: 'bootstrap',
     replayConfigCapabilityPanel: 'bootstrap',
@@ -291,13 +293,41 @@ CairnParts.capabilities = function () {
     },
 
     async probeCapabilityAdmin(kind, id) {
+      const key = `${kind}:${id}`;
+      this.capabilityProbeBusy = { ...this.capabilityProbeBusy, [key]: true };
       try {
-        const entry = await this.api('POST', `/capabilities/admin/${kind}/${encodeURIComponent(id)}/probe`, {});
+        const path = kind === 'mcp_server'
+          ? `/capabilities/admin/mcp_server/${encodeURIComponent(id)}/probe`
+          : `/capabilities/admin/${kind}/${encodeURIComponent(id)}/probe`;
+        const entry = await this.api('POST', path, {});
         this.showToast(`Probe ${entry.status}: ${entry.message || 'ok'}`);
         await this.loadCapabilityAdmin();
       } catch (e) {
         this.showToast(e.message, 'error');
+      } finally {
+        const next = { ...this.capabilityProbeBusy };
+        delete next[key];
+        this.capabilityProbeBusy = next;
       }
+    },
+
+    async probeAllMcpCapabilities() {
+      this.capabilityProbeAllBusy = true;
+      try {
+        const results = await this.api('POST', '/capabilities/admin/mcp/probe-all', {});
+        const ok = (results || []).filter(item => item.status === 'ok').length;
+        const failed = (results || []).length - ok;
+        this.showToast(`MCP probe complete: ${ok} ok, ${failed} failed`);
+        await this.loadCapabilityAdmin();
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.capabilityProbeAllBusy = false;
+      }
+    },
+
+    capabilityProbeBusyFor(kind, id) {
+      return !!this.capabilityProbeBusy[`${kind}:${id}`] || (kind === 'mcp_server' && this.capabilityProbeAllBusy);
     },
 
     async loadCapabilityAdmin() {

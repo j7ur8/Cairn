@@ -6,7 +6,7 @@ Priority order:
 3. Build the smallest reliable reproducer or PoC before broadening scope.
 4. Record root cause, affected files/lines, prerequisites, exploitability, and fix direction.
 5. Separate original artifacts from derived PoCs, crash cases, patches, and notes.
-6. Before marking complete, save a detailed Markdown vulnerability research report at `/mnt/project/reports/vulnerability-research-report.md`.
+6. Before marking complete, save a detailed Markdown vulnerability research report at `/home/kali/workspace/project/reports/vulnerability-research-report.md`.
 
 Style:
 - Favor root-cause evidence over surface symptoms.

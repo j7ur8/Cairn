@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from cairn.server.config.files import load_resources_data, save_resources_data
+from cairn.server.config.files import load_resources_data, save_resources_data, utcnow
 from cairn.server.models_pkg import CapabilityAdminRequest, CapabilityCatalogItem, McpImportResponse
 from cairn.shared.task_types import default_capability_task_type_names
 
@@ -60,6 +60,9 @@ def upsert_yaml_capability(kind: str, capability_id: str, body: CapabilityAdminR
         body,
         source=str(existing.get("source") or "builtin") if existing_idx is not None else "user",
     )
+    for key in ("last_probe_status", "last_probe_at", "last_probe_message"):
+        if existing_idx is not None and key in existing:
+            payload[key] = existing[key]
     if existing_idx is None:
         entries.append(payload)
     else:
@@ -120,6 +123,48 @@ def delete_yaml_capability(kind: str, capability_id: str) -> None:
     raise HTTPException(404, f"{kind} not found: {capability_id}")
 
 
+def update_yaml_mcp_probe_results(results: list[dict[str, str]]) -> list[CapabilityCatalogItem]:
+    if not results:
+        return []
+    data = load_resources_data()
+    caps = data.setdefault("capabilities", {})
+    entries = caps.setdefault("mcp_servers", [])
+    if not isinstance(entries, list):
+        raise HTTPException(500, "config.resources.yaml capabilities.mcp_servers must be a list")
+    by_id = {
+        str(result.get("capability_id") or "").strip(): result
+        for result in results
+        if str(result.get("capability_id") or "").strip()
+    }
+    if not by_id:
+        return []
+    at = utcnow()
+    updated_ids: list[str] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        capability_id = str(item.get("id") or "").strip()
+        result = by_id.get(capability_id)
+        if result is None:
+            continue
+        status = str(result.get("status") or "error").strip()
+        if status not in ("ok", "warn", "error"):
+            status = "error"
+        item["last_probe_status"] = status
+        item["last_probe_at"] = at
+        item["last_probe_message"] = str(result.get("message") or "").strip()
+        item["available"] = status == "ok"
+        updated_ids.append(capability_id)
+    if updated_ids:
+        save_resources_data(data, reload_dispatcher=False)
+    catalog = {
+        item.id: item
+        for item in list_yaml_capabilities()
+        if item.kind == "mcp_server" and item.id in updated_ids
+    }
+    return [catalog[item_id] for item_id in updated_ids if item_id in catalog]
+
+
 def _validate_capability_links(kind: str, capability_id: str, body: CapabilityAdminRequest) -> None:
     catalog = {(item.kind, item.id): item for item in list_yaml_capabilities()}
     if kind == "mcp_server":
@@ -162,9 +207,6 @@ def _capability_body_to_yaml(
         "detail": body.detail,
         "available": body.available,
         "probe_config": body.probe_config or {},
-        "last_probe_status": None,
-        "last_probe_at": None,
-        "last_probe_message": "",
     }
     if kind == "mcp_server":
         if body.transport not in ("stdio", "http"):

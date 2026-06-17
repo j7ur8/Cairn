@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from cairn.server.capability_expansion import TASK_TYPES, CatalogEntry, catalog_map_from_items
+from cairn.server.config.capabilities import update_yaml_mcp_probe_results
 from cairn.server.models_pkg import CapabilityHealthEntry, TaskCapabilities, TaskCapabilitiesMap
 
 PROBE_TIMEOUT_SECONDS = 1.5
@@ -174,10 +175,116 @@ def probe_capability(conn: Any, kind: str, capability_id: str) -> CapabilityHeal
         raise HTTPException(404, f"{kind} not found: {capability_id}")
     entry = catalog_map_from_items([item])[(kind, capability_id)]
     if kind == "mcp_server":
-        return probe_mcp(entry)
+        return probe_mcp_via_dispatcher([capability_id])[0]
     if kind == "skill":
         return probe_skill(entry)
     raise HTTPException(400, f"unknown kind: {kind}")
+
+
+def probe_all_mcp_via_dispatcher() -> list[CapabilityHealthEntry]:
+    from cairn.server.config.capabilities import list_yaml_capabilities
+
+    server_ids = [item.id for item in list_yaml_capabilities() if item.kind == "mcp_server"]
+    return probe_mcp_via_dispatcher(server_ids)
+
+
+def probe_mcp_via_dispatcher(server_ids: list[str]) -> list[CapabilityHealthEntry]:
+    ids = _dedupe_ids(server_ids)
+    if not ids:
+        return []
+    raw_results = _dispatcher_probe_request(ids)
+    items = update_yaml_mcp_probe_results(raw_results)
+    by_id = {item.id: item for item in items}
+    out: list[CapabilityHealthEntry] = []
+    for capability_id in ids:
+        item = by_id.get(capability_id)
+        if item is None:
+            out.append(CapabilityHealthEntry(capability_id=capability_id, status="error", message="probe result missing"))
+            continue
+        out.append(CapabilityHealthEntry(
+            capability_id=item.id,
+            status=item.last_probe_status or "error",
+            message=item.last_probe_message,
+        ))
+    return out
+
+
+def _dispatcher_probe_request(server_ids: list[str]) -> list[dict[str, str]]:
+    from cairn.server.runtime_config import system_config
+
+    runtime = system_config()
+    url = _dispatcher_probe_url(runtime.dispatcher.reload_url)
+    body = json.dumps({"server_ids": server_ids}, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    token = runtime.auth.dispatcher_api_token
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        return [
+            {
+                "capability_id": capability_id,
+                "status": "error",
+                "message": f"dispatcher probe failed: HTTP {exc.code}: {detail}",
+            }
+            for capability_id in server_ids
+        ]
+    except Exception as exc:  # noqa: BLE001
+        return [
+            {
+                "capability_id": capability_id,
+                "status": "error",
+                "message": f"dispatcher probe failed: {exc}",
+            }
+            for capability_id in server_ids
+        ]
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        return [
+            {
+                "capability_id": capability_id,
+                "status": "error",
+                "message": "dispatcher probe returned invalid response",
+            }
+            for capability_id in server_ids
+        ]
+    return [_normalize_dispatcher_probe_result(item) for item in results if isinstance(item, dict)]
+
+
+def _dispatcher_probe_url(reload_url: str) -> str:
+    parsed = urllib.parse.urlparse(reload_url)
+    if parsed.path.endswith("/reload"):
+        path = f"{parsed.path[:-len('/reload')]}/mcp-probe"
+    else:
+        path = "/mcp-probe"
+    return urllib.parse.urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+
+
+def _normalize_dispatcher_probe_result(item: dict[str, Any]) -> dict[str, str]:
+    status = str(item.get("status") or "error")
+    if status not in ("ok", "warn", "error"):
+        status = "error"
+    return {
+        "capability_id": str(item.get("capability_id") or "").strip(),
+        "status": status,
+        "message": str(item.get("message") or "").strip(),
+    }
+
+
+def _dedupe_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        key = str(value or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
 
 
 def probe_per_task(

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
+from cairn.dispatcher.mcp_probe import run_mcp_probe_request
 from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -67,6 +68,7 @@ class DispatcherLoop:
                 last_tick_at=lambda: self._last_tick_at,
             ),
             reload_handler=self._reload_from_health_server,
+            mcp_probe_handler=self._mcp_probe_from_health_server,
         )
         self.health_server.start()
 
@@ -223,6 +225,18 @@ class DispatcherLoop:
 
     def _reload_from_health_server(self, authorization: str | None) -> dict[str, object]:
         return self.reloader.reload_from_health_server(authorization)
+
+    def _mcp_probe_from_health_server(self, authorization: str | None, body: dict[str, object]) -> dict[str, object]:
+        expected = self.config.system.auth.dispatcher_api_token
+        if expected and authorization != f"Bearer {expected}":
+            raise PermissionError("invalid dispatcher token")
+        raw_ids = body.get("server_ids")
+        server_ids = [str(item) for item in raw_ids] if isinstance(raw_ids, list) else []
+        return run_mcp_probe_request(
+            config=self.config,
+            container_manager=self.container_manager,
+            server_ids=server_ids,
+        )
 
     def _advance_replay_project(self, project_id: str) -> bool | None:
         return self.replay.advance_project(project_id)

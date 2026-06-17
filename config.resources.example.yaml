@@ -38,11 +38,7 @@ capabilities:
       and RPC-backed framework operations.
     command: /usr/local/bin/metasploit-mcp-stdio
     args: []
-    env:
-      MSF_MCP_TRANSPORT: stdio
-      MSF_AUTO_START_RPC: 'true'
-      MSF_API_TYPE: messagepack
-      MSF_API_SSL: 'true'
+    env: {}
     use_when:
     - Metasploit module search, exploit validation, payload handling, session management,
       or post-module execution is required.

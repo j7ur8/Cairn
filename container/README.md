@@ -20,6 +20,7 @@ Smoke tests:
 docker run --rm cairn-worker-container:mcp-camoufox python3 -c "import camoufox; print('camoufox ok')"
 docker run --rm cairn-worker-container:mcp-camoufox kali-server-mcp -h
 docker run --rm cairn-worker-container:mcp-camoufox mcp-server -h
+docker run --rm cairn-worker-container:mcp-camoufox metasploitmcp --help
 docker run --rm cairn-worker-container:mcp-camoufox metasploit-mcp-stdio --help
 ```
 

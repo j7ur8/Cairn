@@ -2,8 +2,22 @@ FROM ghcr.io/oritera/cairn-worker-container:latest
 
 USER root
 
-RUN find /etc/apt/sources.list.d/ -name "*.list" -name "*kali*" -exec sed -i 's|mirror.twds.com.tw|mirrors.ustc.edu.cn|g' {} \;
-RUN apt update
+RUN sed -i 's|http://http.kali.org/kali/|https://mirrors.ustc.edu.cn/kali/|g' /etc/apt/sources.list.d/kali.sources
+RUN apt update && apt install -y --no-install-recommends \
+    mcp-kali-server \
+    metasploit-framework \
+    metasploitmcp \
+    nmap \
+    dirb \
+    gobuster \
+    nikto \
+    enum4linux-ng \
+    hydra \
+    john \
+    sqlmap \
+    wpscan \
+    wordlists \
+    && rm -rf /var/lib/apt/lists/*
 RUN rm /home/kali/workspace/*.md
 RUN npm install -g @openai/codex
 RUN npm install -g @anthropic-ai/claude-code
