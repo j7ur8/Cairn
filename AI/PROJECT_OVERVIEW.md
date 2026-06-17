@@ -4,7 +4,7 @@
 
 @update: 本文件应在项目发生重大变更（如核心目标调整、技术栈升级、目录重构）时更新。
 
-生成日期：2026-06-13
+生成日期：2026-06-17
 -->
 
 # Cairn 项目概览
@@ -27,7 +27,7 @@ Cairn 采用 Blackboard Architecture。Server 维护事实、意图和提示构�
 | 认证 | JWT, bcrypt |
 | 观测 | Prometheus metrics, 结构化日志, LLM execution events |
 | 前端 | 无构建 SPA, FastAPI partials, Alpine.js `CairnParts` slices, Tailwind CDN/vendor, Cytoscape |
-| 部署 | Docker Compose, uv |
+| 部署 | `./start.sh` + Docker Compose, uv |
 
 ## 3. 目录结构
 
@@ -36,8 +36,10 @@ Cairn/
 ├── README.md                         # 项目说明与快速开始
 ├── Dockerfile                        # Cairn app 镜像
 ├── docker-compose.yaml               # PostgreSQL、Server、Dispatcher、Worker image 编排
-├── config.yaml                     # 本地运行配置
-├── config.resources.yaml           # remote support、能力、角色、MCP 配置
+├── start.sh                          # 推荐 compose 启动入口，导出 CAIRN_HOST_ROOT
+├── server.yaml                       # 固定部署/敏感/基础设施配置
+├── config.yaml                       # UI 可写的调度、worker、任务、观测配置
+├── config.resources.yaml             # remote support、能力、角色、MCP 配置
 ├── cairn/
 │   ├── pyproject.toml                # Python 包、依赖和 CLI 入口
 │   ├── alembic.ini                   # Alembic 配置
@@ -58,7 +60,7 @@ Cairn/
 
 ```bash
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
-docker compose up --build
+./start.sh
 ```
 
 手动运行：

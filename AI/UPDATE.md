@@ -5,6 +5,17 @@
 
 # 更新日志
 
+## 2026-06-17 — Review 同步
+
+- 同步 Dispatcher 控制面：`health_server.py` 现在除 `/healthz`、`/metrics`、`/reload` 外还提供 `/mcp-probe`，Server capability admin 通过 dispatcher service token 调用它执行 MCP initialize + `tools/list` 探测。
+- 同步 capability health 行为：MCP probe 在临时 startup container 中写入 `mcp.json` 和 probe 脚本，执行后删除容器；probe 结果写回 `config.resources.yaml` 的 `last_probe_*` 字段，并更新 MCP `available`。
+- 同步 System Settings API：旧 runtime/tasks/observability/log-retention 分散管理接口收敛为聚合 `GET/PUT /system-settings`，`GET /container-limits` 保持只读并来自固定 `server.yaml`。
+- 同步配置与启动说明：`server.yaml` 保存固定部署/敏感/基础设施配置，`config.yaml` 保存 UI 可写运行配置，`config.resources.yaml` 保存 resources；推荐启动命令改为 `./start.sh`，由其导出 `CAIRN_HOST_ROOT` 再运行 compose。
+- 同步 Worker image 与能力材料：worker image 安装 Kali/Metasploit 常用工具，`metasploit-mcp` 默认 env 清空，角色提示强调先读 SKILL 和遵守 CTF/pentest/vuln-research 工作流。
+- 同步测试状态：当前 `test_*.py` 文件数为 51；新增/更新 MCP probe、aggregate system settings、static UI endpoint 边界等回归说明。
+
+---
+
 ## 2026-06-16 — Prompts 与 Settings UI 更新
 
 - Settings 主保存/创建操作移动到对应 section 或编辑表单标题行右侧；Capabilities MCP/Skills 资源卡片改为固定高度并保持列表内部滚动。

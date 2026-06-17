@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-06-13
+生成日期：2026-06-17
 -->
 
 # Cairn 架构与设计文档
@@ -26,19 +26,20 @@ flowchart TB
         Auth["JWT 鉴权\nserver/security"]
         Routers["业务路由\nprojects/intents/hints/files/etc."]
         Services["应用/领域/仓储层\napplication/domain/repositories"]
-        ConfigStore["YAML 配置存储\ndispatch/resources"]
+        ConfigStore["YAML 配置读写\nmutable dispatch/resources + fixed server"]
         ObsAPI["观测 API\nllm-executions/events"]
     end
 
     subgraph Data["数据层"]
         PG[("PostgreSQL\nfacts/intents/projects/users")]
-        YAML[("config.yaml\nconfig.resources.yaml")]
+        YAML[("server.yaml\nconfig.yaml\nconfig.resources.yaml")]
         Files[("project-files\nattachments")]
     end
 
     subgraph Dispatcher["Cairn Dispatcher"]
         Loop["DispatcherLoop\n生命周期外壳"]
         Scheduler["Tick/Dispatch/Submit\n调度协作者"]
+        Control["Health/Reload/MCP probe\nhealth_server + mcp_probe"]
         Containers["ContainerManager facade\nlifecycle/cleanup/files/exec"]
         Client["CairnClient\nHTTP client"]
     end
@@ -57,9 +58,12 @@ flowchart TB
     Services --> Files
     ConfigStore --> YAML
     Routers --> ConfigStore
+    Routers -->|"HTTP + service token\nMCP probe/reload"| Control
 
     Dispatcher -->|"HTTP + service token"| API
     Loop --> Scheduler
+    Loop --> Control
+    Control -->|"startup probe container"| Containers
     Scheduler --> Containers
     Client --> Routers
     Containers -->|"Docker socket"| Workers
@@ -86,7 +90,7 @@ sequenceDiagram
     CLI->>App: cairn serve imports app
     CLI->>App: uvicorn.run(app)
     App->>Config: system_config()
-    Config->>Config: load /cairn/config.yaml or repo config.yaml
+    Config->>Config: load server.yaml + config.yaml and merge fixed/dynamic sections
     App->>DB: db.configure()
     DB->>PG: create_engine + Alembic upgrade_head
     DB->>PG: seed_defaults()
@@ -112,7 +116,7 @@ sequenceDiagram
     CLI->>Loop: cairn dispatch --config config.yaml
     Loop->>Config: DispatchConfig.load(config_path)
     Loop->>Client: init(server, dispatcher_api_token)
-    Loop->>Health: start /healthz and /metrics
+    Loop->>Health: start /healthz, /metrics, /reload, /mcp-probe
     Loop->>Docker: docker.from_env()
     Loop->>Loop: startup healthchecks
     Loop->>Client: list_projects()
@@ -139,13 +143,14 @@ sequenceDiagram
 | Server Application | `cairn/src/cairn/server/application/` | 跨 repository 的用例编排：项目创建/读取/命令、intent/reason 命令、hints/files/attachments、execution config、capabilities、export、replay | Router 调用、DB connection | DTO/domain result | domain, repositories, mappers |
 | Server Domain | `cairn/src/cairn/server/domain/` | intent/reason/project 业务规则、ID、时间、lease 清理、业务异常 | repository row/state、命令参数 | domain result 或 `DomainError` | 纯 Python，无 SQL/FastAPI/repository import |
 | Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、结构化持久化、PATCH 和 dispatcher payload 组装 | `config.yaml`, `config.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
-| Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器、回写结果 | Server API, YAML config | HTTP writes, worker execution | requests, Docker SDK |
+| Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器、回写结果，并暴露 reload/MCP probe 控制面 | Server API, YAML config, dispatcher control HTTP | HTTP writes, worker execution, probe results | requests, Docker SDK |
 | Dispatcher Scheduler | `cairn/src/cairn/dispatcher/scheduler/` | tick、reload、planner、submitter、worker selection、runtime state、replay coordination | Project summaries/config/runtime state | submitted tasks, releases, metrics | protocol client, runtime, tasks |
 | Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
+| Dispatcher Control/Probe | `cairn/src/cairn/dispatcher/health_server.py`, `cairn/src/cairn/dispatcher/mcp_probe.py` | Dispatcher 本地 HTTP 控制面，处理 health/metrics/reload 和 MCP initialize/tools-list 探测 | `/healthz`, `/metrics`, `/reload`, `/mcp-probe` | JSON health/probe result, Prometheus metrics | ContainerManager, shared config |
 | Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
 | Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；SQL 拆到 execution/event/view/usage/retention repository/query 模块 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
 | Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由 `CairnParts` slices 合并，Settings 按 settings/admin/prompts/AI profiles/proxies/capabilities 域拆分 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind, Cytoscape |
-| Shared Observability | `cairn/src/cairn/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
+| Shared Observability | `cairn/src/cairn/shared/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
 | Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
 | Capabilities | `capabilities/` | 技能、角色、payload、模板、MCP 配置素材 | YAML/Markdown | Worker prompt context | Dispatcher, prompt builder |
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
@@ -163,6 +168,7 @@ sequenceDiagram
 |--------|----------|-----------|------|
 | SPA | Cairn Server | HTTP + Bearer token | 项目、图、配置、文件、观测 UI |
 | Dispatcher | Cairn Server | HTTP + service JWT | 读取项目、claim/heartbeat/conclude、写观测事件 |
+| Cairn Server | Dispatcher health server | HTTP + service token | 触发 dispatcher reload；通过 `/mcp-probe` 在 worker image 内探测 MCP initialize/tools-list |
 | Server | PostgreSQL | SQLAlchemy session | 持久化 projects/facts/intents/users/events |
 | Server | YAML files | 原子写入/覆盖 | dispatch 和 resources 配置 |
 | Dispatcher | Docker daemon | Docker socket | 创建/启动/停止 Worker 容器 |
@@ -202,6 +208,7 @@ sequenceDiagram
 | ThreadPoolExecutor | Dispatcher | 并发运行 worker task 和 cleanup task |
 | LLM execution events | Server observability API | Dispatcher 批量上报 prompt/stdout/stderr/usage |
 | Retention loop | Server lifespan | 周期清理观测数据 |
+| MCP probe request | Server admin API -> Dispatcher `/mcp-probe` | 使用临时 startup container 写入 `mcp.json` 和 probe 脚本，执行 initialize + `tools/list` 后删除容器 |
 
 共享数据：
 
@@ -209,7 +216,9 @@ sequenceDiagram
 |------|--------|--------|
 | projects/facts/intents/hints | Server routers, Dispatcher through API | SPA, Dispatcher, export/replay |
 | project_execution_configs | project creation/replay | Dispatcher, project detail APIs |
-| config.yaml / config.resources.yaml | Server config routers, operator | Server runtime, Dispatcher |
+| server.yaml | operator | Server runtime、Dispatcher runtime merge、container limits read API |
+| config.yaml | Server system settings routers, operator | Server runtime、Dispatcher；UI 可写 settings/runtime/tasks/observability/log-retention |
+| config.resources.yaml | Server capability/role routers, operator | Dispatcher prompt/capability assembly、MCP probe metadata |
 | attachments/project-files | upload route, Worker container | SPA download, Worker |
 
 ## 5. 关键设计模式与架构风格
@@ -225,7 +234,7 @@ sequenceDiagram
 | Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用 execution config、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
 | Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
 | Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
-| Config-as-data | `config.yaml`, `config.resources.yaml` | Worker、能力、AI Profile、路径和运行参数由 YAML 驱动 |
+| Config-as-data | `server.yaml`, `config.yaml`, `config.resources.yaml` | `server.yaml` 保存固定部署/敏感/基础设施配置；`config.yaml` 保存 UI 可调整的调度、worker、任务、观测配置；`config.resources.yaml` 保存 remote support、capabilities、roles |
 | Lease/Heartbeat | intents, reason lock | 用心跳和超时释放运行中工作 |
 
 总体架构风格是“中心化 Server + 独立调度器 + 容器化执行环境”的分层单体架构，不是微服务系统。边界通过 HTTP、PostgreSQL 和 Docker socket 连接。
@@ -237,10 +246,10 @@ sequenceDiagram
 | 项 | 实现 |
 |----|------|
 | Token | JWT HS256 |
-| 签名密钥 | `config.yaml` 的 `server.auth.jwt_secret` |
+| 签名密钥 | `server.yaml` 的 `server.auth.jwt_secret`，可被 `config.yaml` 同名字段覆盖但默认不通过 UI 编辑 |
 | 默认有效期 | 1 小时 |
 | 密码 | bcrypt hash |
-| 服务账号 | JWT claim `role=service`，映射为 synthetic superuser |
+| 服务账号 | `server.auth.dispatcher_api_token` 对应的 JWT claim `role=service`，映射为 synthetic superuser |
 | 初始管理员 | `server.initial_admin` 可在启动时 bootstrap |
 
 鉴权入口：

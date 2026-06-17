@@ -51,6 +51,7 @@ def get_yaml_task_timeouts() -> TaskTimeouts:
                 },
                 "reason": {
                     "timeout": tasks["reason"]["timeout"],
+                    "max_intents": tasks["reason"].get("max_intents", 3),
                 },
             }
         )

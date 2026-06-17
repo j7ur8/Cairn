@@ -8,7 +8,7 @@
 3. 如数据模型或 API 端点有变更，同步更新 ARCHITECTURE.md 中的相关图表
 4. 新增的函数入口点不超过 15 个上限时，追加到入口点列表；超过则替换次重要的
 
-生成日期：2026-06-13
+生成日期：2026-06-17
 -->
 
 # Cairn 全面代码分析
@@ -61,8 +61,9 @@ Cairn/
 ├── container/                        # Worker 容器镜像与 MCP wrapper
 ├── datas/                            # 默认数据目录
 ├── README/                           # 图片和架构可视化素材
-├── config.yaml                     # 主运行配置
-├── config.resources.yaml           # remote_support、capabilities、roles 配置
+├── server.yaml                       # 固定部署/敏感/基础设施配置
+├── config.yaml                       # UI 可写的调度、worker、任务、观测配置
+├── config.resources.yaml             # remote_support、capabilities、roles 配置
 ├── docker-compose.yaml               # 本地完整栈
 └── Dockerfile                        # app 镜像
 ```
@@ -75,7 +76,7 @@ Cairn/
 | `cairn/src/cairn/server/app.py` | FastAPI app、lifespan、全局鉴权、路由注册、静态文件 |
 | `cairn/src/cairn/server/partials/` | SPA HTML partials，由 `assemble_index()` 拼装 |
 | `cairn/src/cairn/server/static/js/cairn-app.js` | 合并 `CairnParts` slices，保留 duplicate key guard |
-| `cairn/src/cairn/server/static/js/parts.settings*.js` | Settings 导航和 server/runtime/task/observability/system 表单状态 |
+| `cairn/src/cairn/server/static/js/parts.settings*.js` | Settings 导航和聚合 System 管理表单；旧 runtime/tasks/observability/log-retention 分散接口已收敛到 `/system-settings` |
 | `cairn/src/cairn/server/static/js/parts.prompts.js` | Prompt group / role prompt editor 状态和 API 调用 |
 | `cairn/src/cairn/server/static/js/parts.ai_profiles.js`, `parts.proxies.js`, `parts.capabilities.js` | AI Profile、Proxy、Capability 管理与项目选择状态拆分 |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
@@ -87,12 +88,14 @@ Cairn/
 | `cairn/src/cairn/server/execution_config/` | 执行配置快照、PATCH、结构化表持久化与 dispatcher payload 组装 |
 | `cairn/src/cairn/server/mappers/` | DB row 到 API/domain DTO 的转换 |
 | `cairn/src/cairn/dispatcher/scheduler/loop.py` | Dispatcher 主循环、任务分发 |
+| `cairn/src/cairn/dispatcher/health_server.py` | Dispatcher 控制面 HTTP server，暴露 `/healthz`、`/metrics`、`/reload`、`/mcp-probe` |
+| `cairn/src/cairn/dispatcher/mcp_probe.py` | 在临时 startup container 中探测 MCP server，执行 JSON-RPC initialize + `tools/list` 并返回 per-capability 状态 |
 | `cairn/src/cairn/dispatcher/scheduler/task_submitter.py` | bootstrap/explore/reason 提交流程；claim/release 与 runtime registry/log 分别委托给 `task_claims.py` 和 `submission_registry.py` |
 | `cairn/src/cairn/dispatcher/tasks/lifecycle.py` | 统一 reporter 与 heartbeat lease 生命周期 |
 | `cairn/src/cairn/dispatcher/tasks/reason_result.py` | Reason 输出解析、complete/intents 写回和 finish outcome 映射 |
 | `cairn/src/cairn/dispatcher/protocol/` | Dispatcher 调 Server 的 HTTP client，按 project/task/AI profile/observability 子 API 拆分 |
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Worker 容器 facade；生命周期、cleanup、archive/file、exec/process 辅助拆到 runtime helper |
-| `cairn/src/cairn/shared/config/` | `config.yaml` 与 `config.resources.yaml` 配置模型、加载和资源校验 |
+| `cairn/src/cairn/shared/config/` | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 配置模型、加载、merge 和资源校验 |
 | `cairn/src/cairn/shared/contracts/` | Server 与 Dispatcher 共享 HTTP DTO；按 settings/timeouts/proxies/AI profiles/LLM events/projects/reason 拆分 |
 
 ## 3. 关键入口点
@@ -126,6 +129,7 @@ Cairn/
 | Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
 | Replay advance | `server/application/replay/`, `server/repositories/replay.py`, `dispatcher/scheduler/replay.py` | 从完成项目生成 replay run 并推进步骤 | 与 replay steps 数量相关 | 事务内创建/推进在 service，事务外附件复制、激活和失败补偿在 orchestration |
 | Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | 与事件数和查询 limit 相关 | SQL 收敛在 execution/event/view/usage/retention repository/query 类 |
+| MCP capability health probe | `server/capability_health.py`, `dispatcher/mcp_probe.py` | Server admin API 调 dispatcher `/mcp-probe`，Dispatcher 用 worker image 临时容器执行 MCP initialize + `tools/list` | 与 MCP 数量线性相关；每次 probe 创建并清理一个 startup container | 成功会写回 `last_probe_*` 并把 MCP `available` 设为 true，否则设为 false |
 | Redaction | `server/observability/redaction.py`, `dispatcher/observability/redaction.py` | 对 token/key 等敏感文本脱敏 | 与事件文本长度和 pattern 数量相关 | 用于观测数据 |
 
 ## 5. 主要业务流程
@@ -301,7 +305,7 @@ erDiagram
 
 ## 7. API 端点
 
-项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器约 75 个。
+项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器约 85 个。
 
 | 分组 | 主要端点 | 用途 | 认证 |
 |------|----------|------|------|
@@ -314,10 +318,10 @@ erDiagram
 | Hints | `POST /projects/{id}/hints` | 添加人工提示 | Bearer |
 | Attachments/Files | `POST /projects/{id}/attachments`, `GET /projects/{id}/files`, `/download` | 附件上传和文件浏览 | Bearer |
 | Export/Replay | `GET /projects/{id}/export`, `POST /projects/{id}/replay-runs` | 导出与复现 | Bearer |
-| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities` | 能力和角色管理 | Bearer |
+| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities` | 能力和角色管理；admin MCP probe 经 dispatcher `/mcp-probe` 执行真实 initialize/tools-list | Catalog Bearer；admin 写入/import/probe 需要 superuser |
 | AI Profiles | `/ai-profiles/*`, `/projects/{id}/ai-profiles` | AI profile catalog、secret、health check | Bearer |
-| Proxies/Settings | `/proxies/*`, `/settings` | 系统代理和超时配置 | Bearer |
-| System Config | `/runtime-limits`, `/container-limits`, `/task-timeouts`, `/observability`, `/server-log-retention` | YAML-backed runtime、container、timeout、observability、log retention 配置 | GET Bearer；PUT superuser |
+| Proxies/Settings | `/proxies/*`, `/task-timeouts/defaults` | 系统代理配置和任务超时默认值读取 | Bearer；proxy 写入需要 superuser |
+| System Config | `GET/PUT /system-settings`, `GET /container-limits` | 聚合读写 `settings`、runtime limits、task timeouts、observability、server log/retention；container limits 从固定 `server.yaml` 只读 | GET Bearer；PUT superuser |
 | Observability | `/projects/{id}/llm-executions*`, `/llm-events*` | LLM execution/event 记录与查询 | Bearer |
 
 ## 8. 错误处理策略
@@ -344,10 +348,12 @@ erDiagram
 
 | 配置 | 加载位置 |
 |------|----------|
-| Server runtime system config | 优先 `/cairn/config.yaml`，否则 repo 根 `config.yaml`；只读取 `server` 和 `dispatcher` section |
-| Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `config.resources.yaml` |
+| Fixed server/deployment config | 优先 `/cairn/server.yaml`，否则 repo 根 `server.yaml`；保存 database/auth/paths/dispatcher reload/worker_runtime 等启动级配置 |
+| Mutable dispatch config | 优先 `/cairn/config.yaml`，否则 repo 根 `config.yaml`；保存 UI 可写的 settings/runtime/tasks/observability/worker_pool |
+| Runtime system config | `runtime_config.system_config()` 读取 `server.yaml + config.yaml` 并 merge `server`、`dispatcher` sections |
+| Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `server.yaml` 和 `config.resources.yaml` |
 | Resources config | `/cairn/config.resources.yaml` 或 repo 根 `config.resources.yaml`，包含 `remote_support`、`capabilities`、`roles` |
-| Docker Compose bind mount | 将 `config.yaml` 和 `config.resources.yaml` 挂载到 `/cairn/` |
+| Docker Compose startup | 推荐 `./start.sh`，导出 `CAIRN_HOST_ROOT` 后 `docker compose up -d --build`；dispatcher 在 host repo path 下运行，便于 Docker socket worker mount 使用 host-visible 路径 |
 
 核心命令：
 
@@ -356,24 +362,26 @@ uv run --project cairn cairn serve
 uv run --project cairn cairn dispatch --config config.yaml
 uv run --project cairn cairn dispatch --config config.yaml --startup-healthcheck-only
 uv run --project cairn cairn db migrate
-docker compose up --build
+./start.sh
 ```
 
 重要配置项：
 
 | 配置 | 说明 |
 |------|------|
-| `server.database.url` | PostgreSQL URL，SQLite 被显式拒绝 |
-| `server.auth.jwt_secret` | JWT 签名密钥 |
-| `server.auth.dispatcher_api_token` | Dispatcher API/reload token |
-| `server.paths/settings/log/retention` | Server 文件路径、超时、日志和 retention |
-| `dispatcher.reload/health_addr/runtime` | reload、health addr、调度并发和 prompt group |
+| `server.yaml: server.database.url` | PostgreSQL URL，SQLite 被显式拒绝 |
+| `server.yaml: server.auth.jwt_secret` | JWT 签名密钥 |
+| `server.yaml: server.auth.dispatcher_api_token` | Dispatcher reload 和 MCP probe 控制面 token |
+| `server.yaml: server.paths` | Server 数据、附件、project-files 路径 |
+| `server.yaml: dispatcher.reload/health_addr` | Dispatcher 控制面地址和 reload URL |
+| `server.yaml: worker_runtime.container.*` | Worker image、network、limits、bind mounts |
+| `config.yaml: server.settings/log/retention` | UI 可写的业务超时、日志格式和 retention 开关 |
+| `config.yaml: dispatcher.runtime` | UI 可写的调度并发、tick interval、healthcheck timeout、prompt group |
 | `worker_pool.workers[]` | Worker 后端、优先级、env、模型 |
 | `worker_pool.proxies[]` | 系统代理配置 |
-| `worker_runtime.container.*` | Worker image、network、capabilities、bind mounts |
 | `tasks.bootstrap/reason/explore` | 超时和 reason max intents |
 | `observability.*` | 记录范围、事件大小、retention |
-| `config.resources.yaml` | remote support、MCP、skills、roles 和能力可用性 |
+| `config.resources.yaml` | remote support、MCP、skills、roles、probe metadata 和能力可用性 |
 
 ## 10. 基础设施与横切关注点
 
@@ -381,12 +389,14 @@ docker compose up --build
 |--------|------|
 | 日志 | Python logging，Server/Dispatcher 分别配置 |
 | Metrics | `prometheus-client`，Server `/metrics`，Dispatcher health server `/metrics` |
+| Dispatcher control plane | Dispatcher health server 暴露 `/healthz`、`/metrics`、`/reload`、`/mcp-probe`；reload/probe 使用 `server.auth.dispatcher_api_token` 鉴权 |
 | Trace | contextvars trace id，HTTP 响应 `X-Request-Id` |
 | Security headers | `SecurityHeadersMiddleware` 为每个响应补充 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer` |
 | Redaction | Server/Dispatcher 观测模块脱敏 token/key |
 | 文件安全 | project_id/path 校验、symlink escape 检查、download size cap、危险 MIME 强制 attachment |
 | 静态资源缓存 | SPA 和 static vendor 资源 `Cache-Control: no-store` |
 | 容器隔离 | 每项目 worker container，Docker labels 管理生命周期 |
+| MCP 探测隔离 | MCP admin probe 使用 startup container 写入临时 `mcp.json` 和 probe 脚本，执行后删除容器 |
 | 配置写入 | `ConfigStore` 临时文件 + fsync + replace，Docker bind mount EBUSY 时 fallback overwrite |
 
 ## 11. 测试策略
@@ -400,6 +410,7 @@ docker compose up --build
 | `test_ai_profile_*` | AI profile、secret、bridge、flow |
 | `test_capability_*` | 能力配置和 admin 行为 |
 | `test_mcp_http_transport.py` | MCP HTTP transport、bearer token、redaction |
+| `test_mcp_probe.py`, `test_mcp_probe_server.py` | Dispatcher MCP probe runner、Server-to-dispatcher probe request 和 YAML probe result 写回 |
 | `test_observability*.py` | LLM events、文件和 retention |
 | `test_db_*` | migration、PostgreSQL hardening |
 | `test_worker_cli_adapters.py` | Worker CLI adapters |
@@ -410,9 +421,10 @@ docker compose up --build
 
 当前验证状态：
 
-- 仓库有 47 个 `test_*.py` 测试文件。
+- 仓库当前有 51 个 `test_*.py` 测试文件。
 - CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src` 和 pytest coverage。
 - 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
+- 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
 
@@ -437,6 +449,7 @@ docker compose up --build
 | 已修复 | Alembic revision id 超过默认版本表宽度导致 compose 启动失败 | `migrations/versions/0002_exec_config_names.py` | head 缩短为 `0002_exec_config_names`，业务 DDL 不变；边界测试扫描 revision/down_revision 长度不超过 32 |
 | 已修复 | `facts` 缺 project_id 索引、`llm_executions` 缺 started_at 索引 | `migrations/versions/0003_add_scan_indexes.py` | 新增 `idx_facts_project`（project_id）和 `idx_llm_executions_started`（started_at）；orm.py 同步更新 |
 | Low | Dispatcher 阶段入口仍偏大 | `dispatcher/tasks/bootstrap.py`, `dispatcher/tasks/explore.py`, `dispatcher/tasks/reason.py` | common/process/writeback/release/outcome/text/snapshot 已拆分；TaskSubmitter 提交流水线已统一，阶段主流程仍可继续收敛 |
+| Low | Dispatcher `/mcp-probe` 为同步 probe，会创建 startup container 并顺序探测目标 MCP | `dispatcher/mcp_probe.py`, `dispatcher/health_server.py` | 适合 admin 手动健康检查；不要把 probe-all 放入高频自动轮询，否则会增加 Docker daemon 和 worker image 启动压力 |
 
 ## 13. 隐藏细节与注意事项
 
@@ -444,9 +457,10 @@ docker compose up --build
 |------|------|
 | 注意 | Server 的全局鉴权只区分 public 和 authenticated；是否需要 superuser 要由各 router 单独声明。 |
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
-| 注意 | `config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
-| 注意 | `DispatchConfig.load(path)` 只读取同目录 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
-| 注意 | 当前 Alembic head 是 `0003_add_scan_indexes`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
+| 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
+| 注意 | 当前 Alembic head 是 `0004_prompt_snapshots`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后可能成为 hot path。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit，但保留策略依赖 retention loop。 |
 | 向后兼容 | Prompt 模板要求固定变量，如 `{graph_yaml}`、`{intent_id}`、`{capability_instructions}`，配置模型会校验。 |
