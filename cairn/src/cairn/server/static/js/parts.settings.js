@@ -2,17 +2,12 @@ window.CairnParts = window.CairnParts || {};
 CairnParts.settings = function () {
   return {
     showSettings: false,
-    settingsSection: 'server',
-    settingsForm: { intent_timeout: 5, reason_timeout: 5 },
+    settingsSection: 'system',
 
     adminNavItems() {
       return [
-        { section: 'server', label: 'Server Settings', icon: 'SV' },
-        { section: 'runtime', label: 'Runtime & Limits', icon: 'RT' },
+        { section: 'system', label: 'System', icon: 'SY' },
         { section: 'prompts', label: 'Prompts', icon: 'PR' },
-        { section: 'tasks', label: 'Task Timeouts', icon: 'TS' },
-        { section: 'observability', label: 'Observability', icon: 'OB' },
-        { section: 'system', label: 'Log & Retention', icon: 'SY' },
         { section: 'ai', label: 'AI Profiles', icon: 'AI' },
         { section: 'capabilities', label: 'Capabilities', icon: 'CA' },
         { section: 'proxies', label: 'Proxies', icon: 'PX' },
@@ -25,10 +20,10 @@ CairnParts.settings = function () {
     },
 
     async openSettings() {
-      await this.navigateSettings('server');
+      await this.navigateSettings('system');
     },
 
-    async navigateSettings(section = 'server') {
+    async navigateSettings(section = 'system') {
       this.settingsSection = section;
       this.showSettings = false;
       this.view = 'settings';
@@ -38,38 +33,26 @@ CairnParts.settings = function () {
 
     async loadSettingsSection(section = this.settingsSection) {
       const loaders = {
-        server: () => this.loadSettings(),
-        runtime: () => this.loadRuntimeLimits(),
+        system: () => this.loadSystemSettings(),
         prompts: async () => {
-          if (!this.runtimeLimitsForm?.prompt_group) await this.loadRuntimeLimits();
+          if (!this.runtimeLimitsForm?.prompt_group) await this.loadSystemSettings();
           this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || this.promptGroupSelected;
           await this.loadPromptGroups();
         },
-        tasks: () => this.loadTaskTimeouts(),
-        observability: () => this.loadObservability(),
-        system: () => this.loadServerLogRetention(),
         ai: () => this.loadAiProfiles(),
         capabilities: () => this.loadCapabilityAdmin(),
         proxies: () => this.loadProxies(),
       };
-      const loader = loaders[section] || loaders.server;
+      const loader = loaders[section] || loaders.system;
       await loader();
     },
 
     async loadSettings() {
-      try {
-        const s = await this.api('GET', '/settings');
-        this.settingsForm.intent_timeout = s.intent_timeout;
-        this.settingsForm.reason_timeout = s.reason_timeout;
-      } catch(e) { console.error(e); }
+      return this.loadSystemSettings();
     },
 
     async saveServerSettings() {
-      try {
-        await this.api('PUT', '/settings', this.settingsForm);
-        this.showSettings = false;
-        this.showToast('Server settings saved');
-      } catch(e) { this.showToast(e.message, 'error'); }
+      return this.saveSystemSettings();
     },
   };
 };

@@ -4,7 +4,7 @@ from pydantic import TypeAdapter
 
 from cairn.dispatcher.protocol.base import HttpClientBase
 from cairn.dispatcher.protocol.results import ApiResult
-from cairn.shared.contracts import ProjectDetail, ProjectSummary, ProjectWorkSummary, ProxyConfig, Settings
+from cairn.shared.contracts import ProjectDetail, ProjectSummary, ProjectWorkSummary, ProxyConfig, Settings, SystemSettingsAdmin
 
 _PROJECT_SUMMARY_ADAPTER = TypeAdapter(list[ProjectSummary])
 _PROJECT_WORK_SUMMARY_ADAPTER = TypeAdapter(list[ProjectWorkSummary])
@@ -27,9 +27,9 @@ class ProjectApiClient(HttpClientBase):
         return ProjectDetail.model_validate(response.json())
 
     def get_settings(self) -> Settings:
-        response = self._get("/settings")
+        response = self._get("/system-settings")
         response.raise_for_status()
-        return Settings.model_validate(response.json())
+        return Settings.model_validate(SystemSettingsAdmin.model_validate(response.json()).settings)
 
     def get_proxy(self, proxy_id: str) -> ProxyConfig:
         response = self._get(f"/proxies/{proxy_id}")

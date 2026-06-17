@@ -1,6 +1,7 @@
 window.CairnParts = window.CairnParts || {};
 CairnParts.settings_admin = function () {
   return {
+    settingsForm: { intent_timeout: 5, reason_timeout: 5 },
     runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20, prompt_group: 'default' },
     taskTimeoutsForm: {
       bootstrap_timeout: 300, bootstrap_conclude_timeout: 90,
@@ -20,76 +21,61 @@ CairnParts.settings_admin = function () {
       retention_enabled: true, retention_interval_seconds: 21600,
     },
 
-    async loadRuntimeLimits() {
-      try {
-        const r = await this.api('GET', '/runtime-limits');
-        Object.assign(this.runtimeLimitsForm, r);
-        if (!this.promptGroupSelected) this.promptGroupSelected = r.prompt_group || 'default';
-      } catch(e) { console.error(e); }
-    },
-
-    async loadTaskTimeouts() {
-      try {
-        const t = await this.api('GET', '/task-timeouts');
+    applySystemSettings(data) {
+      if (!data) return;
+      Object.assign(this.settingsForm, data.settings || {});
+      Object.assign(this.runtimeLimitsForm, data.runtime_limits || {});
+      const t = data.task_timeouts || {};
+      if (t.bootstrap) {
         this.taskTimeoutsForm.bootstrap_timeout = t.bootstrap.timeout;
         this.taskTimeoutsForm.bootstrap_conclude_timeout = t.bootstrap.conclude_timeout;
+      }
+      if (t.explore) {
         this.taskTimeoutsForm.explore_timeout = t.explore.timeout;
         this.taskTimeoutsForm.explore_conclude_timeout = t.explore.conclude_timeout;
+      }
+      if (t.reason) {
         this.taskTimeoutsForm.reason_timeout = t.reason.timeout;
         this.taskTimeoutsForm.reason_max_intents = t.reason.max_intents;
-      } catch(e) { console.error(e); }
+      }
+      const o = data.observability || {};
+      Object.assign(this.observabilityForm, o);
+      this.observabilityForm.redaction_patterns_text = (o.redaction_patterns || []).join('\n');
+      Object.assign(this.serverLogRetentionForm, data.server_log_retention || {});
+      if (!this.promptGroupSelected) this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || 'default';
     },
 
-    async loadObservability() {
-      try {
-        const o = await this.api('GET', '/observability');
-        Object.assign(this.observabilityForm, o);
-        this.observabilityForm.redaction_patterns_text = (o.redaction_patterns || []).join('\n');
-      } catch(e) { console.error(e); }
-    },
-
-    async loadServerLogRetention() {
-      try {
-        const s = await this.api('GET', '/server-log-retention');
-        Object.assign(this.serverLogRetentionForm, s);
-      } catch(e) { console.error(e); }
-    },
-
-    async saveRuntimeLimits() {
-      try {
-        await this.api('PUT', '/runtime-limits', this.runtimeLimitsForm);
-        this.showToast('Runtime limits saved');
-      } catch(e) { this.showToast(e.message, 'error'); }
-    },
-
-    async saveTaskTimeouts() {
-      try {
-        const payload = {
+    systemSettingsPayload() {
+      const observability = {
+        ...this.observabilityForm,
+        redaction_patterns: (this.observabilityForm.redaction_patterns_text || '').split('\n').map(s => s.trim()).filter(Boolean),
+      };
+      delete observability.redaction_patterns_text;
+      return {
+        settings: this.settingsForm,
+        runtime_limits: this.runtimeLimitsForm,
+        task_timeouts: {
           bootstrap: { timeout: this.taskTimeoutsForm.bootstrap_timeout, conclude_timeout: this.taskTimeoutsForm.bootstrap_conclude_timeout },
           explore: { timeout: this.taskTimeoutsForm.explore_timeout, conclude_timeout: this.taskTimeoutsForm.explore_conclude_timeout },
           reason: { timeout: this.taskTimeoutsForm.reason_timeout, max_intents: this.taskTimeoutsForm.reason_max_intents },
-        };
-        await this.api('PUT', '/task-timeouts', payload);
-        this.showToast('Task timeouts saved');
-      } catch(e) { this.showToast(e.message, 'error'); }
+        },
+        observability,
+        server_log_retention: this.serverLogRetentionForm,
+      };
     },
 
-    async saveObservability() {
+    async loadSystemSettings() {
       try {
-        const payload = {
-          ...this.observabilityForm,
-          redaction_patterns: (this.observabilityForm.redaction_patterns_text || '').split('\n').map(s => s.trim()).filter(Boolean),
-        };
-        delete payload.redaction_patterns_text;
-        await this.api('PUT', '/observability', payload);
-        this.showToast('Observability settings saved');
-      } catch(e) { this.showToast(e.message, 'error'); }
+        const data = await this.api('GET', '/system-settings');
+        this.applySystemSettings(data);
+      } catch(e) { console.error(e); }
     },
 
-    async saveServerLogRetention() {
+    async saveSystemSettings() {
       try {
-        await this.api('PUT', '/server-log-retention', this.serverLogRetentionForm);
-        this.showToast('Log & retention settings saved');
+        const data = await this.api('PUT', '/system-settings', this.systemSettingsPayload());
+        this.applySystemSettings(data);
+        this.showToast('System settings saved');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
   };

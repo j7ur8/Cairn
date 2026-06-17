@@ -1,24 +1,197 @@
 <!-- Settings -->
 <div x-show="view === 'settings'" x-cloak class="h-full overflow-y-auto px-4 pb-4 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
   <div class="h-full w-full rounded-none border-0 bg-transparent p-4 sm:p-5">
-    <section x-show="settingsSection === 'server'">
-    <div class="flex items-start justify-between gap-3 mb-3">
-      <div>
-        <h4 class="text-sm font-semibold text-slate-700">Server Settings</h4>
+    <section x-show="settingsSection === 'system'" class="space-y-5">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-700">System</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Server leases, dispatcher runtime, default task timeouts, observability, and retention are saved together.</p>
+        </div>
+        <button data-testid="system-settings-save" @click="saveSystemSettings()" class="shrink-0 px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
       </div>
-      <button data-testid="server-settings-save" @click="saveServerSettings()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div>
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent lease timeout (seconds)</label>
-        <input type="number" x-model.number="settingsForm.intent_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+
+      <div class="space-y-3">
+        <div class="text-xs font-semibold text-slate-600">Server Settings</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent lease timeout (seconds)</label>
+            <input type="number" x-model.number="settingsForm.intent_timeout" min="5" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason lease timeout (seconds)</label>
+            <input type="number" x-model.number="settingsForm.reason_timeout" min="5" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+        </div>
       </div>
-      <div>
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason lease timeout (seconds)</label>
-        <input type="number" x-model.number="settingsForm.reason_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-slate-600">Runtime Limits</div>
+          <p class="text-[11px] text-slate-400 mt-0.5"><code>max_project_workers</code> must not exceed <code>max_workers</code>.</p>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Workers</label>
+            <input type="number" x-model.number="runtimeLimitsForm.max_workers" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Running Projects</label>
+            <input type="number" x-model.number="runtimeLimitsForm.max_running_projects" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Project Workers</label>
+            <input type="number" x-model.number="runtimeLimitsForm.max_project_workers" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Interval (seconds)</label>
+            <input type="number" x-model.number="runtimeLimitsForm.interval" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Healthcheck Timeout (seconds)</label>
+            <input type="number" x-model.number="runtimeLimitsForm.healthcheck_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Prompt Group</label>
+            <input type="text" x-model="runtimeLimitsForm.prompt_group" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+        </div>
+        <div x-show="runtimeLimitsForm.max_project_workers > runtimeLimitsForm.max_workers" class="text-[11px] text-rose-500 font-medium">max_project_workers cannot exceed max_workers</div>
       </div>
-      <p class="sm:col-span-2 text-[11px] text-slate-400">These values control server heartbeat leases. Worker command timeouts are set per project when creating or replaying a project.</p>
-    </div>
+
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-slate-600">Task Timeouts</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">System-wide defaults for new project execution configs.</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <legend class="text-xs font-semibold text-slate-600 px-1">Bootstrap</legend>
+            <div class="space-y-3">
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
+                <input type="number" x-model.number="taskTimeoutsForm.bootstrap_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Conclude Timeout (seconds)</label>
+                <input type="number" x-model.number="taskTimeoutsForm.bootstrap_conclude_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+            </div>
+          </fieldset>
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <legend class="text-xs font-semibold text-slate-600 px-1">Explore</legend>
+            <div class="space-y-3">
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
+                <input type="number" x-model.number="taskTimeoutsForm.explore_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Conclude Timeout (seconds)</label>
+                <input type="number" x-model.number="taskTimeoutsForm.explore_conclude_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+            </div>
+          </fieldset>
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <legend class="text-xs font-semibold text-slate-600 px-1">Reason</legend>
+            <div class="space-y-3">
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
+                <input type="number" x-model.number="taskTimeoutsForm.reason_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+              <div>
+                <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Intents</label>
+                <input type="number" x-model.number="taskTimeoutsForm.reason_max_intents" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-slate-600">Observability</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Worker stream capture, byte caps, retention, and redaction patterns.</p>
+        </div>
+        <div class="flex items-center gap-4 flex-wrap">
+          <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.enabled">
+            Enabled
+          </label>
+          <label class="inline-flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_raw_worker_stream">
+            Record raw worker stream
+          </label>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 font-medium mb-1">Record streams</div>
+          <div class="flex items-center gap-4 flex-wrap">
+            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_prompts"> prompts</label>
+            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_stdout"> stdout</label>
+            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_stderr"> stderr</label>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Event Bytes</label>
+            <input type="number" x-model.number="observabilityForm.max_event_bytes" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Bytes Per Execution</label>
+            <input type="number" x-model.number="observabilityForm.max_bytes_per_execution" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Flush Interval (ms)</label>
+            <input type="number" x-model.number="observabilityForm.flush_interval_ms" min="0" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Flush Max Bytes</label>
+            <input type="number" x-model.number="observabilityForm.flush_max_bytes" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Retention Days</label>
+            <input type="number" x-model.number="observabilityForm.retention_days" min="0" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+        </div>
+        <div>
+          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Redaction Patterns (one per line)</label>
+          <textarea x-model="observabilityForm.redaction_patterns_text" rows="3" placeholder="e.g. sk-[A-Za-z0-9]+" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-slate-600">Server Log & Retention</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Server-side log format and retention-loop configuration.</p>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Log Level</label>
+            <select x-model="serverLogRetentionForm.log_level" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Log Format</label>
+            <select x-model="serverLogRetentionForm.log_format" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+              <option value="text">text</option>
+              <option value="json">json</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="serverLogRetentionForm.retention_enabled">
+              Retention Enabled
+            </label>
+          </div>
+          <div>
+            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Retention Interval (seconds)</label>
+            <input type="number" x-model.number="serverLogRetentionForm.retention_interval_seconds" min="60" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          </div>
+        </div>
+      </div>
     </section>
 
     <section x-show="settingsSection === 'proxies'">
@@ -405,44 +578,6 @@
       </div>
     </section>
 
-    <!-- Runtime & Limits -->
-    <section x-show="settingsSection === 'runtime'">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h4 class="text-sm font-semibold text-slate-700">Runtime Limits</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">Control the dispatcher's scheduling concurrency, interval, and health-check timeout. <code>max_project_workers</code> must not exceed <code>max_workers</code>.</p>
-        </div>
-        <button data-testid="runtime-limits-save" @click="saveRuntimeLimits()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Workers</label>
-          <input type="number" x-model.number="runtimeLimitsForm.max_workers" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Running Projects</label>
-          <input type="number" x-model.number="runtimeLimitsForm.max_running_projects" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Project Workers</label>
-          <input type="number" x-model.number="runtimeLimitsForm.max_project_workers" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Interval (seconds)</label>
-          <input type="number" x-model.number="runtimeLimitsForm.interval" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Healthcheck Timeout (seconds)</label>
-          <input type="number" x-model.number="runtimeLimitsForm.healthcheck_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Prompt Group</label>
-          <input type="text" x-model="runtimeLimitsForm.prompt_group" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-        </div>
-      </div>
-      <div x-show="runtimeLimitsForm.max_project_workers > runtimeLimitsForm.max_workers" class="mt-2 text-[11px] text-rose-500 font-medium">max_project_workers cannot exceed max_workers</div>
-    </section>
-
     <!-- Prompts -->
     <section x-show="settingsSection === 'prompts'" class="h-full min-h-0 flex flex-col">
       <div class="flex items-start justify-between gap-3 mb-3 shrink-0">
@@ -495,157 +630,6 @@
             </div>
           </div>
           <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>
-        </div>
-      </div>
-    </section>
-
-    <!-- Task Timeouts -->
-    <section x-show="settingsSection === 'tasks'">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h4 class="text-sm font-semibold text-slate-700">Task Timeouts</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">Default lease timeouts for each task stage. These are the system-wide defaults; individual project creation can override them with execution config overrides.</p>
-        </div>
-        <button data-testid="task-timeouts-save" @click="saveTaskTimeouts()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
-      </div>
-      <div class="space-y-4">
-        <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-          <legend class="text-xs font-semibold text-slate-600 px-1">Bootstrap</legend>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
-              <input type="number" x-model.number="taskTimeoutsForm.bootstrap_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Conclude Timeout (seconds)</label>
-              <input type="number" x-model.number="taskTimeoutsForm.bootstrap_conclude_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-          </div>
-        </fieldset>
-        <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-          <legend class="text-xs font-semibold text-slate-600 px-1">Explore</legend>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
-              <input type="number" x-model.number="taskTimeoutsForm.explore_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Conclude Timeout (seconds)</label>
-              <input type="number" x-model.number="taskTimeoutsForm.explore_conclude_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-          </div>
-        </fieldset>
-        <fieldset class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-          <legend class="text-xs font-semibold text-slate-600 px-1">Reason</legend>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Timeout (seconds)</label>
-              <input type="number" x-model.number="taskTimeoutsForm.reason_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Intents</label>
-              <input type="number" x-model.number="taskTimeoutsForm.reason_max_intents" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            </div>
-          </div>
-        </fieldset>
-      </div>
-    </section>
-
-    <!-- Observability -->
-    <section x-show="settingsSection === 'observability'">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h4 class="text-sm font-semibold text-slate-700">Observability</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">Control which worker streams are recorded, byte caps per execution, flush behaviour, retention, and redaction patterns (one per line).</p>
-        </div>
-        <button data-testid="observability-save" @click="saveObservability()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
-      </div>
-      <div class="space-y-3">
-        <div class="flex items-center gap-4 flex-wrap">
-          <label class="inline-flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.enabled">
-            Enabled
-          </label>
-        </div>
-        <div>
-          <div class="text-[11px] text-slate-400 font-medium mb-1">Record streams</div>
-          <div class="flex items-center gap-4 flex-wrap">
-            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_prompts"> prompts</label>
-            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_stdout"> stdout</label>
-            <label class="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_stderr"> stderr</label>
-          </div>
-        </div>
-        <div class="flex items-center gap-4 flex-wrap">
-          <label class="inline-flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="observabilityForm.record_raw_worker_stream">
-            Record raw worker stream
-          </label>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Event Bytes</label>
-            <input type="number" x-model.number="observabilityForm.max_event_bytes" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max Bytes Per Execution</label>
-            <input type="number" x-model.number="observabilityForm.max_bytes_per_execution" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Flush Interval (ms)</label>
-            <input type="number" x-model.number="observabilityForm.flush_interval_ms" min="0" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Flush Max Bytes</label>
-            <input type="number" x-model.number="observabilityForm.flush_max_bytes" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Retention Days</label>
-            <input type="number" x-model.number="observabilityForm.retention_days" min="0" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Redaction Patterns (one per line)</label>
-          <textarea x-model="observabilityForm.redaction_patterns_text" rows="3" placeholder="e.g. sk-[A-Za-z0-9]+" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-        </div>
-      </div>
-    </section>
-
-    <!-- Server Log & Retention -->
-    <section x-show="settingsSection === 'system'">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h4 class="text-sm font-semibold text-slate-700">Server Log & Retention</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">Server-side log format and retention-loop configuration. Changes take effect after a dispatcher reload.</p>
-        </div>
-        <button data-testid="log-retention-save" @click="saveServerLogRetention()" class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition shadow-sm shadow-brand-200">Save</button>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Log Level</label>
-          <select x-model="serverLogRetentionForm.log_level" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            <option value="DEBUG">DEBUG</option>
-            <option value="INFO">INFO</option>
-            <option value="WARNING">WARNING</option>
-            <option value="ERROR">ERROR</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Log Format</label>
-          <select x-model="serverLogRetentionForm.log_format" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            <option value="text">text</option>
-            <option value="json">json</option>
-          </select>
-        </div>
-        <div class="flex items-center gap-2">
-          <label class="inline-flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-100" x-model="serverLogRetentionForm.retention_enabled">
-            Retention Enabled
-          </label>
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Retention Interval (seconds)</label>
-          <input type="number" x-model.number="serverLogRetentionForm.retention_interval_seconds" min="60" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
         </div>
       </div>
     </section>

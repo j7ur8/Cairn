@@ -4,9 +4,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from cairn.shared.contracts.observability import ObservabilitySettings
+from cairn.shared.contracts.runtime_limits import RuntimeLimits
+from cairn.shared.contracts.settings import Settings
+from cairn.shared.contracts.timeouts import TaskTimeouts
+
 
 class ServerLogRetention(BaseModel):
-    """server.log + server.retention — exposed via GET/PUT /server-log-retention."""
+    """server.log + server.retention subset of the System admin contract."""
 
     model_config = {"extra": "forbid"}
 
@@ -14,3 +19,15 @@ class ServerLogRetention(BaseModel):
     log_format: Literal["text", "json"] = "text"
     retention_enabled: bool = True
     retention_interval_seconds: int = Field(default=21600, ge=60)
+
+
+class SystemSettingsAdmin(BaseModel):
+    """Aggregate System admin contract exposed via GET/PUT /system-settings."""
+
+    model_config = {"extra": "forbid"}
+
+    settings: Settings
+    runtime_limits: RuntimeLimits
+    task_timeouts: TaskTimeouts
+    observability: ObservabilitySettings
+    server_log_retention: ServerLogRetention

@@ -14,7 +14,7 @@ CairnParts.prompts = function () {
     async loadPromptGroups() {
       this.promptEditorLoading = true;
       try {
-        if (!this.runtimeLimitsForm.prompt_group) await this.loadRuntimeLimits();
+        if (!this.runtimeLimitsForm.prompt_group) await this.loadSystemSettings();
         const data = await this.api('GET', '/prompt-groups');
         this.promptGroups = Array.isArray(data.groups) ? data.groups : [];
         if (!this.promptGroupSelected) {

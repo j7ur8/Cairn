@@ -207,6 +207,9 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings.js").read_text(
             encoding="utf-8"
         )
+        settings_admin = (
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings_admin.js"
+        ).read_text(encoding="utf-8")
         prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.prompts.js").read_text(
             encoding="utf-8"
         )
@@ -217,10 +220,12 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertNotIn("async navigateSettings(section = 'server')", ui)
         self.assertIn("section: 'prompts'", settings)
         self.assertIn("adminNavItems()", settings)
-        self.assertIn("async navigateSettings(section = 'server')", settings)
+        self.assertIn("async navigateSettings(section = 'system')", settings)
         self.assertIn("async loadSettingsSection(section = this.settingsSection)", settings)
         self.assertIn("async loadSettings()", settings)
         self.assertIn("async saveServerSettings()", settings)
+        self.assertIn("async loadSystemSettings()", settings_admin)
+        self.assertIn("async saveSystemSettings()", settings_admin)
         self.assertIn("async loadPromptGroups()", prompts)
         self.assertIn("async loadPromptGroup(group = this.promptGroupSelected)", prompts)
         self.assertIn("promptTemplateRoutePath(name)", prompts)
@@ -297,11 +302,12 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         )
 
         self.assertNotIn("flex justify-end gap-2 mt-5", view)
-        self.assertIn('data-testid="server-settings-save"', view)
-        self.assertIn('data-testid="runtime-limits-save"', view)
-        self.assertIn('data-testid="task-timeouts-save"', view)
-        self.assertIn('data-testid="observability-save"', view)
-        self.assertIn('data-testid="log-retention-save"', view)
+        self.assertIn('data-testid="system-settings-save"', view)
+        self.assertNotIn('data-testid="server-settings-save"', view)
+        self.assertNotIn('data-testid="runtime-limits-save"', view)
+        self.assertNotIn('data-testid="task-timeouts-save"', view)
+        self.assertNotIn('data-testid="observability-save"', view)
+        self.assertNotIn('data-testid="log-retention-save"', view)
         self.assertIn("shrink-0 space-y-1.5", view)
         self.assertIn(
             '<div class="text-[11px] text-slate-400">Identity, routing metadata, and type-specific settings are grouped below.</div>',
