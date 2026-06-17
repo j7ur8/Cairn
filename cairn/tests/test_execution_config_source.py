@@ -144,16 +144,22 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertNotIn("sk", explore_config["ai_profiles"][0])
         self.assertNotIn("test-key", str(explore_config))
 
-    def test_patch_execution_config_updates_future_config_version(self) -> None:
-        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest, UpdateExecutionConfigRequest
+    def test_execution_config_patch_route_is_not_available(self) -> None:
+        import time
+
+        import jwt
+        from fastapi.testclient import TestClient
+
+        from cairn.server.app import app
+        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest
         from cairn.server.models_pkg.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
         from cairn.server.routers.ai_profiles import create_ai_profile
-        from cairn.server.routers.execution_configs import patch_execution_config
         from cairn.server.routers.projects import create_project
+        from cairn.server.security.jwt import _JWT_ALGORITHM
 
         profile = create_ai_profile(AiProfileCreate(
             name="exec-profile",
@@ -184,13 +190,112 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             ),
         ))
 
-        updated = patch_execution_config(
-            project.project.id,
-            UpdateExecutionConfigRequest(task_timeouts=test_task_timeouts(explore_timeout=22)),
+        token = jwt.encode(
+            {
+                "sub": "admin@cairn.local",
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600,
+            },
+            os.environ["CAIRN_JWT_SECRET"],
+            algorithm=_JWT_ALGORITHM,
         )
+        with TestClient(app) as client:
+            response = client.patch(
+                f"/projects/{project.project.id}/execution-config",
+                json={"task_timeouts": test_task_timeouts(explore_timeout=22).model_dump()},
+                headers={"Authorization": f"Bearer {token}"},
+            )
 
-        self.assertEqual(updated["explore"]["task_timeout"]["timeout"], 22)
-        self.assertGreaterEqual(updated["explore"]["config_version"], 2)
+        self.assertEqual(response.status_code, 404)
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config
+
+            config = load_project_execution_config(conn, project.project.id, "explore")
+        self.assertEqual(config["task_timeout"]["timeout"], 11)
+        self.assertEqual(config["config_version"], 1)
+
+    def test_persist_project_execution_config_rejects_existing_project_without_overwrite(self) -> None:
+        from cairn.server.application.project_creation import ProjectCreationDraft, create_project_from_draft
+        from cairn.server.domain.errors import ServerInvariantError
+        from cairn.server.execution_config import load_project_execution_config, persist_project_execution_configs
+        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest
+        from cairn.server.models_pkg.ai_profiles import (
+            AiProfileCreate,
+            AiProfileSelection,
+            TaskAiProfileSelections,
+        )
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="immutable-profile",
+            worker_type="codex",
+            model="gpt-original",
+            api_key_env="OPENAI_API_KEY",
+            sk="test-key",
+        ))
+        selection = AiProfileSelection(
+            primary_profile_id=profile.id,
+            primary_model="gpt-original",
+            primary_reasoning_type="medium",
+        )
+        capabilities = {
+            "bootstrap": CapabilitySelection(),
+            "explore": CapabilitySelection(),
+            "reason": CapabilitySelection(),
+        }
+        ai_profiles = TaskAiProfileSelections(
+            bootstrap=selection,
+            explore=selection,
+            reason=selection,
+        )
+        project = create_project(CreateProjectRequest(
+            title="immutable execution config",
+            origin="origin",
+            goal="goal",
+            task_timeouts=test_task_timeouts(explore_timeout=11, explore_conclude_timeout=12),
+            capabilities=capabilities,
+            ai_profiles=ai_profiles,
+        ))
+
+        with self.db.session_scope() as conn:
+            with self.assertRaisesRegex(ServerInvariantError, "project execution config already exists"):
+                persist_project_execution_configs(
+                    conn,
+                    project.project.id,
+                    proxy_id=None,
+                    capabilities=capabilities,
+                    ai_profiles=ai_profiles,
+                    role_id=None,
+                    task_timeouts=test_task_timeouts(explore_timeout=99, explore_conclude_timeout=100),
+                    now="2026-06-17T00:00:00Z",
+                )
+
+            explore_config = load_project_execution_config(conn, project.project.id, "explore")
+            self.assertEqual(explore_config["task_timeout"], {"timeout": 11, "conclude_timeout": 12})
+            self.assertEqual(explore_config["ai_profiles"][0]["snapshot_model"], "gpt-original")
+            self.assertEqual(explore_config["capabilities"]["mcp_server_ids"], [])
+            self.assertEqual(explore_config["capabilities"]["skill_ids"], [])
+            self.assertEqual(explore_config["config_version"], 1)
+
+            replay_project = create_project_from_draft(
+                conn,
+                ProjectCreationDraft(
+                    project_id="proj_replay_config",
+                    title="replay execution config",
+                    origin="replay origin",
+                    goal="replay goal",
+                    capabilities=capabilities,
+                    ai_profiles=ai_profiles,
+                    task_timeouts=test_task_timeouts(explore_timeout=33, explore_conclude_timeout=34),
+                    status="stopped",
+                ),
+            )
+            replay_config = load_project_execution_config(conn, replay_project.project.id, "explore")
+            source_config = load_project_execution_config(conn, project.project.id, "explore")
+            self.assertEqual(replay_config["task_timeout"], {"timeout": 33, "conclude_timeout": 34})
+            self.assertEqual(replay_config["config_version"], 1)
+            self.assertEqual(source_config["task_timeout"], {"timeout": 11, "conclude_timeout": 12})
 
     def test_create_project_request_requires_task_timeouts(self) -> None:
         from pydantic import ValidationError

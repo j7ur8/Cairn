@@ -44,7 +44,6 @@ from cairn.server.models_pkg.project_requests import (
     CreateHintRequest,
     CreateProjectRequest,
     ReopenRequest,
-    UpdateExecutionConfigRequest,
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )

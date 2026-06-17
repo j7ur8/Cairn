@@ -271,6 +271,7 @@ class DispatcherLoop:
 
     def _clear_project_log_state(self, project_id: str) -> None:
         self.log_state.clear_project(project_id)
+        self.execution_configs.clear_project(project_id)
 
     def _process_ai_profile_check_requests(self) -> None:
         if not hasattr(self, "health"):

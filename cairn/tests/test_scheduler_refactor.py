@@ -231,6 +231,40 @@ class ContainerCleanupCoordinatorTests(unittest.TestCase):
 
 
 class TaskSubmitterTests(unittest.TestCase):
+    def test_execution_config_resolver_caches_until_cleared(self) -> None:
+        from cairn.dispatcher.protocol.client import ApiResult
+        from cairn.dispatcher.scheduler.execution_config_resolver import ExecutionConfigResolver
+        from cairn.dispatcher.scheduler.log_state import LogState
+
+        client = MagicMock()
+        client.get_project_execution_config.return_value = ApiResult(
+            200,
+            {
+                "task_type": "bootstrap",
+                "config_version": 1,
+                "task_timeout": {"timeout": 5},
+            },
+        )
+        resolver = ExecutionConfigResolver(client, LogState())
+
+        first = resolver.get_task_execution_config("proj_001", "bootstrap")
+        assert first is not None
+        first["task_timeout"]["timeout"] = 99
+        second = resolver.get_task_execution_config("proj_001", "bootstrap")
+
+        self.assertIsNot(first, second)
+        self.assertEqual(second, {"task_type": "bootstrap", "config_version": 1, "task_timeout": {"timeout": 5}})
+        client.get_project_execution_config.assert_called_once_with("proj_001", "bootstrap")
+
+        resolver.clear_project("proj_001")
+        third = resolver.get_task_execution_config("proj_001", "bootstrap")
+        self.assertEqual(third, {"task_type": "bootstrap", "config_version": 1, "task_timeout": {"timeout": 5}})
+        self.assertEqual(client.get_project_execution_config.call_count, 2)
+
+        resolver.clear_all()
+        resolver.get_task_execution_config("proj_001", "bootstrap")
+        self.assertEqual(client.get_project_execution_config.call_count, 3)
+
     def test_bootstrap_claim_and_task_use_same_frozen_execution_config(self) -> None:
         from cairn.dispatcher.protocol.client import ApiResult
         from cairn.dispatcher.runtime.cancellation import TaskCancellation

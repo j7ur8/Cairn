@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from cairn.server.domain.errors import ServerInvariantError
 from cairn.server.execution_config.models import TASK_TYPES, ProjectExecutionConfigSnapshot
 from cairn.server.models_pkg import TaskCapabilities
 from cairn.server.repositories import sql
 
 
-def replace_project_execution_config(
+def insert_project_execution_config(
     conn: Any,
     project_id: str,
     snapshot: ProjectExecutionConfigSnapshot,
@@ -20,13 +21,8 @@ def replace_project_execution_config(
         "SELECT version FROM project_execution_configs WHERE project_id = :project_id",
         {"project_id": project_id},
     )
-    version = int(existing["version"]) + 1 if existing is not None else 1
-    for table in (
-        "project_execution_task_timeouts",
-        "project_execution_ai_profiles",
-        "project_execution_capabilities",
-    ):
-        sql.execute(conn, f"DELETE FROM {table} WHERE project_id = :project_id", {"project_id": project_id})
+    if existing is not None:
+        raise ServerInvariantError("project execution config already exists")
     sql.execute(
         conn,
         """
@@ -39,21 +35,10 @@ def replace_project_execution_config(
             :dispatch_sha256, :resources_sha256, :prompt_group, :prompts_json,
             :prompts_sha256, :created_at, :updated_at
         )
-        ON CONFLICT(project_id) DO UPDATE SET
-            version = excluded.version,
-            role_id = excluded.role_id,
-            role_json = excluded.role_json,
-            proxy_id = excluded.proxy_id,
-            dispatch_sha256 = excluded.dispatch_sha256,
-            resources_sha256 = excluded.resources_sha256,
-            prompt_group = excluded.prompt_group,
-            prompts_json = excluded.prompts_json,
-            prompts_sha256 = excluded.prompts_sha256,
-            updated_at = excluded.updated_at
         """,
         {
             "project_id": project_id,
-            "version": version,
+            "version": 1,
             "role_id": snapshot.role_id,
             "role_json": json.dumps(snapshot.role, ensure_ascii=False, sort_keys=True) if snapshot.role is not None else None,
             "proxy_id": snapshot.proxy_id,

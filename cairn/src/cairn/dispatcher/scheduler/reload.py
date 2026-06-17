@@ -57,6 +57,7 @@ class DispatcherReloader:
                 container_manager=loop.container_manager,
             )
             loop.execution_configs.client = loop.client
+            loop.execution_configs.clear_all()
             loop.replay.client = loop.client
             loop.executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
             loop.project_caches.clear_all()

@@ -51,24 +51,6 @@ class CreateProjectRequest(BaseModel):
         return text
 
 
-class UpdateExecutionConfigRequest(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    capabilities: TaskCapabilitySelectionMap | None = None
-    role_id: str | None = None
-    proxy_id: str | None = None
-    ai_profiles: TaskAiProfileSelections | None = None
-    task_timeouts: TaskTimeouts | None = None
-
-    @field_validator("role_id", "proxy_id")
-    @classmethod
-    def validate_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        text = value.strip()
-        return text or None
-
-
 class CreateHintRequest(BaseModel):
     content: str
     creator: str

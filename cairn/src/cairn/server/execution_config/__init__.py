@@ -6,13 +6,8 @@ from cairn.server.execution_config.assembler import (
     load_project_execution_config,
     load_project_execution_configs,
 )
-from cairn.server.execution_config.patcher import (
-    execution_ai_snapshots,
-    execution_capabilities,
-    execution_task_timeouts,
-    update_project_execution_config,
-)
-from cairn.server.execution_config.repository import replace_project_execution_config
+from cairn.server.execution_config.patcher import execution_ai_snapshots, execution_capabilities, execution_task_timeouts
+from cairn.server.execution_config.repository import insert_project_execution_config
 from cairn.server.execution_config.snapshot_builder import build_project_execution_config_snapshot
 from cairn.server.models_pkg import TaskCapabilitySelectionMap
 from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
@@ -37,7 +32,7 @@ def persist_project_execution_configs(
         proxy_id=proxy_id,
         task_timeouts=task_timeouts,
     )
-    replace_project_execution_config(conn, project_id, snapshot, now=now)
+    insert_project_execution_config(conn, project_id, snapshot, now=now)
 
 
 __all__ = [
@@ -47,5 +42,4 @@ __all__ = [
     "load_project_execution_config",
     "load_project_execution_configs",
     "persist_project_execution_configs",
-    "update_project_execution_config",
 ]
