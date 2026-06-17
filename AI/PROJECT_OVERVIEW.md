@@ -88,7 +88,7 @@ uv run --project cairn python -m pytest -m 'not db'
 uv run --project cairn python -m pytest -m db
 ```
 
-无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。
+无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。DB 集成测试还包含热点查询 `EXPLAIN` 验收，用于防止 project summary、observability、retention 和 replay 查询退回高成本计划。
 
 ## 5. 关键链接
 

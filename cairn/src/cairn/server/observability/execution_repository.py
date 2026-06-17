@@ -64,6 +64,23 @@ class LlmExecutionRepository:
         return sql.fetchall(
             self.conn,
             """
+            WITH paged AS (
+                SELECT *
+                FROM llm_executions
+                WHERE project_id = :project_id
+                ORDER BY started_at DESC, id DESC
+                LIMIT :limit
+            ),
+            event_stats AS (
+                SELECT
+                    ev.execution_id,
+                    MAX(ev.created_at) AS last_event_at,
+                    COUNT(*) AS event_count,
+                    COALESCE(SUM(LENGTH(ev.content)), 0) AS bytes_written
+                FROM llm_execution_events ev
+                WHERE ev.execution_id IN (SELECT id FROM paged)
+                GROUP BY ev.execution_id
+            )
             SELECT
                 e.id,
                 e.project_id,
@@ -73,27 +90,23 @@ class LlmExecutionRepository:
                 e.process_state,
                 e.started_at,
                 e.ended_at,
-                COALESCE(
-                    (SELECT MAX(ev.created_at) FROM llm_execution_events ev WHERE ev.execution_id = e.id),
-                    e.last_event_at
-                ) AS last_event_at,
+                COALESCE(event_stats.last_event_at, e.last_event_at) AS last_event_at,
                 GREATEST(
                     e.event_count::bigint,
-                    (SELECT COUNT(*) FROM llm_execution_events ev WHERE ev.execution_id = e.id)
+                    COALESCE(event_stats.event_count, 0)::bigint
                 ) AS event_count,
                 GREATEST(
                     e.bytes_written::bigint,
-                    COALESCE((SELECT SUM(LENGTH(ev.content)) FROM llm_execution_events ev WHERE ev.execution_id = e.id), 0)::bigint
+                    COALESCE(event_stats.bytes_written, 0)::bigint
                 ) AS bytes_written,
                 e.returncode,
                 e.timed_out,
                 e.error_kind,
                 e.produced_fact_id,
                 e.created_intent_ids
-            FROM llm_executions e
-            WHERE e.project_id = :project_id
-            ORDER BY started_at DESC, id DESC
-            LIMIT :limit
+            FROM paged e
+            LEFT JOIN event_stats ON event_stats.execution_id = e.id
+            ORDER BY e.started_at DESC, e.id DESC
             """,
             {"project_id": project_id, "limit": limit},
         )

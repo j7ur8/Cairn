@@ -16,7 +16,6 @@ CairnParts.llm_log = function () {
     llmAllExecutionEventsLoaded: false,
     llmAllExecutionLastSequence: 0,
     llmAllExecutionEventCountLimit: 5000,
-    llmEventViewActivity: null,
     llmEventViewStats: null,
     llmSelectedExecutionId: ALL_LLM_EXECUTIONS_VALUE,
     llmSelectedExecutionEvents: [],
@@ -26,7 +25,7 @@ CairnParts.llm_log = function () {
     llmExecutionsLastRefreshAt: 0,
     llmEventContentCache: {},
     // Memoization for filteredLlmEvents() / _llmEventsForView(). Bumped on
-    // any input change (event list, per-exec selection, filter, show-usage).
+    // any input change (event list, per-exec selection, filter).
     // 6+ template call sites in a single render collapse to 1 computation.
     _llmViewVersion: 0,
     _llmViewCache: null,
@@ -175,7 +174,6 @@ CairnParts.llm_log = function () {
       this.llmAllExecutionEventsLoading = false;
       this.llmAllExecutionEventsLoaded = false;
       this.llmAllExecutionLastSequence = 0;
-      this.llmEventViewActivity = null;
       this.llmEventViewStats = null;
       this.llmSelectedExecutionId = ALL_LLM_EXECUTIONS_VALUE;
       this.llmSelectedExecutionEvents = [];
@@ -263,7 +261,6 @@ CairnParts.llm_log = function () {
     handleLlmExecutionSelectionChange() {
       const targetId = this.selectedLlmExecutionIdForQuery();
       this.llmSelectedExecutionEvents = [];
-      this.llmEventViewActivity = null;
       this.llmEventViewStats = null;
       this.llmSelectedExecutionEventsLoading = false;
       this._llmViewVersion++;
@@ -309,13 +306,11 @@ CairnParts.llm_log = function () {
     currentLlmVisibleEventKinds() {
       const projectKinds = this.llmVisibleKindsFromProject(this.project?.project || {});
       const visible = new Set(projectKinds);
-      if (this.showUsageLogs) visible.add('usage');
-      else visible.delete('usage');
+      visible.delete('usage');
       return LLM_EVENT_KIND_OPTIONS.filter(kind => visible.has(kind));
     },
 
     applyLlmEventViewMeta(data) {
-      this.llmEventViewActivity = data?.activity || null;
       this.llmEventViewStats = data?.stats || null;
       const lastSequence = Number(data?.last_sequence || 0);
       if (Number.isFinite(lastSequence) && lastSequence > 0) {
@@ -528,18 +523,16 @@ CairnParts.llm_log = function () {
         return this._llmViewModelCache;
       }
       const allEvents = this.filteredLlmEvents();
-      const usage = this.llmUsageActivity();
-      const hasFilterHiddenEvents = this._llmEventsForView().length > 0 && allEvents.length === 0 && !usage;
+      const hasFilterHiddenEvents = this._llmEventsForView().length > 0 && allEvents.length === 0;
       const hiddenSummary = this.llmHiddenEventSummary();
       const visibleEvents = allEvents.slice(0, this.llmRenderLimit);
       const model = {
         allEvents,
         events: visibleEvents,
         eventCount: allEvents.length,
-        usage,
         hiddenSummary,
         hasFilterHiddenEvents,
-        showEmpty: allEvents.length === 0 && !usage && !hasFilterHiddenEvents,
+        showEmpty: allEvents.length === 0 && !hasFilterHiddenEvents,
         canLoadMore: allEvents.length > visibleEvents.length,
       };
       this._llmViewModelCache = model;
@@ -554,37 +547,12 @@ CairnParts.llm_log = function () {
       );
     },
 
-    llmUsageActivity() {
-      if (this.showUsageLogs || !['all', 'output'].includes(this.llmEventKindFilter)) return null;
-      const activity = this.llmEventViewActivity;
-      if (!activity || !activity.hidden_usage_count) return null;
-      const subtype = typeof activity.subtype === 'string' ? activity.subtype : '';
-      const title = subtype === 'thinking_tokens' ? 'Worker is thinking' : 'Worker activity';
-      const parts = [];
-      if (activity.tokens !== undefined && activity.tokens !== null && activity.tokens !== '') {
-        parts.push(`tokens ${activity.tokens}`);
-      }
-      if (activity.delta !== undefined && activity.delta !== null && activity.delta !== '') {
-        parts.push(`+${activity.delta}`);
-      }
-      if (subtype) {
-        parts.push(subtype.replace(/_/g, ' '));
-      }
-      parts.push(`${activity.hidden_usage_count} usage hidden`);
-      return {
-        sequence: activity.latest_usage_sequence || 0,
-        created_at: activity.latest_usage_at,
-        title,
-        detail: parts.join(' · '),
-      };
-    },
-
     llmHasFilterHiddenEvents() {
       return this.llmViewModel().hasFilterHiddenEvents;
     },
 
     llmHasHiddenEvents() {
-      return this.llmUsageActivity() !== null || this.llmHasFilterHiddenEvents();
+      return this.llmHasFilterHiddenEvents();
     },
 
     llmHiddenEventSummary() {
@@ -601,7 +569,6 @@ CairnParts.llm_log = function () {
     },
 
     isVisibleLlmEvent(event) {
-      if (event.event_kind === 'usage') return this.showUsageLogs;
       if (event.event_kind !== 'system_event') return true;
       const payload = this.tryParseLlmJsonObject(event.content);
       if (!payload || typeof payload.type !== 'string') return true;
@@ -783,7 +750,6 @@ CairnParts.llm_log = function () {
 
     matchesLlmEventKindFilter(event) {
       const kind = event.event_kind || '';
-      if (kind === 'usage') return this.showUsageLogs && ['all', 'output'].includes(this.llmEventKindFilter);
       // Merged call events (tool_call + command_start + command_end + tool_result
       // collapsed by call_id) are visible under the two related filter pills.
       if (event._merged_call) {

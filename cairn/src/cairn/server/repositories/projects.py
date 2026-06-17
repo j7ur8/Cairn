@@ -9,29 +9,57 @@ class ProjectRepository:
     def __init__(self, conn: Any):
         self.conn = conn
 
+    @staticmethod
+    def _count_joins() -> str:
+        return """
+            LEFT JOIN (
+                SELECT project_id, COUNT(*) AS fact_count
+                FROM facts
+                GROUP BY project_id
+            ) facts_count ON facts_count.project_id = p.id
+            LEFT JOIN (
+                SELECT
+                    project_id,
+                    COUNT(*) AS intent_count,
+                    COUNT(*) FILTER (WHERE concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
+                    COUNT(*) FILTER (WHERE concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count
+                FROM intents
+                GROUP BY project_id
+            ) intents_count ON intents_count.project_id = p.id
+            LEFT JOIN (
+                SELECT project_id, COUNT(*) AS hint_count
+                FROM hints
+                GROUP BY project_id
+            ) hints_count ON hints_count.project_id = p.id
+        """
+
+    @staticmethod
+    def _count_selects() -> str:
+        return """
+                COALESCE(facts_count.fact_count, 0) AS fact_count,
+                COALESCE(intents_count.intent_count, 0) AS intent_count,
+                COALESCE(intents_count.working_intent_count, 0) AS working_intent_count,
+                COALESCE(intents_count.unclaimed_intent_count, 0) AS unclaimed_intent_count,
+                COALESCE(hints_count.hint_count, 0) AS hint_count
+        """
+
     def list_with_counts(self) -> list[Any]:
-        return sql.fetchall(self.conn, """
+        return sql.fetchall(self.conn, f"""
             SELECT p.*,
-                (SELECT COUNT(*) FROM facts WHERE project_id = p.id) AS fact_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id) AS intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count,
-                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count
+                {self._count_selects()}
             FROM projects p
+            {self._count_joins()}
             ORDER BY p.created_at
         """)
 
     def list_work_summaries(self) -> list[Any]:
-        return sql.fetchall(self.conn, """
+        return sql.fetchall(self.conn, f"""
             SELECT p.*,
                 COALESCE(pec.version, 0) AS config_version,
-                (SELECT COUNT(*) FROM facts WHERE project_id = p.id) AS fact_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id) AS intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
-                (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count,
-                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count
+                {self._count_selects()}
             FROM projects p
             LEFT JOIN project_execution_configs pec ON pec.project_id = p.id
+            {self._count_joins()}
             ORDER BY p.created_at
         """)
 

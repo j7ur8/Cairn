@@ -9,7 +9,6 @@ from typing import Any
 import yaml
 
 from cairn.server import db
-from cairn.server.observability.event_repository import LlmEventRepository
 from cairn.server.observability.retention_repository import LlmRetentionRepository
 
 LOG = logging.getLogger(__name__)
@@ -57,8 +56,7 @@ def _cutoff_iso(hours: int) -> str:
 def prune_older_than(conn: Any, cutoff_iso: str) -> int:
     """Delete executions older than ``cutoff_iso`` and return the count."""
     retention = LlmRetentionRepository(conn)
-    execution_ids = retention.execution_ids_older_than(cutoff_iso)
-    LlmEventRepository(conn).delete_for_executions(execution_ids)
+    retention.delete_events_for_executions_older_than(cutoff_iso)
     return retention.delete_executions_older_than(cutoff_iso)
 
 

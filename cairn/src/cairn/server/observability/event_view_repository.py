@@ -7,7 +7,6 @@ from cairn.server.observability.repository_shared import (
     append_event_kind_filter,
     base_event_filter,
 )
-from cairn.server.observability.usage_repository import LlmUsageRepository
 from cairn.server.repositories import sql
 
 
@@ -65,15 +64,8 @@ class LlmEventViewRepository:
                 """,
                 {**event_params, "limit": limit},
             )
-        usage_row, usage_count = LlmUsageRepository(self.conn).latest_usage_activity(
-            project_id,
-            execution_id=execution_id,
-            after=after if after > 0 else None,
-        )
         return EventViewRows(
             rows=rows,
             last_sequence=last_sequence,
             by_kind=by_kind,
-            usage_row=usage_row,
-            usage_count=usage_count,
         )

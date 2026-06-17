@@ -170,15 +170,6 @@ class IncrementalEventListResponse(BaseModel):
     last_sequence: int = 0
 
 
-class LlmUsageActivity(BaseModel):
-    latest_usage_sequence: int | None = None
-    latest_usage_at: str | None = None
-    subtype: str | None = None
-    tokens: int | None = None
-    delta: int | None = None
-    hidden_usage_count: int = 0
-
-
 class LlmEventStats(BaseModel):
     total: int
     returned: int
@@ -188,6 +179,5 @@ class LlmEventStats(BaseModel):
 
 class EventViewResponse(BaseModel):
     primary_events: list[LlmExecutionEvent]
-    activity: LlmUsageActivity | None = None
     stats: LlmEventStats
     last_sequence: int

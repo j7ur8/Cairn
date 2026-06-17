@@ -6,7 +6,6 @@ CairnParts.core = function () {
     view: 'list',
     polling: true,
     pollTimer: null,
-    showUsageLogs: false,
     proxies: [],
     showLogin: false,
     currentUser: null,
@@ -37,10 +36,6 @@ CairnParts.core = function () {
       this.$watch('llmSelectedExecutionId', bumpLlmView);
       this.$watch('llmSelectedExecutionEvents', bumpLlmView);
       this.$watch('llmEventKindFilter', bumpLlmView);
-      this.$watch('showUsageLogs', async () => {
-        bumpLlmView();
-        await this.reloadLlmEventView(true);
-      });
       this.$watch('_llmViewVersion', () => {
         this.llmRenderLimit = 100;
       });

@@ -127,8 +127,9 @@ Cairn/
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
 | Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
-| Replay advance | `server/application/replay/`, `server/repositories/replay.py`, `dispatcher/scheduler/replay.py` | 从完成项目生成 replay run 并推进步骤 | 与 replay steps 数量相关 | 事务内创建/推进在 service，事务外附件复制、激活和失败补偿在 orchestration |
-| Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | 与事件数和查询 limit 相关 | SQL 收敛在 execution/event/view/usage/retention repository/query 类 |
+| Project summary counts | `server/repositories/projects.py` | 项目列表和 dispatcher work summaries 的 facts/intents/hints 计数 | 预聚合 join，避免逐 project correlated count | `test_hot_query_repositories.py` 用 PostgreSQL `EXPLAIN` 检查无 `SubPlan` |
+| Replay advance | `server/application/replay/`, `server/repositories/replay.py`, `dispatcher/scheduler/replay.py` | 从完成项目生成 replay run 并推进步骤 | route extraction 按 completion facts 反向加载可达子图 | 事务内创建/推进在 service，事务外附件复制、激活和失败补偿在 orchestration |
+| Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | execution list 先分页再聚合 events；event view 先按 kind 统计再拉 primary events；retention 用 DB join delete | SQL 收敛在 execution/event/view/usage/retention repository/query 类，router/application 不感知 SQL 细节 |
 | MCP capability health probe | `server/capability_health.py`, `dispatcher/mcp_probe.py` | Server admin API 调 dispatcher `/mcp-probe`，Dispatcher 用 worker image 临时容器执行 MCP initialize + `tools/list` | 与 MCP 数量线性相关；每次 probe 创建并清理一个 startup container | 成功会写回 `last_probe_*` 并把 MCP `available` 设为 true，否则设为 false |
 | Redaction | `server/observability/redaction.py`, `dispatcher/observability/redaction.py` | 对 token/key 等敏感文本脱敏 | 与事件文本长度和 pattern 数量相关 | 用于观测数据 |
 
@@ -418,6 +419,7 @@ uv run --project cairn cairn db migrate
 | `test_scheduler_refactor.py` | Dispatcher scheduler 协作者和 TaskSubmitter 流水线回归 |
 | `test_architecture_boundaries.py` | domain/router/mapper/application/observability/scheduler/旧路径架构边界检查 |
 | `test_execution_config_source.py` | 执行配置快照、PATCH、secret 隔离 |
+| `test_hot_query_repositories.py` | project count、execution/event view、retention、replay route 和 PostgreSQL `EXPLAIN` 热点查询防回归 |
 
 当前验证状态：
 
@@ -425,6 +427,7 @@ uv run --project cairn cairn db migrate
 - CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src` 和 pytest coverage。
 - 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
 - 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
+- 2026-06-17 热点查询回归覆盖 config loader 测试路径、project summary 预聚合、execution list 分页后聚合、event view usage 收敛、retention `DELETE ... USING`、replay reachable subgraph，以及 `EXPLAIN` 无 `SubPlan`/join delete 验收。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
 
@@ -451,6 +454,16 @@ uv run --project cairn cairn db migrate
 | Low | Dispatcher 阶段入口仍偏大 | `dispatcher/tasks/bootstrap.py`, `dispatcher/tasks/explore.py`, `dispatcher/tasks/reason.py` | common/process/writeback/release/outcome/text/snapshot 已拆分；TaskSubmitter 提交流水线已统一，阶段主流程仍可继续收敛 |
 | Low | Dispatcher `/mcp-probe` 为同步 probe，会创建 startup container 并顺序探测目标 MCP | `dispatcher/mcp_probe.py`, `dispatcher/health_server.py` | 适合 admin 手动健康检查；不要把 probe-all 放入高频自动轮询，否则会增加 Docker daemon 和 worker image 启动压力 |
 
+下一阶段可优化空间：
+
+| 优先级 | 候选 | 位置 | 收益/风险/验收 |
+|--------|------|------|----------------|
+| Medium | `IntentRepository.insert_sources()` 当前逐条 insert，可改为批量 insert | `server/repositories/intents.py` | 多 source intent 创建和 replay seed 写入会减少 round trips；需保持 position 顺序和空 sources 行为；用多 source fixture 验证行数、排序和 replay 路由一致性 |
+| Medium | `_hydrate_intent_sources()` project-scoped 查询可收窄到当前 intent ids | `server/repositories/intents.py` | 大项目只读 open intents 时避免扫描无关 sources；风险是全项目详情仍需完整 sources；用 project detail/open-intent fixtures 验证 API 输出不变并比较 `EXPLAIN` |
+| Low | Lease expiration 增加 PostgreSQL `EXPLAIN` 和 `last_heartbeat_at`/reason heartbeat 索引评估 | `server/repositories/leases.py`, `server/domain/lease_cleanup.py` | 不先加索引，先用大量 active/concluded intent fixture 确认是否真实热点；验收为计划稳定、过期释放行为不变 |
+| Low | Event 查询评估 `event_kind` 过滤组合索引 | `server/observability/event_repository.py`, `event_view_repository.py` | 只有大 usage/noisy event fixture 显示瓶颈后再实施；风险是写入成本和索引膨胀；验收为 event_kinds filter、cursor advance 和 usage hidden stats 不变 |
+| Low | Prompt/settings YAML 读写评估缓存或 section-level reload | `server/config_store.py`, `shared/config/loader.py`, settings/prompt routers | 可能减少管理面重复 YAML parse；风险是 UI 写入一致性、dispatcher reload 语义和 bind mount fallback；验收需覆盖写后读、并发保存和 reload path |
+
 ## 13. 隐藏细节与注意事项
 
 | 标注 | 内容 |
@@ -461,7 +474,8 @@ uv run --project cairn cairn db migrate
 | 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
 | 注意 | 当前 Alembic head 是 `0004_prompt_snapshots`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
-| 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后可能成为 hot path。 |
-| 性能敏感 | LLM event 写入有批量接口和 event size limit，但保留策略依赖 retention loop。 |
+| 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后仍可能成为 hot path；项目列表/调度 summaries 已用 repository 预聚合 counts 避免逐项目子查询。 |
+| 性能敏感 | LLM event 写入有批量接口和 event size limit；execution list 已先分页再聚合 events，event view 已按 kind 收敛 usage 查询，retention loop 通过 `DELETE ... USING` 交给 DB join delete。 |
+| 性能敏感 | Replay route extraction 不再加载完整项目 replay 图，而是从 completion facts 反向加载可达子图；仍需保持 missing producer、多 producer、cycle 错误语义。 |
 | 向后兼容 | Prompt 模板要求固定变量，如 `{graph_yaml}`、`{intent_id}`、`{capability_instructions}`，配置模型会校验。 |
 | 向后兼容 | Worker execute 输出结构驱动 fact/intent/complete 解析；conclude fallback 使用 sentinel plain-text contract，变更需同步 prompts、parser、adapters 和测试。 |

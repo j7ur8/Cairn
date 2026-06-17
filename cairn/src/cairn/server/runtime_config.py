@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from cairn.shared.config import DispatcherConfig, ServerConfig, SystemConfig
-from cairn.shared.config.loader import load_server_data, merge_server_dispatch_data
+from cairn.shared.config.loader import load_server_file, merge_server_dispatch_data
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DISPATCH_CONFIG_PATH = _REPO_ROOT / "config.yaml"
@@ -34,7 +34,7 @@ def system_config() -> SystemConfig:
     dispatch_data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(dispatch_data, dict):
         raise RuntimeError(f"dispatch config must be a mapping: {path}")
-    server_data = load_server_data(server_path.with_name("config.yaml"))
+    server_data = load_server_file(server_path)
     data = merge_server_dispatch_data(server_data, dispatch_data)
     server = data.get("server")
     dispatcher = data.get("dispatcher")

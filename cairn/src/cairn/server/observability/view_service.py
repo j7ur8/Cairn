@@ -5,7 +5,6 @@ from typing import Any
 from cairn.server.observability._shared import normalize_event_kind_filter, row_to_event
 from cairn.server.observability.event_view_repository import LlmEventViewRepository
 from cairn.server.observability.models import EventViewResponse, LlmEventStats
-from cairn.server.observability.usage_query import activity_from_usage_row
 
 
 def list_event_view(
@@ -36,10 +35,8 @@ def list_event_view(
             if kind not in visible and count > 0
         }
 
-    activity = activity_from_usage_row(view.usage_row, view.usage_count)
     return EventViewResponse(
         primary_events=primary_events,
-        activity=activity,
         stats=LlmEventStats(
             total=sum(view.by_kind.values()),
             returned=len(primary_events),

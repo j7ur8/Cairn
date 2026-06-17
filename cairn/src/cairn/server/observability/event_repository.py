@@ -201,9 +201,10 @@ class LlmEventRepository:
         )
 
     def delete_for_executions(self, execution_ids: list[str]) -> None:
-        for execution_id in execution_ids:
-            sql.execute(
-                self.conn,
-                "DELETE FROM llm_execution_events WHERE execution_id = :execution_id",
-                {"execution_id": execution_id},
-            )
+        if not execution_ids:
+            return
+        sql.execute(
+            self.conn,
+            "DELETE FROM llm_execution_events WHERE execution_id = ANY(:execution_ids)",
+            {"execution_ids": execution_ids},
+        )

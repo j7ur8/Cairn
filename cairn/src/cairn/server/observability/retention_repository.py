@@ -17,6 +17,19 @@ class LlmRetentionRepository:
         )
         return [row["id"] for row in rows]
 
+    def delete_events_for_executions_older_than(self, cutoff_iso: str) -> int:
+        cur = sql.execute(
+            self.conn,
+            """
+            DELETE FROM llm_execution_events ev
+            USING llm_executions e
+            WHERE ev.execution_id = e.id
+              AND e.started_at < :cutoff
+            """,
+            {"cutoff": cutoff_iso},
+        )
+        return cur.rowcount
+
     def delete_executions_older_than(self, cutoff_iso: str) -> int:
         cur = sql.execute(
             self.conn,

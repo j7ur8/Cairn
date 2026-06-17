@@ -151,10 +151,6 @@
               x-text="filter.label"></button>
           </template>
         </div>
-        <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-500 select-none">
-          <input type="checkbox" x-model="showUsageLogs" class="h-3 w-3 rounded border-slate-300 text-slate-700 focus:ring-brand-100">
-          <span>Show Hidden</span>
-        </label>
         <div x-show="llmViewModel().hiddenSummary" class="text-[10px] text-slate-400 truncate" x-text="llmViewModel().hiddenSummary"></div>
         <div class="grid grid-cols-3 gap-1.5 text-[10px]">
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
@@ -174,18 +170,6 @@
       <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/25">
         <template x-if="llmViewModel().showEmpty">
           <p class="text-sm text-slate-300 text-center mt-12">No execution log yet</p>
-        </template>
-        <template x-if="llmViewModel().eventCount === 0 && llmViewModel().usage">
-          <div class="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-700">
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="px-1.5 py-0.5 rounded bg-white/80 text-[9px] font-semibold uppercase tracking-wide text-sky-700 shrink-0">Active</span>
-              <span class="font-semibold truncate" x-text="llmViewModel().usage.title"></span>
-              <span class="flex-1"></span>
-              <span class="font-mono text-[10px] text-sky-500 shrink-0" x-text="`#${llmViewModel().usage.sequence}`"></span>
-            </div>
-            <div class="mt-1 text-sky-600" x-text="llmViewModel().usage.detail"></div>
-            <div class="mt-1 text-[10px] text-sky-400" x-text="formatTime(llmViewModel().usage.created_at)"></div>
-          </div>
         </template>
         <template x-if="llmViewModel().eventCount === 0 && llmViewModel().hasFilterHiddenEvents">
           <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700">
@@ -832,4 +816,3 @@
 </template>
 </div>
 </template>
-

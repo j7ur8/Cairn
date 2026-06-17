@@ -188,6 +188,101 @@ class ReplayRepository:
             {"project_id": project_id, "intent_id": intent_id},
         )
 
+    def route_graph(self, project_id: str) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, list[Any]]]:
+        intents = sql.fetchall(
+            self.conn,
+            """
+            SELECT *
+            FROM intents
+            WHERE project_id = :project_id
+            """,
+            {"project_id": project_id},
+        )
+        source_rows = sql.fetchall(
+            self.conn,
+            """
+            SELECT intent_id, fact_id
+            FROM intent_sources
+            WHERE project_id = :project_id
+            ORDER BY intent_id, position, fact_id
+            """,
+            {"project_id": project_id},
+        )
+        intents_by_id = {row["id"]: row for row in intents}
+        sources_by_intent: dict[str, list[str]] = {intent_id: [] for intent_id in intents_by_id}
+        for source in source_rows:
+            sources = sources_by_intent.get(source["intent_id"])
+            if sources is not None:
+                sources.append(source["fact_id"])
+
+        producers_by_fact: dict[str, list[Any]] = {}
+        for intent in intents:
+            fact_id = intent["to_fact_id"]
+            if fact_id is not None:
+                producers_by_fact.setdefault(fact_id, []).append(intent)
+        return intents_by_id, sources_by_intent, producers_by_fact
+
+    def route_graph_for_facts(
+        self,
+        project_id: str,
+        seed_fact_ids: list[str],
+    ) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, list[Any]]]:
+        intents_by_id: dict[str, Any] = {}
+        sources_by_intent: dict[str, list[str]] = {}
+        producers_by_fact: dict[str, list[Any]] = {}
+        seen_facts: set[str] = set()
+        frontier = list(dict.fromkeys(seed_fact_ids))
+
+        while frontier:
+            fact_ids = [fact_id for fact_id in frontier if fact_id not in seen_facts]
+            frontier = []
+            if not fact_ids:
+                continue
+            seen_facts.update(fact_ids)
+
+            intents = sql.fetchall(
+                self.conn,
+                """
+                SELECT *
+                FROM intents
+                WHERE project_id = :project_id
+                  AND to_fact_id = ANY(:fact_ids)
+                """,
+                {"project_id": project_id, "fact_ids": fact_ids},
+            )
+            new_intent_ids: list[str] = []
+            for intent in intents:
+                intent_id = intent["id"]
+                fact_id = intent["to_fact_id"]
+                producers_by_fact.setdefault(fact_id, []).append(intent)
+                if intent_id in intents_by_id:
+                    continue
+                intents_by_id[intent_id] = intent
+                sources_by_intent[intent_id] = []
+                new_intent_ids.append(intent_id)
+
+            if not new_intent_ids:
+                continue
+            source_rows = sql.fetchall(
+                self.conn,
+                """
+                SELECT intent_id, fact_id
+                FROM intent_sources
+                WHERE project_id = :project_id
+                  AND intent_id = ANY(:intent_ids)
+                ORDER BY intent_id, position, fact_id
+                """,
+                {"project_id": project_id, "intent_ids": new_intent_ids},
+            )
+            for source in source_rows:
+                intent_id = source["intent_id"]
+                fact_id = source["fact_id"]
+                sources_by_intent[intent_id].append(fact_id)
+                if fact_id not in seen_facts:
+                    frontier.append(fact_id)
+
+        return intents_by_id, sources_by_intent, producers_by_fact
+
     def fact_description(self, project_id: str, fact_id: str) -> str:
         row = sql.fetchone(
             self.conn,

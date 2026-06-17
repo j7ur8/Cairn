@@ -148,7 +148,7 @@ sequenceDiagram
 | Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
 | Dispatcher Control/Probe | `cairn/src/cairn/dispatcher/health_server.py`, `cairn/src/cairn/dispatcher/mcp_probe.py` | Dispatcher 本地 HTTP 控制面，处理 health/metrics/reload 和 MCP initialize/tools-list 探测 | `/healthz`, `/metrics`, `/reload`, `/mcp-probe` | JSON health/probe result, Prometheus metrics | ContainerManager, shared config |
 | Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
-| Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；SQL 拆到 execution/event/view/usage/retention repository/query 模块 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
+| Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；热点 SQL 仍只在 execution/event/view/usage/retention repository/query 模块，application/router 不感知 SQL 细节 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
 | Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由 `CairnParts` slices 合并，Settings 按 settings/admin/prompts/AI profiles/proxies/capabilities 域拆分 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind, Cytoscape |
 | Shared Observability | `cairn/src/cairn/shared/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
 | Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
@@ -185,7 +185,7 @@ sequenceDiagram
     participant W as Agent Worker
 
     D->>S: GET /projects
-    S->>DB: expire leases + list project summaries
+    S->>DB: expire leases + list project summaries with pre-aggregated counts
     S-->>D: active projects and open intents
     D->>S: GET /projects/{id}
     S-->>D: graph detail
@@ -210,6 +210,8 @@ sequenceDiagram
 | Retention loop | Server lifespan | 周期清理观测数据 |
 | MCP probe request | Server admin API -> Dispatcher `/mcp-probe` | 使用临时 startup container 写入 `mcp.json` 和 probe 脚本，执行 initialize + `tools/list` 后删除容器 |
 
+性能敏感查询仍收敛在 repository/query 层：project summaries 使用 facts/intents/hints 预聚合 join；execution list 先分页再聚合 events；event view 先计算 by-kind stats，再按可见 `event_kind` 拉取 primary events；retention 使用 DB join delete；replay route extraction 按 completion facts 可达子图加载。Router、application service 和 DTO contract 不暴露这些 SQL 形态。
+
 共享数据：
 
 | 数据 | 写入方 | 读取方 |
@@ -227,7 +229,7 @@ sequenceDiagram
 |------|----------|------|
 | Blackboard Architecture | facts/intents/hints graph | Worker 不直接通信，通过共享图协作 |
 | Router/Application/Domain | `server/routers/`, `server/application/`, `server/domain/` | Router 只做参数/鉴权/HTTP 响应映射，application/query service 编排事务用例，domain 是无 SQL 的规则/决策层 |
-| Repository / Query | `server/repositories/`, `server/execution_config/repository.py`, `server/observability/*_repository.py` | 唯一 SQL 访问层，负责条件更新、lease 过期、ID 分配、export/replay/AI check/observability row 读取 |
+| Repository / Query | `server/repositories/`, `server/execution_config/repository.py`, `server/observability/*_repository.py` | 唯一 SQL 访问层，负责条件更新、lease 过期、ID 分配、export/replay/AI check/observability row 读取；project count 预聚合、execution 分页后聚合、retention `DELETE ... USING` 和 replay reachable subgraph 查询都保持在这一层 |
 | Mapper | `server/mappers/` | 只做 row/projection 到 API/domain DTO 的转换，不查 SQL |
 | Adapter | `dispatcher/workers/adapters/` | 对接 Claude Code、Codex、mock |
 | Scheduler Coordinators | `dispatcher/scheduler/` | `DispatcherLoop` 保持生命周期外壳，tick/dispatch/runtime/submitter 协作者依赖 `SchedulerServices` 或具体 resolver，而不是完整 loop |

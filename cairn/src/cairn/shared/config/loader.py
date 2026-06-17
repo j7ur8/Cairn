@@ -25,8 +25,12 @@ def server_config_path(dispatch_path: Path) -> Path:
     return dispatch_path.with_name("server.yaml")
 
 
-def load_server_data(dispatch_path: Path) -> dict[str, Any]:
-    server_path = server_config_path(dispatch_path)
+def load_server_data(path: Path) -> dict[str, Any]:
+    server_path = server_config_path(path)
+    return load_server_file(server_path)
+
+
+def load_server_file(server_path: Path) -> dict[str, Any]:
     data = _read_yaml(server_path, label="server config")
     return prepare_bind_mount_data(data, server_path.parent)
 

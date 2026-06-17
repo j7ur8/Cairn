@@ -15,8 +15,6 @@ class EventViewRows:
     rows: list[Any]
     last_sequence: int
     by_kind: dict[str, int]
-    usage_row: Any | None
-    usage_count: int
 
 
 def base_event_filter(

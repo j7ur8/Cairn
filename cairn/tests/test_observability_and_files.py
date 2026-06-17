@@ -487,8 +487,7 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual([event.event_kind for event in view.primary_events], ["process_end", "command_start"])
-        self.assertEqual(view.activity.hidden_usage_count, 25)
-        self.assertEqual(view.activity.tokens, 24)
+        self.assertFalse(hasattr(view, "activity"))
         self.assertEqual(view.stats.hidden_by_kind["usage"], 25)
         self.assertEqual(view.last_sequence, view.primary_events[0].sequence)
 

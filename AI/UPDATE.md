@@ -5,6 +5,17 @@
 
 # 更新日志
 
+## 2026-06-17 — 热点查询二阶段优化与优化候选盘点
+
+- 同步热点查询二阶段实现：测试侧 config loader 改走 repo 根 `server.test.yaml`，避免测试路径漂移；project list/work summaries 的事实、意图、hint 计数改为 repository 预聚合 join，消除逐项目 correlated count `SubPlan`。
+- 同步观测查询优化：execution 列表先用分页 CTE 选出目标 execution，再只聚合分页集合内 events；event view 先按 `event_kind` 聚合统计，再按可见 kind 拉取 primary events，usage count/latest usage 查询只在需要时执行。
+- 同步 retention 与 replay 优化：retention events 清理改为 `DELETE ... USING llm_executions`，不再预取旧 execution ids；replay route extraction 使用 `route_graph_for_facts()` 从 completion facts 反向加载可达子图，避免完整项目 replay 图扫描。
+- 当前验收：`uv run python -m pytest -q tests/test_config_loader.py tests/test_replay_service.py` 通过；`CAIRN_ALLOW_DB_RESET=1 uv run python -m pytest -q tests/test_hot_query_repositories.py tests/test_retention_loop.py tests/test_observability_and_files.py::ObservabilityRepositoryTests` 通过。
+- 工程保障：`cairn/tests/test_hot_query_repositories.py` 覆盖 project count、execution/event view、retention、replay route 和 PostgreSQL `EXPLAIN` 防回归；该文件必须纳入版本控制，否则热点 SQL/replay/retention 回归闭环会丢失。
+- 下一阶段候选已记录到 `CODEBASE_ANALYSIS.md`：intent sources 批量 insert、project-scoped source hydrate 收窄、lease expiration/event kind 索引基于 fixture + EXPLAIN 再决策、prompt/settings YAML 缓存或 section-level reload 评估。
+
+---
+
 ## 2026-06-17 — Review 同步
 
 - 同步 Dispatcher 控制面：`health_server.py` 现在除 `/healthz`、`/metrics`、`/reload` 外还提供 `/mcp-probe`，Server capability admin 通过 dispatcher service token 调用它执行 MCP initialize + `tools/list` 探测。

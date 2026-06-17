@@ -221,6 +221,24 @@ roles:
         self.assertEqual(cfg.capabilities.mcp_servers, [])
         self.assertEqual(cfg.server.base_url, "http://server")
 
+    def test_system_config_uses_explicit_server_path_override(self) -> None:
+        from cairn.server import runtime_config
+
+        old_dispatch_path = runtime_config.DEFAULT_DISPATCH_CONFIG_PATH
+        old_server_path = runtime_config.DEFAULT_SERVER_CONFIG_PATH
+        try:
+            runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = _REPO / "config.test.yaml"
+            runtime_config.DEFAULT_SERVER_CONFIG_PATH = _REPO / "server.test.yaml"
+            runtime_config.reset_runtime_config_cache()
+            self.assertEqual(
+                runtime_config.system_config().database.url,
+                "postgresql+psycopg://cairn:cairn@localhost:5432/cairn",
+            )
+        finally:
+            runtime_config.DEFAULT_DISPATCH_CONFIG_PATH = old_dispatch_path
+            runtime_config.DEFAULT_SERVER_CONFIG_PATH = old_server_path
+            runtime_config.reset_runtime_config_cache()
+
 
 if __name__ == "__main__":
     unittest.main()
