@@ -41,6 +41,8 @@ class ProjectRow(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active", server_default="active")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    graph_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    timeline_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     proxy_id: Mapped[str | None] = mapped_column(Text)
     llm_hidden_event_kinds: Mapped[str] = mapped_column(Text, nullable=False, default='["usage"]', server_default='["usage"]')
     reason_worker: Mapped[str | None] = mapped_column(Text)

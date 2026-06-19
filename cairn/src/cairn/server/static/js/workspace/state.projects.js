@@ -4,6 +4,7 @@ import {
   defaultTaskCapabilitiesMap,
   defaultTaskTimeouts,
 } from '../shared/defaults.js';
+import { sanitizeUserSkillIdsForProjectPayload } from '../shared/capability-selection.js';
 
 export function createWorkspaceProjectsState() {
   return {
@@ -12,6 +13,7 @@ export function createWorkspaceProjectsState() {
     projectLoadError: '',
     selectedProjectId: '',
     projectPollInFlight: false,
+    currentProjectPollState: null,
     isCreatingProject: false,
     newProjectPanel: 'basic',
     newProjectCatalog: {
@@ -70,30 +72,51 @@ export function createWorkspaceProjectsState() {
       this._summaryCardCacheOrder = [];
     },
 
-    projectTimelineDataSignature(project = this.project) {
-      if (!project) return '';
-      const facts = (project.facts || [])
-        .map(fact => `${fact.id}:${fact.description || ''}`)
-        .sort()
-        .join('|');
-      const hints = (project.hints || [])
-        .map(hint => `${hint.id}:${hint.created_at || ''}:${hint.creator || ''}:${hint.content || ''}`)
-        .sort()
-        .join('|');
-      const intents = (project.intents || [])
-        .map(intent => [
-          intent.id,
-          intent.description || '',
-          intent.creator || '',
-          intent.created_at || '',
-          Array.isArray(intent.from) ? intent.from.join(',') : '',
-          intent.to || '',
-          intent.worker || '',
-          intent.concluded_at || '',
-        ].join(':'))
-        .sort()
-        .join('|');
-      return `${project.project?.id || ''}:${project.project?.created_at || ''}:${project.project?.title || ''}::${facts}::${hints}::${intents}`;
+    projectFactCount(project = this.project) {
+      if (!project) return 0;
+      if (Number.isFinite(project.fact_count)) return project.fact_count;
+      return Array.isArray(project.facts) ? project.facts.length : 0;
+    },
+
+    projectIntentCount(project = this.project) {
+      if (!project) return 0;
+      if (Number.isFinite(project.intent_count)) return project.intent_count;
+      return Array.isArray(project.intents) ? project.intents.length : 0;
+    },
+
+    projectHintCount(project = this.project) {
+      if (!project) return 0;
+      if (Number.isFinite(project.hint_count)) return project.hint_count;
+      return Array.isArray(project.hints) ? project.hints.length : 0;
+    },
+
+    applyProjectPollState(pollState) {
+      if (!pollState) return;
+      this.currentProjectPollState = pollState;
+      const summary = this.projects.find(item => item.id === pollState.project_id);
+      if (summary) {
+        summary.title = pollState.title;
+        summary.status = pollState.status;
+        summary.reason = pollState.reason;
+        summary.fact_count = pollState.fact_count;
+        summary.intent_count = pollState.intent_count;
+        summary.hint_count = pollState.hint_count;
+      }
+      if (this.project?.project?.id === pollState.project_id) {
+        this.project.project.title = pollState.title;
+        this.project.project.status = pollState.status;
+        this.project.project.reason = pollState.reason;
+        this.project.fact_count = pollState.fact_count;
+        this.project.intent_count = pollState.intent_count;
+        this.project.hint_count = pollState.hint_count;
+      }
+    },
+
+    async loadProjectPollState(projectId = this.selectedProjectId) {
+      if (!projectId) return null;
+      const pollState = await this.api('GET', `/projects/${projectId}/poll-state`);
+      this.applyProjectPollState(pollState);
+      return pollState;
     },
 
     recentProjects() {
@@ -373,23 +396,32 @@ export function createWorkspaceProjectsState() {
       }
     },
 
-    async loadProject(id) {
+    async loadProject(id, options = {}) {
+      const { invalidateCaches = true } = options;
       try {
         this.projectLoadError = '';
         const nextProject = await this.api('GET', `/projects/${id}`);
-        const canPatchMetadata = this.project?.project?.id === nextProject?.project?.id
-          && this.projectGraphDataSignature(this.project) === this.projectGraphDataSignature(nextProject)
-          && this.projectTimelineDataSignature(this.project) === this.projectTimelineDataSignature(nextProject);
-        if (canPatchMetadata) {
-          this.project.project = nextProject.project;
-        } else {
-          this.project = nextProject;
-          this.invalidateProjectViewCaches();
-        }
+        nextProject.fact_count = Array.isArray(nextProject.facts) ? nextProject.facts.length : 0;
+        nextProject.intent_count = Array.isArray(nextProject.intents) ? nextProject.intents.length : 0;
+        nextProject.hint_count = Array.isArray(nextProject.hints) ? nextProject.hints.length : 0;
+        this.project = nextProject;
+        if (invalidateCaches) this.invalidateProjectViewCaches();
+        this.currentProjectPollState = {
+          project_id: nextProject.project.id,
+          title: nextProject.project.title,
+          status: nextProject.project.status,
+          reason: nextProject.project.reason,
+          fact_count: nextProject.fact_count,
+          intent_count: nextProject.intent_count,
+          hint_count: nextProject.hint_count,
+          graph_revision: this.currentProjectPollState?.project_id === nextProject.project.id ? this.currentProjectPollState.graph_revision : 0,
+          timeline_revision: this.currentProjectPollState?.project_id === nextProject.project.id ? this.currentProjectPollState.timeline_revision : 0,
+        };
         if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
         return true;
       } catch(e) {
         this.project = null;
+        this.currentProjectPollState = null;
         this.projectLoadError = e.message || 'Project not found';
         this.invalidateProjectViewCaches();
         this.showToast(this.projectLoadError, 'error');
@@ -578,8 +610,7 @@ export function createWorkspaceProjectsState() {
     },
 
     sanitizeUserSkillIdsForProjectPayload(ids) {
-      const hiddenSkillIds = new Set(this.roleDefaultTopLevelSkillIds());
-      return [...(ids || [])].filter(id => !hiddenSkillIds.has(id));
+      return sanitizeUserSkillIdsForProjectPayload(ids, this.roleDefaultTopLevelSkillIds());
     },
 
     newProjectAiSelectionSummary() {
@@ -745,6 +776,7 @@ export function createWorkspaceProjectsState() {
       this.rememberProjectListScroll();
       this.resetLlmState();
       this.selectedProjectId = id;
+      this.currentProjectPollState = null;
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;
@@ -769,11 +801,13 @@ export function createWorkspaceProjectsState() {
         if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
         return;
       }
+      await this.loadProjectPollState(id);
       await this.loadCapabilities();
       await this.loadLlmExecutions(true);
       await this.pollLlmEvents(true);
       if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
       this.$nextTick(() => {
+        this.resetLlmEventPagination();
         const clampedWidth = this.clampPanelWidth(this.sidePanelWidth);
         if (clampedWidth !== this.sidePanelWidth) {
           this.sidePanelWidth = clampedWidth;
@@ -805,6 +839,7 @@ export function createWorkspaceProjectsState() {
       this.view = 'list';
       this.shouldRestoreProjectListScroll = true;
       this.project = null;
+      this.currentProjectPollState = null;
       this.invalidateProjectViewCaches();
       this.selectedProjectId = '';
       this.resetLlmState();

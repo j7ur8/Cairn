@@ -1,4 +1,7 @@
+import { createApiClient } from '../shared/api-client.js';
 import { createSummaryHelpers } from '../shared/summary.js';
+
+const apiClient = createApiClient();
 
 export function createCoreState() {
   return {
@@ -27,23 +30,17 @@ export function createCoreState() {
       window.addEventListener('pointerup', this._panelResizeStop);
       window.addEventListener('pointermove', this._llmPanelResizeMove);
       window.addEventListener('pointerup', this._llmPanelResizeStop);
+      this._llmLogViewportResize = () => this.onLlmLogViewportResize();
+      window.addEventListener('resize', this._llmLogViewportResize);
       this.initLlmPerfStats();
-      // Invalidate the LLM-event view cache whenever any input changes. This
-      // lets filteredLlmEvents() / _llmEventsForView() reuse a single
-      // computation across the 6+ template call sites in a render. Manual
-      // bumps at pollLlmEvents / loadLlmExecutionEvents / resetLlmState are
-      // belt-and-suspenders for the push/slice mutation paths.
+      // Invalidate the LLM-event view cache whenever any input changes.
       const bumpLlmView = () => { this._llmViewVersion++; };
-      const resetLlmRenderLimit = () => {
-        this.llmRenderLimit = this.currentLlmRenderLimit();
-        this._llmViewVersion++;
-      };
       this.$watch('llmEvents', bumpLlmView);
-      this.$watch('llmSelectedExecutionId', resetLlmRenderLimit);
-      this.$watch('llmSelectedExecutionEvents', bumpLlmView);
-      this.$watch('llmEventKindFilter', resetLlmRenderLimit);
-      this.$watch('graphMode', resetLlmRenderLimit);
-      this.$watch('llmPanelCollapsed', resetLlmRenderLimit);
+      this.$watch('llmLatestEvents', bumpLlmView);
+      this.$watch('llmPagedEvents', bumpLlmView);
+      this.$watch('llmPanelCollapsed', () => {
+        if (!this.llmPanelCollapsed) this.resetLlmEventPagination();
+      });
       this.loadLocalPrefs();
       // Validate the stored token (if any) before loading any data
       // so the first GET /projects does not pop a 401 toast.
@@ -69,76 +66,24 @@ export function createCoreState() {
     },
 
     async authFetch(path, opts = {}) {
-      const request = {
-        ...opts,
-        headers: { ...(opts.headers || {}) },
-      };
-      const token = localStorage.getItem('cairn.token');
-      if (token) request.headers['Authorization'] = `Bearer ${token}`;
-      let r = await fetch(path, request);
-      // One transparent refresh on 401. If the user has no token or
-      // the refresh itself fails, fall through to the error path so
-      // the login overlay can be shown.
-      if (r.status === 401 && token) {
-        const refreshed = await this.refreshSession();
-        if (refreshed) {
-          const newToken = localStorage.getItem('cairn.token');
-          request.headers['Authorization'] = `Bearer ${newToken}`;
-          r = await fetch(path, request);
-        }
-      }
-      return r;
+      return apiClient.authFetch(path, opts);
     },
 
     async api(method, path, body) {
-      const opts = { method, headers: { 'Content-Type': 'application/json' } };
-      if (body) opts.body = JSON.stringify(body);
-      const r = await this.authFetch(path, opts);
-      if (r.status === 204) return null;
-      const data = await r.json().catch(() => null);
-      if (!r.ok) {
-        if (r.status === 401) this.showLogin = true;
-        let msg = `HTTP ${r.status}`;
-        if (data && typeof data.detail === 'string') msg = data.detail;
-        else if (data && Array.isArray(data.detail)) msg = data.detail.map(e => e.msg).join('; ');
-        throw new Error(msg);
+      try {
+        return await apiClient.api(method, path, body);
+      } catch (error) {
+        if (error.status === 401) this.showLogin = true;
+        throw error;
       }
-      return data;
     },
 
     async refreshSession() {
-      const current = localStorage.getItem('cairn.token');
-      if (!current) return false;
-      try {
-        const r = await fetch('/auth/refresh', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${current}` },
-        });
-        if (!r.ok) return false;
-        const data = await r.json();
-        if (data && data.access_token) {
-          localStorage.setItem('cairn.token', data.access_token);
-          return true;
-        }
-        return false;
-      } catch (e) {
-        return false;
-      }
+      return apiClient.refreshSession();
     },
 
     async login(email, password) {
-      const r = await fetch('/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!r.ok) {
-        const data = await r.json().catch(() => null);
-        const detail = data && data.detail;
-        throw new Error(typeof detail === 'string' ? detail : `HTTP ${r.status}`);
-      }
-      const data = await r.json();
-      localStorage.setItem('cairn.token', data.access_token);
+      const data = await apiClient.login(email, password);
       this.currentUser = data.user;
       this.showLogin = false;
       await this.bootstrapAuthenticatedApp();
@@ -146,7 +91,7 @@ export function createCoreState() {
     },
 
     async logout() {
-      localStorage.removeItem('cairn.token');
+      apiClient.logout();
       this.currentUser = null;
       this.showLogin = true;
     },
@@ -155,25 +100,13 @@ export function createCoreState() {
       // Used on first paint: if a token is sitting in localStorage,
       // try /auth/me to confirm it is still valid. If yes, hide the
       // login overlay; if no, surface the overlay.
-      const token = localStorage.getItem('cairn.token');
-      if (!token) {
+      const user = await apiClient.me();
+      if (!user) {
         this.showLogin = true;
         return;
       }
-      try {
-        const r = await fetch('/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (r.ok) {
-          this.currentUser = await r.json();
-          this.showLogin = false;
-        } else {
-          localStorage.removeItem('cairn.token');
-          this.showLogin = true;
-        }
-      } catch (e) {
-        this.showLogin = true;
-      }
+      this.currentUser = user;
+      this.showLogin = false;
     },
 
     async bootstrapAuthenticatedApp() {
@@ -398,17 +331,23 @@ export function createCoreState() {
         this.projectPollInFlight = true;
         try {
           if (this.selectedProjectId && this.view === 'graph' && this.project?.project) {
-            const previousGraphDataSignature = this.projectGraphDataSignature();
-            const previousTimelineDataSignature = this.projectTimelineDataSignature();
-            const loaded = await this.loadProject(this.selectedProjectId);
-            if (loaded) {
-              const nextGraphDataSignature = this.projectGraphDataSignature();
-              const nextTimelineDataSignature = this.projectTimelineDataSignature();
-              if (!this.cy || previousGraphDataSignature !== nextGraphDataSignature) {
-                this.updateGraph({ animateLayout: false });
-              }
-              if (previousTimelineDataSignature !== nextTimelineDataSignature) {
-                this.invalidateProjectViewCaches();
+            const previousGraphRevision = this.currentProjectPollState?.graph_revision ?? 0;
+            const previousTimelineRevision = this.currentProjectPollState?.timeline_revision ?? 0;
+            const pollState = await this.api('GET', `/projects/${this.selectedProjectId}/poll-state`);
+            const graphChanged = pollState.graph_revision !== previousGraphRevision;
+            const timelineChanged = pollState.timeline_revision !== previousTimelineRevision;
+            this.applyProjectPollState(pollState);
+            if (graphChanged || timelineChanged) {
+              const loaded = await this.loadProject(this.selectedProjectId, { invalidateCaches: false });
+              if (loaded) {
+                this.currentProjectPollState.graph_revision = pollState.graph_revision;
+                this.currentProjectPollState.timeline_revision = pollState.timeline_revision;
+                if (!this.cy || graphChanged) {
+                  this.updateGraph({ animateLayout: false });
+                }
+                if (timelineChanged) {
+                  this.invalidateProjectViewCaches();
+                }
               }
             }
           } else {

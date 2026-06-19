@@ -47,7 +47,7 @@ from cairn.server.models_pkg.project_requests import (
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )
-from cairn.server.models_pkg.project_responses import ReopenResponse
+from cairn.server.models_pkg.project_responses import ProjectPollStateResponse, ReopenResponse
 from cairn.server.models_pkg.reason_models import ReasonClaimRequest, ReasonFinishRequest
 from cairn.server.models_pkg.replay_models import (
     ReplayRunAdvanceResponse,

@@ -30,10 +30,29 @@ class LeaseRepository:
               AND last_heartbeat_at < :cutoff
         """
         params: dict[str, str] = {"cutoff": lease_cutoff(self.intent_timeout())}
+        project_rows = sql.fetchall(
+            self.conn,
+            """
+            SELECT DISTINCT project_id
+            FROM intents
+            WHERE to_fact_id IS NULL
+              AND worker IS NOT NULL
+              AND last_heartbeat_at IS NOT NULL
+              AND last_heartbeat_at < :cutoff
+              AND (:project_id IS NULL OR project_id = :project_id)
+            """,
+            {"cutoff": params["cutoff"], "project_id": project_id},
+        )
         if project_id is not None:
             query = query.replace("WHERE ", "WHERE project_id = :project_id AND ", 1)
             params["project_id"] = project_id
         sql.execute(self.conn, query, params)
+        for row in project_rows:
+            sql.execute(
+                self.conn,
+                "UPDATE projects SET graph_revision = graph_revision + 1 WHERE id = :project_id",
+                {"project_id": row["project_id"]},
+            )
 
     def expire_reason_leases(self, project_id: str | None = None) -> None:
         query = """
@@ -48,7 +67,25 @@ class LeaseRepository:
               AND reason_last_heartbeat_at < :cutoff
         """
         params: dict[str, str] = {"cutoff": lease_cutoff(self.reason_timeout())}
+        project_rows = sql.fetchall(
+            self.conn,
+            """
+            SELECT id
+            FROM projects
+            WHERE reason_worker IS NOT NULL
+              AND reason_last_heartbeat_at IS NOT NULL
+              AND reason_last_heartbeat_at < :cutoff
+              AND (:project_id IS NULL OR id = :project_id)
+            """,
+            {"cutoff": params["cutoff"], "project_id": project_id},
+        )
         if project_id is not None:
             query = query.replace("WHERE ", "WHERE id = :project_id AND ", 1)
             params["project_id"] = project_id
         sql.execute(self.conn, query, params)
+        for row in project_rows:
+            sql.execute(
+                self.conn,
+                "UPDATE projects SET graph_revision = graph_revision + 1 WHERE id = :project_id",
+                {"project_id": row["id"]},
+            )

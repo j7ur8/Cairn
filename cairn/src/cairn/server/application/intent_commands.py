@@ -53,6 +53,7 @@ def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Inte
         worker=body.worker,
         now=now,
     )
+    projects.bump_revisions(project_id, graph=True, timeline=True)
 
     return Intent(
         id=intent_id,
@@ -75,6 +76,7 @@ def claim_intent(conn: Any, project_id: str, intent_id: str, body: HeartbeatRequ
     validate_claimable_open_intent(intents.get_intent(project_id, intent_id), body.worker)
     if intents.claim_open(project_id, intent_id, body.worker, now) != 1:
         claim_failed(intents.get_intent(project_id, intent_id), body.worker)
+    ProjectRepository(conn).bump_revisions(project_id, graph=True)
     updated = validate_claim_result(intents.get_intent(project_id, intent_id), body.worker)
     projection = intents.get_intent_projection(project_id, updated["id"])
     assert projection is not None
@@ -89,6 +91,7 @@ def heartbeat_intent(conn: Any, project_id: str, intent_id: str, body: Heartbeat
     validate_heartbeatable_open_intent(intents.get_intent(project_id, intent_id), body.worker)
     if intents.heartbeat_open(project_id, intent_id, body.worker, now) != 1:
         heartbeat_failed(intents.get_intent(project_id, intent_id), body.worker)
+    ProjectRepository(conn).bump_revisions(project_id, graph=True)
     updated = validate_heartbeatable_open_intent(intents.get_intent(project_id, intent_id), body.worker)
     projection = intents.get_intent_projection(project_id, updated["id"])
     assert projection is not None
@@ -103,6 +106,7 @@ def release_intent(conn: Any, project_id: str, intent_id: str, body: HeartbeatRe
     if row["worker"] is not None:
         if intents.release_open(project_id, intent_id, body.worker) != 1:
             release_failed(intents.get_intent(project_id, intent_id), body.worker)
+        ProjectRepository(conn).bump_revisions(project_id, graph=True)
         row = intents.get_intent(project_id, intent_id)
     projection = intents.get_intent_projection(project_id, row["id"])
     assert projection is not None
@@ -121,6 +125,7 @@ def conclude_intent(conn: Any, project_id: str, intent_id: str, body: ConcludeRe
     intents.insert_fact(project_id, fact_id, body.description)
     if intents.conclude_open(project_id, intent_id, body.worker, fact_id, now) != 1:
         conclude_failed(intents.get_intent(project_id, intent_id), body.worker)
+    ProjectRepository(conn).bump_revisions(project_id, graph=True, timeline=True)
     updated = validate_conclude_result(intents.get_intent(project_id, intent_id), body.worker, fact_id)
 
     projection = intents.get_intent_projection(project_id, updated["id"])

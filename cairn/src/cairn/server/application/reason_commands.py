@@ -45,6 +45,7 @@ def claim_reason(conn: Any, project_id: str, body: ReasonClaimRequest) -> Projec
             now=now,
         ) != 1:
             claim_failed(require_project(projects.get(project_id)), body.worker, body.run_id)
+        projects.bump_revisions(project_id, graph=True)
     updated = require_project(projects.get(project_id))
     return project_meta_from_row(updated)
 
@@ -57,6 +58,7 @@ def heartbeat_reason(conn: Any, project_id: str, body: HeartbeatRequest) -> Proj
     validate_reason_heartbeatable(row, body.worker, body.run_id)
     if ReasonRepository(conn).heartbeat_project_reason(project_id, worker=body.worker, now=now) != 1:
         heartbeat_failed(require_project(projects.get(project_id)), body.worker, body.run_id)
+    projects.bump_revisions(project_id, graph=True)
     updated = require_project(projects.get(project_id))
     return project_meta_from_row(updated)
 
@@ -69,6 +71,7 @@ def release_reason(conn: Any, project_id: str, body: HeartbeatRequest) -> Projec
     if row["reason_worker"] is not None:
         if ReasonRepository(conn).release_project_reason(project_id, worker=body.worker) != 1:
             release_failed(require_project(projects.get(project_id)), body.worker, body.run_id)
+        projects.bump_revisions(project_id, graph=True)
     updated = require_project(projects.get(project_id))
     return project_meta_from_row(updated)
 
@@ -102,5 +105,6 @@ def finish_reason(conn: Any, project_id: str, body: ReasonFinishRequest) -> Proj
     )
     if should_clear_reason_after_finish(row, body.worker):
         reason.clear_project_reason(project_id)
+        projects.bump_revisions(project_id, graph=True)
     updated = require_project(projects.get(project_id))
     return project_meta_from_row(updated)

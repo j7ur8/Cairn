@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from typing import Literal as _Literal  # noqa: F401
 
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 ProcessState = Literal["running", "completed", "failed", "timeout", "cancelled", "stale"]
 TaskType = str  # any name registered in TASK_TYPE_REGISTRY
@@ -181,3 +181,18 @@ class EventViewResponse(BaseModel):
     primary_events: list[LlmExecutionEvent]
     stats: LlmEventStats
     last_sequence: int
+
+
+class LlmEventCard(LlmExecutionEvent):
+    model_config = ConfigDict(populate_by_name=True)
+
+    merged_call: bool = Field(default=False, alias="_merged_call")
+    parsed_payload: dict[str, Any] | None = Field(default=None, alias="_parsedPayload")
+
+
+class EventCardPageResponse(BaseModel):
+    cards: list[LlmEventCard]
+    has_next: bool = False
+    next_page_token: str | None = None
+    page_range_label: str = ""
+    last_sequence: int = 0

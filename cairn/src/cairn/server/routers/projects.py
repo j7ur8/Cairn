@@ -25,6 +25,7 @@ from cairn.server.application.project_creation import (
 )
 from cairn.server.application.project_read import (
     get_project_detail,
+    get_project_poll_state,
     list_project_summaries,
     list_project_work_summaries,
 )
@@ -43,6 +44,7 @@ from cairn.server.models_pkg import (
     ReasonFinishRequest,
     ReasonState,
     ReopenRequest,
+    ProjectPollStateResponse,
     ReopenResponse,
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
@@ -89,6 +91,12 @@ def create_project(body: CreateProjectRequest):
 def get_project(project_id: str):
     with db.session_scope() as conn:
         return get_project_detail(conn, project_id)
+
+
+@router.get("/projects/{project_id}/poll-state", response_model=ProjectPollStateResponse)
+def get_project_poll(project_id: str):
+    with db.session_scope() as conn:
+        return get_project_poll_state(conn, project_id)
 
 
 @router.delete("/projects/{project_id}", status_code=204)

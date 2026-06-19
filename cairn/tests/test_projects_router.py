@@ -118,6 +118,100 @@ class ProjectsRouterTests(unittest.TestCase):
             r = c.get("/projects/proj_does_not_exist", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(r.status_code, 404)
 
+    def test_get_project_poll_state_returns_lightweight_fields(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            created = c.post("/projects", json=_MINIMAL_CREATE, headers={"Authorization": f"Bearer {token}"})
+            pid = created.json()["project"]["id"]
+            r = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["project_id"], pid)
+        self.assertIn("graph_revision", body)
+        self.assertIn("timeline_revision", body)
+        self.assertIn("fact_count", body)
+        self.assertIn("intent_count", body)
+        self.assertIn("hint_count", body)
+        self.assertNotIn("facts", body)
+        self.assertNotIn("intents", body)
+        self.assertNotIn("hints", body)
+        self.assertNotIn("proxy", body)
+
+    def test_hint_only_bumps_timeline_revision(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            created = c.post("/projects", json=_MINIMAL_CREATE, headers={"Authorization": f"Bearer {token}"})
+            pid = created.json()["project"]["id"]
+            before = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            hint = c.post(
+                f"/projects/{pid}/hints",
+                json={"content": "check auth edge case", "creator": "worker_a"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            after = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+        self.assertEqual(hint.status_code, 201)
+        self.assertEqual(after["graph_revision"], before["graph_revision"])
+        self.assertGreater(after["timeline_revision"], before["timeline_revision"])
+
+    def test_intent_lifecycle_bumps_graph_revision(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            created = c.post("/projects", json=_MINIMAL_CREATE, headers={"Authorization": f"Bearer {token}"})
+            pid = created.json()["project"]["id"]
+            before = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            created_intent = c.post(
+                f"/projects/{pid}/intents",
+                json={"from": ["origin"], "description": "investigate", "creator": "worker_a", "worker": None},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            intent_id = created_intent.json()["id"]
+            claimed = c.post(
+                f"/projects/{pid}/intents/{intent_id}/claim",
+                json={"worker": "worker_a"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            after_claim = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            released = c.post(
+                f"/projects/{pid}/intents/{intent_id}/release",
+                json={"worker": "worker_a"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            after_release = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+        self.assertEqual(created_intent.status_code, 201)
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(released.status_code, 200)
+        self.assertGreater(after_claim["graph_revision"], before["graph_revision"])
+        self.assertGreater(after_release["graph_revision"], after_claim["graph_revision"])
+
+    def test_conclude_and_title_update_bump_expected_revisions(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            created = c.post("/projects", json=_MINIMAL_CREATE, headers={"Authorization": f"Bearer {token}"})
+            pid = created.json()["project"]["id"]
+            initial = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            created_intent = c.post(
+                f"/projects/{pid}/intents",
+                json={"from": ["origin"], "description": "investigate", "creator": "worker_a", "worker": "worker_a"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            intent_id = created_intent.json()["id"]
+            c.post(
+                f"/projects/{pid}/intents/{intent_id}/conclude",
+                json={"worker": "worker_a", "description": "new fact"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            after_conclude = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            c.put(
+                f"/projects/{pid}/title",
+                json={"title": "renamed"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            after_title = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+        self.assertGreater(after_conclude["graph_revision"], initial["graph_revision"])
+        self.assertGreater(after_conclude["timeline_revision"], initial["timeline_revision"])
+        self.assertEqual(after_title["graph_revision"], after_conclude["graph_revision"])
+        self.assertGreater(after_title["timeline_revision"], after_conclude["timeline_revision"])
+
     def test_update_title(self) -> None:
         with self._client() as c:
             token = _login_token(c)
@@ -205,3 +299,25 @@ class ProjectsRouterTests(unittest.TestCase):
         with self._client() as c:
             r = c.delete("/projects/proj_any")
         self.assertEqual(r.status_code, 401)
+
+    def test_llm_event_cards_page_token_is_scoped_to_execution(self) -> None:
+        from cairn.server.observability.event_card_service import _decode_page_token, _encode_page_token, _CardPageState
+
+        token = _encode_page_token(
+            _CardPageState(
+                project_id="proj_cards",
+                execution_id="exec_cards_a",
+                event_kinds_mode="include",
+                event_kinds=("agent_message",),
+                offset=2,
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "page token does not match query"):
+            _decode_page_token(
+                token,
+                project_id="proj_cards",
+                execution_id="exec_cards_b",
+                event_kinds_mode="include",
+                event_kinds=("agent_message",),
+            )

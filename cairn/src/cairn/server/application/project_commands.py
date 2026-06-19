@@ -49,8 +49,11 @@ def delete_project_observability_best_effort(project_id: str) -> None:
 
 
 def update_project_title(conn: Any, project_id: str, body: UpdateProjectTitleRequest) -> ProjectMeta:
-    require_project(ProjectRepository(conn).get(project_id))
-    updated = ProjectRepository(conn).update_title(project_id, body.title)
+    projects = ProjectRepository(conn)
+    require_project(projects.get(project_id))
+    updated = projects.update_title(project_id, body.title)
+    projects.bump_revisions(project_id, timeline=True)
+    updated = projects.get(project_id)
     return project_meta_from_row(updated)
 
 
@@ -65,6 +68,9 @@ def update_project_status(conn: Any, project_id: str, body: UpdateProjectStatusR
     if body.status == "stopped":
         projects.release_open_intents(project_id)
         ReasonRepository(conn).clear_project_reason(project_id)
+        projects.bump_revisions(project_id, graph=True, timeline=True)
+    else:
+        projects.bump_revisions(project_id, timeline=True)
     updated = projects.get(project_id)
     return project_meta_from_row(updated)
 
@@ -88,6 +94,7 @@ def complete_project(conn: Any, project_id: str, body: CompleteRequest) -> Inten
         now=now,
     )
     ProjectRepository(conn).complete(project_id)
+    ProjectRepository(conn).bump_revisions(project_id, graph=True, timeline=True)
 
     return Intent(
         id=intent_id,
@@ -133,6 +140,8 @@ def reopen_project(conn: Any, project_id: str, body: ReopenRequest) -> ReopenRes
     )
     ReasonRepository(conn).clear_project_reason(project_id)
     updated_project = projects.reopen(project_id)
+    projects.bump_revisions(project_id, graph=True, timeline=True)
+    updated_project = projects.get(project_id)
 
     updated_intent = intents.get_intent(project_id, intent_id)
     assert updated_project is not None

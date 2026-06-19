@@ -1,4 +1,12 @@
 import { baseCapabilityForm, defaultTaskAiProfileSelections, defaultTaskCapabilitiesMap, defaultTaskTimeouts } from '../shared/defaults.js';
+import { selectedCapabilitiesForPayload } from '../shared/capability-selection.js';
+import {
+  jsonObjectToText,
+  keyValueObjectToText,
+  normalizeStringList,
+  textToJsonObject,
+  textToKeyValueObject,
+} from '../shared/form.js';
 
 export function createWorkspaceCapabilitiesState() {
   return {
@@ -198,15 +206,6 @@ export function createWorkspaceCapabilitiesState() {
         this.showToast('id and name are required', 'error');
         return;
       }
-      const normalizeStringList = (value) => {
-        if (Array.isArray(value)) {
-          return value.map(s => String(s || '').trim()).filter(Boolean);
-        }
-        if (typeof value === 'string') {
-          return value.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
-        }
-        return [];
-      };
       const basePayload = {
         kind: this.capabilityForm.kind,
         id: this.capabilityForm.id.trim(),
@@ -368,35 +367,19 @@ export function createWorkspaceCapabilitiesState() {
     },
 
     keyValueObjectToText(value) {
-      if (!value || typeof value !== 'object') return '';
-      return Object.entries(value).map(([key, item]) => `${key}=${item}`).join('\n');
+      return keyValueObjectToText(value);
     },
 
     textToKeyValueObject(text) {
-      const out = {};
-      for (const raw of String(text || '').split('\n')) {
-        const line = raw.trim();
-        if (!line) continue;
-        const index = line.indexOf('=');
-        if (index <= 0) throw new Error(`Invalid key=value line: ${line}`);
-        const key = line.slice(0, index).trim();
-        const value = line.slice(index + 1).trim();
-        if (key) out[key] = value;
-      }
-      return out;
+      return textToKeyValueObject(text);
     },
 
     jsonObjectToText(value) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return '{}';
-      return JSON.stringify(value, null, 2);
+      return jsonObjectToText(value);
     },
 
     textToJsonObject(text) {
-      const value = JSON.parse(text || '{}');
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new Error('Probe config must be a JSON object');
-      }
-      return value;
+      return textToJsonObject(text);
     },
 
     aiProfileTaskTypes() {
@@ -538,15 +521,12 @@ export function createWorkspaceCapabilitiesState() {
     },
 
     selectedCapabilitiesForPayload(capabilities) {
-      const out = {};
-      for (const task of this.capabilityTaskTypes()) {
-        const entry = capabilities?.[task.key] || this.defaultTaskCapabilities();
-        out[task.key] = {
-          mcp_server_ids: [...(entry.user_mcp_server_ids || entry.mcp_server_ids || [])],
-          skill_ids: this.sanitizeUserSkillIdsForProjectPayload(entry.user_skill_ids || []),
-        };
-      }
-      return out;
+      return selectedCapabilitiesForPayload(
+        capabilities,
+        this.capabilityTaskTypes(),
+        () => this.defaultTaskCapabilities(),
+        this.roleDefaultTopLevelSkillIds(),
+      );
     },
 
     hydrateReplayCapabilitiesFromSource(projectCapabilities) {

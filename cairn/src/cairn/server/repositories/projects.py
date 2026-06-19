@@ -43,6 +43,14 @@ class ProjectRepository:
                 COALESCE(hints_count.hint_count, 0) AS hint_count
         """
 
+    @staticmethod
+    def _poll_state_selects() -> str:
+        return """
+                COALESCE(facts_count.fact_count, 0) AS fact_count,
+                COALESCE(intents_count.intent_count, 0) AS intent_count,
+                COALESCE(hints_count.hint_count, 0) AS hint_count
+        """
+
     def list_with_counts(self) -> list[Any]:
         return sql.fetchall(self.conn, f"""
             SELECT p.*,
@@ -77,6 +85,19 @@ class ProjectRepository:
             {"project_id": project_id},
         )
 
+    def get_poll_state(self, project_id: str) -> Any:
+        return sql.fetchone(
+            self.conn,
+            f"""
+            SELECT p.*,
+                {self._poll_state_selects()}
+            FROM projects p
+            {self._count_joins()}
+            WHERE p.id = :project_id
+            """,
+            {"project_id": project_id},
+        )
+
     def existing_fact_ids(self, project_id: str, fact_ids: list[str]) -> set[str]:
         if not fact_ids:
             return set()
@@ -106,6 +127,8 @@ class ProjectRepository:
         title: str,
         status: str,
         created_at: str,
+        graph_revision: int,
+        timeline_revision: int,
         proxy_id: str | None,
         llm_hidden_event_kinds: str,
     ) -> None:
@@ -113,9 +136,9 @@ class ProjectRepository:
             self.conn,
             """
             INSERT INTO projects (
-                id, title, status, created_at, proxy_id, llm_hidden_event_kinds
+                id, title, status, created_at, graph_revision, timeline_revision, proxy_id, llm_hidden_event_kinds
             ) VALUES (
-                :id, :title, :status, :created_at, :proxy_id, :llm_hidden_event_kinds
+                :id, :title, :status, :created_at, :graph_revision, :timeline_revision, :proxy_id, :llm_hidden_event_kinds
             )
             """,
             {
@@ -123,6 +146,8 @@ class ProjectRepository:
                 "title": title,
                 "status": status,
                 "created_at": created_at,
+                "graph_revision": graph_revision,
+                "timeline_revision": timeline_revision,
                 "proxy_id": proxy_id,
                 "llm_hidden_event_kinds": llm_hidden_event_kinds,
             },
@@ -186,6 +211,26 @@ class ProjectRepository:
             {"status": status, "project_id": project_id},
         )
         return self.get(project_id)
+
+    def bump_revisions(
+        self,
+        project_id: str,
+        *,
+        graph: bool = False,
+        timeline: bool = False,
+    ) -> None:
+        if not graph and not timeline:
+            return
+        assignments: list[str] = []
+        if graph:
+            assignments.append("graph_revision = graph_revision + 1")
+        if timeline:
+            assignments.append("timeline_revision = timeline_revision + 1")
+        sql.execute(
+            self.conn,
+            f"UPDATE projects SET {', '.join(assignments)} WHERE id = :project_id",
+            {"project_id": project_id},
+        )
 
     def release_open_intents(self, project_id: str) -> None:
         sql.execute(

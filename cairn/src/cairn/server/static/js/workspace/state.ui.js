@@ -1,3 +1,15 @@
+import {
+  isFiniteNumber,
+  parseBooleanPref,
+  parseFlagPref,
+  parseJsonPref,
+  parseNumberPref,
+  readPref,
+  serializeFlagPref,
+  serializeJsonPref,
+  writePref,
+} from '../shared/prefs.js';
+
 export function createWorkspaceUiState() {
   return {
     sideTab: 'detail',
@@ -17,49 +29,33 @@ export function createWorkspaceUiState() {
     },
 
     loadLocalPrefs() {
-      try {
-        const raw = localStorage.getItem('cairn.localPrefs');
-        if (!raw) {
-          this.localPrefs.actor_name = 'Human';
-        } else {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed.actor_name === 'string') this.localPrefs.actor_name = parsed.actor_name;
-          if (typeof parsed.layout_mode === 'string') this.localPrefs.layout_mode = parsed.layout_mode;
-        }
-        const rawPanelWidth = localStorage.getItem('cairn.sidePanelWidth');
-        if (rawPanelWidth !== null) {
-          const savedPanelWidth = Number(rawPanelWidth);
-          if (Number.isFinite(savedPanelWidth)) this.sidePanelWidth = savedPanelWidth;
-        }
-        const rawLlmPanelWidth = localStorage.getItem('cairn.llmPanelWidth');
-        if (rawLlmPanelWidth !== null) {
-          const savedLlmPanelWidth = Number(rawLlmPanelWidth);
-          if (Number.isFinite(savedLlmPanelWidth)) this.llmPanelWidth = savedLlmPanelWidth;
-        }
-        this.llmPanelCollapsed = localStorage.getItem('cairn.llmPanelCollapsed') === 'true';
-        this.navCollapsed = localStorage.getItem('cairn.navCollapsed') === '1';
-      } catch (e) {
-        console.error(e);
-      }
+      const localPrefs = readPref('cairn.localPrefs', {}, {
+        parse: parseJsonPref,
+        validate: value => value && typeof value === 'object' && !Array.isArray(value),
+      });
+      if (typeof localPrefs.actor_name === 'string') this.localPrefs.actor_name = localPrefs.actor_name;
+      if (typeof localPrefs.layout_mode === 'string') this.localPrefs.layout_mode = localPrefs.layout_mode;
+      this.sidePanelWidth = readPref('cairn.sidePanelWidth', this.sidePanelWidth, {
+        parse: parseNumberPref,
+        validate: isFiniteNumber,
+      });
+      this.llmPanelWidth = readPref('cairn.llmPanelWidth', this.llmPanelWidth, {
+        parse: parseNumberPref,
+        validate: isFiniteNumber,
+      });
+      this.llmPanelCollapsed = readPref('cairn.llmPanelCollapsed', false, { parse: parseBooleanPref });
+      this.navCollapsed = readPref('cairn.navCollapsed', false, { parse: parseFlagPref });
       if (!this.localPrefs.actor_name.trim()) this.localPrefs.actor_name = 'Human';
       if (!this.isValidLayoutMode(this.localPrefs.layout_mode)) this.localPrefs.layout_mode = 'dagre_tb';
       this.layoutMode = this.localPrefs.layout_mode;
     },
 
     saveLocalPrefs() {
-      try {
-        localStorage.setItem('cairn.localPrefs', JSON.stringify(this.localPrefs));
-      } catch (e) {
-        console.error(e);
-      }
+      writePref('cairn.localPrefs', this.localPrefs, { serialize: serializeJsonPref });
     },
 
     saveNavPrefs() {
-      try {
-        localStorage.setItem('cairn.navCollapsed', this.navCollapsed ? '1' : '0');
-      } catch (e) {
-        console.error(e);
-      }
+      writePref('cairn.navCollapsed', this.navCollapsed, { serialize: serializeFlagPref });
     },
 
     appShellVisible() {
@@ -77,7 +73,7 @@ export function createWorkspaceUiState() {
       if (this.view === 'newProject') return 'Create project configuration';
       if (this.view === 'settings') return 'Administration and runtime defaults';
       if (this.view === 'graph' && this.project?.project) {
-        return `${this.project.project.id} · ${this.project.project.status} · ${this.project.facts.length} facts · ${this.project.intents.length} intents`;
+        return `${this.project.project.id} · ${this.project.project.status} · ${this.projectFactCount()} facts · ${this.projectIntentCount()} intents`;
       }
       return `${this.projects.length} projects · ${this.countProjectsByStatus('active')} active`;
     },
@@ -91,11 +87,7 @@ export function createWorkspaceUiState() {
     },
 
     saveSidePanelWidth() {
-      try {
-        localStorage.setItem('cairn.sidePanelWidth', String(this.sidePanelWidth));
-      } catch (e) {
-        console.error(e);
-      }
+      writePref('cairn.sidePanelWidth', this.sidePanelWidth);
     },
 
     switchSideTab(tab) {

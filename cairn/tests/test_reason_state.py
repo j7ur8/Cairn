@@ -96,8 +96,8 @@ class ReasonStateServiceTests(unittest.TestCase):
             sql.execute(
                 conn,
                 """
-                INSERT INTO projects (id, title, status, created_at)
-                VALUES ('proj_t', 'T', 'active', '2026-06-04T00:00:00Z')
+                INSERT INTO projects (id, title, status, created_at, graph_revision, timeline_revision)
+                VALUES ('proj_t', 'T', 'active', '2026-06-04T00:00:00Z', 1, 1)
                 """,
             )
             sql.execute(

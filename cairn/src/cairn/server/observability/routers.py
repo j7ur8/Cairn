@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from cairn.server import db
 from cairn.server.observability.events_query import (
@@ -10,6 +10,7 @@ from cairn.server.observability.events_query import (
     list_incremental_events,
     list_project_events,
 )
+from cairn.server.observability.event_card_service import list_event_cards
 from cairn.server.observability.events_writer import (
     append_event,
     append_events,
@@ -26,6 +27,7 @@ from cairn.server.observability.models import (
     CreateEventsBatchResponse,
     CreateExecutionRequest,
     CreateExecutionResponse,
+    EventCardPageResponse,
     EventListResponse,
     EventViewResponse,
     ExecutionListResponse,
@@ -81,6 +83,28 @@ def get_project_llm_events_incremental(
             event_kinds=event_kinds,
         )
         return IncrementalEventListResponse(events=events, last_sequence=last_sequence)
+
+
+@router.get("/llm-events/cards", response_model=EventCardPageResponse)
+def get_project_llm_event_cards(
+    project_id: str,
+    execution_id: str | None = Query(default=None),
+    page_size: int = Query(default=12, ge=1),
+    page_token: str | None = Query(default=None),
+    event_kinds: list[str] | None = Query(default=None),
+):
+    try:
+        with db.session_scope() as conn:
+            return list_event_cards(
+                conn,
+                project_id,
+                execution_id=execution_id,
+                page_size=_limit(page_size),
+                page_token=page_token,
+                event_kinds=event_kinds,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/llm-events/view", response_model=EventViewResponse)

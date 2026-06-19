@@ -71,6 +71,7 @@ def create_hint(conn: Any, project_id: str, body: CreateHintRequest) -> Hint:
     now = utcnow()
     hint_id = IdRepository(conn).next_hint_id(project_id)
     projects.insert_hint(project_id, hint_id, body.content, body.creator, now)
+    projects.bump_revisions(project_id, timeline=True)
     return Hint(id=hint_id, content=body.content, creator=body.creator, created_at=now)
 
 
@@ -99,6 +100,8 @@ def upload_project_attachments(
                 hint=hint,
             )
         )
+    if attachments:
+        projects.bump_revisions(project_id, timeline=True)
     return AttachmentUploadResponse(project_id=project_id, attachments=attachments)
 
 

@@ -44,8 +44,8 @@ class HotQueryRepositoryTests(unittest.TestCase):
         sql.execute(
             self.conn,
             """
-            INSERT INTO projects (id, title, status, created_at)
-            VALUES (:id, :title, 'active', :created_at)
+            INSERT INTO projects (id, title, status, created_at, graph_revision, timeline_revision)
+            VALUES (:id, :title, 'active', :created_at, 1, 1)
             """,
             {"id": project_id, "title": project_id, "created_at": created_at},
         )

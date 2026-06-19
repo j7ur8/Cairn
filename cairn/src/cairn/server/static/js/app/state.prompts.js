@@ -117,8 +117,17 @@ export function createPromptsState() {
 
     promptResourceDisplayName(resource) {
       if (!resource) return '';
-      if (resource.type === 'role') return `roles/${resource.path}`;
-      return `prompts/${this.promptGroupSelected}/${resource.path}`;
+      const pathSegments = String(resource.path || '').split('/').filter(Boolean);
+      const keySegments = String(resource.key || '').split('/').filter(Boolean);
+      const segments = pathSegments.length > 0 ? pathSegments : keySegments;
+      const basename = segments[segments.length - 1] || '';
+      if (resource.type === 'prompt') return basename;
+      if (resource.type === 'role') {
+        const parent = segments[segments.length - 2] || '';
+        if (basename === 'ROLE.md' && parent) return parent;
+        return parent || basename;
+      }
+      return basename;
     },
 
     promptShowResourceGroup(resource, index) {

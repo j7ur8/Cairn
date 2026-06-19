@@ -7,6 +7,7 @@ from cairn.server.domain.errors import DomainError
 from cairn.server.domain.projects import require_project
 from cairn.server.mappers.intents import build_intents, intent_to_model
 from cairn.server.mappers.projects import project_meta_from_row, project_reason_from_row
+from cairn.server.models_pkg import ProjectPollStateResponse
 from cairn.server.repositories.intents import IntentRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.shared.contracts import (
@@ -48,6 +49,21 @@ def get_project_detail(conn: Any, project_id: str) -> ProjectDetail:
         intents=build_intents(IntentRepository(conn).list_intent_projections(project_id)),
         hints=[Hint(**dict(hint)) for hint in hints],
         proxy=project_proxy_summary(row),
+    )
+
+
+def get_project_poll_state(conn: Any, project_id: str) -> ProjectPollStateResponse:
+    row = require_project(ProjectRepository(conn).get_poll_state(project_id))
+    return ProjectPollStateResponse(
+        project_id=row["id"],
+        title=row["title"],
+        status=row["status"],
+        reason=project_reason_from_row(row),
+        fact_count=row["fact_count"],
+        intent_count=row["intent_count"],
+        hint_count=row["hint_count"],
+        graph_revision=row["graph_revision"],
+        timeline_revision=row["timeline_revision"],
     )
 
 

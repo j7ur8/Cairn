@@ -50,29 +50,6 @@ export function createWorkspaceGraphState() {
       return plainMatch ? plainMatch[1] : '';
     },
 
-    projectGraphDataSignature(project = this.project) {
-      if (!project) return '';
-      const facts = (project.facts || [])
-        .map(fact => `${fact.id}:${fact.description || ''}`)
-        .sort()
-        .join('|');
-      const intents = (project.intents || [])
-        .map(intent => [
-          intent.id,
-          intent.description || '',
-          intent.creator || '',
-          Array.isArray(intent.from) ? intent.from.join(',') : '',
-          intent.to || '',
-          intent.worker || '',
-          intent.last_heartbeat_at || '',
-          intent.created_at || '',
-          intent.concluded_at || '',
-        ].join(':'))
-        .sort()
-        .join('|');
-      return `${project.project?.id || ''}::${facts}::${intents}`;
-    },
-
     buildElements() {
       const nodes = [];
       const edges = [];
@@ -166,7 +143,6 @@ export function createWorkspaceGraphState() {
       rawCy.on('tap', 'node', e => self.onNodeTap(e));
       rawCy.on('tap', 'edge', e => self.onEdgeTap(e));
       rawCy.on('tap', e => { if (e.target === rawCy) self.clearSelection(); });
-      this.pulseActive();
       this.setupAutoFit();
       this.settleGraphViewport();
     },
@@ -175,7 +151,7 @@ export function createWorkspaceGraphState() {
       return GRAPH_STYLES;
     },
 
-    layoutOpts(animate = true) {
+    layoutOpts() {
       const direction = this.layoutDirection();
       if (this.layoutEngine() === 'elk') {
         const elkDirection = direction === 'TB' ? 'DOWN' : 'RIGHT';
@@ -183,9 +159,7 @@ export function createWorkspaceGraphState() {
           name: 'elk',
           fit: true,
           padding: 50,
-          animate,
-          animationDuration: 350,
-          animationEasing: 'ease-in-out-cubic',
+          animate: false,
           elk: {
             algorithm: 'layered',
             'elk.direction': elkDirection,
@@ -205,9 +179,7 @@ export function createWorkspaceGraphState() {
           name: 'klay',
           fit: true,
           padding: 50,
-          animate,
-          animationDuration: 400,
-          animationEasing: 'ease-in-out-cubic',
+          animate: false,
           klay: {
             direction: direction === 'TB' ? 'DOWN' : 'RIGHT',
             edgeRouting: 'POLYLINE',
@@ -228,9 +200,7 @@ export function createWorkspaceGraphState() {
         rankSep: 80,
         padding: 50,
         fit: true,
-        animate,
-        animationDuration: 400,
-        animationEasing: 'ease-in-out-cubic',
+        animate: false,
       };
     },
 
@@ -278,28 +248,8 @@ export function createWorkspaceGraphState() {
       return this.anchorPositionFromIds(producingIntent.from, previousPositions, 44);
     },
 
-    fadeInFreshElement(element) {
-      if (!element || element.length === 0) return;
-      element.addClass('fresh');
-      setTimeout(() => {
-        if (!element.inside()) return;
-        element.animate(
-          { style: { opacity: 1 } },
-          {
-            duration: 500,
-            complete: () => {
-              if (!element.inside()) return;
-              element.removeStyle('opacity');
-            },
-          },
-        );
-        element.removeClass('fresh');
-      }, 30);
-    },
-
     updateGraph(options = {}) {
       if (!this.cy || !this.project) return;
-      const animateLayout = options.animateLayout !== false;
       const { nodes, edges } = this.buildElements();
       const nextSignature = this.graphSignatureFromElements(nodes, edges);
       const wantNodes = new Set(nodes.map(n => n.data.id));
@@ -315,8 +265,7 @@ export function createWorkspaceGraphState() {
         const ex = this.cy.getElementById(n.data.id);
         if (ex.length === 0) {
           const initialPosition = this.initialPositionForNode(n.data, previousPositions);
-          const a = this.cy.add(initialPosition ? { ...n, position: initialPosition } : n);
-          this.fadeInFreshElement(a);
+          this.cy.add(initialPosition ? { ...n, position: initialPosition } : n);
           changed = true;
           layoutChanged = true;
         } else if (
@@ -332,8 +281,7 @@ export function createWorkspaceGraphState() {
       for (const e of edges) {
         const ex = this.cy.getElementById(e.data.id);
         if (ex.length === 0) {
-          const a = this.cy.add(e);
-          this.fadeInFreshElement(a);
+          this.cy.add(e);
           changed = true;
           layoutChanged = true;
         } else if (this.graphEdgeDataChanged(ex, e.data)) {
@@ -343,61 +291,10 @@ export function createWorkspaceGraphState() {
       if (layoutChanged) {
         this._graphSignature = nextSignature;
         void this.ensureLayoutEngineLoaded()
-          .then(() => this.cy?.layout(this.layoutOpts(animateLayout)).run())
+          .then(() => this.cy?.layout(this.layoutOpts()).run())
           .catch((error) => this.showToast(error.message, 'error'));
       }
-      this.pulseActive();
       this.refreshGraphDecorations();
-    },
-
-    pulseActive() {
-      if (!this.cy) return;
-      this.cy.nodes('[nodeType="in_progress"], [nodeType="bootstrap_running"]').forEach(node => {
-        if (node.scratch('_pulseActive')) return;
-        node.scratch('_pulseActive', true);
-        const isBootstrap = node.data('nodeType') === 'bootstrap_running';
-        const minOpacity = isBootstrap ? 0.55 : 0.35;
-        const maxOpacity = isBootstrap ? 0.98 : 0.8;
-        const pulseOut = () => {
-          if (!node.inside()) {
-            node.removeScratch('_pulseActive');
-            return;
-          }
-          node.animate({ style:{'background-opacity':minOpacity} }, { duration:900, complete: pulseIn });
-        };
-        const pulseIn = () => {
-          if (!node.inside()) {
-            node.removeScratch('_pulseActive');
-            return;
-          }
-          node.animate({ style:{'background-opacity':maxOpacity} }, { duration:900, complete: pulseOut });
-        };
-        pulseOut();
-      });
-      this.cy.edges('[status="in_progress"], [status="bootstrap_running"]').forEach(edge => {
-        if (edge.scratch('_flowActive')) return;
-        edge.scratch('_flowActive', true);
-        const isBootstrap = edge.data('status') === 'bootstrap_running';
-        const dashOffset = isBootstrap ? -16 : -12;
-        const flow = () => {
-          if (!edge.inside() || !['in_progress', 'bootstrap_running'].includes(edge.data('status'))) {
-            edge.removeScratch('_flowActive');
-            return;
-          }
-          edge.animate({ style:{'line-dash-offset':dashOffset} }, {
-            duration:isBootstrap ? 620 : 700,
-            complete:() => {
-              if (!edge.inside() || !['in_progress', 'bootstrap_running'].includes(edge.data('status'))) {
-                edge.removeScratch('_flowActive');
-                return;
-              }
-              edge.style('line-dash-offset', 0);
-              flow();
-            }
-          });
-        };
-        flow();
-      });
     },
 
     fitGraph() { if (this.cy) this.cy.fit(undefined, 50); },
@@ -419,9 +316,7 @@ export function createWorkspaceGraphState() {
 
     centerGraphOnElements(eles) {
       if (!this.cy || !eles || eles.length === 0) return;
-      if (this._centerAnimation) this._centerAnimation.stop();
-      this._centerAnimation = this.cy.animation({ center: { eles }, duration: 220, easing: 'ease-in-out-cubic' });
-      this._centerAnimation.play();
+      this.cy.center(eles);
     },
 
     centerGraphOnFact(factId) {

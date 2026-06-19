@@ -97,7 +97,23 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("params.append('event_kinds', kind);", html)
         self.assertIn("/llm-events/view?", html)
         self.assertIn("/llm-events/incremental?", html)
+        self.assertIn("/llm-events/cards?", html)
         self.assertNotIn("include_low_signal", html)
+
+    def test_execution_log_latest_preview_has_no_title_or_empty_copy(self) -> None:
+        html = _frontend_source()
+        self.assertNotIn(">Latest<", html)
+        self.assertNotIn(">No recent events<", html)
+        self.assertNotIn("x-show=\"llmLatestLoading\">Loading</span>", html)
+
+    def test_execution_log_uses_page_tokens_for_cards_pagination(self) -> None:
+        html = _frontend_source()
+        self.assertIn("llmEventCardsUrl({ executionId = '', pageSize = this.llmPageSize, pageToken = '' } = {})", html)
+        self.assertIn("params.set('page_size', String(pageSize));", html)
+        self.assertIn("params.set('page_token', pageToken);", html)
+        self.assertIn("llmPageTokenHistory = [...this.llmPageTokenHistory, this.llmPageToken];", html)
+        self.assertIn("const previousPageToken = stack.pop() || '';", html)
+        self.assertNotIn("llmPageBackStack", html)
 
     def test_execution_log_all_selection_uses_sentinel(self) -> None:
         html = _frontend_source()
@@ -118,10 +134,18 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn('value="klay_tb"', html)
         self.assertIn('value="elk_tb"', html)
         self.assertIn("buildElements()", html)
-        self.assertIn("layoutOpts(animate = true)", html)
+        self.assertIn("layoutOpts()", html)
+        self.assertIn("await this.api('GET', `/projects/${this.selectedProjectId}/poll-state`)", html)
         self.assertIn("cytoscape({", html)
         self.assertIn("rawCy.on('tap', 'node'", html)
         self.assertIn("rawCy.on('tap', 'edge'", html)
+        self.assertIn("this.applyProjectPollState(pollState);", html)
+        self.assertNotIn("projectGraphDataSignature(", html)
+        self.assertNotIn("projectTimelineDataSignature(", html)
+        self.assertNotIn("pulseActive()", html)
+        self.assertNotIn("fadeInFreshElement(", html)
+        self.assertNotIn("this.cy.animation({ center: { eles }", html)
+        self.assertNotIn("selector: '.fresh'", html)
         self.assertNotIn('id="dagViewport"', html)
         self.assertNotIn('flowDagViewModel()', html)
         self.assertNotIn('class="dag-edges"', html)

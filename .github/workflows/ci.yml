@@ -61,6 +61,9 @@ jobs:
         # warn_unused_ignores) lives in cairn/pyproject.toml [tool.mypy].
         run: uv run mypy src
 
+      - name: Frontend static checks
+        run: node scripts/check_frontend.mjs
+
       - name: Tests (pytest, with PostgreSQL)
         env:
           # Mirrors tests/helpers.py minimal_server_config().

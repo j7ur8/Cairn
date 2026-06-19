@@ -44,9 +44,16 @@ class IntentClaimConcurrencyTests(unittest.TestCase):
         with self.db.session_scope() as conn:
             sql.execute(
                 conn,
-                "INSERT INTO projects (id, title, status, created_at) "
-                "VALUES (:id, :title, :status, :created_at)",
-                {"id": "proj_c", "title": "C", "status": "active", "created_at": "2026-06-06T00:00:00Z"},
+                "INSERT INTO projects (id, title, status, created_at, graph_revision, timeline_revision) "
+                "VALUES (:id, :title, :status, :created_at, :graph_revision, :timeline_revision)",
+                {
+                    "id": "proj_c",
+                    "title": "C",
+                    "status": "active",
+                    "created_at": "2026-06-06T00:00:00Z",
+                    "graph_revision": 1,
+                    "timeline_revision": 1,
+                },
             )
             sql.execute(
                 conn,

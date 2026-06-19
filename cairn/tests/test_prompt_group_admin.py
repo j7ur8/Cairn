@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -225,6 +228,80 @@ class PromptGroupAdminTests(unittest.TestCase):
 
 
 class PromptSettingsFrontendTests(unittest.TestCase):
+    def test_prompt_resource_display_names_are_sidebar_only_labels(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required to execute frontend state helper")
+
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.prompts.js"
+        script = f"""
+            import {{ pathToFileURL }} from 'node:url';
+
+            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
+            const state = createPromptsState();
+            state.promptGroupSelected = 'default';
+            state.promptGroupDetail = {{
+              prompt_names: ['reason.md', 'roles/redteam.md'],
+              prompts: {{
+                'reason.md': 'reason prompt',
+                'roles/redteam.md': 'redteam prompt',
+              }},
+              prompt_sha256: {{
+                'reason.md': 'reason-sha',
+                'roles/redteam.md': 'redteam-sha',
+              }},
+              prompts_sha256: 'group-sha',
+            }};
+            state.rolePromptDetail = {{
+              role_names: ['cypher-ctf-operator/ROLE.md', 'legacy/custom.md', 'custom.md'],
+              roles: {{
+                'cypher-ctf-operator/ROLE.md': 'ctf role',
+                'legacy/custom.md': 'legacy role',
+                'custom.md': 'custom role',
+              }},
+              role_sha256: {{
+                'cypher-ctf-operator/ROLE.md': 'role-sha',
+                'legacy/custom.md': 'legacy-sha',
+                'custom.md': 'custom-sha',
+              }},
+            }};
+
+            const resources = state.promptEditorResources();
+            const roleResource = resources.find(resource => resource.path === 'cypher-ctf-operator/ROLE.md');
+            state.promptTemplateNames = resources.map(resource => resource.key);
+            state.promptTemplateSelected = roleResource.key;
+
+            console.log(JSON.stringify({{
+              labels: Object.fromEntries(resources.map(resource => [resource.key, state.promptResourceDisplayName(resource)])),
+              roleKey: roleResource.key,
+              rolePath: roleResource.path,
+              selectedContent: state.promptSelectedResourceContent(),
+              selectedSha: state.promptTemplateSha(),
+              routePath: state.promptTemplateRoutePath(roleResource.path),
+              groups: resources.filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
+            }}));
+        """
+
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["labels"]["prompts/default/reason.md"], "reason.md")
+        self.assertEqual(result["labels"]["prompts/default/roles/redteam.md"], "redteam.md")
+        self.assertEqual(result["labels"]["roles/cypher-ctf-operator/ROLE.md"], "cypher-ctf-operator")
+        self.assertEqual(result["labels"]["roles/legacy/custom.md"], "legacy")
+        self.assertEqual(result["labels"]["roles/custom.md"], "custom.md")
+        self.assertEqual(result["roleKey"], "roles/cypher-ctf-operator/ROLE.md")
+        self.assertEqual(result["rolePath"], "cypher-ctf-operator/ROLE.md")
+        self.assertEqual(result["selectedContent"], "ctf role")
+        self.assertEqual(result["selectedSha"], "role-sha")
+        self.assertEqual(result["routePath"], "cypher-ctf-operator/ROLE.md")
+        self.assertEqual(result["groups"], ["Prompt Templates", "Role Prompts"])
+
     def test_settings_contains_prompt_editor_controls(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
             encoding="utf-8"

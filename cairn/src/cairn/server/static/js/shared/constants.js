@@ -51,7 +51,6 @@ export const GRAPH_STYLES = Object.freeze([
   { selector: 'edge.focus', style: { 'z-index':1000,'overlay-color':'#93c5fd','overlay-opacity':0.22,'overlay-padding':5 }},
   { selector: 'node.selected-fact', style: { 'border-width':0,'underlay-color':'#93c5fd','underlay-padding':8,'underlay-opacity':0.28,'z-index':1001 }},
   { selector: '.faded', style: { opacity:0.5 }},
-  { selector: '.fresh', style: { opacity:0 }},
 ]);
 
 export const LAYOUT_ENGINE_SCRIPTS = Object.freeze({

@@ -360,6 +360,145 @@ class ObservabilityRepositoryTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertEqual(last_sequence, event.sequence)
 
+    def test_event_cards_page_by_merged_cards_without_duplicates(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cairn.server.observability.event_card_service import list_event_cards
+
+        def event(sequence: int, kind: str, content: str, *, stream: str = "system"):
+            return SimpleNamespace(
+                sequence=sequence,
+                execution_id="exec_cards",
+                project_id="proj_cards",
+                intent_id="i001",
+                task_type="reason",
+                worker="worker-a",
+                phase="reason",
+                event_kind=kind,
+                stream=stream,
+                content=content,
+                truncated=0,
+                redacted=0,
+                created_at=f"2026-06-19T00:00:{sequence:02d}Z",
+                model_dump=lambda: {
+                    "sequence": sequence,
+                    "execution_id": "exec_cards",
+                    "project_id": "proj_cards",
+                    "intent_id": "i001",
+                    "task_type": "reason",
+                    "worker": "worker-a",
+                    "phase": "reason",
+                    "event_kind": kind,
+                    "stream": stream,
+                    "content": content,
+                    "truncated": 0,
+                    "redacted": 0,
+                    "created_at": f"2026-06-19T00:00:{sequence:02d}Z",
+                },
+            )
+
+        rows = [
+            event(1, "tool_call", '{"call_id":"call-1","tool":"exec_command","arguments":{"cmd":"echo 1"}}'),
+            event(2, "command_start", '{"call_id":"call-1","command":"echo 1","workdir":"/tmp"}'),
+            event(3, "command_end", '{"call_id":"call-1","status":"completed","stdout":"1","command":"echo 1"}'),
+            event(4, "agent_message", "plain-1", stream="result"),
+            event(5, "tool_call", '{"call_id":"call-2","tool":"exec_command","arguments":{"cmd":"echo 2"}}'),
+            event(6, "command_start", '{"call_id":"call-2","command":"echo 2","workdir":"/tmp"}'),
+            event(7, "command_end", '{"call_id":"call-2","status":"completed","stdout":"2","command":"echo 2"}'),
+            event(8, "agent_message", "plain-2", stream="result"),
+            event(9, "agent_message", "plain-3", stream="result"),
+        ]
+
+        with patch("cairn.server.observability.event_card_service._list_filtered_events", return_value=(rows, 9)):
+            first_page = list_event_cards(object(), "proj_cards", execution_id="exec_cards", page_size=2)
+            second_page = list_event_cards(
+                object(),
+                "proj_cards",
+                execution_id="exec_cards",
+                page_size=2,
+                page_token=first_page.next_page_token,
+            )
+            third_page = list_event_cards(
+                object(),
+                "proj_cards",
+                execution_id="exec_cards",
+                page_size=2,
+                page_token=second_page.next_page_token,
+            )
+
+        self.assertEqual(len(first_page.cards), 2)
+        self.assertTrue(first_page.has_next)
+        self.assertEqual([card.sequence for card in first_page.cards], [3, 4])
+        self.assertTrue(first_page.cards[0].merged_call)
+        self.assertEqual(first_page.page_range_label, "#3-#4")
+        self.assertEqual([card.sequence for card in second_page.cards], [7, 8])
+        self.assertTrue(second_page.has_next)
+        self.assertTrue(second_page.cards[0].merged_call)
+        self.assertEqual([card.sequence for card in third_page.cards], [9])
+        self.assertFalse(third_page.has_next)
+
+    def test_event_cards_filter_keeps_page_size_stable(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cairn.server.observability.event_card_service import list_event_cards
+
+        def event(sequence: int, content: str):
+            return SimpleNamespace(
+                sequence=sequence,
+                execution_id="exec_cards_filter",
+                project_id="proj_cards_filter",
+                intent_id="i001",
+                task_type="reason",
+                worker="worker-a",
+                phase="reason",
+                event_kind="agent_message",
+                stream="result",
+                content=content,
+                truncated=0,
+                redacted=0,
+                created_at=f"2026-06-19T00:00:{sequence:02d}Z",
+                model_dump=lambda: {
+                    "sequence": sequence,
+                    "execution_id": "exec_cards_filter",
+                    "project_id": "proj_cards_filter",
+                    "intent_id": "i001",
+                    "task_type": "reason",
+                    "worker": "worker-a",
+                    "phase": "reason",
+                    "event_kind": "agent_message",
+                    "stream": "result",
+                    "content": content,
+                    "truncated": 0,
+                    "redacted": 0,
+                    "created_at": f"2026-06-19T00:00:{sequence:02d}Z",
+                },
+            )
+
+        rows = [event(2, "visible-0"), event(4, "visible-1"), event(6, "visible-2")]
+        with patch("cairn.server.observability.event_card_service._list_filtered_events", return_value=(rows, 6)):
+            page = list_event_cards(
+                object(),
+                "proj_cards_filter",
+                execution_id="exec_cards_filter",
+                page_size=2,
+                event_kinds=["agent_message"],
+            )
+            next_page = list_event_cards(
+                object(),
+                "proj_cards_filter",
+                execution_id="exec_cards_filter",
+                page_size=2,
+                event_kinds=["agent_message"],
+                page_token=page.next_page_token,
+            )
+
+        self.assertEqual([card.content for card in page.cards], ["visible-0", "visible-1"])
+        self.assertTrue(page.has_next)
+        self.assertEqual([card.content for card in next_page.cards], ["visible-2"])
+        self.assertFalse(next_page.has_next)
+
     def test_tail_project_events_returns_latest_events_in_ascending_order(self) -> None:
         from cairn.server.observability.events_query import list_project_events
         from cairn.server.observability.events_writer import append_event
@@ -618,8 +757,8 @@ class ProjectFilesRouterTests(unittest.TestCase):
             sql.execute(
                 conn,
                 """
-                INSERT INTO projects (id, title, status, created_at)
-                VALUES (:id, :title, 'active', :created_at)
+                INSERT INTO projects (id, title, status, created_at, graph_revision, timeline_revision)
+                VALUES (:id, :title, 'active', :created_at, 1, 1)
                 """,
                 {
                     "id": "proj_files",

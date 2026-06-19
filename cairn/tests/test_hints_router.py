@@ -28,14 +28,16 @@ class HintsRouterTests(unittest.TestCase):
             sql.execute(
                 conn,
                 """
-                INSERT INTO projects (id, title, status, created_at)
-                VALUES (:id, :title, :status, :created_at)
+                INSERT INTO projects (id, title, status, created_at, graph_revision, timeline_revision)
+                VALUES (:id, :title, :status, :created_at, :graph_revision, :timeline_revision)
                 """,
                 {
                     "id": "proj_h",
                     "title": "H",
                     "status": status,
                     "created_at": "2026-06-06T00:00:00Z",
+                    "graph_revision": 1,
+                    "timeline_revision": 1,
                 },
             )
 

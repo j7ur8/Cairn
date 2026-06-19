@@ -87,6 +87,8 @@ def create_project_from_draft(
             title=draft.title,
             status=draft.status,
             created_at=now,
+            graph_revision=1,
+            timeline_revision=1,
             proxy_id=draft.proxy_id,
             llm_hidden_event_kinds=json.dumps(hidden_event_kinds, ensure_ascii=False),
         )
