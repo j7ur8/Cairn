@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.prompts = function () {
+export function createPromptsState() {
   return {
     promptTemplateNames: [],
     promptGroups: [],
@@ -198,4 +197,4 @@ CairnParts.prompts = function () {
       }
     },
   };
-};
+}

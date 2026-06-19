@@ -115,8 +115,6 @@ def delete_yaml_capability(kind: str, capability_id: str) -> None:
     for idx, item in enumerate(entries):
         if not isinstance(item, dict) or item.get("id") != capability_id:
             continue
-        if item.get("source") != "user":
-            raise HTTPException(409, f"{kind}/{capability_id} is built-in and cannot be deleted")
         entries.pop(idx)
         save_resources_data(data)
         return

@@ -1,5 +1,11 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.projects = function () {
+import {
+  defaultLlmVisibleEventKinds,
+  defaultTaskAiProfileSelections,
+  defaultTaskCapabilitiesMap,
+  defaultTaskTimeouts,
+} from '../shared/defaults.js';
+
+export function createWorkspaceProjectsState() {
   return {
     projects: [],
     project: null,
@@ -62,6 +68,32 @@ CairnParts.projects = function () {
       this._timelineViewModelCache = null;
       this._summaryCardCache.clear();
       this._summaryCardCacheOrder = [];
+    },
+
+    projectTimelineDataSignature(project = this.project) {
+      if (!project) return '';
+      const facts = (project.facts || [])
+        .map(fact => `${fact.id}:${fact.description || ''}`)
+        .sort()
+        .join('|');
+      const hints = (project.hints || [])
+        .map(hint => `${hint.id}:${hint.created_at || ''}:${hint.creator || ''}:${hint.content || ''}`)
+        .sort()
+        .join('|');
+      const intents = (project.intents || [])
+        .map(intent => [
+          intent.id,
+          intent.description || '',
+          intent.creator || '',
+          intent.created_at || '',
+          Array.isArray(intent.from) ? intent.from.join(',') : '',
+          intent.to || '',
+          intent.worker || '',
+          intent.concluded_at || '',
+        ].join(':'))
+        .sort()
+        .join('|');
+      return `${project.project?.id || ''}:${project.project?.created_at || ''}:${project.project?.title || ''}::${facts}::${hints}::${intents}`;
     },
 
     recentProjects() {
@@ -344,8 +376,16 @@ CairnParts.projects = function () {
     async loadProject(id) {
       try {
         this.projectLoadError = '';
-        this.project = await this.api('GET', `/projects/${id}`);
-        this.invalidateProjectViewCaches();
+        const nextProject = await this.api('GET', `/projects/${id}`);
+        const canPatchMetadata = this.project?.project?.id === nextProject?.project?.id
+          && this.projectGraphDataSignature(this.project) === this.projectGraphDataSignature(nextProject)
+          && this.projectTimelineDataSignature(this.project) === this.projectTimelineDataSignature(nextProject);
+        if (canPatchMetadata) {
+          this.project.project = nextProject.project;
+        } else {
+          this.project = nextProject;
+          this.invalidateProjectViewCaches();
+        }
         if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
         return true;
       } catch(e) {
@@ -730,10 +770,7 @@ CairnParts.projects = function () {
         return;
       }
       await this.loadCapabilities();
-      await this.loadLlmExecutions();
-      // Materialize a stable, complete project-wide snapshot for the
-      // default "All Executions" mode before warming the rolling live window.
-      await this.loadAllExecutionEvents(true);
+      await this.loadLlmExecutions(true);
       await this.pollLlmEvents(true);
       if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
       this.$nextTick(() => {
@@ -975,4 +1012,4 @@ CairnParts.projects = function () {
     },
 
   };
-};
+}

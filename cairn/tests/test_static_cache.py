@@ -20,16 +20,16 @@ def _frontend_source() -> str:
     """The full shipped frontend surface as one searchable string.
 
     The SPA was split out of a single index.html into partials/*.html (markup,
-    assembled by assemble_index()) and static/js/*.js (the cairnApp component
-    sliced into CairnParts.*). Behavioral assertions below grep this combined
-    surface, exactly as they used to grep the monolithic index.html.
+    assembled by assemble_index()) and static/js/*.js (the Alpine app now
+    assembled from native ES modules). Behavioral assertions below grep this
+    combined surface, exactly as they used to grep the monolithic index.html.
     """
     from cairn.server.app import STATIC_DIR, assemble_index
 
     html = assemble_index()
     js = "\n".join(
         p.read_text(encoding="utf-8")
-        for p in sorted((STATIC_DIR / "js").glob("*.js"))
+        for p in sorted((STATIC_DIR / "js").rglob("*.js"))
     )
     return html + "\n" + js
 
@@ -107,6 +107,28 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("return this.isAllLlmExecutionsSelected() ? '' : this.llmSelectedExecutionId;", html)
         self.assertNotIn("const running = next.find(execution => execution.process_state === 'running');", html)
 
+    def test_project_graph_uses_cytoscape_dagre_surface(self) -> None:
+        html = _frontend_source()
+        self.assertIn('id="cy"', html)
+        self.assertIn('/static/vendor/dagre.min.js', html)
+        self.assertIn('/static/vendor/cytoscape.min.js', html)
+        self.assertIn('/static/vendor/cytoscape-dagre.js', html)
+        self.assertIn("layoutMode: 'dagre_tb'", html)
+        self.assertIn('value="dagre_tb"', html)
+        self.assertIn('value="klay_tb"', html)
+        self.assertIn('value="elk_tb"', html)
+        self.assertIn("buildElements()", html)
+        self.assertIn("layoutOpts(animate = true)", html)
+        self.assertIn("cytoscape({", html)
+        self.assertIn("rawCy.on('tap', 'node'", html)
+        self.assertIn("rawCy.on('tap', 'edge'", html)
+        self.assertNotIn('id="dagViewport"', html)
+        self.assertNotIn('flowDagViewModel()', html)
+        self.assertNotIn('class="dag-edges"', html)
+        self.assertNotIn('x-ref="dagEdgesSvg"', html)
+        self.assertNotIn('<template x-for="edge in flowDagViewModel().edges"', html)
+        self.assertNotIn('<template x-for="junction in flowDagViewModel().junctions"', html)
+
     def test_detail_and_timeline_cards_render_full_text_without_summary_headline(self) -> None:
         html = _frontend_source()
         self.assertIn('x-text="fact.description"', html)
@@ -139,36 +161,84 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("async probeAllMcpCapabilities()", html)
         self.assertIn("capabilityItems('mcp_server')", html)
         self.assertIn("capabilityItems('skill')", html)
+        self.assertEqual(html.count('@click="deleteCapabilityAdmin(item.kind, item.id, item.name)"'), 2)
+        self.assertNotIn('x-show="item.source === \'user\'"', html)
         self.assertNotIn("data-testid=\"settings-capability-add\"", html)
 
-    def test_cairn_app_registers_settings_domain_slices_with_collision_guard(self) -> None:
-        app_js = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "cairn-app.js").read_text(
-            encoding="utf-8"
+    def test_ai_profile_form_actions_live_in_header(self) -> None:
+        html = _frontend_source()
+        ai_start = html.index(
+            '<section x-show="settingsSection === \'ai\'" class="h-full min-h-0 flex flex-col gap-3">'
         )
-        doc_close = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "_doc_close.html").read_text(
-            encoding="utf-8"
+        ai_end = html.index("<!-- Prompts -->", ai_start)
+        ai_section = html[ai_start:ai_end]
+        form_start = ai_section.index(
+            '<div x-show="aiProfileForm.id || aiProfileFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto'
+        )
+        list_start = ai_section.index(
+            '<template x-if="!aiProfileForm.id && !aiProfileFormOpen && aiProfiles.length === 0">',
+            form_start,
+        )
+        ai_header = ai_section[:form_start]
+        ai_form = ai_section[form_start:list_start]
+        ai_list = ai_section[list_start:]
+
+        self.assertIn('x-show="!aiProfileForm.id && !aiProfileFormOpen"', ai_header)
+        self.assertIn('data-testid="settings-ai-refresh"', ai_header)
+        self.assertIn('data-testid="settings-ai-add"', ai_header)
+        self.assertIn('x-show="aiProfileForm.id || aiProfileFormOpen"', ai_header)
+        self.assertIn('x-model="aiProfileForm.available"', ai_header)
+        self.assertIn('@click="cancelAiProfileEdit()"', ai_header)
+        self.assertIn('data-testid="ai-profile-save"', ai_header)
+        self.assertIn(':disabled="!aiProfileForm.name.trim() || !aiProfileForm.model.trim()"', ai_header)
+        self.assertIn('x-text="aiProfileForm.id ? \'Save\' : \'Create\'"', ai_header)
+        self.assertIn(
+            'class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition"',
+            ai_header,
+        )
+        self.assertIn(
+            'class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed"',
+            ai_header,
+        )
+        self.assertNotIn('@click="cancelAiProfileEdit()"', ai_form)
+        self.assertNotIn('data-testid="ai-profile-save"', ai_form)
+        self.assertNotIn('x-model="aiProfileForm.available"', ai_form)
+        self.assertIn('x-show="!aiProfileForm.id && !aiProfileFormOpen"', ai_list)
+        self.assertIn('class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1"', ai_list)
+        self.assertNotIn(
+            'class="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 rounded-lg transition"',
+            ai_section,
+        )
+        self.assertNotIn(
+            'class="px-3 py-1.5 text-xs bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed"',
+            ai_section,
         )
 
-        for slice_name in [
-            "settings",
-            "settings_admin",
-            "prompts",
-            "ai_profiles",
-            "proxies",
-            "capabilities",
-        ]:
-            self.assertIn(f"CairnParts.{slice_name}(),", app_js)
-            self.assertIn(f'<script src="/static/js/parts.{slice_name}.js"></script>', doc_close)
-        self.assertIn("duplicate CairnParts key overwritten", app_js)
+    def test_cairn_app_uses_single_module_entrypoint(self) -> None:
+        app_js = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "index.js").read_text(
+            encoding="utf-8"
+        )
+        doc_open = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "_doc_open.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('<script type="module" src="/static/js/app/index.js"></script>', doc_open)
+        self.assertIn("createSettingsState()", app_js)
+        self.assertIn("createSettingsAdminState()", app_js)
+        self.assertIn("createPromptsState()", app_js)
+        self.assertIn("createAiProfilesState()", app_js)
+        self.assertIn("createProxiesState()", app_js)
+        self.assertIn("createWorkspaceCapabilitiesState()", app_js)
+        self.assertIn("window.cairnApp = function cairnApp()", app_js)
+        self.assertIn("duplicate app state key overwritten", (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "create-app-state.js").read_text(encoding="utf-8"))
 
     def test_settings_navigation_uses_section_specific_loaders(self) -> None:
-        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings.js").read_text(
+        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings.js").read_text(
             encoding="utf-8"
         )
-        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.ui.js").read_text(
+        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.ui.js").read_text(
             encoding="utf-8"
         )
-        core = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.core.js").read_text(
+        core = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.core.js").read_text(
             encoding="utf-8"
         )
 
@@ -191,7 +261,7 @@ class StaticCacheTests(unittest.TestCase):
 
     def test_capabilities_slice_excludes_non_capability_admin_endpoints(self) -> None:
         capabilities = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.capabilities.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.capabilities.js"
         ).read_text(encoding="utf-8")
         self.assertNotIn("/prompt-groups", capabilities)
         self.assertNotIn("/role-prompts", capabilities)

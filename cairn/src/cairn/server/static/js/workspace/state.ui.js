@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.ui = function () {
+export function createWorkspaceUiState() {
   return {
     sideTab: 'detail',
     sidePanelWidth: 320,
@@ -25,11 +24,7 @@ CairnParts.ui = function () {
         } else {
           const parsed = JSON.parse(raw);
           if (typeof parsed.actor_name === 'string') this.localPrefs.actor_name = parsed.actor_name;
-          if (this.isValidLayoutMode(parsed.layout_mode)) {
-            this.localPrefs.layout_mode = parsed.layout_mode;
-          } else if (parsed.layout_dir === 'TB' || parsed.layout_dir === 'LR') {
-            this.localPrefs.layout_mode = parsed.layout_dir === 'LR' ? 'dagre_lr' : 'dagre_tb';
-          }
+          if (typeof parsed.layout_mode === 'string') this.localPrefs.layout_mode = parsed.layout_mode;
         }
         const rawPanelWidth = localStorage.getItem('cairn.sidePanelWidth');
         if (rawPanelWidth !== null) {
@@ -149,4 +144,4 @@ CairnParts.ui = function () {
     },
 
   };
-};
+}

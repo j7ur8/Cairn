@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.settings = function () {
+export function createSettingsState() {
   return {
     showSettings: false,
     settingsSection: 'system',
@@ -55,4 +54,4 @@ CairnParts.settings = function () {
       return this.saveSystemSettings();
     },
   };
-};
+}

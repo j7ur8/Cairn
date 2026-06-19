@@ -1,5 +1,6 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.capabilities = function () {
+import { baseCapabilityForm, defaultTaskAiProfileSelections, defaultTaskCapabilitiesMap, defaultTaskTimeouts } from '../shared/defaults.js';
+
+export function createWorkspaceCapabilitiesState() {
   return {
     capabilities: {
       catalog: [],
@@ -9,7 +10,7 @@ CairnParts.capabilities = function () {
       projectAiProfiles: { catalog: [], selections: defaultTaskAiProfileSelections(), snapshots: [], unavailable_profile_ids: [] },
     },
     capabilityAdmin: { catalog: [], health: {} },
-    capabilityForm: defaultCapabilityForm(),
+    capabilityForm: baseCapabilityForm(),
     capabilityFormOpen: false,
     capabilityEditId: '',
     capabilityImportOpen: false,
@@ -770,4 +771,4 @@ CairnParts.capabilities = function () {
       return parts.join(' · ');
     },
   };
-};
+}

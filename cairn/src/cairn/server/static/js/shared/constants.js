@@ -1,11 +1,12 @@
-const LLM_EVENT_KIND_FILTERS = Object.freeze([
+export const LLM_EVENT_KIND_FILTERS = Object.freeze([
   { id: 'all', label: 'All' },
   { id: 'tools', label: 'Tools' },
   { id: 'commands', label: 'Cmds' },
   { id: 'output', label: 'Output' },
   { id: 'errors', label: 'Errors' },
 ]);
-const LLM_EVENT_KIND_OPTIONS = Object.freeze([
+
+export const LLM_EVENT_KIND_OPTIONS = Object.freeze([
   'prompt',
   'stdout',
   'stderr',
@@ -29,7 +30,8 @@ const LLM_EVENT_KIND_OPTIONS = Object.freeze([
   'capability_manifest',
   'trace_parse_error',
 ]);
-const GRAPH_STYLES = Object.freeze([
+
+export const GRAPH_STYLES = Object.freeze([
   { selector: 'node[nodeType="origin"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
   { selector: 'node[nodeType="goal"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#f43f5e',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
   { selector: 'node[nodeType="fact"]', style: { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif', shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
@@ -51,7 +53,19 @@ const GRAPH_STYLES = Object.freeze([
   { selector: '.faded', style: { opacity:0.5 }},
   { selector: '.fresh', style: { opacity:0 }},
 ]);
-const LAYOUT_ENGINE_SCRIPTS = Object.freeze({
+
+export const LAYOUT_ENGINE_SCRIPTS = Object.freeze({
   klay: ['/static/vendor/klay.js', '/static/vendor/cytoscape-klay.js'],
   elk: ['/static/vendor/elk.bundled.js', '/static/vendor/cytoscape-elk.js'],
+});
+
+export const ALL_LLM_EXECUTIONS_VALUE = '__all__';
+
+export const SETTINGS_UI_CLASSES = Object.freeze({
+  primaryButton: 'h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed',
+  secondaryButton: 'h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed',
+  panel: 'rounded-xl border border-slate-200 bg-slate-50/60 p-3',
+  card: 'rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm',
+  compactCard: 'rounded-xl border border-slate-200 bg-white px-3 py-2',
+  fieldInput: 'px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300',
 });

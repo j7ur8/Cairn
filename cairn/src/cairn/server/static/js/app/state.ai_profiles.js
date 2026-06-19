@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.ai_profiles = function () {
+export function createAiProfilesState() {
   return {
     aiProfiles: [],
     aiProfileCheckBusy: {},
@@ -243,4 +242,4 @@ CairnParts.ai_profiles = function () {
       return 'No health check yet';
     },
   };
-};
+}

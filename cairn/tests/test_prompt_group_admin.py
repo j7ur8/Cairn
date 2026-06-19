@@ -229,20 +229,20 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
             encoding="utf-8"
         )
-        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.ui.js").read_text(
+        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.ui.js").read_text(
             encoding="utf-8"
         )
-        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings.js").read_text(
+        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings.js").read_text(
             encoding="utf-8"
         )
         settings_admin = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.settings_admin.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings_admin.js"
         ).read_text(encoding="utf-8")
-        prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.prompts.js").read_text(
+        prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.prompts.js").read_text(
             encoding="utf-8"
         )
         capabilities = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "parts.capabilities.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.capabilities.js"
         ).read_text(encoding="utf-8")
 
         self.assertNotIn("async navigateSettings(section = 'server')", ui)

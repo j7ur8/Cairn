@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.settings_admin = function () {
+export function createSettingsAdminState() {
   return {
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
     runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20, prompt_group: 'default' },
@@ -79,4 +78,4 @@ CairnParts.settings_admin = function () {
       } catch(e) { this.showToast(e.message, 'error'); }
     },
   };
-};
+}

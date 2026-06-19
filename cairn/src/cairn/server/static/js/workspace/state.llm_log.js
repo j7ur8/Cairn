@@ -1,5 +1,12 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.llm_log = function () {
+import { ALL_LLM_EXECUTIONS_VALUE, LLM_EVENT_KIND_FILTERS, LLM_EVENT_KIND_OPTIONS } from '../shared/constants.js';
+import {
+  defaultLlmVisibleEventKinds,
+  defaultTaskAiProfileSelections,
+  defaultTaskCapabilitiesMap,
+  defaultTaskTimeouts,
+} from '../shared/defaults.js';
+
+export function createWorkspaceLogState() {
   return {
     ALL_LLM_EXECUTIONS_VALUE,
     selectedTimelineEntryId: null,
@@ -44,8 +51,30 @@ CairnParts.llm_log = function () {
     llmPollInFlight: false,
     llmPollingPaused: false,
     llmLastSlowPollAt: 0,
-    llmRenderLimit: 100,
-    llmRenderStep: 100,
+    llmLastEventPollAt: 0,
+    llmFastPollMs: 5000,
+    llmSlowPollMs: 10000,
+    llmExecutionsRefreshMs: 10000,
+    llmCollapsedExecutionsRefreshMs: 15000,
+    llmSidebarEventLimit: 100,
+    llmFullLogEventLimit: 200,
+    llmSidebarRenderLimit: 20,
+    llmFullLogRenderLimit: 50,
+    llmRenderLimit: 20,
+    llmRenderStep: 50,
+    timelineRenderLimit: 200,
+    timelineRenderStep: 100,
+    llmPerfStats: {
+      enabled: false,
+      incrementalPolls: 0,
+      executionPolls: 0,
+      filteredCalls: 0,
+      filteredMs: 0,
+      lastEventWindowSize: 0,
+      longTasks: 0,
+      observer: null,
+      lastLogAt: 0,
+    },
     showReplayConfigModal: false,
     replayConfig: {
       sourceProjectId: '',
@@ -83,11 +112,13 @@ CairnParts.llm_log = function () {
       if (!this.selectedProjectId) return;
       this.view = 'graph';
       this.graphMode = 'log';
+      this.llmRenderLimit = this.currentLlmRenderLimit();
       this.mobileNavOpen = false;
+      this.pollLlmEvents(true);
     },
 
     runningExecutionCount() {
-      return (this.llmExecutions || []).filter(item => ['running', 'active'].includes(String(item.status || '').toLowerCase())).length;
+      return (this.llmExecutions || []).filter(item => this.llmExecutionIsRunning(item)).length;
     },
 
     errorEventCount() {
@@ -186,6 +217,16 @@ CairnParts.llm_log = function () {
       this.llmExpandedEvents = {};
       this.llmPollingPaused = false;
       this.llmLastSlowPollAt = 0;
+      this.llmLastEventPollAt = 0;
+      this.llmRenderLimit = this.currentLlmRenderLimit();
+      this.timelineRenderLimit = 200;
+      this.llmPerfStats.incrementalPolls = 0;
+      this.llmPerfStats.executionPolls = 0;
+      this.llmPerfStats.filteredCalls = 0;
+      this.llmPerfStats.filteredMs = 0;
+      this.llmPerfStats.lastEventWindowSize = 0;
+      this.llmPerfStats.longTasks = 0;
+      this.llmPerfStats.lastLogAt = 0;
       this._llmViewVersion++;
       this._llmViewCache = null;
       this._llmViewCacheKey = '';
@@ -196,9 +237,13 @@ CairnParts.llm_log = function () {
       this._llmParsedPayloadCache.clear();
     },
 
-    async loadLlmExecutions() {
+    async loadLlmExecutions(force = false) {
       if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
+      const now = Date.now();
+      const refreshMs = this.llmExecutionRefreshMs();
+      if (!force && now - this.llmExecutionsLastRefreshAt < refreshMs) return;
       try {
+        this.llmPerfStats.executionPolls++;
         const data = await this.api('GET', `/projects/${this.selectedProjectId}/llm-executions?limit=200`);
         const executions = data.executions || [];
         this.llmExecutionsLastRefreshAt = Date.now();
@@ -255,7 +300,7 @@ CairnParts.llm_log = function () {
     async endLlmExecutionSelectionInteraction() {
       this.llmExecutionSelectInteracting = false;
       if (!this.llmExecutionsRefreshPending) return;
-      await this.loadLlmExecutions();
+      await this.loadLlmExecutions(true);
     },
 
     handleLlmExecutionSelectionChange() {
@@ -271,8 +316,6 @@ CairnParts.llm_log = function () {
         this.endLlmExecutionSelectionInteraction();
         if (targetId) {
           this.loadLlmExecutionEvents(targetId);
-        } else {
-          this.loadAllExecutionEvents(true);
         }
       });
     },
@@ -364,7 +407,7 @@ CairnParts.llm_log = function () {
         return;
       }
       try {
-        const data = await this.api('GET', this.llmEventViewUrl({ executionId, limit: 300 }));
+        const data = await this.api('GET', this.llmEventViewUrl({ executionId, limit: this.currentLlmEventRequestLimit() }));
         const events = Array.isArray(data?.primary_events) ? data.primary_events : [];
         if (this.selectedLlmExecutionIdForQuery() === executionId) {
           this.llmSelectedExecutionEvents = events;
@@ -392,7 +435,7 @@ CairnParts.llm_log = function () {
       this.llmAllExecutionEventsLoading = true;
       this._llmViewVersion++;
       try {
-        const data = await this.api('GET', this.llmEventViewUrl({ limit: 300 }));
+        const data = await this.api('GET', this.llmEventViewUrl({ limit: this.llmAllExecutionEventCountLimit }));
         const rows = Array.isArray(data?.primary_events) ? data.primary_events : [];
         this.llmAllExecutionEvents = rows;
         this.llmAllExecutionLastSequence = Number(data?.last_sequence || 0);
@@ -408,17 +451,44 @@ CairnParts.llm_log = function () {
       }
     },
 
+    llmCanPollEvents(force = false) {
+      if (force) return true;
+      if (this.llmPollingPaused || this.replay.active) return false;
+      return this.llmPanelVisible();
+    },
+
+    llmPanelVisible() {
+      return this.view === 'graph' && (this.isFullLlmLogMode() || !this.llmPanelCollapsed);
+    },
+
+    isFullLlmLogMode() {
+      return this.graphMode === 'log';
+    },
+
+    currentLlmRenderLimit() {
+      return this.isFullLlmLogMode() ? this.llmFullLogRenderLimit : this.llmSidebarRenderLimit;
+    },
+
+    currentLlmEventRequestLimit() {
+      return this.isFullLlmLogMode() ? this.llmFullLogEventLimit : this.llmSidebarEventLimit;
+    },
+
+    llmExecutionRefreshMs() {
+      return this.llmPanelVisible() ? this.llmExecutionsRefreshMs : this.llmCollapsedExecutionsRefreshMs;
+    },
+
     async pollLlmEvents(force = false) {
       if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project || this.replay.active) return;
-      if (!force && (this.llmPanelCollapsed || this.llmPollingPaused)) return;
+      if (!this.llmCanPollEvents(force)) return;
       if (this.llmPollInFlight && !force) return;
       this.llmPollInFlight = true;
       try {
-        const after = force && this.llmEvents.length === 0 ? 0 : this.llmLastSequence;
+        const after = force ? 0 : this.llmLastSequence;
         const selectedExecutionId = this.selectedLlmExecutionIdForQuery();
+        this.llmPerfStats.incrementalPolls++;
         const data = await this.api(
           'GET',
-          this.llmIncrementalEventsUrl({ executionId: selectedExecutionId, after, limit: 200 }),
+          this.llmIncrementalEventsUrl({ executionId: selectedExecutionId, after, limit: this.currentLlmEventRequestLimit() }),
         );
         const events = Array.isArray(data?.events) ? data.events : [];
         const lastSequence = Number(data?.last_sequence || 0);
@@ -449,8 +519,8 @@ CairnParts.llm_log = function () {
 
           this._llmViewVersion++;
           await this.loadLlmExecutions();
-        } else if (force || this.llmExecutions.some(execution => execution.process_state === 'running')) {
-          await this.loadLlmExecutions();
+        } else if (force || this.llmExecutions.some(execution => this.llmExecutionIsRunning(execution))) {
+          await this.loadLlmExecutions(force);
           if (this.llmEvents.length === 0 && this.llmExecutions.length > 0 && after !== 0) {
             this.llmLastSequence = 0;
             await this.pollLlmEvents(true);
@@ -459,6 +529,7 @@ CairnParts.llm_log = function () {
       } catch (e) {
         console.error(e);
       } finally {
+        this.llmLastEventPollAt = Date.now();
         this.llmPollInFlight = false;
       }
     },
@@ -467,29 +538,31 @@ CairnParts.llm_log = function () {
       if (this.llmPollTimer) return;
       this.llmPollTimer = setInterval(async () => {
         if (!this.selectedProjectId || this.view !== 'graph' || !this.project?.project) return;
-        if (this.llmPanelCollapsed || this.llmPollingPaused || this.replay.active) return;
-        const hasRunning = this.llmExecutions.some(execution => execution.process_state === 'running');
         const now = Date.now();
-        if (now - this.llmExecutionsLastRefreshAt >= 2000) {
+        const canPollEvents = this.llmCanPollEvents(false);
+        const executionRefreshMs = this.llmExecutionRefreshMs();
+        if (now - this.llmExecutionsLastRefreshAt >= executionRefreshMs) {
           await this.loadLlmExecutions();
         }
-        if (hasRunning || this.llmEvents.length === 0 || now - this.llmLastSlowPollAt >= 5000) {
-          if (!hasRunning) this.llmLastSlowPollAt = now;
+        if (!canPollEvents) return;
+        const hasRunning = this.llmExecutions.some(execution => this.llmExecutionIsRunning(execution));
+        const pollMs = hasRunning ? this.llmFastPollMs : this.llmSlowPollMs;
+        if (this.llmEvents.length === 0 || now - this.llmLastEventPollAt >= pollMs) {
           await this.pollLlmEvents();
         }
       }, 1000);
     },
 
     _llmEventsForView() {
-      const cacheKey = `${this._llmViewVersion}:${this.llmSelectedExecutionId || ''}:${this.llmSelectedExecutionEventsLoading ? 1 : 0}:${this.llmSelectedExecutionEvents.length}:${this.llmAllExecutionEventsLoaded ? 1 : 0}:${this.llmAllExecutionEventsLoading ? 1 : 0}:${this.llmAllExecutionEvents.length}`;
+      const cacheKey = `${this._llmViewVersion}:${this.llmSelectedExecutionId || ''}:${this.isFullLlmLogMode() ? 1 : 0}:${this.llmRenderLimit}:${this.llmSelectedExecutionEventsLoading ? 1 : 0}:${this.llmSelectedExecutionEvents.length}:${this.llmAllExecutionEventsLoaded ? 1 : 0}:${this.llmAllExecutionEventsLoading ? 1 : 0}:${this.llmAllExecutionEvents.length}`;
       if (this._llmEventsForViewCache && this._llmEventsForViewCacheKey === cacheKey) {
         return this._llmEventsForViewCache;
       }
       let result;
       if (this.isAllLlmExecutionsSelected()) {
-        // "All Executions" is backed by the stable complete-history snapshot,
-        // not the rolling llmEvents live window.
-        result = this.llmAllExecutionEvents;
+        // Default to the rolling live window; only use the complete-history
+        // snapshot after the user explicitly loads it from the log panel.
+        result = this.llmAllExecutionEventsLoaded ? this.llmAllExecutionEvents : this.llmEvents;
       } else if (this.llmSelectedExecutionEvents.length > 0 || this.llmSelectedExecutionEventsLoading) {
         result = this.llmSelectedExecutionEvents;
       } else {
@@ -504,21 +577,68 @@ CairnParts.llm_log = function () {
     },
 
     filteredLlmEvents() {
-      if (this._llmViewCache && this._llmViewCacheKey === String(this._llmViewVersion)) {
+      const cacheKey = `${this._llmViewVersion}:${this.isFullLlmLogMode() ? 1 : 0}:${this.llmRenderLimit}:${this.llmSelectedExecutionId || ''}:${this.llmEventKindFilter}`;
+      if (this._llmViewCache && this._llmViewCacheKey === cacheKey) {
         return this._llmViewCache;
       }
+      const startedAt = performance.now();
       const events = this._llmEventsForView();
       const result = this.mergeLlmCommandEvents(events.filter(event => this.isVisibleLlmEvent(event)))
         .filter(event => this.matchesLlmEventKindFilter(event))
         .sort((a, b) => this.llmEventSequence(b) - this.llmEventSequence(a))
         .slice(0, 500);
+      this.recordLlmFilterPerf(performance.now() - startedAt, events.length);
       this._llmViewCache = result;
-      this._llmViewCacheKey = String(this._llmViewVersion);
+      this._llmViewCacheKey = cacheKey;
       return result;
     },
 
+    initLlmPerfStats() {
+      const paramsEnabled = new URLSearchParams(location.search || '').has('llmPerf');
+      const storageEnabled = localStorage.getItem('cairn.debug.llmPerf') === '1';
+      const hostEnabled = ['localhost', '127.0.0.1'].includes(location.hostname);
+      this.llmPerfStats.enabled = hostEnabled && (paramsEnabled || storageEnabled);
+      if (!this.llmPerfStats.enabled || this.llmPerfStats.observer || typeof PerformanceObserver === 'undefined') return;
+      try {
+        const observer = new PerformanceObserver((list) => {
+          this.llmPerfStats.longTasks += list.getEntries().filter(entry => entry.duration >= 50).length;
+          this.maybeLogLlmPerfStats();
+        });
+        observer.observe({ entryTypes: ['longtask'] });
+        this.llmPerfStats.observer = observer;
+      } catch (error) {
+        this.llmPerfStats.enabled = false;
+      }
+    },
+
+    recordLlmFilterPerf(durationMs, eventWindowSize) {
+      if (!this.llmPerfStats.enabled) return;
+      this.llmPerfStats.filteredCalls++;
+      this.llmPerfStats.filteredMs += durationMs;
+      this.llmPerfStats.lastEventWindowSize = eventWindowSize;
+      this.maybeLogLlmPerfStats();
+    },
+
+    maybeLogLlmPerfStats(force = false) {
+      if (!this.llmPerfStats.enabled) return;
+      const now = Date.now();
+      if (!force && now - this.llmPerfStats.lastLogAt < 10000) return;
+      this.llmPerfStats.lastLogAt = now;
+      const avgFilterMs = this.llmPerfStats.filteredCalls > 0
+        ? (this.llmPerfStats.filteredMs / this.llmPerfStats.filteredCalls).toFixed(2)
+        : '0.00';
+      console.debug('[cairn:llm-perf]', {
+        incrementalPolls: this.llmPerfStats.incrementalPolls,
+        executionPolls: this.llmPerfStats.executionPolls,
+        eventWindowSize: this.llmPerfStats.lastEventWindowSize,
+        filteredCalls: this.llmPerfStats.filteredCalls,
+        avgFilterMs,
+        longTasks: this.llmPerfStats.longTasks,
+      });
+    },
+
     llmViewModel() {
-      const cacheKey = `${this._llmViewVersion}:${this.llmRenderLimit}`;
+      const cacheKey = `${this._llmViewVersion}:${this.isFullLlmLogMode() ? 1 : 0}:${this.llmRenderLimit}:${this.currentLlmRenderLimit()}`;
       if (this._llmViewModelCache && this._llmViewModelCacheKey === cacheKey) {
         return this._llmViewModelCache;
       }
@@ -541,9 +661,38 @@ CairnParts.llm_log = function () {
     },
 
     showMoreLlmEvents() {
+      if (!this.isFullLlmLogMode()) {
+        this.selectExecutionLog();
+        return;
+      }
       this.llmRenderLimit = Math.min(
         this.filteredLlmEvents().length,
         this.llmRenderLimit + this.llmRenderStep,
+      );
+    },
+
+    llmShowMoreLabel() {
+      return this.isFullLlmLogMode() ? 'Show more events' : 'Open full log';
+    },
+
+    llmHistoryButtonLabel() {
+      if (this.llmAllExecutionEventsLoading) return 'Loading';
+      if (!this.isFullLlmLogMode()) return 'Open full log';
+      return this.llmAllExecutionEventsLoaded ? 'Reload history' : 'Load history';
+    },
+
+    handleLlmHistoryClick() {
+      if (!this.isFullLlmLogMode()) {
+        this.selectExecutionLog();
+        return;
+      }
+      this.loadAllExecutionEvents(true);
+    },
+
+    showMoreTimelineEvents() {
+      this.timelineRenderLimit = Math.min(
+        this.timelineEvents().length,
+        this.timelineRenderLimit + this.timelineRenderStep,
       );
     },
 
@@ -767,12 +916,21 @@ CairnParts.llm_log = function () {
       return true;
     },
 
+    llmExecutionState(execution) {
+      return String(execution?.process_state || execution?.status || '').toLowerCase();
+    },
+
+    llmExecutionIsRunning(execution) {
+      return ['running', 'active'].includes(this.llmExecutionState(execution));
+    },
+
     llmExecutionCount(state) {
-      return this.llmExecutions.filter(execution => execution.process_state === state).length;
+      const target = String(state || '').toLowerCase();
+      return this.llmExecutions.filter(execution => this.llmExecutionState(execution) === target).length;
     },
 
     llmErrorCount() {
-      return this.llmExecutions.filter(execution => ['failed', 'timeout', 'cancelled', 'stale'].includes(execution.process_state)).length;
+      return this.llmExecutions.filter(execution => ['failed', 'timeout', 'cancelled', 'stale'].includes(this.llmExecutionState(execution))).length;
     },
 
     llmPanelSummary() {
@@ -1154,12 +1312,14 @@ CairnParts.llm_log = function () {
 
     collapseLlmPanel() {
       this.llmPanelCollapsed = true;
+      this.llmRenderLimit = this.currentLlmRenderLimit();
       this.saveLlmPanelPrefs();
       this.settleGraphViewport();
     },
 
     expandLlmPanel() {
       this.llmPanelCollapsed = false;
+      this.llmRenderLimit = this.currentLlmRenderLimit();
       this.saveLlmPanelPrefs();
       this.pollLlmEvents(true);
       this.settleGraphViewport();
@@ -1403,9 +1563,9 @@ CairnParts.llm_log = function () {
         }
         this.$nextTick(() => {
           void this.initGraph();
-        this.followReplayTimelineTail();
-      });
-      return;
+          this.followReplayTimelineTail();
+        });
+        return;
       }
 
       this.updateGraph();
@@ -1868,15 +2028,19 @@ CairnParts.llm_log = function () {
         this.selectedNode?.type || '',
         this.selectedNode?.id || '',
         this.selectedFacts.join(','),
+        this.timelineRenderLimit,
       ].join('|');
       if (this._timelineViewModelCache && this._timelineViewModelCacheKey === cacheKey) {
         return this._timelineViewModelCache;
       }
       const latestEntryId = events.length > 0 ? events[events.length - 1].id : null;
+      const visibleEvents = events.slice(-this.timelineRenderLimit);
       const model = {
-        events,
+        events: visibleEvents,
         empty: events.length === 0,
         latestEntryId,
+        hiddenCount: Math.max(0, events.length - visibleEvents.length),
+        canLoadMore: events.length > visibleEvents.length,
       };
       this._timelineViewModelCache = model;
       this._timelineViewModelCacheKey = cacheKey;
@@ -2137,4 +2301,4 @@ CairnParts.llm_log = function () {
     },
     formatTimelineDate(ts) { if (!ts) return ''; return new Date(ts).toLocaleDateString([],{year:'numeric',month:'short',day:'numeric'}); },
   };
-};
+}

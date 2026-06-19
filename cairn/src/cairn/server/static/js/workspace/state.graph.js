@@ -1,5 +1,6 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.graph = function () {
+import { GRAPH_STYLES, LAYOUT_ENGINE_SCRIPTS } from '../shared/constants.js';
+
+export function createWorkspaceGraphState() {
   return {
     cy: null,
     selectedNode: null,
@@ -49,6 +50,29 @@ CairnParts.graph = function () {
       return plainMatch ? plainMatch[1] : '';
     },
 
+    projectGraphDataSignature(project = this.project) {
+      if (!project) return '';
+      const facts = (project.facts || [])
+        .map(fact => `${fact.id}:${fact.description || ''}`)
+        .sort()
+        .join('|');
+      const intents = (project.intents || [])
+        .map(intent => [
+          intent.id,
+          intent.description || '',
+          intent.creator || '',
+          Array.isArray(intent.from) ? intent.from.join(',') : '',
+          intent.to || '',
+          intent.worker || '',
+          intent.last_heartbeat_at || '',
+          intent.created_at || '',
+          intent.concluded_at || '',
+        ].join(':'))
+        .sort()
+        .join('|');
+      return `${project.project?.id || ''}::${facts}::${intents}`;
+    },
+
     buildElements() {
       const nodes = [];
       const edges = [];
@@ -66,7 +90,7 @@ CairnParts.graph = function () {
         }});
       }
       for (const intent of this.project.intents) {
-        const lbl = intent.description;
+        const lbl = intent.id;
         if (intent.to) {
           for (const src of intent.from) {
             edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: intent.to, intentId: intent.id, label: lbl, status: 'concluded' }});
@@ -273,8 +297,9 @@ CairnParts.graph = function () {
       }, 30);
     },
 
-    updateGraph() {
+    updateGraph(options = {}) {
       if (!this.cy || !this.project) return;
+      const animateLayout = options.animateLayout !== false;
       const { nodes, edges } = this.buildElements();
       const nextSignature = this.graphSignatureFromElements(nodes, edges);
       const wantNodes = new Set(nodes.map(n => n.data.id));
@@ -318,7 +343,7 @@ CairnParts.graph = function () {
       if (layoutChanged) {
         this._graphSignature = nextSignature;
         void this.ensureLayoutEngineLoaded()
-          .then(() => this.cy?.layout(this.layoutOpts()).run())
+          .then(() => this.cy?.layout(this.layoutOpts(animateLayout)).run())
           .catch((error) => this.showToast(error.message, 'error'));
       }
       this.pulseActive();
@@ -814,4 +839,4 @@ CairnParts.graph = function () {
     },
 
   };
-};
+}

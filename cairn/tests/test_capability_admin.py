@@ -378,6 +378,48 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(entry.message, "skill manifest readable")
 
 
+class CapabilityAdminYamlMutationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.yaml = TempYamlConfig(resources={
+            "capabilities": {
+                "mcp_servers": [
+                    {
+                        "id": "builtin-mcp",
+                        "name": "Builtin MCP",
+                        "source": "builtin",
+                        "task_types": ["bootstrap"],
+                        "transport": "stdio",
+                        "command": "builtin-mcp",
+                    }
+                ],
+                "skills": [
+                    {
+                        "id": "builtin-skill",
+                        "name": "Builtin Skill",
+                        "source": "builtin",
+                        "task_types": ["bootstrap"],
+                        "source_path": "/tmp/builtin-skill",
+                    }
+                ],
+            },
+            "roles": [],
+        })
+        self.yaml.__enter__()
+
+    def tearDown(self) -> None:
+        self.yaml.__exit__(None, None, None)
+
+    def test_admin_delete_allows_builtin_capabilities(self) -> None:
+        from cairn.server.routers.capabilities import delete_admin_capability, get_capability_catalog
+
+        delete_admin_capability("mcp_server", "builtin-mcp")
+        delete_admin_capability("skill", "builtin-skill")
+
+        items = {(item.kind, item.id): item for item in get_capability_catalog()}
+        self.assertNotIn(("mcp_server", "builtin-mcp"), items)
+        self.assertNotIn(("skill", "builtin-skill"), items)
+
+
 class DispatcherConfigRequiredSkillIdsTests(unittest.TestCase):
     def test_yaml_mcp_required_skill_must_resolve(self) -> None:
         from pydantic import ValidationError

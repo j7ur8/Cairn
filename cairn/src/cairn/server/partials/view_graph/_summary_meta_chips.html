@@ -1,0 +1,10 @@
+<template x-if="[[HAS_META]]">
+  <div class="flex flex-wrap gap-1.5">
+    <template x-for="item in [[ITEMS]]" :key="[[KEY]]">
+      <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] [[CHIP_CLASS]]">
+        <span class="font-semibold uppercase tracking-wide" x-text="item.key"></span>
+        <span class="break-all" x-text="item.value"></span>
+      </span>
+    </template>
+  </div>
+</template>

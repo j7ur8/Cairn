@@ -1,5 +1,6 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.core = function () {
+import { createSummaryHelpers } from '../shared/summary.js';
+
+export function createCoreState() {
   return {
     task_type_specs: [],
     task_types: [],
@@ -26,19 +27,23 @@ CairnParts.core = function () {
       window.addEventListener('pointerup', this._panelResizeStop);
       window.addEventListener('pointermove', this._llmPanelResizeMove);
       window.addEventListener('pointerup', this._llmPanelResizeStop);
+      this.initLlmPerfStats();
       // Invalidate the LLM-event view cache whenever any input changes. This
       // lets filteredLlmEvents() / _llmEventsForView() reuse a single
       // computation across the 6+ template call sites in a render. Manual
       // bumps at pollLlmEvents / loadLlmExecutionEvents / resetLlmState are
       // belt-and-suspenders for the push/slice mutation paths.
       const bumpLlmView = () => { this._llmViewVersion++; };
+      const resetLlmRenderLimit = () => {
+        this.llmRenderLimit = this.currentLlmRenderLimit();
+        this._llmViewVersion++;
+      };
       this.$watch('llmEvents', bumpLlmView);
-      this.$watch('llmSelectedExecutionId', bumpLlmView);
+      this.$watch('llmSelectedExecutionId', resetLlmRenderLimit);
       this.$watch('llmSelectedExecutionEvents', bumpLlmView);
-      this.$watch('llmEventKindFilter', bumpLlmView);
-      this.$watch('_llmViewVersion', () => {
-        this.llmRenderLimit = 100;
-      });
+      this.$watch('llmEventKindFilter', resetLlmRenderLimit);
+      this.$watch('graphMode', resetLlmRenderLimit);
+      this.$watch('llmPanelCollapsed', resetLlmRenderLimit);
       this.loadLocalPrefs();
       // Validate the stored token (if any) before loading any data
       // so the first GET /projects does not pop a 401 toast.
@@ -393,10 +398,18 @@ CairnParts.core = function () {
         this.projectPollInFlight = true;
         try {
           if (this.selectedProjectId && this.view === 'graph' && this.project?.project) {
+            const previousGraphDataSignature = this.projectGraphDataSignature();
+            const previousTimelineDataSignature = this.projectTimelineDataSignature();
             const loaded = await this.loadProject(this.selectedProjectId);
             if (loaded) {
-              if (this.sideTab === 'files') await this.loadProjectFiles(true);
-              this.updateGraph();
+              const nextGraphDataSignature = this.projectGraphDataSignature();
+              const nextTimelineDataSignature = this.projectTimelineDataSignature();
+              if (!this.cy || previousGraphDataSignature !== nextGraphDataSignature) {
+                this.updateGraph({ animateLayout: false });
+              }
+              if (previousTimelineDataSignature !== nextTimelineDataSignature) {
+                this.invalidateProjectViewCaches();
+              }
             }
           } else {
             await this.loadProjects();
@@ -405,140 +418,6 @@ CairnParts.core = function () {
           this.projectPollInFlight = false;
         }
       }, 5000);
-    },
-
-    parseBracketMeta(metaText) {
-      const tokens = [];
-      const text = (metaText || '').trim();
-      let current = '';
-      let quote = null;
-      for (const ch of text) {
-        if (quote) {
-          current += ch;
-          if (ch === quote) quote = null;
-          continue;
-        }
-        if (ch === '"' || ch === '\'') {
-          current += ch;
-          quote = ch;
-          continue;
-        }
-        if (/\s/.test(ch)) {
-          if (current) {
-            tokens.push(current);
-            current = '';
-          }
-          continue;
-        }
-        current += ch;
-      }
-      if (current) tokens.push(current);
-
-      const result = {};
-      for (const token of tokens) {
-        const idx = token.indexOf('=');
-        if (idx <= 0) continue;
-        const key = token.slice(0, idx);
-        let value = token.slice(idx + 1).trim();
-        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
-          value = value.slice(1, -1);
-        }
-        result[key] = value;
-      }
-      return result;
-    },
-
-    parseCypherSummary(text, expectedPrefix, mode) {
-      const trimmed = (text || '').trim();
-      if (!trimmed.startsWith(expectedPrefix)) return null;
-      const closing = trimmed.indexOf(']');
-      if (closing < 0) return null;
-      const header = trimmed.slice(expectedPrefix.length, closing).trim();
-      const rest = trimmed.slice(closing + 1).trim();
-      return {
-        mode,
-        headline: rest.split(/\n+/)[0]?.trim() || '',
-        body: rest,
-        meta: this.parseBracketMeta(header),
-        raw: trimmed,
-      };
-    },
-
-    summaryView(text, kind = 'plain') {
-      const trimmed = (text || '').trim();
-      if (!trimmed) return { mode: 'plain', headline: '', body: '', meta: {}, raw: '' };
-      if (kind === 'fact') {
-        const finding = this.parseCypherSummary(trimmed, '[cypher:finding', 'cypher_finding');
-        if (finding) return finding;
-      }
-      if (kind === 'intent' || kind === 'reason') {
-        const intent = this.parseCypherSummary(trimmed, '[cypher:intent', 'cypher_intent');
-        if (intent) return intent;
-      }
-      const replay = this.parseReplaySummary(trimmed);
-      if (replay) return replay;
-      return {
-        mode: 'plain',
-        headline: trimmed.split(/\n+/)[0]?.trim() || '',
-        body: trimmed,
-        meta: {},
-        raw: trimmed,
-      };
-    },
-
-    summaryHeadline(view) {
-      return view?.headline || '';
-    },
-
-    summaryBody(view) {
-      if (!view) return '';
-      if (view.mode === 'plain') return view.body || '';
-      const headline = view.headline || '';
-      const body = view.body || '';
-      if (!body) return '';
-      return body === headline ? '' : body;
-    },
-
-    summaryMetaItems(view) {
-      if (!view?.meta) return [];
-      const entries = Object.entries(view.meta).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
-      const preferredOrder = ['type', 'confidence', 'severity', 'lane', 'priority', 'expected', 'cost', 'destructiveness', 'triggers', 'tags', 'artifacts', 'cleanup', 'expected_source_fact'];
-      entries.sort((a, b) => {
-        const aIdx = preferredOrder.indexOf(a[0]);
-        const bIdx = preferredOrder.indexOf(b[0]);
-        if (aIdx === -1 && bIdx === -1) return a[0].localeCompare(b[0]);
-        if (aIdx === -1) return 1;
-        if (bIdx === -1) return -1;
-        return aIdx - bIdx;
-      });
-      return entries.map(([key, value]) => ({ key: key.replaceAll('_', ' '), value: String(value) }));
-    },
-
-    summaryHasMeta(view) {
-      return this.summaryMetaItems(view).length > 0;
-    },
-
-    summaryCardViewModel(text, kind = 'plain') {
-      const raw = String(text || '');
-      const cacheKey = `${kind}:${raw}`;
-      const cached = this._summaryCardCache.get(cacheKey);
-      if (cached) return cached;
-      const view = this.summaryView(raw, kind);
-      const metaItems = this.summaryMetaItems(view);
-      const model = {
-        view,
-        headline: this.summaryHeadline(view),
-        body: this.summaryBody(view),
-        metaItems,
-        hasMeta: metaItems.length > 0,
-      };
-      this._summaryCardCache.set(cacheKey, model);
-      this._summaryCardCacheOrder.push(cacheKey);
-      while (this._summaryCardCacheOrder.length > 300) {
-        const staleKey = this._summaryCardCacheOrder.shift();
-        this._summaryCardCache.delete(staleKey);
-      }
-      return model;
     },
 
     formatTime(ts) { if (!ts) return ''; return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); },
@@ -583,5 +462,6 @@ CairnParts.core = function () {
       finally { this.layoutLoading = false; }
     },
 
+    ...createSummaryHelpers(),
   };
-};
+}

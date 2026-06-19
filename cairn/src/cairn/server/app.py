@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -79,13 +80,41 @@ INDEX_PARTIALS = (
     "_doc_close.html",
 )
 
+_INCLUDE_RE = re.compile(r'\{\{\s*include\s+"([^"]+)"(?:\s+(.+?))?\s*\}\}')
+
+
+def _parse_include_params(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    params: dict[str, str] = {}
+    for chunk in raw.split(";"):
+        item = chunk.strip()
+        if not item:
+            continue
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise ValueError(f"invalid include parameter: {item}")
+        params[key.strip()] = value.strip()
+    return params
+
+
+def _render_partial(name: str) -> str:
+    text = (PARTIALS_DIR / name).read_text(encoding="utf-8")
+
+    def replace(match: re.Match[str]) -> str:
+        include_name = match.group(1)
+        params = _parse_include_params(match.group(2))
+        content = _render_partial(include_name)
+        for key, value in params.items():
+            content = content.replace(f"[[{key}]]", value)
+        return content
+
+    return _INCLUDE_RE.sub(replace, text)
+
 
 def assemble_index() -> str:
     """Concatenate the SPA shell fragments into the full index document."""
-    return "".join(
-        (PARTIALS_DIR / name).read_text(encoding="utf-8")
-        for name in INDEX_PARTIALS
-    )
+    return "".join(_render_partial(name) for name in INDEX_PARTIALS)
 
 
 class NoStoreStaticFiles(StaticFiles):

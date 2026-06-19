@@ -1,5 +1,4 @@
-window.CairnParts = window.CairnParts || {};
-CairnParts.proxies = function () {
+export function createProxiesState() {
   return {
     proxyForm: { id: '', name: '', type: 'socks5', host: '', port: 1080, username: '', password: '' },
     proxyFormOpen: false,
@@ -74,4 +73,4 @@ CairnParts.proxies = function () {
       }
     },
   };
-};
+}
