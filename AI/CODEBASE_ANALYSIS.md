@@ -85,7 +85,7 @@ Cairn/
 | `cairn/src/cairn/server/domain/` | 图操作、claim/conclude/reason lease、项目状态等无 SQL 纯业务规则 |
 | `cairn/src/cairn/server/repositories/` | 项目、intent、reason、lease、ID、AI profile check、export、replay 等 SQL repository/query |
 | `cairn/src/cairn/server/observability/*_repository.py` | LLM execution、event、event view、usage、retention SQL repository/query，观测 application 模块只负责映射和编排 |
-| `cairn/src/cairn/server/execution_config/` | 执行配置快照、PATCH、结构化表持久化与 dispatcher payload 组装 |
+| `cairn/src/cairn/server/execution_config/` | 执行配置不可变快照、create-only 结构化表持久化与 dispatcher payload 组装 |
 | `cairn/src/cairn/server/mappers/` | DB row 到 API/domain DTO 的转换 |
 | `cairn/src/cairn/dispatcher/scheduler/loop.py` | Dispatcher 主循环、任务分发 |
 | `cairn/src/cairn/dispatcher/health_server.py` | Dispatcher 控制面 HTTP server，暴露 `/healthz`、`/metrics`、`/reload`、`/mcp-probe` |
@@ -132,6 +132,7 @@ Cairn/
 | Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | execution list 先分页再聚合 events；event view 先按 kind 统计再拉 primary events；retention 用 DB join delete | SQL 收敛在 execution/event/view/usage/retention repository/query 类，router/application 不感知 SQL 细节 |
 | MCP capability health probe | `server/capability_health.py`, `dispatcher/mcp_probe.py` | Server admin API 调 dispatcher `/mcp-probe`，Dispatcher 用 worker image 临时容器执行 MCP initialize + `tools/list` | 与 MCP 数量线性相关；每次 probe 创建并清理一个 startup container | 成功会写回 `last_probe_*` 并把 MCP `available` 设为 true，否则设为 false |
 | Redaction | `server/observability/redaction.py`, `dispatcher/observability/redaction.py` | 对 token/key 等敏感文本脱敏 | 与事件文本长度和 pattern 数量相关 | 用于观测数据 |
+| Execution config snapshot immutability | `server/execution_config/repository.py`, `dispatcher/scheduler/execution_config_resolver.py` | 项目创建/replay 创建时只插入一次执行配置；Dispatcher 缓存返回 deep copy | 写入 O(task types + profiles)，读取按 `(project_id, task_type)` 缓存 | 已创建 project 的配置不 PATCH/覆盖，reload/project clear/404 负责缓存失效 |
 
 ## 5. 主要业务流程
 
@@ -280,6 +281,7 @@ erDiagram
 | `users` | `email` unique |
 | `replay_runs` | `replay_project_id` unique |
 | `replay_steps` | `(run_id, source_intent_id)` unique |
+| `project_execution_configs` | `project_id` primary key；创建/replay 时 insert-only，重复写入是 server invariant failure |
 | `proxies` | `type IN ('socks5','http','https')` |
 | `ai_profile_check_requests` | `status IN ('pending','running','completed','failed')` |
 
@@ -313,6 +315,7 @@ erDiagram
 | App | `GET /`, `GET /health`, `GET /metrics` | SPA、健康检查、Prometheus | public |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/refresh`, `POST /auth/users` | 登录、用户信息、刷新、创建用户 | login public；users 需要 superuser |
 | Projects | `GET/POST /projects`, `GET/DELETE /projects/{id}`, `PUT /projects/{id}/title/status` | 项目 CRUD 和状态管理 | Bearer |
+| Execution Configs | `GET /projects/{id}/execution-configs`, `GET /projects/{id}/execution-configs/{task_type}` | 读取创建时冻结的执行配置快照；无 PATCH/更新端点 | Bearer |
 | Reason | `/projects/{id}/reason/*` | reason claim/heartbeat/release/state/finish | Bearer |
 | Complete/Reopen | `POST /projects/{id}/complete`, `POST /projects/{id}/reopen` | 完成或重开项目 | Bearer |
 | Intents | `POST /projects/{id}/intents`, `/claim`, `/heartbeat`, `/release`, `/conclude` | intent 生命周期 | Bearer |
@@ -418,7 +421,7 @@ uv run --project cairn cairn db migrate
 | `test_yaml_config.py`, `test_dispatch_sidecar_config.py`, `test_proxy_settings.py` | YAML 配置、resources sidecar 和代理 |
 | `test_scheduler_refactor.py` | Dispatcher scheduler 协作者和 TaskSubmitter 流水线回归 |
 | `test_architecture_boundaries.py` | domain/router/mapper/application/observability/scheduler/旧路径架构边界检查 |
-| `test_execution_config_source.py` | 执行配置快照、PATCH、secret 隔离 |
+| `test_execution_config_source.py` | 执行配置不可变快照、重复 persist 防覆盖、replay 独立 snapshot、PATCH route 移除、secret 隔离 |
 | `test_hot_query_repositories.py` | project count、execution/event view、retention、replay route 和 PostgreSQL `EXPLAIN` 热点查询防回归 |
 
 当前验证状态：
@@ -427,6 +430,7 @@ uv run --project cairn cairn db migrate
 - CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src` 和 pytest coverage。
 - 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
 - 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
+- 2026-06-17 新增/更新 execution config 回归覆盖 create-only snapshot、防覆盖、Dispatcher resolver deep-copy 缓存隔离，以及 reload/project clear 缓存失效。
 - 2026-06-17 热点查询回归覆盖 config loader 测试路径、project summary 预聚合、execution list 分页后聚合、event view usage 收敛、retention `DELETE ... USING`、replay reachable subgraph，以及 `EXPLAIN` 无 `SubPlan`/join delete 验收。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
@@ -473,6 +477,7 @@ uv run --project cairn cairn db migrate
 | 注意 | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
 | 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
 | 注意 | 当前 Alembic head 是 `0004_prompt_snapshots`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | Execution config 是项目创建时冻结的 snapshot，`version` 固定作为 metadata；需要修改配置时应创建 replay/new project，而不是覆盖原 project snapshot。 |
 | 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后仍可能成为 hot path；项目列表/调度 summaries 已用 repository 预聚合 counts 避免逐项目子查询。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit；execution list 已先分页再聚合 events，event view 已按 kind 收敛 usage 查询，retention loop 通过 `DELETE ... USING` 交给 DB join delete。 |

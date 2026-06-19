@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from cairn.dispatcher.contracts import parse_json_output, validate_bootstrap_execute_payload
+from cairn.dispatcher.contracts import parse_sentinel_fact_output
 from cairn.dispatcher.prompting import (
     format_remote_support_instructions,
     load_prompt_from_execution_config,
     render_prompt,
 )
 from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
-from cairn.dispatcher.tasks.bootstrap_result import run_bootstrap_conclude_fallback, write_bootstrap_complete_result
+from cairn.dispatcher.tasks.bootstrap_result import run_bootstrap_conclude_fallback
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.intent_task import (
     IntentTaskContext,
@@ -15,6 +15,7 @@ from cairn.dispatcher.tasks.intent_task import (
     IntentWriteOutcome,
     run_intent_task,
 )
+from cairn.dispatcher.tasks.task_writeback import write_conclude_result_with_fact_id
 from cairn.shared.capability_projection import capability_manifest_payload, project_capability_data
 from cairn.shared.contracts import ProjectDetail
 
@@ -45,28 +46,26 @@ def _build_prompt(ctx: IntentTaskContext) -> str:
 
 
 def _validate(model_output: str) -> tuple[str, object]:
-    payload = parse_json_output(model_output)
-    return validate_bootstrap_execute_payload(payload)
+    return "fact", parse_sentinel_fact_output(model_output)
 
 
 def _write_success(ctx: IntentTaskContext, payload) -> IntentWriteOutcome:
-    data = payload
-    complete = write_bootstrap_complete_result(
+    fact_description = payload
+    conclude = write_conclude_result_with_fact_id(
         ctx.client,
         ctx.project.project.id,
         ctx.intent.id,
         ctx.worker.name,
-        data["fact_description"],
-        data["complete_description"],
+        fact_description,
         source="bootstrap",
         phase_ms=ctx.execute_ms,
         total_ms=ctx.total_ms,
     )
     return IntentWriteOutcome(
-        outcome=complete.status,
-        fact_id=complete.fact_id,
+        outcome=conclude.status,
+        fact_id=conclude.fact_id,
         result_phase="bootstrap_write",
-        result_description=data["complete_description"],
+        result_description=fact_description,
     )
 
 

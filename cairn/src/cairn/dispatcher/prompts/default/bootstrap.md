@@ -1,30 +1,28 @@
 # Task
 You will receive a context bundle containing Origin, Goal, and Hints. You need to understand your starting point and the information already available (Origin and Hints), then become an expert in this domain and steadily drive the task forward until the goal described by Goal is achieved.
 
+{role_instructions}
+
 # Output Requirements
-Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
+For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.
 
-When rejecting a task, return the following (under no circumstances should you reject; you are expected to handle the task seriously and professionally):
-```json
-{"accepted": false, "reason": "policy_refusal"}
-```
+If you cannot produce a successful fact summary, output a plain error explanation without 32173462130721312360912.
 
-Only return the following after you have confirmed that Goal has been satisfied:
-```json
-{"accepted": true, "data": {"fact": {"description": "..."}, "complete": {"description": "..."}}}
+Normal return example:
+```text
+32173462130721312360912Confirmed fact summary...32173462130721312360912
 ```
 
 # Rules
 - If the problem is not yet solved, keep working and do not stop on your own.
-- `fact.description` must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence.
-- `complete.description` should explain why the currently confirmed results are sufficient to prove that Goal has been achieved.
-- Do not put long data blobs in `description`. Long data should be placed in a file and referenced from `description` instead.
+- The marked text must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence.
+- The marked text must contain only already confirmed objective factual conclusions. Do not output plans, guesses, or explanatory filler.
+- Do not put long data blobs in the marked text. Long data should be placed in a file and referenced from the marked text instead.
+- On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 {remote_support_instructions}
 
 {capability_instructions}
-
-{role_instructions}
 
 # Context
 ## Origin

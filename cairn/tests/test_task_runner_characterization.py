@@ -21,6 +21,7 @@ from unittest import mock
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
+from cairn.dispatcher.prompting import render_prompt
 from cairn.dispatcher.runtime.process import ProcessResult
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 
@@ -118,6 +119,7 @@ import contextlib
 
 import cairn.dispatcher.tasks.bootstrap as bootstrap_mod
 import cairn.dispatcher.tasks.intent_task as intent_task_mod
+from cairn.dispatcher.tasks.explore_prompt import build_explore_conclude_prompt
 
 
 @contextlib.contextmanager
@@ -126,10 +128,10 @@ def _patch_bootstrap(
     process_result,
     healthcheck_outcome=None,
     prepared=True,
-    validate_return=("data", {"fact_description": "f", "complete_description": "c"}),
+    validate_return=("fact", "f"),
     validate_raises=False,
-    complete_status="success",
-    complete_fact_id="fact_1",
+    conclude_status="success",
+    conclude_fact_id="fact_1",
     cancellation_reason=None,
     lease_failure=None,
 ):
@@ -151,13 +153,13 @@ def _patch_bootstrap(
     p(mock.patch.object(bootstrap_mod, "capability_manifest_payload", return_value={}))
     fallback = p(mock.patch.object(bootstrap_mod, "run_bootstrap_conclude_fallback", return_value="failed"))
     if validate_raises:
-        p(mock.patch.object(bootstrap_mod, "parse_json_output", side_effect=ValueError("bad json")))
+        validate = p(mock.patch.object(bootstrap_mod, "parse_sentinel_fact_output", side_effect=ValueError("bad sentinel")))
+        p(mock.patch.object(bootstrap_mod._BOOTSTRAP_SPEC, "validate", side_effect=validate))
     else:
-        p(mock.patch.object(bootstrap_mod, "parse_json_output", return_value={}))
-        p(mock.patch.object(bootstrap_mod, "validate_bootstrap_execute_payload", return_value=validate_return))
+        validate = p(mock.patch.object(bootstrap_mod._BOOTSTRAP_SPEC, "validate", return_value=validate_return))
     p(mock.patch.object(
-        bootstrap_mod, "write_bootstrap_complete_result",
-        return_value=mock.Mock(status=complete_status, fact_id=complete_fact_id),
+        bootstrap_mod, "write_conclude_result_with_fact_id",
+        return_value=mock.Mock(status=conclude_status, fact_id=conclude_fact_id),
     ))
     # Drive cancellation / heartbeat via the fakes the runner sees.
     cancellation = mock.Mock()
@@ -187,6 +189,58 @@ def _run_bootstrap(cancellation, lease_failure=None):
 
 
 class BootstrapCharacterizationTests(unittest.TestCase):
+    def test_prepare_task_execution_passes_runtime_prompt_group_to_capability_injection(self) -> None:
+        import cairn.dispatcher.tasks.runner as runner_mod
+
+        config = mock.Mock()
+        config.runtime.prompt_group = "mock"
+        client = mock.Mock()
+        reporter = mock.Mock()
+        role_injection = mock.Mock(summary="", errors=[])
+        capability_injection = mock.Mock(summary="", errors=[], context={})
+        with mock.patch.object(runner_mod, "project_execution_config", return_value={"task_timeout": {"timeout": 5}}), \
+             mock.patch.object(runner_mod, "project_task_timeout", return_value={"timeout": 5}), \
+             mock.patch.object(runner_mod, "project_capability_data", return_value={}), \
+             mock.patch.object(runner_mod, "inject_project_capabilities", return_value=capability_injection) as inject_caps, \
+             mock.patch.object(runner_mod, "project_role_data", return_value={}), \
+             mock.patch.object(runner_mod, "inject_project_role", return_value=role_injection):
+            prepared = runner_mod.prepare_task_execution(
+                config=config,
+                client=client,
+                container_manager=mock.Mock(),
+                container_name="worker",
+                project_id="proj",
+                task_type="explore",
+                capability_scope="task",
+                reporter=reporter,
+                phase="phase",
+            )
+
+        self.assertIsNotNone(prepared)
+        inject_caps.assert_called_once()
+        self.assertEqual(inject_caps.call_args.args[1], "mock")
+
+    def test_role_instructions_render_inside_task_section(self) -> None:
+        template = (_REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default" / "bootstrap.md").read_text(
+            encoding="utf-8"
+        )
+
+        prompt = render_prompt(
+            template,
+            {
+                "origin": "origin",
+                "goal": "goal",
+                "hints": "[]",
+                "remote_support_instructions": "",
+                "capability_instructions": "",
+                "role_instructions": "## Project Type\nThis is a CTF project.",
+            },
+        )
+
+        task_section = prompt.split("# Output Requirements", 1)[0]
+        self.assertIn("## Project Type\nThis is a CTF project.", task_section)
+        self.assertNotIn("selected a primary role", prompt)
+
     def test_success_returns_complete_status(self) -> None:
         with _patch_bootstrap(process_result=_result(returncode=0)) as (es, release, fallback, canc):
             outcome = _run_bootstrap(canc)
@@ -226,6 +280,24 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         with _patch_bootstrap(process_result=_result(returncode=0), validate_raises=True) as (es, release, fallback, canc):
             _run_bootstrap(canc)
         fallback.assert_called_once()
+
+    def test_sentinel_fact_parse_is_used_for_success(self) -> None:
+        with _patch_bootstrap(process_result=_result(returncode=0)) as (es, release, fallback, canc):
+            parse = es.enter_context(mock.patch.object(bootstrap_mod, "parse_sentinel_fact_output", return_value="sentinel fact"))
+            es.enter_context(mock.patch.object(
+                bootstrap_mod._BOOTSTRAP_SPEC,
+                "validate",
+                side_effect=bootstrap_mod._validate,
+            ))
+            write = es.enter_context(mock.patch.object(
+                bootstrap_mod,
+                "write_conclude_result_with_fact_id",
+                return_value=mock.Mock(status="success", fact_id="fact_1"),
+            ))
+            outcome = _run_bootstrap(canc)
+        self.assertEqual(outcome, "success")
+        parse.assert_called_once_with("{}")
+        write.assert_called_once()
 
     def test_command_failure_releases_and_returns_failed(self) -> None:
         with _patch_bootstrap(process_result=_result(returncode=2)) as (es, release, fallback, canc):
@@ -308,6 +380,35 @@ def _run_explore(cancellation, lease_failure=None):
 
 
 class ExploreCharacterizationTests(unittest.TestCase):
+    def test_explore_conclude_prompt_does_not_include_role_instructions(self) -> None:
+        config = mock.Mock()
+        config.runtime.prompt_group = "default"
+        container_manager = mock.Mock()
+        intent = mock.Mock(id="intent_1", description="intent description")
+
+        prompt = build_explore_conclude_prompt(
+            config=config,
+            container_manager=container_manager,
+            container_name="container",
+            export_yaml="graph: []",
+            intent=intent,
+            execution_config={
+                "prompt_snapshot": {
+                    "prompts": {
+                        "explore_conclude.md": (
+                            "# Task\nsummary only\n\n# Context\n"
+                            "## Graph\n```\n{graph_yaml}\n```\n"
+                            "## Current Intent\n```\n{intent_id}\n```\n"
+                            "## Current Intent Description\n```\n{intent_description}\n```\n"
+                        )
+                    }
+                }
+            },
+        )
+
+        self.assertNotIn("## Project Type", prompt)
+        self.assertNotIn("selected a primary role", prompt)
+
     def test_success_returns_conclude_status(self) -> None:
         with _patch_explore(process_result=_result(returncode=0)) as (es, release, fallback, canc):
             outcome = _run_explore(canc)

@@ -11,7 +11,7 @@ MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     ),
     "explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "bootstrap": frozenset({"complete", "fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "bootstrap": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "bootstrap_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
 }
 
@@ -55,8 +55,7 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
     "bootstrap": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "complete": "1.0",
-            "fact": "0.0",
+            "fact": "1.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",

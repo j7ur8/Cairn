@@ -342,7 +342,7 @@ worker_pool:
       priority: 0
       env:
         MOCK_HEALTHCHECK: '{"delay":[0,1],"outcomes":{"ok":1.0,"fail":0.0}}'
-        MOCK_BOOTSTRAP: '{"delay":[0,1],"outcomes":{"complete":0.0,"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
+        MOCK_BOOTSTRAP: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
         MOCK_BOOTSTRAP_CONCLUDE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
         MOCK_REASON: '{"delay":[0,1],"outcomes":{"complete":0.0,"intent":1.0,"noop":0.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'
         MOCK_EXPLORE_EXECUTE: '{"delay":[0,1],"outcomes":{"fact":1.0,"rejected":0.0,"invalid_json":0.0,"invalid_payload":0.0,"command_fail":0.0}}'

@@ -15,6 +15,7 @@ PROMPT_SNAPSHOT_NAMES = (
     "explore_conclude.md",
     "reason.md",
 )
+PROMPT_GROUP_REQUIRED_RESOURCE_NAMES = PROMPT_SNAPSHOT_NAMES + ("FILE_OUTPUTS.md",)
 
 
 def list_prompt_markdown_names(group_dir: Traversable) -> list[str]:
@@ -80,6 +81,10 @@ def load_prompt_snapshot(prompt_group: str) -> dict[str, Any]:
         "prompt_sha256": prompt_sha256,
         "prompts_sha256": prompts_sha256,
     }
+
+
+def is_complete_prompt_group_dir(group_dir: Traversable) -> bool:
+    return group_dir.is_dir() and all(group_dir.joinpath(name).is_file() for name in PROMPT_GROUP_REQUIRED_RESOURCE_NAMES)
 
 
 def _sha256_text(value: str) -> str:

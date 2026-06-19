@@ -48,6 +48,8 @@ roles:
 ## 范围
 
 - 这里的资源只作为 skill 文件包或 MCP 启动资料；`config.yaml` 仍然是 catalog 的真相源。
+- `role` 负责项目类型、语境和当前目标的解释框架；prompt group 下的 `FILE_OUTPUTS.md` 负责通用文件与产物落盘规范；`skill` 负责方法论、工具路由和专项工件要求。
 - Role 属于项目控制面配置：创建项目时保存 role prompt 快照，运行时注入 `bootstrap` / `explore` / `reason` prompt，不改变 Fact / Intent / Hint 的黑板语义。
+- `FILE_OUTPUTS.md` 属于 prompt-group-scoped 静态 Markdown 资源，不是 role、skill，也不参与 capability catalog 枚举。
 - 敏感信息（API key、token、SSH 密码）继续写在 `config.yaml` 之外的环境变量或 secrets 后端，yaml 里用 `{{PLACEHOLDER}}` 占位。
 - 多 Dispatcher 部署时各 `config.yaml` 的 `capabilities` 与 `roles` 必须保持一致，否则会被后启动的 Dispatcher 全量覆盖。

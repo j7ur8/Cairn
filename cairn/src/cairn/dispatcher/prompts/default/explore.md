@@ -1,6 +1,7 @@
 # Task
 You will receive a YAML snapshot of the task graph. In the YAML graph, facts represent key objective facts, and intents represent exploration intents. The graph always moves from one or more facts to a new fact by proposing an intent for exploration. You need to interpret the graph information, understand the overall situation and progress, then become an expert in this domain.
 You will also be assigned a specific `Current Intent`. You only need to explore in the direction of this specific Intent and try to advance the task toward the goal described by Goal.
+{role_instructions}
 
 # Output Requirements
 Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
@@ -23,8 +24,6 @@ Normal return example:
 {remote_support_instructions}
 
 {capability_instructions}
-
-{role_instructions}
 
 # Context
 ## Graph

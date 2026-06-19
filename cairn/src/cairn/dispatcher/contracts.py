@@ -168,35 +168,6 @@ def validate_reason_payload(
     return "noop", None
 
 
-def validate_bootstrap_execute_payload(payload: dict[str, Any]) -> tuple[str, dict[str, str] | None]:
-    if payload.get("accepted") is False:
-        return "rejected", None
-    if payload.get("accepted") is not True:
-        raise ValueError("accepted must be true or false")
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        raise ValueError("data must be an object")
-
-    fact = data.get("fact")
-    if not isinstance(fact, dict):
-        raise ValueError("fact is required")
-    fact_description = fact.get("description")
-    if not isinstance(fact_description, str) or not fact_description.strip():
-        raise ValueError("fact.description is required")
-
-    result = {"fact_description": fact_description.strip()}
-    complete = data.get("complete")
-    if complete is None:
-        raise ValueError("complete is required")
-    if not isinstance(complete, dict):
-        raise ValueError("complete must be an object")
-    complete_description = complete.get("description")
-    if not isinstance(complete_description, str) or not complete_description.strip():
-        raise ValueError("complete.description is required")
-    result["complete_description"] = complete_description.strip()
-    return "complete", result
-
-
 def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
     if payload.get("accepted") is False:
         return "rejected", None

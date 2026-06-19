@@ -26,7 +26,7 @@ Cairn 采用 Blackboard Architecture。Server 维护事实、意图和提示构�
 | 调度与运行 | ThreadPoolExecutor, Docker SDK, requests |
 | 认证 | JWT, bcrypt |
 | 观测 | Prometheus metrics, 结构化日志, LLM execution events |
-| 前端 | 无构建 SPA, FastAPI partials, Alpine.js `CairnParts` slices, Tailwind CDN/vendor, Cytoscape |
+| 前端 | 无构建 SPA, FastAPI partials, Alpine.js ES modules, Tailwind CDN/vendor |
 | 部署 | `./start.sh` + Docker Compose, uv |
 
 ## 3. 目录结构
@@ -88,7 +88,7 @@ uv run --project cairn python -m pytest -m 'not db'
 uv run --project cairn python -m pytest -m db
 ```
 
-无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。DB 集成测试还包含热点查询 `EXPLAIN` 验收，用于防止 project summary、observability、retention 和 replay 查询退回高成本计划。
+无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。DB 集成测试还包含热点查询 `EXPLAIN` 验收，用于防止 project summary、observability、retention 和 replay 查询退回高成本计划；执行配置测试覆盖创建时冻结的 snapshot 不可覆盖，以及 Dispatcher 缓存返回值防 mutation 污染。
 
 ## 5. 关键链接
 

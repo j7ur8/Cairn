@@ -5,6 +5,16 @@
 
 # 更新日志
 
+## 2026-06-17 — Execution Config 不可变性与 Dispatcher 缓存隔离同步
+
+- 同步 execution config 语义：`project_execution_configs` 是项目创建/replay 创建时写入的一次性 snapshot，底层 repository 改为 `insert_project_execution_config()`；同一 `project_id` 再次持久化会抛 `ServerInvariantError("project execution config already exists")`，不再 delete child rows 或 upsert 覆盖。
+- 同步 API 边界：`PATCH /projects/{id}/execution-config` 和 `UpdateExecutionConfigRequest` 已移除；外部只保留 `GET /projects/{id}/execution-configs` 与 `GET /projects/{id}/execution-configs/{task_type}` 读取项目执行快照。
+- 同步 Dispatcher 缓存约束：`ExecutionConfigResolver` 对 cached/fetched payload 存取都做 `deepcopy`，避免下游 mutation 污染同一 `(project_id, task_type)` 的后续 dispatch；reload 清空全部缓存，project log-state clear/404 清空对应 project。
+- 同步测试状态：`test_execution_config_source.py` 覆盖重复 persist 不覆盖原 snapshot、replay/new project 可写独立 snapshot、PATCH route 不存在；`test_scheduler_refactor.py` 覆盖 resolver 返回值 mutation 不污染缓存。
+- 当前验证：`cd cairn && uv run --group dev python -m pytest -q tests/test_execution_config_source.py tests/test_replay_service.py tests/test_scheduler_refactor.py` 通过；`cd cairn && uv run --group dev python -m pytest -q -m 'not db'` 通过。
+
+---
+
 ## 2026-06-17 — 热点查询二阶段优化与优化候选盘点
 
 - 同步热点查询二阶段实现：测试侧 config loader 改走 repo 根 `server.test.yaml`，避免测试路径漂移；project list/work summaries 的事实、意图、hint 计数改为 repository 预聚合 join，消除逐项目 correlated count `SubPlan`。

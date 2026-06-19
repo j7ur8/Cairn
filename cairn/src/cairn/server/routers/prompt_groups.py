@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from cairn.server.config.files import _text_sha256, resources_yaml_path
-from cairn.server.execution_config.prompt_snapshot import PROMPT_SNAPSHOT_NAMES, load_prompt_snapshot
+from cairn.server.execution_config.prompt_snapshot import is_complete_prompt_group_dir, load_prompt_snapshot
 from cairn.server.security.deps import current_active_superuser
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
 
@@ -113,6 +113,8 @@ def _validate_template_content(group: str, name: str, content: str) -> None:
 
 
 def _detail_for_group(group: str) -> dict[str, Any]:
+    if not is_complete_prompt_group_dir(_group_dir(group)):
+        raise HTTPException(status_code=400, detail=f"prompt group {group} missing resource: FILE_OUTPUTS.md")
     try:
         return load_prompt_snapshot(group)
     except ValueError as exc:
@@ -152,7 +154,7 @@ def list_prompt_groups():
     groups = sorted(
         child.name
         for child in root.iterdir()
-        if child.is_dir() and all((child / name).is_file() for name in PROMPT_SNAPSHOT_NAMES)
+        if is_complete_prompt_group_dir(child)
     )
     return {"groups": groups}
 

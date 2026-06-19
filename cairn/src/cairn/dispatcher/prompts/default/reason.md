@@ -4,6 +4,8 @@ You need to judge two things:
 1. Whether the current facts already satisfy Goal
 2. If not, whether new intents should currently be proposed
 
+{role_instructions}
+
 # Output Requirements
 Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
 
@@ -39,8 +41,6 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
 {capability_instructions}
-
-{role_instructions}
 
 ## Context
 ### Graph

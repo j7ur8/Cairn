@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from typing import Any
 
 from cairn.dispatcher.contracts import parse_sentinel_fact_output
@@ -23,94 +22,6 @@ from cairn.shared.config import DispatchConfig, WorkerConfig
 from cairn.shared.contracts import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class BootstrapCompleteWriteResult:
-    status: str
-    fact_id: str | None = None
-
-
-def write_bootstrap_complete_result(
-    client: CairnClient,
-    project_id: str,
-    intent_id: str,
-    worker_name: str,
-    fact_description: str,
-    complete_description: str,
-    *,
-    source: str,
-    phase_ms: int,
-    total_ms: int | None = None,
-) -> BootstrapCompleteWriteResult:
-    conclude = write_conclude_result_with_fact_id(
-        client,
-        project_id,
-        intent_id,
-        worker_name,
-        fact_description,
-        source=source,
-        phase_ms=phase_ms,
-        total_ms=total_ms,
-    )
-    if conclude.status != "success":
-        return BootstrapCompleteWriteResult(status="failed")
-    if conclude.fact_id is None:
-        LOG.warning(
-            "bootstrap complete deferred because conclude response omitted fact id project=%s intent=%s worker=%s source=%s",
-            project_id,
-            intent_id,
-            worker_name,
-            source,
-        )
-        return BootstrapCompleteWriteResult(status="success", fact_id=None)
-
-    response = client.complete(project_id, [conclude.fact_id], complete_description, worker_name)
-    if response.status_code in (403, 409):
-        LOG.info(
-            "bootstrap complete deferred project=%s intent=%s worker=%s source=%s status=%s fact_id=%s",
-            project_id,
-            intent_id,
-            worker_name,
-            source,
-            response.status_code,
-            conclude.fact_id,
-        )
-        return BootstrapCompleteWriteResult(status="success", fact_id=conclude.fact_id)
-    if not response.ok:
-        LOG.warning(
-            "bootstrap complete write failed project=%s intent=%s worker=%s source=%s fact_id=%s status=%s body=%s",
-            project_id,
-            intent_id,
-            worker_name,
-            source,
-            conclude.fact_id,
-            response.status_code,
-            response.text,
-        )
-        return BootstrapCompleteWriteResult(status="success", fact_id=conclude.fact_id)
-    if total_ms is None:
-        LOG.info(
-            "bootstrap completed project=%s intent=%s worker=%s source=%s from=%s phase_ms=%s",
-            project_id,
-            intent_id,
-            worker_name,
-            source,
-            [conclude.fact_id],
-            phase_ms,
-        )
-    else:
-        LOG.info(
-            "bootstrap completed project=%s intent=%s worker=%s source=%s from=%s phase_ms=%s total_ms=%s",
-            project_id,
-            intent_id,
-            worker_name,
-            source,
-            [conclude.fact_id],
-            phase_ms,
-            total_ms,
-        )
-    return BootstrapCompleteWriteResult(status="success", fact_id=conclude.fact_id)
 
 
 def run_bootstrap_conclude_fallback(

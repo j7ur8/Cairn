@@ -19,6 +19,7 @@ from cairn.dispatcher.capability_mcp import (
     mcp_json,
 )
 from cairn.dispatcher.capability_probe import validate_selected_mcp
+from cairn.dispatcher.prompt_resources import load_prompt_group_files_appendix
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
 
@@ -40,6 +41,7 @@ class CapabilityInjection:
 
 def inject_project_capabilities(
     config: DispatchConfig,
+    prompt_group: str,
     container_manager: ContainerManager,
     container_name: str,
     project_id: str,
@@ -47,8 +49,27 @@ def inject_project_capabilities(
     task_instance_id: str,
     selection_data: dict[str, Any] | None,
 ) -> CapabilityInjection:
+    include_files_appendix = task_type != "reason"
+    files_appendix, files_errors = ("", [])
+    if include_files_appendix:
+        files_appendix, files_errors = load_prompt_group_files_appendix(prompt_group)
+
+    def render_files_only_instructions() -> str:
+        if not files_appendix.strip():
+            return ""
+        return instructions("", "", [], [], files_appendix=files_appendix)
+
     if not selection_data:
-        return CapabilityInjection("", "no capability selection available", [], [], [], WorkerExecutionContext())
+        if not include_files_appendix:
+            return CapabilityInjection("", "no capability selection available", [], [], [], WorkerExecutionContext())
+        return CapabilityInjection(
+            render_files_only_instructions(),
+            "no capability selection available",
+            [],
+            [],
+            files_errors,
+            WorkerExecutionContext(),
+        )
 
     tasks_raw = selection_data.get("tasks")
     tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
@@ -70,7 +91,7 @@ def inject_project_capabilities(
     selected_skills = [item for item in selected_skills if item]
     mcp_by_id = {item.id: item for item in config.capabilities.mcp_servers}
     skill_by_id = {item.id: item for item in config.capabilities.skills}
-    errors: list[str] = []
+    errors: list[str] = list(files_errors)
 
     mcp_servers: list[McpServerCapabilityConfig] = []
     for capability_id in selected_mcp:
@@ -109,7 +130,16 @@ def inject_project_capabilities(
         skills.append(skill)
 
     if not mcp_servers and not skills:
-        return CapabilityInjection("", summary([], [], errors), [], [], errors, WorkerExecutionContext())
+        if not include_files_appendix:
+            return CapabilityInjection("", summary([], [], errors), [], [], errors, WorkerExecutionContext())
+        return CapabilityInjection(
+            render_files_only_instructions(),
+            summary([], [], errors),
+            [],
+            [],
+            errors,
+            WorkerExecutionContext(),
+        )
 
     if task_type == "reason":
         rendered_instructions = reason_instructions(mcp_servers, skills)
@@ -169,7 +199,13 @@ def inject_project_capabilities(
             errors.append(f"claude_plugin: failed to write session plugin: {exc}")
             claude_plugin_dir = ""
 
-    rendered_instructions = instructions(mcp_path, skill_root, injected_mcp_servers, injected_skills)
+    rendered_instructions = instructions(
+        mcp_path,
+        skill_root,
+        injected_mcp_servers,
+        injected_skills,
+        files_appendix=files_appendix,
+    )
     return CapabilityInjection(
         instructions=rendered_instructions,
         summary=summary([item.id for item in injected_mcp_servers], [item.id for item in injected_skills], errors),

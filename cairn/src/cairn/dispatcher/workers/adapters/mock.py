@@ -91,14 +91,12 @@ if phase=="reason":
     raise SystemExit(0)
 
 if phase=="bootstrap":
-    if outcome=="complete":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact for bootstrap"},"complete":{"description":"mock bootstrap complete from fact"}}}, ensure_ascii=False))
-    elif outcome=="fact":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact-only bootstrap result"}}}, ensure_ascii=False))
+    if outcome=="fact":
+        print("32173462130721312360912mock fact for bootstrap32173462130721312360912")
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock invalid payload"}}}, ensure_ascii=False))
+        print("mock invalid payload")
     raise SystemExit(0)
 
 if phase=="bootstrap_conclude":

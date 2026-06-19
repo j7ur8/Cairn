@@ -21,6 +21,7 @@ def _write_prompt_group(root: Path, group: str, overrides: dict[str, str] | None
         tokens = " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS.get(name, ()))
         content = overrides.get(name, f"{name}\n{tokens}\n")
         (group_dir / name).write_text(content, encoding="utf-8")
+    (group_dir / "FILE_OUTPUTS.md").write_text(overrides.get("FILE_OUTPUTS.md", "file outputs\n"), encoding="utf-8")
 
 
 class PromptGroupAdminTests(unittest.TestCase):
@@ -56,6 +57,13 @@ class PromptGroupAdminTests(unittest.TestCase):
 
         self.assertEqual(result["groups"], ["custom", "default"])
 
+    def test_list_prompt_groups_excludes_group_missing_file_outputs(self) -> None:
+        (self.root / "custom" / "FILE_OUTPUTS.md").unlink()
+
+        result = self.router.list_prompt_groups()
+
+        self.assertEqual(result["groups"], ["default"])
+
     def test_read_prompt_group_returns_templates_and_hashes(self) -> None:
         roles_dir = self.root / "default" / "roles"
         roles_dir.mkdir()
@@ -67,6 +75,7 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertEqual(
             set(result["prompts"]),
             {
+                "FILE_OUTPUTS.md",
                 "bootstrap.md",
                 "bootstrap_conclude.md",
                 "explore.md",
@@ -79,6 +88,17 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertRegex(result["prompt_sha256"]["reason.md"], r"^[0-9a-f]{64}$")
         self.assertRegex(result["prompt_sha256"]["roles/redteam.md"], r"^[0-9a-f]{64}$")
         self.assertRegex(result["prompts_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_read_prompt_group_rejects_group_missing_file_outputs(self) -> None:
+        from fastapi import HTTPException
+
+        (self.root / "default" / "FILE_OUTPUTS.md").unlink()
+
+        with self.assertRaises(HTTPException) as cm:
+            self.router.read_prompt_group("default")
+
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("missing resource: FILE_OUTPUTS.md", cm.exception.detail)
 
     def test_read_role_prompts_returns_markdown_files_and_hashes(self) -> None:
         role_root = self.root / "capabilities" / "roles"
@@ -144,6 +164,14 @@ class PromptGroupAdminTests(unittest.TestCase):
         after = self.router.update_prompt_template("default", "roles/redteam.md", body)
 
         self.assertEqual(after["prompts"]["roles/redteam.md"], "no placeholders required here\n")
+
+    def test_file_outputs_template_is_writable_without_placeholder_validation(self) -> None:
+        body = self.router.PromptGroupTemplateUpdate(content="updated file outputs\n")
+
+        after = self.router.update_prompt_template_legacy("default", "FILE_OUTPUTS.md", body)
+
+        self.assertEqual((self.root / "default" / "FILE_OUTPUTS.md").read_text(encoding="utf-8"), "updated file outputs\n")
+        self.assertEqual(after["prompts"]["FILE_OUTPUTS.md"], "updated file outputs\n")
 
     def test_update_missing_required_placeholder_fails_without_writing(self) -> None:
         from fastapi import HTTPException

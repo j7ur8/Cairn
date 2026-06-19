@@ -11,6 +11,8 @@ def instructions(
     skill_root: str,
     mcp_servers: list[McpServerCapabilityConfig],
     skills: list[SkillCapabilityConfig],
+    *,
+    files_appendix: str = "",
 ) -> str:
     lines = [
         "# Project Capabilities",
@@ -43,6 +45,8 @@ def instructions(
             else:
                 lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md for domain guidance and adapt any procedures or examples to the current evidence, scope, and constraints.")
             lines.append("")
+    if files_appendix.strip():
+        lines.extend(["## Files", files_appendix.strip(), ""])
     lines.extend(
         [
             "Use these capabilities only for the current Cairn project/challenge.",

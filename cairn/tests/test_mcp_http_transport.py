@@ -275,6 +275,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         return SimpleNamespace(
+            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[
                     McpServerCapabilityConfig(
@@ -318,6 +319,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
+            "default",
             manager,
             "worker",
             "proj",
@@ -334,6 +336,8 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertIn("Claude native Skill name: cairn-session-capabilities:s", result.instructions)
         self.assertIn("Description: metadata mcp", result.instructions)
         self.assertIn("Description: metadata skill", result.instructions)
+        self.assertIn("## Files", result.instructions)
+        self.assertIn("reports/", result.instructions)
         self.assertEqual(len(manager.files), 2)
         self.assertEqual(len(manager.directories), 2)
         self.assertEqual(result.context.mcp_config_path, "/tmp/cairn-capabilities/proj/task/mcp.json")
@@ -356,6 +360,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
         config = SimpleNamespace(
+            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[],
                 skills=[
@@ -382,6 +387,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
+            "default",
             manager,
             "worker",
             "proj",
@@ -412,6 +418,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
         config = SimpleNamespace(
+            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[],
                 skills=[
@@ -438,6 +445,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
+            "default",
             manager,
             "worker",
             "proj",
@@ -468,6 +476,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
+            "default",
             manager,
             "worker",
             "proj",
@@ -483,6 +492,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertIn("Description: metadata mcp", result.instructions)
         self.assertIn("s: Skill", result.instructions)
         self.assertIn("Description: metadata skill", result.instructions)
+        self.assertNotIn("## Files", result.instructions)
         self.assertNotIn("mcp.json", result.instructions)
         self.assertNotIn("Directory root", result.instructions)
         self.assertEqual(manager.files, [])
@@ -497,6 +507,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore"]),
+            "default",
             manager,
             "worker",
             "proj",
@@ -510,6 +521,81 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.skills, [])
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
+
+    def test_explore_injection_includes_files_appendix_without_selected_capabilities(self):
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            self._config(["reason"]),
+            "default",
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            self._selection(),
+        )
+
+        self.assertEqual(result.mcp_servers, [])
+        self.assertEqual(result.skills, [])
+        self.assertIn("## Files", result.instructions)
+        self.assertIn("reports/", result.instructions)
+        self.assertEqual(manager.files, [])
+        self.assertEqual(manager.directories, [])
+
+    def test_explore_injection_reports_missing_files_appendix_without_blocking(self):
+        from unittest.mock import patch
+
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        with patch(
+            "cairn.dispatcher.capabilities.load_prompt_group_files_appendix",
+            return_value=("", ["files: prompt group default missing FILE_OUTPUTS.md"]),
+        ):
+            result = inject_project_capabilities(
+                self._config(["explore"]),
+                "default",
+                manager,
+                "worker",
+                "proj",
+                "explore",
+                "task",
+                self._selection(),
+            )
+
+        self.assertEqual(result.mcp_servers, ["m"])
+        self.assertEqual(result.skills, ["s"])
+        self.assertNotIn("## Files", result.instructions)
+        self.assertIn("files: prompt group default missing FILE_OUTPUTS.md", result.errors)
+        self.assertIn('"errors": [\n    "files: prompt group default missing FILE_OUTPUTS.md"\n  ]', result.summary)
+
+    def test_explore_injection_reports_empty_files_appendix_without_blocking(self):
+        from unittest.mock import patch
+
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+
+        manager = self.FakeContainerManager()
+        with patch(
+            "cairn.dispatcher.capabilities.load_prompt_group_files_appendix",
+            return_value=("", ["files: prompt group default FILE_OUTPUTS.md is empty"]),
+        ):
+            result = inject_project_capabilities(
+                self._config(["explore"]),
+                "default",
+                manager,
+                "worker",
+                "proj",
+                "explore",
+                "task",
+                self._selection(),
+            )
+
+        self.assertEqual(result.mcp_servers, ["m"])
+        self.assertEqual(result.skills, ["s"])
+        self.assertNotIn("## Files", result.instructions)
+        self.assertIn("files: prompt group default FILE_OUTPUTS.md is empty", result.errors)
 
 
 class CodexAdapterHttpTests(unittest.TestCase):

@@ -9,7 +9,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class ContractParsingTests(unittest.TestCase):
-    def test_conclude_parses_sentinel_fact_text(self) -> None:
+    def test_parse_sentinel_fact_output_parses_sentinel_fact_text(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         stdout = (
@@ -20,7 +20,7 @@ class ContractParsingTests(unittest.TestCase):
 
         self.assertEqual(parse_sentinel_fact_output(stdout), "sentinel fact")
 
-    def test_conclude_parses_multiline_sentinel_fact_text(self) -> None:
+    def test_parse_sentinel_fact_output_parses_multiline_sentinel_fact_text(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         stdout = (
@@ -31,13 +31,13 @@ class ContractParsingTests(unittest.TestCase):
 
         self.assertEqual(parse_sentinel_fact_output(stdout), "line one\n\n## Heading\n- item")
 
-    def test_conclude_rejects_missing_sentinel(self) -> None:
+    def test_parse_sentinel_fact_output_rejects_missing_sentinel(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         with self.assertRaisesRegex(ValueError, "no sentinel fact found"):
             parse_sentinel_fact_output("plain error without markers")
 
-    def test_conclude_rejects_empty_sentinel_fact(self) -> None:
+    def test_parse_sentinel_fact_output_rejects_empty_sentinel_fact(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         with self.assertRaisesRegex(ValueError, "must not be empty"):
@@ -45,7 +45,7 @@ class ContractParsingTests(unittest.TestCase):
                 "32173462130721312360912   \n  32173462130721312360912"
             )
 
-    def test_conclude_rejects_multiple_sentinel_facts(self) -> None:
+    def test_parse_sentinel_fact_output_rejects_multiple_sentinel_facts(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         with self.assertRaisesRegex(ValueError, "multiple sentinel facts"):
@@ -54,12 +54,22 @@ class ContractParsingTests(unittest.TestCase):
                 "32173462130721312360912two32173462130721312360912"
             )
 
-    def test_conclude_rejects_json_inside_sentinel(self) -> None:
+    def test_parse_sentinel_fact_output_rejects_json_inside_sentinel(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
         with self.assertRaisesRegex(ValueError, "plain text, not JSON"):
             parse_sentinel_fact_output(
                 '32173462130721312360912{"accepted":true,"data":{"description":"old"}}32173462130721312360912'
+            )
+
+    def test_parse_sentinel_fact_output_rejects_bare_json_object_text(self) -> None:
+        from cairn.dispatcher.contracts import parse_sentinel_fact_output
+
+        with self.assertRaisesRegex(ValueError, "plain text, not JSON"):
+            parse_sentinel_fact_output(
+                "32173462130721312360912\n"
+                '{"description":"json-looking text"}'
+                "\n32173462130721312360912"
             )
 
     def test_json_parser_still_handles_agent_message_protocol_json(self) -> None:

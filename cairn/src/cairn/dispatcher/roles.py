@@ -62,7 +62,7 @@ def inject_project_role(
     if not role_id or not role_prompt_text:
         errors.append(f"project:{project_id}: invalid role snapshot")
         return RoleInjection("", _summary(None, None, errors), errors=errors)
-    instructions = _instructions(role_id, role_name, role_prompt_text, role_hash, task_type)
+    instructions = _instructions(role_prompt_text)
     return RoleInjection(
         instructions=instructions,
         summary=_summary(role_id, role_hash, errors),
@@ -72,23 +72,11 @@ def inject_project_role(
     )
 
 
-def _instructions(role_id: str, role_name: str, prompt: str, role_hash: str | None, task_type: TaskType) -> str:
-    hash_line = f"- Role prompt sha256: {role_hash}" if role_hash else "- Role prompt sha256: unavailable"
+def _instructions(prompt: str) -> str:
     return "\n".join(
         [
-            "# Project Role",
-            "The current Cairn project selected a primary role. This role guides method, priorities, and domain style.",
-            "It does not override the Cairn task contract, JSON output requirements, scope/ROE, or blackboard semantics.",
-            "",
-            f"- Role id: {role_id}",
-            f"- Role name: {role_name}",
-            f"- Task type: {task_type}",
-            hash_line,
-            "",
-            "## Role Prompt",
-            "```",
-            prompt,
-            "```",
+            "## Project Type",
+            prompt.strip(),
         ]
     )
 

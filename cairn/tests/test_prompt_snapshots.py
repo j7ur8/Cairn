@@ -11,6 +11,24 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class PromptSnapshotTests(unittest.TestCase):
+    def test_default_templates_keep_role_in_task_and_exclude_it_from_conclude(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+
+        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
+        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
+        bootstrap_conclude = (default_dir / "bootstrap_conclude.md").read_text(encoding="utf-8")
+        explore_conclude = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+
+        self.assertIn("# Task\n", bootstrap)
+        self.assertIn("# Task\n", explore)
+        self.assertIn("# Task\n", reason)
+        self.assertIn("{role_instructions}", bootstrap.split("# Output Requirements", 1)[0])
+        self.assertIn("{role_instructions}", explore.split("# Output Requirements", 1)[0])
+        self.assertIn("{role_instructions}", reason.split("# Output Requirements", 1)[0])
+        self.assertNotIn("{role_instructions}", bootstrap_conclude)
+        self.assertNotIn("{role_instructions}", explore_conclude)
+
     def test_load_prompt_snapshot_hash_changes_with_content(self) -> None:
         from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
 
@@ -29,7 +47,7 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertEqual(
             set(first["prompts"]),
-            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md", "FILE_OUTPUTS.md"},
         )
         self.assertEqual(first["prompt_group"], "mock")
         self.assertNotEqual(first["prompts_sha256"], changed["prompts_sha256"])

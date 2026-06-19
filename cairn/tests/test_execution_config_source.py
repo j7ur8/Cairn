@@ -130,7 +130,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual(prompt_snapshot["prompt_group"], "default")
         self.assertEqual(
             set(prompt_snapshot["prompts"]),
-            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md", "FILE_OUTPUTS.md"},
         )
         self.assertEqual(header["prompts_sha256"], prompt_snapshot["prompts_sha256"])
         self.assertEqual(removed_tables, [])
