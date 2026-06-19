@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,7 +35,7 @@ function checkSyntax(files) {
 
 function checkStateFileSizes(files) {
   const offenders = files
-    .filter(file => /(?:^|[/\\])state\.[^/\\]+\.js$/.test(file))
+    .filter(file => /(?:^|[/\\])state-[^/\\]+\.js$/.test(file))
     .map(file => ({ file, lines: countLines(file) }))
     .filter(item => item.lines > STATE_FILE_MAX_LINES);
   assert.deepEqual(
@@ -45,6 +45,23 @@ function checkStateFileSizes(files) {
       offenders.map(item => `${relative(ROOT, item.file)} (${item.lines})`).join(', ')
     }`,
   );
+}
+
+function checkLocalImportsResolve(files) {
+  const importRe = /(?:import|export)\s+(?:[^'"]*\s+from\s+)?['"]([^'"]+)['"]/g;
+  const offenders = [];
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    for (const match of source.matchAll(importRe)) {
+      const specifier = match[1];
+      if (!specifier.startsWith('.')) continue;
+      const target = resolve(dirname(file), specifier);
+      if (!existsSync(target)) {
+        offenders.push(`${relative(ROOT, file)} -> ${specifier}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `local JS imports must resolve: ${offenders.join(', ')}`);
 }
 
 function checkNoDuplicateKeys() {
@@ -73,17 +90,17 @@ function checkNoDuplicateKeys() {
 function checkCairnAppStateHasNoDuplicateKeys() {
   runModuleAssertion(`
     import { createAppState } from './src/cairn/server/static/js/app/create-app-state.js';
-    import { createCoreState } from './src/cairn/server/static/js/app/state.core.js';
-    import { createSettingsState } from './src/cairn/server/static/js/app/state.settings.js';
-    import { createSettingsAdminState } from './src/cairn/server/static/js/app/state.settings_admin.js';
-    import { createPromptsState } from './src/cairn/server/static/js/app/state.prompts.js';
-    import { createAiProfilesState } from './src/cairn/server/static/js/app/state.ai_profiles.js';
-    import { createProxiesState } from './src/cairn/server/static/js/app/state.proxies.js';
-    import { createWorkspaceUiState } from './src/cairn/server/static/js/workspace/state.ui.js';
-    import { createWorkspaceGraphState } from './src/cairn/server/static/js/workspace/state.graph.js';
-    import { createWorkspaceLogState } from './src/cairn/server/static/js/workspace/state.llm_log.js';
-    import { createWorkspaceProjectsState } from './src/cairn/server/static/js/workspace/state.projects.js';
-    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state.capabilities.js';
+    import { createCoreState } from './src/cairn/server/static/js/app/state-core.js';
+    import { createSettingsState } from './src/cairn/server/static/js/app/state-settings.js';
+    import { createSettingsAdminState } from './src/cairn/server/static/js/app/state-settings-admin.js';
+    import { createPromptsState } from './src/cairn/server/static/js/app/state-prompts.js';
+    import { createAiProfilesState } from './src/cairn/server/static/js/app/state-ai-profiles.js';
+    import { createProxiesState } from './src/cairn/server/static/js/app/state-proxies.js';
+    import { createWorkspaceUiState } from './src/cairn/server/static/js/workspace/state-ui.js';
+    import { createWorkspaceGraphState } from './src/cairn/server/static/js/workspace/state-graph.js';
+    import { createWorkspaceLogState } from './src/cairn/server/static/js/workspace/state-llm-log.js';
+    import { createWorkspaceProjectsState } from './src/cairn/server/static/js/workspace/state-projects.js';
+    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
 
     globalThis.CAIRN_FRONTEND_ENV = 'development';
     createAppState(
@@ -105,7 +122,7 @@ function checkCairnAppStateHasNoDuplicateKeys() {
 function checkWorkspaceLogShape() {
   runModuleAssertion(`
     import assert from 'node:assert/strict';
-    import { createWorkspaceLogState } from './src/cairn/server/static/js/workspace/state.llm_log.js';
+    import { createWorkspaceLogState } from './src/cairn/server/static/js/workspace/state-llm-log.js';
 
     const state = createWorkspaceLogState();
     const requiredKeys = [
@@ -337,6 +354,7 @@ function main() {
   assert.ok(statSync(JS_ROOT).isDirectory(), `missing JS root: ${JS_ROOT}`);
   const files = walkJsFiles(JS_ROOT);
   checkSyntax(files);
+  checkLocalImportsResolve(files);
   checkStateFileSizes(files);
   checkNoDuplicateKeys();
   checkCairnAppStateHasNoDuplicateKeys();

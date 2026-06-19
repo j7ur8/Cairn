@@ -5,6 +5,17 @@
 
 # 更新日志
 
+## 2026-06-20 — 命名规范入口与主流命名重命名
+
+- 新增 `AI/NAMING.md`，记录 Python PEP 8、FastAPI 分层、前端 kebab-case、配置环境后缀和协议文件例外。
+- 新增 `cairn/scripts/check_naming.py`，检查 Python/JS/YAML 文件命名，并确认关键重命名后的 canonical 文件存在。
+- `server/models_pkg/` 迁移为 `server/schemas/`，内部源码改用新路径；保留 `models_pkg` re-export 兼容层用于短期迁移。
+- `server/application/project_read.py` 迁移为 `project_queries.py`，`dispatcher/workers/adapters/claudecode.py` 迁移为 `claude_code.py`，均保留旧模块兼容导入。
+- 前端 state 文件改为 kebab-case，例如 `state-projects.js`、`state-graph.js`、`state-llm-log.js`、`state-settings-admin.js`，并增强 `check_frontend.mjs` 的本地 import 解析检查。
+- mock 配置文件统一为 `config.mock.yaml` 与 `server.mock.yaml`。
+
+---
+
 ## 2026-06-20 — Review 与仓库清理同步
 
 - 恢复并更新被工作树删除的 `AI/ARCHITECTURE.md`、`AI/CODEBASE_ANALYSIS.md`、`AI/PROJECT_OVERVIEW.md`，保持 review 文档继续受版本控制。

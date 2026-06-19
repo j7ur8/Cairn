@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import time
 from contextlib import asynccontextmanager
@@ -50,6 +51,7 @@ from cairn.shared.observability.trace import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 PARTIALS_DIR = Path(__file__).parent / "partials"
+LOG = logging.getLogger(__name__)
 
 # The SPA shell is authored as verbatim HTML fragments under partials/ and
 # concatenated here in document order. The fragments are not individually
@@ -291,14 +293,20 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
+def _database_error_payload() -> dict[str, str]:
+    return {
+        "status": "degraded",
+        "database": "postgresql",
+        "error": "database_unavailable",
+        "request_id": get_trace_id() or "",
+    }
+
+
 def _database_error_response(exc: Exception) -> JSONResponse:
+    LOG.exception("database unavailable trace_id=%s", get_trace_id(), exc_info=exc)
     return JSONResponse(
         status_code=503,
-        content={
-            "status": "degraded",
-            "database": "postgresql",
-            "database_error": str(exc),
-        },
+        content=_database_error_payload(),
     )
 
 
@@ -323,11 +331,8 @@ def health() -> Response:
     try:
         status_payload = db.postgres_status()
     except Exception as exc:  # noqa: BLE001
-        body = {
-            "status": "degraded",
-            "database": "postgresql",
-            "database_error": str(exc),
-        }
+        LOG.exception("health database check failed trace_id=%s", get_trace_id(), exc_info=exc)
+        body = _database_error_payload()
         return Response(
             content=json.dumps(body, ensure_ascii=False, separators=(",", ":")),
             status_code=503,

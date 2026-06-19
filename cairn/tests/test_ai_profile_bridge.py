@@ -759,12 +759,12 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         pass
 
     def test_sync_upsert_idempotent(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import (
-            AiProfileSyncRequest,
-            AiProfileSyncWorker,
-        )
         from cairn.server.routers.ai_profiles import (
             sync_ai_profiles,
+        )
+        from cairn.server.schemas.ai_profiles import (
+            AiProfileSyncRequest,
+            AiProfileSyncWorker,
         )
 
         body = AiProfileSyncRequest(workers=[
@@ -797,8 +797,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual({p.name for p in result3}, {"claude_ds"})
 
     def test_sync_updates_profile_models_and_reasoning(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
         from cairn.server.routers.ai_profiles import sync_ai_profiles
+        from cairn.server.schemas.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
 
         body = AiProfileSyncRequest(workers=[
             AiProfileSyncWorker(
@@ -819,8 +819,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(profile.model_reasoning_effort, "xhigh")
 
     def test_sync_drops_unsupported_worker_types(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
         from cairn.server.routers.ai_profiles import sync_ai_profiles
+        from cairn.server.schemas.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
 
         body = AiProfileSyncRequest(workers=[
             AiProfileSyncWorker(name="claude_ds", worker_type="claudecode",
@@ -842,10 +842,10 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         ``codex``/``claudecode`` worker set and confirms the obsolete
         row (and its models) are deleted.
         """
-        from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
         from cairn.server.routers.ai_profiles import (
             sync_ai_profiles,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
 
         # Pre-seed an obsolete seeded profile as if a previous dispatcher
         # version had inserted it. seeded_from_worker != current worker name.
@@ -928,15 +928,15 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_preserves_operator_created_profiles(self) -> None:
         """Profiles with seeded_from_worker IS NULL must survive a sync prune."""
-        from cairn.server.models_pkg.ai_profiles import (
-            AiProfileCreate,
-            AiProfileSyncRequest,
-            AiProfileSyncWorker,
-        )
         from cairn.server.routers.ai_profiles import (
             create_ai_profile,
             list_ai_profiles,
             sync_ai_profiles,
+        )
+        from cairn.server.schemas.ai_profiles import (
+            AiProfileCreate,
+            AiProfileSyncRequest,
+            AiProfileSyncWorker,
         )
 
         manual = create_ai_profile(AiProfileCreate(
@@ -960,11 +960,11 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_with_no_supported_workers_drops_all_seeded(self) -> None:
         """An empty/payload with only unsupported workers prunes every seeded row."""
-        from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
         from cairn.server.routers.ai_profiles import (
             list_ai_profiles,
             sync_ai_profiles,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
 
         # Seed two profiles manually.
         body = AiProfileSyncRequest(workers=[
@@ -990,11 +990,11 @@ class AiProfileDbBridgeTests(unittest.TestCase):
 
     def test_sync_keeps_seeded_profile_whose_worker_renamed_to_match(self) -> None:
         """A worker renaming its seed must adopt the old id, not duplicate it."""
-        from cairn.server.models_pkg.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
         from cairn.server.routers.ai_profiles import (
             list_ai_profiles,
             sync_ai_profiles,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileSyncRequest, AiProfileSyncWorker
 
         # First sync establishes the "codex" seeded row.
         body = AiProfileSyncRequest(workers=[
@@ -1019,15 +1019,15 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(listed[0].id, first_id)
 
     def test_health_report_flips_availability(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import (
-            AiProfileCreate,
-            AiProfileHealthReport,
-            AiProfileHealthReportRequest,
-        )
         from cairn.server.routers.ai_profiles import (
             create_ai_profile,
             list_ai_profiles,
             post_health_report,
+        )
+        from cairn.server.schemas.ai_profiles import (
+            AiProfileCreate,
+            AiProfileHealthReport,
+            AiProfileHealthReportRequest,
         )
 
         created = create_ai_profile(AiProfileCreate(
@@ -1054,8 +1054,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertTrue(row.last_health_ok)
 
     def test_auth_var_is_canonicalized_on_create(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
@@ -1064,8 +1064,8 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(created.warnings, [])
 
     def test_update_keeps_canonical_auth_env(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
         from cairn.server.routers.ai_profiles import create_ai_profile, update_ai_profile
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileUpdate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="DEEPSEEK_KEY",
@@ -1079,7 +1079,7 @@ class AiProfileDbBridgeTests(unittest.TestCase):
     def test_healthcheck_timeout_bounds(self) -> None:
         from pydantic import ValidationError
 
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         with self.assertRaises(ValidationError):
             AiProfileCreate(name="x", worker_type="codex", model="m",
@@ -1092,13 +1092,13 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         self.assertEqual(ok.healthcheck_timeout, 2.5)
 
     def test_check_request_lifecycle(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCheckCompleteRequest, AiProfileCreate
         from cairn.server.routers.ai_profiles import (
             claim_ai_profile_check_request,
             complete_ai_profile_check_request,
             create_ai_profile,
             trigger_ai_profile_check,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileCheckCompleteRequest, AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",
@@ -1118,12 +1118,12 @@ class AiProfileDbBridgeTests(unittest.TestCase):
         )
 
     def test_concurrent_check_request_claim_has_single_winner(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers.ai_profiles import (
             claim_ai_profile_check_request,
             create_ai_profile,
             trigger_ai_profile_check,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         created = create_ai_profile(AiProfileCreate(
             name="p", worker_type="codex", model="m", api_key_env="OPENAI_API_KEY",

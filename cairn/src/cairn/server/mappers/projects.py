@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cairn.server.models_pkg import ReasonState
+from cairn.server.schemas import ReasonState
 from cairn.shared.contracts import ProjectMeta, ProjectReason, parse_llm_hidden_event_kinds
 
 

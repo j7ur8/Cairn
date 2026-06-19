@@ -21,12 +21,12 @@ class ServerMcpProbeTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def test_single_mcp_probe_success_updates_yaml(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_admin_capability,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "stdio-mcp", CapabilityAdminRequest(
             id="stdio-mcp",
@@ -56,12 +56,12 @@ class ServerMcpProbeTests(unittest.TestCase):
         self.assertEqual(item.last_probe_message, "initialize + tools/list ok")
 
     def test_dispatcher_unreachable_marks_mcp_error(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_admin_capability,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "offline-mcp", CapabilityAdminRequest(
             id="offline-mcp",
@@ -81,12 +81,12 @@ class ServerMcpProbeTests(unittest.TestCase):
         self.assertEqual(item.last_probe_status, "error")
 
     def test_probe_all_updates_partial_results(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_all_admin_mcp_servers,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         for capability_id in ("a-mcp", "b-mcp"):
             upsert_admin_capability("mcp_server", capability_id, CapabilityAdminRequest(

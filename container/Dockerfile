@@ -1,4 +1,4 @@
-FROM ghcr.io/oritera/cairn-worker-container:latest
+FROM ghcr.io/oritera/cairn-worker-container:latest@sha256:d90d40b7c634b8d5dc9464e04b863a185b9efe964ffd2b246f6e5cbc2a2ef053
 
 USER root
 
@@ -19,8 +19,8 @@ RUN apt update && apt install -y --no-install-recommends \
     wordlists \
     && rm -rf /var/lib/apt/lists/*
 RUN rm /home/kali/workspace/*.md
-RUN npm install -g @openai/codex
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @openai/codex@0.141.0
+RUN npm install -g @anthropic-ai/claude-code@2.1.183
 RUN npm install -g chrome-devtools-mcp@1.1.1
 
 USER kali

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from cairn.server.application.replay import advance_replay_run as advance_replay_run_service
 from cairn.server.application.replay import create_replay_run as create_replay_run_service
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     ReplayRunAdvanceResponse,
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,

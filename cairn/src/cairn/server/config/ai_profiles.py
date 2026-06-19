@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from cairn.server.config.files import load_dispatch_data, save_dispatch_data, utcnow
-from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
+from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileUpdate
 from cairn.shared.config import WORKER_ENV_KEYS
 from cairn.shared.contracts import AiProfile, auth_env_warning, canonical_auth_env
 from cairn.shared.task_types import default_worker_task_type_names

@@ -27,14 +27,14 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def test_project_create_writes_structured_execution_config_without_secret(self) -> None:
-        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers.ai_profiles import create_ai_profile
-        from cairn.server.routers.projects import create_project
 
         profile = create_ai_profile(AiProfileCreate(
             name="exec-profile",
@@ -151,14 +151,14 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from cairn.server.app import app
-        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers.ai_profiles import create_ai_profile
-        from cairn.server.routers.projects import create_project
         from cairn.server.security.jwt import _JWT_ALGORITHM
 
         profile = create_ai_profile(AiProfileCreate(
@@ -218,14 +218,14 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         from cairn.server.application.project_creation import ProjectCreationDraft, create_project_from_draft
         from cairn.server.domain.errors import ServerInvariantError
         from cairn.server.execution_config import load_project_execution_config, persist_project_execution_configs
-        from cairn.server.models_pkg import CapabilitySelection, CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers.ai_profiles import create_ai_profile
-        from cairn.server.routers.projects import create_project
 
         profile = create_ai_profile(AiProfileCreate(
             name="immutable-profile",
@@ -300,8 +300,8 @@ class ExecutionConfigSourceTests(unittest.TestCase):
     def test_create_project_request_requires_task_timeouts(self) -> None:
         from pydantic import ValidationError
 
-        from cairn.server.models_pkg import CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import AiProfileSelection, TaskAiProfileSelections
+        from cairn.server.schemas import CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import AiProfileSelection, TaskAiProfileSelections
 
         selection = AiProfileSelection(
             primary_profile_id="ai_test",

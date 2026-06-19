@@ -18,7 +18,7 @@ from cairn.server.config.capabilities import (
     upsert_yaml_capability,
 )
 from cairn.server.config.roles import list_yaml_roles
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     CapabilityAdminRequest,
     CapabilityAdminResponse,
     CapabilityCatalogItem,

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cairn.dispatcher.prompts.validation import validate_prompt_resources
+from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.shared.config import load_dispatch_config
 
@@ -31,19 +32,21 @@ class DispatcherReloader:
         with self.lock:
             next_config = load_dispatch_config(self.config_path)
             validate_prompt_resources(next_config.runtime.prompt_group)
+            next_client = CairnClient(next_config.server_url, api_token=next_config.system.auth.dispatcher_api_token)
             next_container_manager = ContainerManager(
                 next_config.container,
                 proxy_resolver=loop.project_context.resolve_proxy_env,
             )
+            next_executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
             old_container_manager = loop.container_manager
+            old_client = loop.client
             old_executor = loop.executor
             old_cleanup_executor = loop.cleanup.refresh(
                 next_container_manager,
                 max_workers=next_config.runtime.max_workers,
             )
             loop.config = next_config
-            loop.client.close()
-            loop.client._base_url = next_config.server_url.rstrip("/")  # noqa: SLF001 - reloads existing client wiring.
+            loop.client = next_client
             loop.container_manager = next_container_manager
             if hasattr(loop, "scheduler_services"):
                 loop.scheduler_services.refresh(
@@ -59,7 +62,7 @@ class DispatcherReloader:
             loop.execution_configs.client = loop.client
             loop.execution_configs.clear_all()
             loop.replay.client = loop.client
-            loop.executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
+            loop.executor = next_executor
             loop.project_caches.clear_all()
             loop._ai_overlay_cache.invalidate()
             loop.runtime.clear_backoff()
@@ -85,7 +88,10 @@ class DispatcherReloader:
             try:
                 old_container_manager.close()
             finally:
-                old_executor.shutdown(wait=False, cancel_futures=False)
-                old_cleanup_executor.shutdown(wait=False, cancel_futures=False)
+                try:
+                    old_client.close()
+                finally:
+                    old_executor.shutdown(wait=False, cancel_futures=False)
+                    old_cleanup_executor.shutdown(wait=False, cancel_futures=False)
         LOG.info("dispatcher config reloaded workers=%s", len(loop.config.workers))
         return {"ok": True, "workers": len(loop.config.workers)}

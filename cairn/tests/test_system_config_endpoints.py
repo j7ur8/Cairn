@@ -74,8 +74,12 @@ class SystemSettingsEndpointTests(unittest.TestCase):
 
         self.yaml = TempYamlConfig(dispatch=self._dispatch())
         self.yaml.__enter__()
-        from cairn.server.routers.system_config import read_container_limits, read_system_settings, write_system_settings
         from cairn.server.routers.settings import get_task_timeout_defaults
+        from cairn.server.routers.system_config import (
+            read_container_limits,
+            read_system_settings,
+            write_system_settings,
+        )
 
         self.read = read_system_settings
         self.write = write_system_settings

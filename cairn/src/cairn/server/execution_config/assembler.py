@@ -9,7 +9,7 @@ from cairn.server.config.settings import get_yaml_settings
 from cairn.server.domain.errors import DomainError, NotFoundError
 from cairn.server.execution_config import repository
 from cairn.server.execution_config.models import TASK_TYPES
-from cairn.server.models_pkg import TaskCapabilities
+from cairn.server.schemas import TaskCapabilities
 from cairn.shared.contracts import TaskTimeouts
 
 

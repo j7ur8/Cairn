@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from cairn.server.config.files import _text_sha256, load_resources_data, resources_yaml_path
-from cairn.server.models_pkg import RoleCatalogItem
+from cairn.server.schemas import RoleCatalogItem
 
 
 def list_yaml_roles() -> list[RoleCatalogItem]:

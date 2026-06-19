@@ -147,23 +147,6 @@ def seed_defaults() -> None:
             session.add(SettingRow(id=1, intent_timeout=15, reason_timeout=15))
         if session.get(CounterRow, "project") is None:
             session.add(CounterRow(name="project", value=0))
-        session.execute(text("""
-            CREATE TABLE IF NOT EXISTS health_check_results (
-                id TEXT PRIMARY KEY,
-                profile_id TEXT NOT NULL,
-                checked_at TEXT NOT NULL,
-                ok BOOLEAN NOT NULL,
-                latency_ms INTEGER,
-                http_status INTEGER,
-                error_type TEXT,
-                error_message TEXT,
-                check_type TEXT NOT NULL DEFAULT 'manual'
-            )
-        """))
-        session.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_health_check_results_profile_checked
-            ON health_check_results (profile_id, checked_at)
-        """))
 
 
 def postgres_status() -> dict[str, Any]:

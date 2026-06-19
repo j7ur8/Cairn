@@ -21,8 +21,8 @@ class AiProfileSecretTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def test_create_with_sk_masks_value_in_listing(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers import ai_profiles as r
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         created = r.create_ai_profile(AiProfileCreate(
             name="gpt-test",
@@ -41,8 +41,8 @@ class AiProfileSecretTests(unittest.TestCase):
         self.assertEqual(listed[0].sk_preview, "***abcd")
 
     def test_secret_endpoint_returns_raw_yaml_value(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers import ai_profiles as r
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         created = r.create_ai_profile(AiProfileCreate(
             name="raw",
@@ -54,8 +54,8 @@ class AiProfileSecretTests(unittest.TestCase):
         self.assertEqual(r.get_ai_profile_secret(created.id)["value"], "sk-secret-9999")
 
     def test_secret_endpoint_returns_literal_yaml_reference(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate
         from cairn.server.routers import ai_profiles as r
+        from cairn.server.schemas.ai_profiles import AiProfileCreate
 
         created = r.create_ai_profile(AiProfileCreate(
             name="literal",
@@ -69,8 +69,8 @@ class AiProfileSecretTests(unittest.TestCase):
     def test_put_empty_string_is_rejected(self) -> None:
         from fastapi import HTTPException
 
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
         from cairn.server.routers import ai_profiles as r
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileUpdate
 
         created = r.create_ai_profile(AiProfileCreate(
             name="clear",
@@ -84,8 +84,8 @@ class AiProfileSecretTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
 
     def test_put_omitted_sk_preserves_existing(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
         from cairn.server.routers import ai_profiles as r
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileUpdate
 
         created = r.create_ai_profile(AiProfileCreate(
             name="keep",

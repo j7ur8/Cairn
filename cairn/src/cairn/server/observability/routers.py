@@ -5,12 +5,12 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from cairn.server import db
+from cairn.server.observability.event_card_service import list_event_cards
 from cairn.server.observability.events_query import (
     list_execution_events,
     list_incremental_events,
     list_project_events,
 )
-from cairn.server.observability.event_card_service import list_event_cards
 from cairn.server.observability.events_writer import (
     append_event,
     append_events,

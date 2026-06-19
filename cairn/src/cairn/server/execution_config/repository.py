@@ -5,8 +5,8 @@ from typing import Any
 
 from cairn.server.domain.errors import ServerInvariantError
 from cairn.server.execution_config.models import TASK_TYPES, ProjectExecutionConfigSnapshot
-from cairn.server.models_pkg import TaskCapabilities
 from cairn.server.repositories import sql
+from cairn.server.schemas import TaskCapabilities
 
 
 def insert_project_execution_config(

@@ -40,6 +40,7 @@ from cairn.shared.observability.metrics import (
 )
 
 LOG = logging.getLogger(__name__)
+MAX_TICK_BACKOFF_SECONDS = 30.0
 
 
 class DispatcherLoop:
@@ -60,12 +61,15 @@ class DispatcherLoop:
         validate_prompt_resources(self.config.runtime.prompt_group)
         self.client = CairnClient(self.config.server_url, api_token=self.config.system.auth.dispatcher_api_token)
         self._last_tick_at: float | None = None
+        self._transient_failure_count = 0
+        self._last_transient_error: str | None = None
 
     def _init_health_server(self) -> None:
         self.health_server = DispatcherHealthServer(
             *self._health_addr(),
             state=DispatcherHealthState(
                 last_tick_at=lambda: self._last_tick_at,
+                transient_error=self._transient_error_payload,
             ),
             reload_handler=self._reload_from_health_server,
             mcp_probe_handler=self._mcp_probe_from_health_server,
@@ -193,7 +197,28 @@ class DispatcherLoop:
 
     def _run_iteration(self, *, once: bool) -> None:
         """One scheduler tick."""
-        self.tick_coordinator.run_iteration(once=once)
+        if not self._startup_healthchecks_checked or not self._settings_checked:
+            self.tick_coordinator.run_iteration(once=once)
+            self._transient_failure_count = 0
+            self._last_transient_error = None
+            return
+        try:
+            self.tick_coordinator.run_iteration(once=once)
+        except Exception as exc:
+            self._transient_failure_count += 1
+            self._last_transient_error = f"{type(exc).__name__}: {exc}"
+            delay = self._tick_backoff_seconds()
+            LOG.exception(
+                "dispatcher tick failed consecutive_failures=%s retry_delay=%ss",
+                self._transient_failure_count,
+                delay,
+            )
+            if once:
+                return
+            time.sleep(delay)
+            return
+        self._transient_failure_count = 0
+        self._last_transient_error = None
 
     def run_startup_healthchecks_only(self) -> None:
         try:
@@ -216,6 +241,18 @@ class DispatcherLoop:
         self._last_tick_at = time.time()
         DISPATCHER_TICKS.inc()
         DISPATCHER_INFLIGHT.set(self.runtime.running_count())
+
+    def _tick_backoff_seconds(self) -> float:
+        return min(MAX_TICK_BACKOFF_SECONDS, max(1.0, float(2 ** min(self._transient_failure_count - 1, 5))))
+
+    def _transient_error_payload(self) -> dict[str, object] | None:
+        if self._transient_failure_count <= 0:
+            return None
+        return {
+            "consecutive_failures": self._transient_failure_count,
+            "error": self._last_transient_error or "unknown",
+            "retry_delay_seconds": self._tick_backoff_seconds(),
+        }
 
     def _set_project_cursor(self, value: int) -> None:
         self.project_cursor = value

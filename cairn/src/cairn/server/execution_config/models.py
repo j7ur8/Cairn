@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from cairn.server.models_pkg import TaskCapabilities
+from cairn.server.schemas import TaskCapabilities
 from cairn.shared.contracts import ProjectAiProfileSnapshot, TaskTimeouts
 from cairn.shared.task_types import builtin_task_type_names
 

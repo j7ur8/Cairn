@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import cairn.dispatcher.prompts as prompt_package
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+import cairn.dispatcher.prompts as prompt_package
 from cairn.server.config.files import _text_sha256, resources_yaml_path
 from cairn.server.execution_config.prompt_snapshot import is_complete_prompt_group_dir, load_prompt_snapshot
 from cairn.server.security.deps import current_active_superuser

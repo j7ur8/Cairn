@@ -189,6 +189,16 @@ def _run_bootstrap(cancellation, lease_failure=None):
 
 
 class BootstrapCharacterizationTests(unittest.TestCase):
+    def test_process_tail_buffer_bounds_large_output(self) -> None:
+        from cairn.dispatcher.runtime.process import _TextTailBuffer
+
+        buffer = _TextTailBuffer(8)
+        buffer.append("012345")
+        buffer.append("6789abcdef")
+
+        self.assertEqual(buffer.text(), "89abcdef")
+        self.assertTrue(buffer.truncated)
+
     def test_prepare_task_execution_passes_runtime_prompt_group_to_capability_injection(self) -> None:
         import cairn.dispatcher.tasks.runner as runner_mod
 

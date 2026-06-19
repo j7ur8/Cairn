@@ -1,57 +1,8 @@
-"""Server-private HTTP request/response Pydantic models.
+"""Compatibility re-export for the former server DTO package.
 
-Models in this package belong to the FastAPI server surface only. Put DTOs
-shared with the dispatcher or other processes in ``cairn.shared.contracts``
-instead, and keep pure business decisions in domain/application code.
+New code should import server-only request/response DTOs from
+``cairn.server.schemas``. This package remains during the migration window so
+older imports continue to work.
 """
 
-from __future__ import annotations
-
-from cairn.server.models_pkg.capability_admin import (
-    CapabilityAdminRequest,
-    CapabilityAdminResponse,
-    McpImportRequest,
-    McpImportResponse,
-)
-from cairn.server.models_pkg.capability_catalog import (
-    CapabilityCatalogItem,
-    CapabilityHealthEntry,
-    CapabilitySource,
-    ProjectRole,
-    ProjectRoleResponse,
-    RoleCatalogItem,
-    TaskCapabilities,
-    TaskCapabilitiesMap,
-    task_capabilities_map,
-)
-from cairn.server.models_pkg.capability_selection import (
-    CapabilitySelection,
-    ProjectCapabilitiesResponse,
-    ProjectCapabilitiesUpdateRequest,
-    ProjectCapabilitySnapshotItem,
-    ProjectCapabilityTaskState,
-    TaskCapabilitySelectionMap,
-    task_capability_selection_map,
-)
-from cairn.server.models_pkg.intent_models import (
-    ConcludeRequest,
-    ConcludeResponse,
-    CreateIntentRequest,
-    HeartbeatRequest,
-)
-from cairn.server.models_pkg.project_requests import (
-    CompleteRequest,
-    CreateHintRequest,
-    CreateProjectRequest,
-    ReopenRequest,
-    UpdateProjectStatusRequest,
-    UpdateProjectTitleRequest,
-)
-from cairn.server.models_pkg.project_responses import ProjectPollStateResponse, ReopenResponse
-from cairn.server.models_pkg.reason_models import ReasonClaimRequest, ReasonFinishRequest
-from cairn.server.models_pkg.replay_models import (
-    ReplayRunAdvanceResponse,
-    ReplayRunCreateRequest,
-    ReplayRunCreateResponse,
-)
-from cairn.shared.contracts import ReasonState
+from cairn.server.schemas import *  # noqa: F403

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from cairn.server.config.ai_profiles import list_yaml_ai_profiles
-from cairn.server.models_pkg.ai_profiles import (
+from cairn.server.schemas.ai_profiles import (
     AiProfileSelection,
     TaskAiProfileSelections,
     ai_selections_from_snapshots,

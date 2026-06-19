@@ -92,6 +92,7 @@ def resolve_mock_behavior(worker_name: str, env: dict[str, str]) -> dict[str, di
         raw_outcomes = payload.get("outcomes")
         if not isinstance(raw_outcomes, dict):
             raise ValueError(f"worker {worker_name} {prefix}.outcomes must be an object")
+        raw_outcomes = _normalize_mock_outcomes(phase, raw_outcomes)
         unknown_outcomes = sorted(set(raw_outcomes) - allowed_outcomes)
         if unknown_outcomes:
             raise ValueError(f"worker {worker_name} {prefix}.outcomes has unsupported keys: {', '.join(unknown_outcomes)}")
@@ -139,6 +140,16 @@ def resolve_mock_behavior(worker_name: str, env: dict[str, str]) -> dict[str, di
                 normalized_rules.append(entry)
             behavior[phase]["rules"] = normalized_rules
     return behavior
+
+
+def _normalize_mock_outcomes(phase: str, outcomes: dict[str, Any]) -> dict[str, Any]:
+    if phase != "bootstrap" or "complete" not in outcomes:
+        return outcomes
+    normalized = dict(outcomes)
+    complete_weight = normalized.pop("complete")
+    if "fact" not in normalized or Decimal(str(normalized.get("fact", "0"))) == Decimal("0"):
+        normalized["fact"] = complete_weight
+    return normalized
 
 
 def _mock_env_prefix(phase: str) -> str:

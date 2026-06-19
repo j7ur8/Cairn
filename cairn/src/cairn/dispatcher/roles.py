@@ -55,7 +55,6 @@ def inject_project_role(
     if not role:
         return RoleInjection("", "no project role selected", errors=[])
     role_id = _string_value(role.get("role_id"))
-    role_name = _string_value(role.get("role_name")) or role_id or "Project Role"
     role_prompt_text = _string_value(role.get("role_prompt"))
     role_hash = _string_value(role.get("role_prompt_sha256"))
     errors: list[str] = []

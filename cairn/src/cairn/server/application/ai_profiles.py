@@ -8,7 +8,10 @@ from cairn.server.config.ai_profiles import list_yaml_ai_profiles, update_yaml_a
 from cairn.server.domain.errors import NotFoundError
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import execution_ai_snapshots, load_project_execution_configs
-from cairn.server.models_pkg.ai_profiles import (
+from cairn.server.repositories.ai_profiles import AiProfileCheckRepository
+from cairn.server.repositories.health_results import HealthCheckResultRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas.ai_profiles import (
     AiProfileCheckCompleteRequest,
     AiProfileCheckRequest,
     AiProfileCheckTriggerResponse,
@@ -16,9 +19,6 @@ from cairn.server.models_pkg.ai_profiles import (
     AiProfileWithHealth,
     ProjectAiProfilesResponse,
 )
-from cairn.server.repositories.ai_profiles import AiProfileCheckRepository
-from cairn.server.repositories.health_results import HealthCheckResultRepository
-from cairn.server.repositories.projects import ProjectRepository
 from cairn.shared.contracts import HealthCheckItem, HealthCheckResult
 
 

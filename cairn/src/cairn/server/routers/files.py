@@ -10,7 +10,7 @@ from cairn.server.application.project_io import (
 from cairn.server.application.project_io import (
     list_project_files as list_project_files_query,
 )
-from cairn.server.models_pkg.projects import ProjectFilesResponse
+from cairn.server.schemas.projects import ProjectFilesResponse
 from cairn.server.security.paths import validate_relative_path
 
 router = APIRouter(tags=["files"])

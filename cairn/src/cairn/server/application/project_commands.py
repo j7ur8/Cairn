@@ -17,19 +17,19 @@ from cairn.server.domain.projects import (
 from cairn.server.domain.time import utcnow
 from cairn.server.mappers.intents import intent_to_model
 from cairn.server.mappers.projects import project_meta_from_row
-from cairn.server.models_pkg import (
-    CompleteRequest,
-    ReopenRequest,
-    ReopenResponse,
-    UpdateProjectStatusRequest,
-    UpdateProjectTitleRequest,
-)
 from cairn.server.observability.executions import delete_project_observability
 from cairn.server.repositories.ids import IdRepository
 from cairn.server.repositories.intents import IntentRepository
 from cairn.server.repositories.leases import LeaseRepository
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.repositories.reason import ReasonRepository
+from cairn.server.schemas import (
+    CompleteRequest,
+    ReopenRequest,
+    ReopenResponse,
+    UpdateProjectStatusRequest,
+    UpdateProjectTitleRequest,
+)
 from cairn.shared.contracts import Fact, Intent, ProjectMeta
 
 LOG = logging.getLogger(__name__)

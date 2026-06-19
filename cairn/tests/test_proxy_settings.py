@@ -58,13 +58,13 @@ class ProxyConfigSchemaTests(unittest.TestCase):
     """``ProxyConfig`` / ``ProxyCreate`` / ``ProxyUpdate`` schema basics."""
 
     def test_create_requires_name(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(type="socks5", host="h", port=1080)
 
     def test_create_port_must_be_in_range(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(name="x", type="socks5", host="h", port=0)
@@ -72,7 +72,7 @@ class ProxyConfigSchemaTests(unittest.TestCase):
             ProxyCreate(name="x", type="socks5", host="h", port=70000)
 
     def test_create_type_must_be_known(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         with self.assertRaises(Exception):
             ProxyCreate(name="x", type="ftp", host="h", port=21)
@@ -297,7 +297,7 @@ class ProxyDatabaseTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def test_create_and_get_proxy(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
         created = self.proxies_router.create_proxy(body)
@@ -307,7 +307,7 @@ class ProxyDatabaseTests(unittest.TestCase):
         self.assertEqual(fetched.password, "p")
 
     def test_list_proxies_returns_summaries_without_credentials(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
         self.proxies_router.create_proxy(body)
@@ -318,7 +318,7 @@ class ProxyDatabaseTests(unittest.TestCase):
         self.assertNotIn("password", summaries[0].model_dump())
 
     def test_delete_proxy_removes_yaml_entry(self) -> None:
-        from cairn.server.models_pkg.proxies import ProxyCreate
+        from cairn.server.schemas.proxies import ProxyCreate
 
         body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080)
         created = self.proxies_router.create_proxy(body)
@@ -327,14 +327,14 @@ class ProxyDatabaseTests(unittest.TestCase):
 
     def test_create_project_with_invalid_proxy_id_returns_400(self) -> None:
         from cairn.server.domain.errors import DomainError
-        from cairn.server.models_pkg import CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers import projects as projects_router
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.schemas import CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers import projects as projects_router
-        from cairn.server.routers.ai_profiles import create_ai_profile
         from helpers import test_task_timeouts
 
         profile = create_ai_profile(AiProfileCreate(

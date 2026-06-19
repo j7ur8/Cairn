@@ -9,13 +9,13 @@ from cairn.server.capability_expansion import (
 from cairn.server.config.capabilities import list_yaml_capabilities
 from cairn.server.domain.projects import require_project
 from cairn.server.execution_config import execution_capabilities, load_project_execution_configs
-from cairn.server.models_pkg import (
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas import (
     CapabilityHealthEntry,
     ProjectCapabilitiesResponse,
     ProjectRole,
     ProjectRoleResponse,
 )
-from cairn.server.repositories.projects import ProjectRepository
 from cairn.shared.task_types import builtin_task_type_names
 
 

@@ -132,6 +132,10 @@ def _check_worker_image(config: DispatchConfig, result: PreflightResult, *, stri
     if not _looks_like_image_ref(image):
         result.errors.append(f"worker_runtime.container.image is not a valid image reference: {image!r}")
         return
+    if _uses_latest_tag(image):
+        result.errors.append("worker_runtime.container.image must not use the mutable latest tag")
+    if "@" not in image:
+        result.warnings.append("worker_runtime.container.image is not pinned by digest; production deployments should use image@sha256:...")
 
     try:
         import docker
@@ -192,3 +196,9 @@ def _looks_like_image_ref(value: str) -> bool:
     if not value or any(ch.isspace() for ch in value):
         return False
     return _IMAGE_REF_RE.match(value) is not None
+
+
+def _uses_latest_tag(value: str) -> bool:
+    image = value.split("@", 1)[0]
+    last_segment = image.rsplit("/", 1)[-1]
+    return ":" not in last_segment or last_segment.endswith(":latest")

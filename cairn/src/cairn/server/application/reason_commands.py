@@ -17,15 +17,15 @@ from cairn.server.domain.reason import (
 )
 from cairn.server.domain.time import utcnow
 from cairn.server.mappers.projects import project_meta_from_row, reason_state_from_row
-from cairn.server.models_pkg import (
+from cairn.server.repositories.leases import LeaseRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.repositories.reason import ReasonRepository
+from cairn.server.schemas import (
     HeartbeatRequest,
     ReasonClaimRequest,
     ReasonFinishRequest,
     ReasonState,
 )
-from cairn.server.repositories.leases import LeaseRepository
-from cairn.server.repositories.projects import ProjectRepository
-from cairn.server.repositories.reason import ReasonRepository
 from cairn.shared.contracts import ProjectMeta
 
 

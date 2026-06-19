@@ -11,15 +11,15 @@ from fastapi import HTTPException
 
 from cairn.server.domain.projects import require_project, require_project_hint_writable
 from cairn.server.domain.time import utcnow
-from cairn.server.models_pkg import CreateHintRequest
-from cairn.server.models_pkg.projects import (
+from cairn.server.repositories.ids import IdRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas import CreateHintRequest
+from cairn.server.schemas.projects import (
     AttachmentUpload,
     AttachmentUploadResponse,
     ProjectFileItem,
     ProjectFilesResponse,
 )
-from cairn.server.repositories.ids import IdRepository
-from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.security.paths import (
     download_size_guard,
     force_attachment_disposition,

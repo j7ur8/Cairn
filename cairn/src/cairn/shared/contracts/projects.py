@@ -78,9 +78,27 @@ class ProjectWorkSummary(ProjectSummary):
     config_version: int = 0
 
 
+class ProjectSummaryPage(BaseModel):
+    items: list[ProjectSummary]
+    next_cursor: str | None = None
+
+
+class ProjectWorkSummaryPage(BaseModel):
+    items: list[ProjectWorkSummary]
+    next_cursor: str | None = None
+
+
 class ProjectDetail(BaseModel):
     project: ProjectMeta
     facts: list[Fact]
     intents: list[Intent]
     hints: list[Hint]
     proxy: ProxySummary | None = None
+
+
+class ProjectGraphDelta(BaseModel):
+    facts: list[Fact]
+    intents: list[Intent]
+    hints: list[Hint]
+    graph_revision: int
+    timeline_revision: int

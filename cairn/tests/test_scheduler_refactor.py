@@ -231,6 +231,63 @@ class ContainerCleanupCoordinatorTests(unittest.TestCase):
 
 
 class TaskSubmitterTests(unittest.TestCase):
+    def test_dispatcher_loop_isolates_transient_tick_errors_after_startup(self) -> None:
+        import cairn.dispatcher.scheduler.loop as loop_mod
+
+        loop = loop_mod.DispatcherLoop.__new__(loop_mod.DispatcherLoop)
+        loop._startup_healthchecks_checked = True
+        loop._settings_checked = True
+        loop._transient_failure_count = 0
+        loop._last_transient_error = None
+        loop.tick_coordinator = MagicMock()
+        loop.tick_coordinator.run_iteration.side_effect = RuntimeError("server temporarily unavailable")
+
+        loop._run_iteration(once=True)
+
+        self.assertEqual(loop._transient_failure_count, 1)
+        self.assertIn("server temporarily unavailable", loop._last_transient_error)
+
+    def test_dispatcher_reload_replaces_client_for_token_rotation(self) -> None:
+        from pathlib import Path
+        from unittest import mock
+
+        import cairn.dispatcher.scheduler.reload as reload_mod
+
+        old_client = MagicMock(name="old_client")
+        old_container = MagicMock(name="old_container")
+        old_executor = MagicMock(name="old_executor")
+        old_cleanup_executor = MagicMock(name="old_cleanup_executor")
+        next_client = MagicMock(name="next_client")
+        next_config = MagicMock()
+        next_config.server_url = "http://next"
+        next_config.system.auth.dispatcher_api_token = "next-token"
+        next_config.container = object()
+        next_config.runtime.max_workers = 3
+        next_config.runtime.prompt_group = "default"
+        next_config.workers = [object()]
+
+        loop = MagicMock()
+        loop.config.system.auth.dispatcher_api_token = "old-token"
+        loop.client = old_client
+        loop.container_manager = old_container
+        loop.executor = old_executor
+        loop.cleanup.refresh.return_value = old_cleanup_executor
+        loop.project_context.resolve_proxy_env = MagicMock()
+        loop.runtime.worker_unhealthy_until = {}
+        loop.runtime.worker_rejected_until = {}
+
+        with mock.patch.object(reload_mod, "load_dispatch_config", return_value=next_config), \
+             mock.patch.object(reload_mod, "validate_prompt_resources"), \
+             mock.patch.object(reload_mod, "ContainerManager", return_value=MagicMock(name="next_container")), \
+             mock.patch.object(reload_mod, "ThreadPoolExecutor", return_value=MagicMock(name="next_executor")), \
+             mock.patch.object(reload_mod, "CairnClient", return_value=next_client) as client_ctor:
+            result = reload_mod.DispatcherReloader(loop, Path("config.yaml")).reload_from_health_server("Bearer old-token")
+
+        self.assertEqual(result, {"ok": True, "workers": 1})
+        client_ctor.assert_called_once_with("http://next", api_token="next-token")
+        self.assertIs(loop.client, next_client)
+        old_client.close.assert_called_once()
+
     def test_execution_config_resolver_caches_until_cleared(self) -> None:
         from cairn.dispatcher.protocol.client import ApiResult
         from cairn.dispatcher.scheduler.execution_config_resolver import ExecutionConfigResolver

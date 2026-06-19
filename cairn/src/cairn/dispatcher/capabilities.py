@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol
 
 from cairn.dispatcher.capability_catalog import catalog_payload  # noqa: F401  (re-exported for consumers/tests)
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
@@ -23,9 +23,6 @@ from cairn.dispatcher.prompt_resources import load_prompt_group_files_appendix
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
 
-if TYPE_CHECKING:
-    from cairn.dispatcher.runtime.containers import ContainerManager
-
 LOG = logging.getLogger(__name__)
 
 
@@ -39,10 +36,16 @@ class CapabilityInjection:
     context: WorkerExecutionContext
 
 
+class CapabilityWriter(Protocol):
+    def write_text_file(self, container_name: str, path: str, content: str) -> None: ...
+
+    def write_directory(self, container_name: str, path: str, source: Path) -> None: ...
+
+
 def inject_project_capabilities(
     config: DispatchConfig,
     prompt_group: str,
-    container_manager: ContainerManager,
+    container_manager: CapabilityWriter,
     container_name: str,
     project_id: str,
     task_type: TaskType,
@@ -50,7 +53,8 @@ def inject_project_capabilities(
     selection_data: dict[str, Any] | None,
 ) -> CapabilityInjection:
     include_files_appendix = task_type != "reason"
-    files_appendix, files_errors = ("", [])
+    files_errors: list[str] = []
+    files_appendix = ""
     if include_files_appendix:
         files_appendix, files_errors = load_prompt_group_files_appendix(prompt_group)
 

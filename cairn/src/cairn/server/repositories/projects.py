@@ -57,8 +57,25 @@ class ProjectRepository:
                 {self._count_selects()}
             FROM projects p
             {self._count_joins()}
-            ORDER BY p.created_at
+            ORDER BY p.created_at, p.id
         """)
+
+    def list_with_counts_page(self, *, limit: int, cursor: tuple[str, str] | None) -> list[Any]:
+        cursor_filter = ""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            cursor_filter = "WHERE (p.created_at, p.id) > (:cursor_created_at, :cursor_id)"
+            params["cursor_created_at"] = cursor[0]
+            params["cursor_id"] = cursor[1]
+        return sql.fetchall(self.conn, f"""
+            SELECT p.*,
+                {self._count_selects()}
+            FROM projects p
+            {self._count_joins()}
+            {cursor_filter}
+            ORDER BY p.created_at, p.id
+            LIMIT :limit
+        """, params)
 
     def list_work_summaries(self) -> list[Any]:
         return sql.fetchall(self.conn, f"""
@@ -68,8 +85,27 @@ class ProjectRepository:
             FROM projects p
             LEFT JOIN project_execution_configs pec ON pec.project_id = p.id
             {self._count_joins()}
-            ORDER BY p.created_at
+            ORDER BY p.created_at, p.id
         """)
+
+    def list_work_summaries_page(self, *, limit: int, cursor: tuple[str, str] | None) -> list[Any]:
+        cursor_filter = ""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            cursor_filter = "WHERE (p.created_at, p.id) > (:cursor_created_at, :cursor_id)"
+            params["cursor_created_at"] = cursor[0]
+            params["cursor_id"] = cursor[1]
+        return sql.fetchall(self.conn, f"""
+            SELECT p.*,
+                COALESCE(pec.version, 0) AS config_version,
+                {self._count_selects()}
+            FROM projects p
+            LEFT JOIN project_execution_configs pec ON pec.project_id = p.id
+            {self._count_joins()}
+            {cursor_filter}
+            ORDER BY p.created_at, p.id
+            LIMIT :limit
+        """, params)
 
     def get_facts(self, project_id: str) -> list[Any]:
         return sql.fetchall(

@@ -1,7 +1,7 @@
 """Wire contracts shared across Cairn processes.
 
 Only models used across the server/dispatcher boundary belong here. Server-only
-HTTP request/response DTOs stay in ``cairn.server.models_pkg``.
+HTTP request/response DTOs stay in ``cairn.server.schemas``.
 """
 
 from cairn.shared.contracts.ai_profiles import (
@@ -28,10 +28,13 @@ from cairn.shared.contracts.projects import (
     Hint,
     Intent,
     ProjectDetail,
+    ProjectGraphDelta,
     ProjectMeta,
     ProjectReason,
     ProjectSummary,
+    ProjectSummaryPage,
     ProjectWorkSummary,
+    ProjectWorkSummaryPage,
 )
 from cairn.shared.contracts.proxies import ProxyConfig, ProxySummary
 from cairn.shared.contracts.reason import ReasonState
@@ -59,10 +62,13 @@ __all__ = [
     "RuntimeLimits",
     "ProjectAiProfileSnapshot",
     "ProjectDetail",
+    "ProjectGraphDelta",
     "ProjectMeta",
     "ProjectReason",
     "ProjectSummary",
+    "ProjectSummaryPage",
     "ProjectWorkSummary",
+    "ProjectWorkSummaryPage",
     "ProxyConfig",
     "ProxySummary",
     "ReasonState",

@@ -94,6 +94,12 @@ class ProjectsRouterTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIsInstance(r.json(), list)
 
+    def test_project_cursor_round_trip_is_stable(self) -> None:
+        from cairn.server.application.project_queries import _decode_cursor, _encode_cursor
+
+        row = {"created_at": "2026-06-06T00:00:00Z", "id": "proj_001"}
+        self.assertEqual(_decode_cursor(_encode_cursor(row)), (row["created_at"], row["id"]))
+
     def test_list_projects_returns_created_project(self) -> None:
         with self._client() as c:
             token = _login_token(c)
@@ -104,6 +110,20 @@ class ProjectsRouterTests(unittest.TestCase):
         ids = [p["id"] for p in r2.json()]
         self.assertIn(pid, ids)
 
+    def test_list_projects_supports_cursor_pagination(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            ids = []
+            for idx in range(3):
+                payload = {**_MINIMAL_CREATE, "title": f"project-{idx}"}
+                created = c.post("/projects", json=payload, headers={"Authorization": f"Bearer {token}"})
+                ids.append(created.json()["project"]["id"])
+            first = c.get("/projects?limit=2", headers={"Authorization": f"Bearer {token}"}).json()
+            second = c.get(f"/projects?limit=2&cursor={first['next_cursor']}", headers={"Authorization": f"Bearer {token}"}).json()
+        seen = [item["id"] for item in first["items"] + second["items"]]
+        self.assertEqual(len(seen), len(set(seen)))
+        self.assertTrue(set(ids).issubset(set(seen)))
+
     def test_list_project_work_feed(self) -> None:
         """The dispatcher poll endpoint must return a valid envelope."""
         with self._client() as c:
@@ -111,6 +131,18 @@ class ProjectsRouterTests(unittest.TestCase):
             r = c.get("/projects/work", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(r.status_code, 200)
         self.assertIsInstance(r.json(), list)
+
+    def test_list_project_work_supports_cursor_pagination(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            for idx in range(2):
+                payload = {**_MINIMAL_CREATE, "title": f"work-{idx}"}
+                c.post("/projects", json=payload, headers={"Authorization": f"Bearer {token}"})
+            r = c.get("/projects/work?limit=1", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertIsNotNone(body["next_cursor"])
 
     def test_get_project_not_found(self) -> None:
         with self._client() as c:
@@ -136,6 +168,22 @@ class ProjectsRouterTests(unittest.TestCase):
         self.assertNotIn("intents", body)
         self.assertNotIn("hints", body)
         self.assertNotIn("proxy", body)
+
+    def test_graph_delta_returns_empty_when_revisions_are_current(self) -> None:
+        with self._client() as c:
+            token = _login_token(c)
+            created = c.post("/projects", json=_MINIMAL_CREATE, headers={"Authorization": f"Bearer {token}"})
+            pid = created.json()["project"]["id"]
+            state = c.get(f"/projects/{pid}/poll-state", headers={"Authorization": f"Bearer {token}"}).json()
+            r = c.get(
+                f"/projects/{pid}/graph?after_graph_revision={state['graph_revision']}&after_timeline_revision={state['timeline_revision']}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["facts"], [])
+        self.assertEqual(body["intents"], [])
+        self.assertEqual(body["hints"], [])
 
     def test_hint_only_bumps_timeline_revision(self) -> None:
         with self._client() as c:
@@ -301,7 +349,7 @@ class ProjectsRouterTests(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
     def test_llm_event_cards_page_token_is_scoped_to_execution(self) -> None:
-        from cairn.server.observability.event_card_service import _decode_page_token, _encode_page_token, _CardPageState
+        from cairn.server.observability.event_card_service import _CardPageState, _decode_page_token, _encode_page_token
 
         token = _encode_page_token(
             _CardPageState(

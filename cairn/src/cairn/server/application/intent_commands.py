@@ -21,16 +21,16 @@ from cairn.server.domain.projects import (
 )
 from cairn.server.domain.time import utcnow
 from cairn.server.mappers.intents import intent_to_model
-from cairn.server.models_pkg import (
+from cairn.server.repositories.ids import IdRepository
+from cairn.server.repositories.intents import IntentRepository
+from cairn.server.repositories.leases import LeaseRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas import (
     ConcludeRequest,
     ConcludeResponse,
     CreateIntentRequest,
     HeartbeatRequest,
 )
-from cairn.server.repositories.ids import IdRepository
-from cairn.server.repositories.intents import IntentRepository
-from cairn.server.repositories.leases import LeaseRepository
-from cairn.server.repositories.projects import ProjectRepository
 from cairn.shared.contracts import Fact, Intent
 
 

@@ -26,7 +26,6 @@ class AiProfileFlowTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def test_crud_uses_dispatch_yaml(self) -> None:
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileUpdate
         from cairn.server.routers.ai_profiles import (
             create_ai_profile,
             delete_ai_profile,
@@ -34,6 +33,7 @@ class AiProfileFlowTests(unittest.TestCase):
             list_ai_profiles,
             update_ai_profile,
         )
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileUpdate
 
         created = create_ai_profile(AiProfileCreate(
             name="gpt-deepseek",
@@ -67,14 +67,14 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertEqual(list_ai_profiles(), [])
 
     def test_project_ai_selection_round_trips_from_execution_config(self) -> None:
-        from cairn.server.models_pkg import CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers.ai_profiles import create_ai_profile, get_project_ai_profiles
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers.ai_profiles import create_ai_profile, get_project_ai_profiles
-        from cairn.server.routers.projects import create_project
 
         boot = create_ai_profile(AiProfileCreate(
             name="boot", worker_type="codex", model="m1", api_key_env="K1", sk="sk-1",
@@ -126,7 +126,7 @@ class AiProfileFlowTests(unittest.TestCase):
         from fastapi import HTTPException
 
         from cairn.server.ai_profile_service import require_complete_ai_profile_selections
-        from cairn.server.models_pkg.ai_profiles import AiProfileSelection, TaskAiProfileSelections
+        from cairn.server.schemas.ai_profiles import AiProfileSelection, TaskAiProfileSelections
 
         with self.assertRaises(HTTPException):
             require_complete_ai_profile_selections(None)
@@ -151,10 +151,10 @@ class AiProfileFlowTests(unittest.TestCase):
     def test_invalid_selected_model_rejected_on_project_create(self) -> None:
         from fastapi import HTTPException
 
-        from cairn.server.models_pkg import CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
         from cairn.server.routers.ai_profiles import create_ai_profile
         from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
 
         profile = create_ai_profile(AiProfileCreate(
             name="codex", worker_type="codex", model="default-model", api_key_env="K1", sk="test-key",
@@ -180,10 +180,10 @@ class AiProfileFlowTests(unittest.TestCase):
         self.assertIn("not available", ctx.exception.detail)
 
     def test_deleted_profile_marks_existing_snapshot_unavailable(self) -> None:
-        from cairn.server.models_pkg import CreateProjectRequest
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
         from cairn.server.routers.ai_profiles import create_ai_profile, delete_ai_profile, get_project_ai_profiles
         from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
 
         profile = create_ai_profile(AiProfileCreate(
             name="to-delete", worker_type="codex", model="m", api_key_env="K", sk="test-key",

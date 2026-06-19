@@ -11,9 +11,9 @@ from cairn.server.config.files import config_revision
 from cairn.server.config.roles import get_yaml_role_snapshot
 from cairn.server.execution_config.models import TASK_TYPES, ProjectExecutionConfigSnapshot
 from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
-from cairn.server.models_pkg import TaskCapabilitySelectionMap
-from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
 from cairn.server.runtime_config import dispatch_config_path
+from cairn.server.schemas import TaskCapabilitySelectionMap
+from cairn.server.schemas.ai_profiles import TaskAiProfileSelections
 from cairn.shared.config import load_dispatch_config
 from cairn.shared.contracts import TaskTimeouts
 

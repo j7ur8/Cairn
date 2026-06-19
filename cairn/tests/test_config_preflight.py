@@ -86,7 +86,7 @@ def _dispatch_config(root: Path) -> dict:
         "worker_runtime": {
             "common_env": {},
             "container": {
-                "image": "cairn/test:latest",
+                "image": "cairn/test:2026.06",
                 "network_mode": "bridge",
                 "completed_action": "stop",
                 "bind_mounts": [
@@ -164,6 +164,20 @@ class ConfigPreflightTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertTrue(any("worker image" in error for error in result.errors))
+
+    def test_latest_worker_image_fails_preflight(self) -> None:
+        from cairn.shared.config.preflight import check_dispatch_config
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            dispatch = _dispatch_config(root)
+            dispatch["worker_runtime"]["container"]["image"] = "cairn/test:latest"
+            with mock.patch("docker.from_env") as from_env:
+                from_env.return_value.images.get.return_value = object()
+                result = check_dispatch_config(self._write(root, dispatch))
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("latest tag" in error for error in result.errors))
 
     def test_placeholder_jwt_secret_fails(self) -> None:
         from cairn.shared.config.preflight import check_dispatch_config

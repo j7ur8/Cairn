@@ -42,8 +42,8 @@ class HintsRouterTests(unittest.TestCase):
             )
 
     def test_create_hint_persists_and_returns_model(self) -> None:
-        from cairn.server.models_pkg import CreateHintRequest
         from cairn.server.routers import hints
+        from cairn.server.schemas import CreateHintRequest
 
         self._create_project()
         result = hints.create_hint(
@@ -63,8 +63,8 @@ class HintsRouterTests(unittest.TestCase):
 
     def test_create_hint_unknown_project_raises_not_found(self) -> None:
         from cairn.server.domain.errors import NotFoundError
-        from cairn.server.models_pkg import CreateHintRequest
         from cairn.server.routers import hints
+        from cairn.server.schemas import CreateHintRequest
 
         with self.assertRaises(NotFoundError):
             hints.create_hint(
@@ -74,8 +74,8 @@ class HintsRouterTests(unittest.TestCase):
 
     def test_create_hint_blocked_on_non_writable_status(self) -> None:
         from cairn.server.domain.errors import ForbiddenError
-        from cairn.server.models_pkg import CreateHintRequest
         from cairn.server.routers import hints
+        from cairn.server.schemas import CreateHintRequest
 
         self._create_project(status="deleted")
         with self.assertRaises(ForbiddenError):
@@ -87,7 +87,7 @@ class HintsRouterTests(unittest.TestCase):
     def test_create_hint_rejects_blank_content(self) -> None:
         from pydantic import ValidationError
 
-        from cairn.server.models_pkg import CreateHintRequest
+        from cairn.server.schemas import CreateHintRequest
 
         with self.assertRaises(ValidationError):
             CreateHintRequest(content="   ", creator="worker_a")

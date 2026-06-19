@@ -11,14 +11,14 @@ from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.domain.errors import BadRequestError, DomainError
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import persist_project_execution_configs
-from cairn.server.models_pkg import (
+from cairn.server.repositories.ids import IdRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas import (
     TaskCapabilitiesMap,
     TaskCapabilitySelectionMap,
 )
-from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
-from cairn.server.models_pkg.projects import CreateHintInline
-from cairn.server.repositories.ids import IdRepository
-from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas.ai_profiles import TaskAiProfileSelections
+from cairn.server.schemas.projects import CreateHintInline
 from cairn.shared.contracts import (
     Fact,
     Hint,

@@ -113,7 +113,7 @@ class ReasonStateServiceTests(unittest.TestCase):
     def test_failures_are_recorded_without_blocking_outcome(self) -> None:
         from cairn.server.application.reason_commands import claim_reason, finish_reason, reason_state
         from cairn.server.domain.reason import reason_trigger_hash
-        from cairn.server.models_pkg import ReasonClaimRequest, ReasonFinishRequest
+        from cairn.server.schemas import ReasonClaimRequest, ReasonFinishRequest
 
         project_id = self._create_project()
         trigger = "facts:19->21"
@@ -218,7 +218,7 @@ class ReasonStateServiceTests(unittest.TestCase):
         from cairn.server.application.reason_commands import claim_reason, finish_reason
         from cairn.server.domain.errors import DomainError
         from cairn.server.domain.reason import reason_trigger_hash
-        from cairn.server.models_pkg import ReasonClaimRequest, ReasonFinishRequest
+        from cairn.server.schemas import ReasonClaimRequest, ReasonFinishRequest
 
         project_id = self._create_project()
         trigger = "facts:2->3"
@@ -259,7 +259,7 @@ class ReasonStateServiceTests(unittest.TestCase):
         from cairn.server.application.reason_commands import finish_reason
         from cairn.server.domain.errors import DomainError
         from cairn.server.domain.reason import reason_trigger_hash
-        from cairn.server.models_pkg import ReasonFinishRequest
+        from cairn.server.schemas import ReasonFinishRequest
 
         project_id = self._create_project()
         trigger = "facts:2->3"

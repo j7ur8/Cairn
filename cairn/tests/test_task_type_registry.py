@@ -27,7 +27,7 @@ class TaskTypeRegistryTests(unittest.TestCase):
     def test_project_snapshot_rejects_unknown_task_type(self) -> None:
         from pydantic import ValidationError
 
-        from cairn.server.models_pkg.ai_profiles import ProjectAiProfileSnapshot
+        from cairn.server.schemas.ai_profiles import ProjectAiProfileSnapshot
         with self.assertRaises(ValidationError):
             ProjectAiProfileSnapshot(
                 profile_id="ai1",

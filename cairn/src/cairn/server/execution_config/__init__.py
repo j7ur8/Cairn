@@ -6,11 +6,15 @@ from cairn.server.execution_config.assembler import (
     load_project_execution_config,
     load_project_execution_configs,
 )
-from cairn.server.execution_config.patcher import execution_ai_snapshots, execution_capabilities, execution_task_timeouts
+from cairn.server.execution_config.patcher import (
+    execution_ai_snapshots,
+    execution_capabilities,
+    execution_task_timeouts,
+)
 from cairn.server.execution_config.repository import insert_project_execution_config
 from cairn.server.execution_config.snapshot_builder import build_project_execution_config_snapshot
-from cairn.server.models_pkg import TaskCapabilitySelectionMap
-from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
+from cairn.server.schemas import TaskCapabilitySelectionMap
+from cairn.server.schemas.ai_profiles import TaskAiProfileSelections
 from cairn.shared.contracts import TaskTimeouts
 
 

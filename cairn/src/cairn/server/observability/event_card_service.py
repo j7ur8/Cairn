@@ -7,7 +7,7 @@ from typing import Any
 
 from cairn.server.observability._shared import normalize_event_kind_filter, row_to_event
 from cairn.server.observability.event_repository import LlmEventRepository
-from cairn.server.observability.models import EventCardPageResponse, LlmEventCard, LlmEventStats
+from cairn.server.observability.models import EventCardPageResponse, LlmEventCard
 
 _MERGEABLE_KINDS = {"tool_call", "tool_result", "command_start", "command_end"}
 

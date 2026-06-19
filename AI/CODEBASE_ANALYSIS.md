@@ -77,8 +77,8 @@ Cairn/
 | `cairn/src/cairn/server/partials/` | SPA HTML partials，由 `assemble_index()` 拼装 |
 | `cairn/src/cairn/server/static/js/app/index.js` | Alpine app 入口，导入并组合 core、settings、prompts、AI profile、proxy、workspace 状态模块 |
 | `cairn/src/cairn/server/static/js/app/create-app-state.js` | 合并 app state fragments，默认阻止重复 key 静默覆盖 |
-| `cairn/src/cairn/server/static/js/app/state.core.js` | 全局 API、轮询、登录、导航等核心状态；使用 `/projects/{id}/poll-state` 判定是否刷新完整图或时间线 |
-| `cairn/src/cairn/server/static/js/app/state.settings*.js`, `state.prompts.js`, `state.ai_profiles.js`, `state.proxies.js` | Settings、Prompt group、AI Profile、Proxy 管理状态 |
+| `cairn/src/cairn/server/static/js/app/state-core.js` | 全局 API、轮询、登录、导航等核心状态；使用 `/projects/{id}/poll-state` 判定是否刷新完整图或时间线 |
+| `cairn/src/cairn/server/static/js/app/state-settings*.js`, `state-prompts.js`, `state-ai-profiles.js`, `state-proxies.js` | Settings、Prompt group、AI Profile、Proxy 管理状态 |
 | `cairn/src/cairn/server/static/js/workspace/` | 项目列表/图、能力选择、LLM log、replay 等工作区状态 |
 | `cairn/src/cairn/server/static/js/shared/` | API client、表单、偏好、默认值、summary、capability selection 等共享 JS helper |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
@@ -125,7 +125,7 @@ Cairn/
 | 算法/机制 | 文件位置 | 功能描述 | 复杂度/特性 | 备注 |
 |-----------|----------|----------|-------------|------|
 | Fact-Intent graph expansion | `server/domain/*`, `server/application/*`, `dispatcher/scheduler/*` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
-| Project poll revisions | `server/repositories/projects.py`, `server/application/*`, `server/static/js/app/state.core.js` | 图变更递增 `graph_revision`，title/status/hints/files 等时间线变更递增 `timeline_revision`；SPA 轻量轮询 poll-state 后按 revision 决定是否拉完整项目 | O(1) project row update + 聚合 counts | 降低高频轮询时完整 graph API 压力 |
+| Project poll revisions | `server/repositories/projects.py`, `server/application/*`, `server/static/js/app/state-core.js` | 图变更递增 `graph_revision`，title/status/hints/files 等时间线变更递增 `timeline_revision`；SPA 轻量轮询 poll-state 后按 revision 决定是否拉完整项目 | O(1) project row update + 聚合 counts | 降低高频轮询时完整 graph API 压力 |
 | Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |

@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
+from cairn.dispatcher.workers.adapters._jsonl import extract_text_parts, iter_jsonl
+from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
+from cairn.shared.config import WorkerConfig
+
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+class ClaudeCodeDriver(SeedSessionDriver):
+    type_name = "claudecode"
+
+    def trace_format(self) -> str | None:
+        return "claude_stream_json"
+
+    def build_healthcheck(self, worker: WorkerConfig) -> list[str]:
+        env = worker.env
+        return [
+            "curl",
+            "-sS",
+            "--fail",
+            "-o",
+            "/dev/null",
+            f"{env['ANTHROPIC_BASE_URL']}/v1/messages",
+            "-H",
+            f"Authorization: Bearer {env['ANTHROPIC_AUTH_TOKEN']}",
+            "-H",
+            f"anthropic-version: {ANTHROPIC_VERSION}",
+            "-H",
+            "content-type: application/json",
+            "-d",
+            (
+                '{"model":"'
+                + env["ANTHROPIC_MODEL"]
+                + '","max_tokens":10,"messages":[{"role":"user","content":"ping"}]}'
+            ),
+        ]
+
+    def build_startup_healthcheck(self, worker: WorkerConfig) -> list[str]:
+        env = worker.env
+        return build_verbose_curl_healthcheck(
+            f"{env['ANTHROPIC_BASE_URL']}/v1/messages",
+            headers=[
+                "-H",
+                f"Authorization: Bearer {env['ANTHROPIC_AUTH_TOKEN']}",
+                "-H",
+                f"anthropic-version: {ANTHROPIC_VERSION}",
+                "-H",
+                "content-type: application/json",
+            ],
+            payload=(
+                '{"model":"'
+                + env["ANTHROPIC_MODEL"]
+                + '","max_tokens":10,"messages":[{"role":"user","content":"ping"}]}'
+            ),
+        )
+
+    def describe_startup_healthcheck(self, worker: WorkerConfig) -> str:
+        env = worker.env
+        return render_curl_command(
+            f"{env['ANTHROPIC_BASE_URL']}/v1/messages",
+            headers=[
+                "-H",
+                expand_env("Authorization: Bearer $ANTHROPIC_AUTH_TOKEN"),
+                "-H",
+                f"anthropic-version: {ANTHROPIC_VERSION}",
+                "-H",
+                "content-type: application/json",
+            ],
+            payload=(
+                '{"model":"'
+                + env["ANTHROPIC_MODEL"]
+                + '","max_tokens":10,"messages":[{"role":"user","content":"ping"}]}'
+            ),
+        )
+
+    def build_execute(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str | None,
+        context: WorkerExecutionContext | None = None,
+    ) -> DriverResult:
+        assert session is not None
+        capability_args = self._capability_args(context)
+        effort_args = self._effort_args(worker)
+        return DriverResult(
+            argv=[
+                "claude",
+                "--session-id",
+                session,
+                "--dangerously-skip-permissions",
+                "--print",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                *effort_args,
+                *capability_args,
+                "--",
+                prompt,
+            ],
+            session=session,
+        )
+
+    def build_conclude(
+        self,
+        worker: WorkerConfig,
+        prompt: str,
+        session: str,
+        context: WorkerExecutionContext | None = None,
+    ) -> list[str]:
+        effort_args = self._effort_args(worker)
+        return [
+            "claude",
+            "-r",
+            session,
+            "--dangerously-skip-permissions",
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "Read",
+            *effort_args,
+            "--",
+            prompt,
+        ]
+
+    @staticmethod
+    def _capability_args(context: WorkerExecutionContext | None) -> list[str]:
+        if context is None:
+            return []
+        args: list[str] = []
+        if context.mcp_config_path:
+            args.extend(["--mcp-config", context.mcp_config_path])
+        if context.claude_plugin_dir:
+            args.extend(["--plugin-dir", context.claude_plugin_dir])
+        if context.skill_root:
+            args.extend(["--add-dir", context.skill_root])
+        return args
+
+    @staticmethod
+    def _effort_args(worker: WorkerConfig) -> list[str]:
+        effort = (worker.env.get("CAIRN_MODEL_REASONING_EFFORT") or "").strip()
+        return ["--effort", effort] if effort else []
+
+    def extract_response_text(self, stdout: str, stderr: str) -> str:
+        messages: list[str] = []
+        for payload in iter_jsonl(stdout):
+            payload_type = payload.get("type")
+            if payload_type == "assistant" and isinstance(payload.get("message"), dict):
+                text = extract_text_parts(
+                    payload["message"].get("content"),
+                    predicate=lambda item: item.get("type") == "text",
+                )
+                if text:
+                    messages.append(text)
+            elif payload_type == "result":
+                result = payload.get("result")
+                if isinstance(result, str) and result:
+                    messages.append(result)
+        if messages:
+            return messages[-1]
+        return stdout

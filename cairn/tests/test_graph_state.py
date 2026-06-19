@@ -17,7 +17,7 @@ class GraphStateTests(unittest.TestCase):
             """
             import { pathToFileURL } from 'node:url';
 
-            const mod = await import(pathToFileURL('cairn/src/cairn/server/static/js/workspace/state.graph.js'));
+            const mod = await import(pathToFileURL('cairn/src/cairn/server/static/js/workspace/state-graph.js'));
             const state = mod.createWorkspaceGraphState();
             state.project = {
               facts: [

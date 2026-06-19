@@ -196,8 +196,8 @@ def test_task_modules_depend_on_container_runtime_protocol_not_manager() -> None
 def test_removed_internal_import_paths_do_not_reappear() -> None:
     forbidden = (
         "cairn.dispatcher.tasks.common",
-        "cairn.server.models_pkg.intents",
-        "cairn.server.models_pkg.capabilities",
+        "cairn.server.schemas.intents",
+        "cairn.server.schemas.capabilities",
     )
     offenders: list[str] = []
     for path in _py_files(SRC):
@@ -233,12 +233,30 @@ def test_known_small_import_cycles_do_not_reappear() -> None:
 
 
 def test_dto_boundary_docs_stay_visible() -> None:
-    server_models = (SRC / "server" / "models_pkg" / "__init__.py").read_text(encoding="utf-8")
+    server_models = (SRC / "server" / "schemas" / "__init__.py").read_text(encoding="utf-8")
+    compatibility_models = (SRC / "server" / "models_pkg" / "__init__.py").read_text(encoding="utf-8")
     shared_contracts = (SRC / "shared" / "contracts" / "__init__.py").read_text(encoding="utf-8")
     assert "Server-private HTTP request/response" in server_models
     assert "shared with the dispatcher" in server_models
+    assert "Compatibility re-export" in compatibility_models
     assert "Wire contracts shared across Cairn processes" in shared_contracts
     assert "Server-only" in shared_contracts
+
+
+def test_renamed_import_compatibility_shims_stay_available() -> None:
+    from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver as CanonicalClaudeCodeDriver
+    from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver as LegacyClaudeCodeDriver
+    from cairn.server.application.project_queries import _decode_cursor as canonical_decode_cursor
+    from cairn.server.application.project_read import _decode_cursor as legacy_decode_cursor
+    from cairn.server.models_pkg import CreateProjectRequest as LegacyCreateProjectRequest
+    from cairn.server.models_pkg.ai_profiles import AiProfileCreate as LegacyAiProfileCreate
+    from cairn.server.schemas import CreateProjectRequest
+    from cairn.server.schemas.ai_profiles import AiProfileCreate
+
+    assert LegacyClaudeCodeDriver is CanonicalClaudeCodeDriver
+    assert legacy_decode_cursor is canonical_decode_cursor
+    assert LegacyCreateProjectRequest is CreateProjectRequest
+    assert LegacyAiProfileCreate is AiProfileCreate
 
 
 def test_alembic_revision_ids_fit_default_version_column() -> None:

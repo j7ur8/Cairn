@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from cairn.dispatcher.protocol.client import CairnClient
@@ -21,10 +23,12 @@ class ContainerRuntime(Protocol):
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
         tty: bool = False,
-        on_output: object | None = None,
+        on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess: ...
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None: ...
+
+    def write_directory(self, container_name: str, path: str, source: Path) -> None: ...
 
 
 @dataclass(slots=True)

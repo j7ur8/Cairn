@@ -49,6 +49,25 @@ class DispatcherHealthServerTests(unittest.TestCase):
         finally:
             server.stop()
 
+    def test_healthz_returns_degraded_for_transient_tick_error(self) -> None:
+        from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
+
+        state = DispatcherHealthState(
+            last_tick_at=lambda: 123.0,
+            transient_error=lambda: {"consecutive_failures": 2, "error": "RequestException: timeout"},
+        )
+        server = DispatcherHealthServer("127.0.0.1", 0, state)
+        try:
+            server.start()
+            assert server.address is not None
+            host, port = server.address
+            with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=5) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(body["status"], "degraded")
+            self.assertEqual(body["transient_error"]["consecutive_failures"], 2)
+        finally:
+            server.stop()
+
     def test_mcp_probe_post_forwards_auth_and_json_body(self) -> None:
         from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHealthState
 

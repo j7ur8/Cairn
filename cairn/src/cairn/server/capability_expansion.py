@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     CapabilityCatalogItem,
     CapabilitySelection,
     TaskCapabilities,
@@ -195,7 +195,7 @@ def _role_default_skills_for_task(
 
 
 def project_capability_tasks(per_task: TaskCapabilitiesMap) -> dict[str, Any]:
-    from cairn.server.models_pkg import ProjectCapabilityTaskState
+    from cairn.server.schemas import ProjectCapabilityTaskState
 
     return {
         task: ProjectCapabilityTaskState.model_validate(payload)

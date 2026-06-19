@@ -50,14 +50,14 @@ class IntentRouterTests(unittest.TestCase):
             )
 
     def test_cross_module_response_models_rebuild(self) -> None:
-        from cairn.server.models_pkg import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
+        from cairn.server.schemas import ConcludeResponse, ReopenResponse, ReplayRunCreateResponse
 
         for model in (ConcludeResponse, ReopenResponse, ReplayRunCreateResponse):
             model.model_rebuild(raise_errors=True)
 
     def test_conclude_returns_response_model(self) -> None:
-        from cairn.server.models_pkg import ConcludeRequest, CreateIntentRequest
         from cairn.server.routers import intents
+        from cairn.server.schemas import ConcludeRequest, CreateIntentRequest
 
         self._create_project()
         created = intents.create_intent(
@@ -84,8 +84,8 @@ class IntentRouterTests(unittest.TestCase):
 
     def test_claim_and_heartbeat_are_separate(self) -> None:
         from cairn.server.domain.errors import DomainError
-        from cairn.server.models_pkg import CreateIntentRequest, HeartbeatRequest
         from cairn.server.routers import intents
+        from cairn.server.schemas import CreateIntentRequest, HeartbeatRequest
 
         self._create_project()
         created = intents.create_intent(

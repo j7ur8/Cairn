@@ -256,13 +256,13 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("duplicate app state key overwritten", (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "create-app-state.js").read_text(encoding="utf-8"))
 
     def test_settings_navigation_uses_section_specific_loaders(self) -> None:
-        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings.js").read_text(
+        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-settings.js").read_text(
             encoding="utf-8"
         )
-        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.ui.js").read_text(
+        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-ui.js").read_text(
             encoding="utf-8"
         )
-        core = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.core.js").read_text(
+        core = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-core.js").read_text(
             encoding="utf-8"
         )
 
@@ -285,7 +285,7 @@ class StaticCacheTests(unittest.TestCase):
 
     def test_capabilities_slice_excludes_non_capability_admin_endpoints(self) -> None:
         capabilities = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.capabilities.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-capabilities.js"
         ).read_text(encoding="utf-8")
         self.assertNotIn("/prompt-groups", capabilities)
         self.assertNotIn("/role-prompts", capabilities)
@@ -318,7 +318,9 @@ class StaticCacheTests(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["status"], "degraded")
         self.assertEqual(body["database"], "postgresql")
-        self.assertIn("postgres unavailable", body["database_error"])
+        self.assertEqual(body["error"], "database_unavailable")
+        self.assertIn("request_id", body)
+        self.assertNotIn("postgres unavailable", json.dumps(body))
 
     def test_database_unavailable_handler_returns_degraded_json(self) -> None:
         import asyncio
@@ -331,7 +333,9 @@ class StaticCacheTests(unittest.TestCase):
         body = json.loads(r.body)
         self.assertEqual(body["status"], "degraded")
         self.assertEqual(body["database"], "postgresql")
-        self.assertIn("postgres unavailable", body["database_error"])
+        self.assertEqual(body["error"], "database_unavailable")
+        self.assertIn("request_id", body)
+        self.assertNotIn("postgres unavailable", json.dumps(body))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ except ModuleNotFoundError:  # Allows scheduler pure logic to import without Doc
 
 LOG = logging.getLogger(__name__)
 EXEC_KILL_JOIN_TIMEOUT_SECONDS = 5.0
+DEFAULT_STREAM_TAIL_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -32,6 +33,30 @@ class ProcessResult:
     timed_out: bool = False
     cancelled: bool = False
     cancel_reason: str | None = None
+    truncated: bool = False
+
+
+class _TextTailBuffer:
+    def __init__(self, limit_bytes: int) -> None:
+        self.limit_bytes = limit_bytes
+        self._text = ""
+        self._bytes = 0
+        self.truncated = False
+
+    def append(self, chunk: str) -> None:
+        if not chunk:
+            return
+        self._text += chunk
+        self._bytes += len(chunk.encode("utf-8", errors="replace"))
+        if self._bytes <= self.limit_bytes:
+            return
+        encoded = self._text.encode("utf-8", errors="replace")[-self.limit_bytes:]
+        self._text = encoded.decode("utf-8", errors="ignore")
+        self._bytes = len(self._text.encode("utf-8", errors="replace"))
+        self.truncated = True
+
+    def text(self) -> str:
+        return self._text
 
 
 class ManagedProcess:
@@ -53,8 +78,8 @@ class ManagedProcess:
         self._api = container.client.api
         self._exec_id: str | None = None
         self._reader: threading.Thread | None = None
-        self._stdout: list[str] = []
-        self._stderr: list[str] = []
+        self._stdout = _TextTailBuffer(DEFAULT_STREAM_TAIL_BYTES)
+        self._stderr = _TextTailBuffer(DEFAULT_STREAM_TAIL_BYTES)
         self._returncode: int | None = None
         self._timed_out = False
         self._cancel_reason: str | None = None
@@ -88,15 +113,16 @@ class ManagedProcess:
                 self._returncode = 137
             self._done.set()
         self._done.wait(timeout=0)
-        if self._read_error and not self._stderr:
+        if self._read_error and not self._stderr.text():
             self._stderr.append(self._read_error)
         return ProcessResult(
             returncode=self._returncode if self._returncode is not None else 1,
-            stdout="".join(self._stdout),
-            stderr="".join(self._stderr),
+            stdout=self._stdout.text(),
+            stderr=self._stderr.text(),
             timed_out=self._timed_out,
             cancelled=self._cancel_reason is not None,
             cancel_reason=self._cancel_reason,
+            truncated=self._stdout.truncated or self._stderr.truncated,
         )
 
     def kill(self) -> None:

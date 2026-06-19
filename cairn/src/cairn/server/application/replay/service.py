@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cairn.server.application.project_creation import ProjectCreationDraft, create_project_from_draft
-from cairn.server.application.project_read import get_project_detail
+from cairn.server.application.project_queries import get_project_detail
 from cairn.server.application.replay.attachments import (
     rewrite_attachment_refs,
 )
@@ -17,15 +17,15 @@ from cairn.server.domain.errors import ConflictError
 from cairn.server.domain.projects import completion_intent_or_409, require_project, require_project_completed
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import execution_capabilities, load_project_execution_configs
-from cairn.server.models_pkg import (
+from cairn.server.repositories.ids import IdRepository
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.repositories.replay import ReplayRepository
+from cairn.server.schemas import (
     CapabilitySelection,
     ReplayRunAdvanceResponse,
     ReplayRunCreateRequest,
 )
-from cairn.server.models_pkg.projects import CreateHintInline
-from cairn.server.repositories.ids import IdRepository
-from cairn.server.repositories.projects import ProjectRepository
-from cairn.server.repositories.replay import ReplayRepository
+from cairn.server.schemas.projects import CreateHintInline
 from cairn.shared.contracts import hidden_kinds_from_visible, parse_llm_hidden_event_kinds
 
 

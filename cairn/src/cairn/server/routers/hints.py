@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from cairn.server import db
 from cairn.server.application.project_io import create_hint as create_hint_command
-from cairn.server.models_pkg import CreateHintRequest
+from cairn.server.schemas import CreateHintRequest
 from cairn.shared.contracts import Hint
 
 router = APIRouter(tags=["hints"])

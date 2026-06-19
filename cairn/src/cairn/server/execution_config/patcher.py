@@ -5,12 +5,12 @@ from typing import Any
 from cairn.server.domain.errors import ServerInvariantError
 from cairn.server.execution_config.assembler import load_project_execution_configs
 from cairn.server.execution_config.models import TASK_TYPES
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     TaskCapabilities,
     TaskCapabilitiesMap,
     TaskCapabilitySelectionMap,
 )
-from cairn.server.models_pkg.ai_profiles import TaskAiProfileSelections
+from cairn.server.schemas.ai_profiles import TaskAiProfileSelections
 from cairn.shared.contracts import ProjectAiProfileSnapshot, TaskTimeouts
 
 
@@ -33,12 +33,12 @@ def update_project_execution_config(
     next_timeouts = task_timeouts or execution_task_timeouts(current)
     next_ai_profiles = ai_profiles
     if next_ai_profiles is None:
-        from cairn.server.models_pkg.ai_profiles import ai_selections_from_snapshots
+        from cairn.server.schemas.ai_profiles import ai_selections_from_snapshots
 
         next_ai_profiles = ai_selections_from_snapshots(execution_ai_snapshots(current))
     next_capabilities = capabilities
     if next_capabilities is None:
-        from cairn.server.models_pkg import CapabilitySelection
+        from cairn.server.schemas import CapabilitySelection
 
         expanded = execution_capabilities(current)
         next_capabilities = {

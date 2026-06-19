@@ -28,8 +28,8 @@ class DbHardeningTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def _project_ai_profiles(self):
-        from cairn.server.models_pkg.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
         from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.schemas.ai_profiles import AiProfileCreate, AiProfileSelection, TaskAiProfileSelections
 
         profile = create_ai_profile(
             AiProfileCreate(
@@ -124,9 +124,9 @@ class DbHardeningTests(unittest.TestCase):
         )
 
     def test_concurrent_conclude_produces_one_fact(self) -> None:
-        from cairn.server.models_pkg import ConcludeRequest, CreateIntentRequest, CreateProjectRequest
         from cairn.server.routers.intents import conclude, create_intent
         from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import ConcludeRequest, CreateIntentRequest, CreateProjectRequest
 
         project = create_project(
             CreateProjectRequest(
@@ -182,8 +182,8 @@ class DbHardeningTests(unittest.TestCase):
         self.assertEqual(fact_count, 1)
 
     def test_concurrent_complete_produces_one_goal_intent(self) -> None:
-        from cairn.server.models_pkg import CompleteRequest, CreateProjectRequest
         from cairn.server.routers.projects import complete_project, create_project
+        from cairn.server.schemas import CompleteRequest, CreateProjectRequest
 
         project = create_project(
             CreateProjectRequest(

@@ -28,12 +28,12 @@ class CapabilityAdminTests(unittest.TestCase):
         self.yaml.__exit__(None, None, None)
 
     def _create_profile_selection(self):
-        from cairn.server.models_pkg.ai_profiles import (
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.schemas.ai_profiles import (
             AiProfileCreate,
             AiProfileSelection,
             TaskAiProfileSelections,
         )
-        from cairn.server.routers.ai_profiles import create_ai_profile
 
         profile = create_ai_profile(AiProfileCreate(
             name="t",
@@ -50,12 +50,12 @@ class CapabilityAdminTests(unittest.TestCase):
         return TaskAiProfileSelections(bootstrap=selection, explore=selection, reason=selection)
 
     def test_admin_upsert_and_delete_uses_capabilities_yaml(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             delete_admin_capability,
             get_capability_catalog,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "my-mcp", CapabilityAdminRequest(
             id="my-mcp",
@@ -83,8 +83,8 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertNotIn(("skill", "my-skill"), items)
 
     def test_admin_upsert_persists_mcp_env(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import get_capability_catalog, upsert_admin_capability
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "env-mcp", CapabilityAdminRequest(
             id="env-mcp",
@@ -99,8 +99,8 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(items[("mcp_server", "env-mcp")].env, {"A": "1", "B": "two"})
 
     def test_import_mcp_json_creates_user_items(self) -> None:
-        from cairn.server.models_pkg import McpImportRequest
         from cairn.server.routers.capabilities import get_capability_catalog, import_admin_mcp_json
+        from cairn.server.schemas import McpImportRequest
 
         result = import_admin_mcp_json(McpImportRequest(mcpServers={
             "remote-http": {
@@ -121,8 +121,8 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(items[("mcp_server", "local-stdio")].env, {"K": "V"})
 
     def test_import_mcp_json_rejects_builtin_conflict(self) -> None:
-        from cairn.server.models_pkg import McpImportRequest
         from cairn.server.routers.capabilities import import_admin_mcp_json
+        from cairn.server.schemas import McpImportRequest
 
         result = import_admin_mcp_json(McpImportRequest(mcpServers={
             "kali-server-mcp": {"command": "other"},
@@ -133,8 +133,8 @@ class CapabilityAdminTests(unittest.TestCase):
     def test_skill_source_path_is_required(self) -> None:
         from fastapi import HTTPException
 
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import upsert_admin_capability
+        from cairn.server.schemas import CapabilityAdminRequest
 
         with self.assertRaises(HTTPException) as cm:
             upsert_admin_capability("skill", "missing-path", CapabilityAdminRequest(
@@ -152,8 +152,8 @@ class CapabilityAdminTests(unittest.TestCase):
             catalog_map_from_items,
             expand_task_capabilities,
         )
-        from cairn.server.models_pkg import CapabilityAdminRequest, task_capabilities_map
         from cairn.server.routers.capabilities import get_capability_catalog, upsert_admin_capability
+        from cairn.server.schemas import CapabilityAdminRequest, task_capabilities_map
 
         upsert_admin_capability("skill", "a", CapabilityAdminRequest(
             id="a",
@@ -186,9 +186,9 @@ class CapabilityAdminTests(unittest.TestCase):
     def test_project_create_persists_role_default_skill_in_execution_config(self) -> None:
         import yaml
 
-        from cairn.server.models_pkg import CapabilityAdminRequest, CreateProjectRequest
         from cairn.server.routers.capabilities import get_project_capabilities, upsert_admin_capability
         from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilityAdminRequest, CreateProjectRequest
 
         skill_dir = self.yaml.root / "role-skill"
         skill_dir.mkdir()
@@ -233,12 +233,12 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(boot_snapshots[0].source, "role_default")
 
     def test_probe_mcp_success_updates_yaml_status(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_admin_capability,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "stdio-mcp", CapabilityAdminRequest(
             id="stdio-mcp",
@@ -268,12 +268,12 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:9100/mcp-probe")
 
     def test_probe_mcp_failure_updates_yaml_status(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_admin_capability,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "bad-mcp", CapabilityAdminRequest(
             id="bad-mcp",
@@ -300,12 +300,12 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(items["bad-mcp"].last_probe_status, "error")
 
     def test_probe_all_mcp_updates_each_result(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_all_admin_mcp_servers,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         for capability_id in ("a-mcp", "b-mcp"):
             upsert_admin_capability("mcp_server", capability_id, CapabilityAdminRequest(
@@ -337,12 +337,12 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertFalse(items["b-mcp"].available)
 
     def test_dispatcher_unreachable_marks_target_error(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import (
             get_capability_catalog,
             probe_admin_capability,
             upsert_admin_capability,
         )
+        from cairn.server.schemas import CapabilityAdminRequest
 
         upsert_admin_capability("mcp_server", "offline-mcp", CapabilityAdminRequest(
             id="offline-mcp",
@@ -360,8 +360,8 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertFalse(items["offline-mcp"].available)
 
     def test_skill_probe_remains_local(self) -> None:
-        from cairn.server.models_pkg import CapabilityAdminRequest
         from cairn.server.routers.capabilities import probe_admin_capability, upsert_admin_capability
+        from cairn.server.schemas import CapabilityAdminRequest
 
         skill_dir = self.yaml.root / "skill"
         skill_dir.mkdir()

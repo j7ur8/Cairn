@@ -35,7 +35,7 @@ from cairn.server.config.ai_profiles import (
     update_yaml_ai_profile_models,
     yaml_ai_profile_secret,
 )
-from cairn.server.models_pkg.ai_profiles import (
+from cairn.server.schemas.ai_profiles import (
     AiProfileCheckCompleteRequest,
     AiProfileCheckRequest,
     AiProfileCheckTriggerResponse,

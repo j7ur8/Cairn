@@ -15,7 +15,7 @@ from cairn.server.application.project_io import (
 from cairn.server.application.project_io import (
     upload_project_attachments as upload_project_attachments_command,
 )
-from cairn.server.models_pkg.projects import AttachmentUploadResponse
+from cairn.server.schemas.projects import AttachmentUploadResponse
 
 router = APIRouter(tags=["attachments"])
 

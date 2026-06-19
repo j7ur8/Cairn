@@ -4,7 +4,14 @@ from pydantic import TypeAdapter
 
 from cairn.dispatcher.protocol.base import HttpClientBase
 from cairn.dispatcher.protocol.results import ApiResult
-from cairn.shared.contracts import ProjectDetail, ProjectSummary, ProjectWorkSummary, ProxyConfig, Settings, SystemSettingsAdmin
+from cairn.shared.contracts import (
+    ProjectDetail,
+    ProjectSummary,
+    ProjectWorkSummary,
+    ProxyConfig,
+    Settings,
+    SystemSettingsAdmin,
+)
 
 _PROJECT_SUMMARY_ADAPTER = TypeAdapter(list[ProjectSummary])
 _PROJECT_WORK_SUMMARY_ADAPTER = TypeAdapter(list[ProjectWorkSummary])

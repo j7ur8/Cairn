@@ -233,7 +233,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         if node is None:
             self.skipTest("node is required to execute frontend state helper")
 
-        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.prompts.js"
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
         script = f"""
             import {{ pathToFileURL }} from 'node:url';
 
@@ -306,20 +306,20 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
             encoding="utf-8"
         )
-        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.ui.js").read_text(
+        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-ui.js").read_text(
             encoding="utf-8"
         )
-        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings.js").read_text(
+        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-settings.js").read_text(
             encoding="utf-8"
         )
         settings_admin = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.settings_admin.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-settings-admin.js"
         ).read_text(encoding="utf-8")
-        prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state.prompts.js").read_text(
+        prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js").read_text(
             encoding="utf-8"
         )
         capabilities = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state.capabilities.js"
+            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-capabilities.js"
         ).read_text(encoding="utf-8")
 
         self.assertNotIn("async navigateSettings(section = 'server')", ui)

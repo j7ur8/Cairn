@@ -23,6 +23,7 @@ from cairn.shared.observability.metrics import render_metrics
 @dataclass(slots=True)
 class DispatcherHealthState:
     last_tick_at: Callable[[], float | None]
+    transient_error: Callable[[], dict[str, object] | None] | None = None
 
     def payload(self) -> dict[str, object]:
         errors: list[str] = []
@@ -31,10 +32,18 @@ class DispatcherHealthState:
         except Exception as exc:  # noqa: BLE001 - health endpoint must not crash
             last_tick = None
             errors.append(f"last_tick_at: {type(exc).__name__}: {exc}")
+        transient_error: dict[str, object] | None = None
+        if self.transient_error is not None:
+            try:
+                transient_error = self.transient_error()
+            except Exception as exc:  # noqa: BLE001 - health endpoint must not crash
+                errors.append(f"transient_error: {type(exc).__name__}: {exc}")
         payload: dict[str, object] = {
-            "status": "degraded" if errors else "ok",
+            "status": "degraded" if errors or transient_error else "ok",
             "last_tick_age": None if last_tick is None else max(0.0, time.time() - last_tick),
         }
+        if transient_error:
+            payload["transient_error"] = transient_error
         if errors:
             payload["errors"] = errors
         return payload

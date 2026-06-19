@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from cairn.server.config.files import load_resources_data, save_resources_data, utcnow
-from cairn.server.models_pkg import CapabilityAdminRequest, CapabilityCatalogItem, McpImportResponse
+from cairn.server.schemas import CapabilityAdminRequest, CapabilityCatalogItem, McpImportResponse
 from cairn.shared.task_types import default_capability_task_type_names
 
 
@@ -254,9 +254,12 @@ def _mcp_import_spec_to_body(capability_id: str, spec: dict[str, Any]) -> Capabi
     url = source.get("url") or source.get("httpUrl")
     command = source.get("command")
     transport = "http" if url and not command else "stdio"
-    args = source.get("args") if isinstance(source.get("args"), list) else []
-    env = source.get("env") if isinstance(source.get("env"), dict) else {}
-    headers = source.get("headers") if isinstance(source.get("headers"), dict) else {}
+    raw_args = source.get("args")
+    raw_env = source.get("env")
+    raw_headers = source.get("headers")
+    args = raw_args if isinstance(raw_args, list) else []
+    env = raw_env if isinstance(raw_env, dict) else {}
+    headers = raw_headers if isinstance(raw_headers, dict) else {}
     return CapabilityAdminRequest(
         id=capability_id,
         name=str(source.get("name") or capability_id),

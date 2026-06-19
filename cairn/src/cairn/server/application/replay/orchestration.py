@@ -9,11 +9,11 @@ from cairn.server.application.replay.service import (
     advance_replay_run_in_transaction,
     create_replay_run_in_transaction,
 )
-from cairn.server.models_pkg import (
+from cairn.server.repositories.projects import ProjectRepository
+from cairn.server.schemas import (
     ReplayRunCreateRequest,
     ReplayRunCreateResponse,
 )
-from cairn.server.repositories.projects import ProjectRepository
 
 
 def create_replay_run(project_id: str, body: ReplayRunCreateRequest):

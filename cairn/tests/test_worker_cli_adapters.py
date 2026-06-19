@@ -31,7 +31,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         return worker
 
     def test_build_execute_uses_print_mode(self) -> None:
-        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
 
         result = ClaudeCodeDriver().build_execute(self._worker(), "hello", "11111111-1111-1111-1111-111111111111")
         self.assertIn("--print", result.argv)
@@ -39,7 +39,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertFalse(ClaudeCodeDriver().requires_tty())
 
     def test_build_conclude_uses_print_mode(self) -> None:
-        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
 
         argv = ClaudeCodeDriver().build_conclude(
             self._worker(),
@@ -52,7 +52,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--tools") + 1], "Read")
 
     def test_build_execute_includes_effort_when_configured(self) -> None:
-        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
 
         result = ClaudeCodeDriver().build_execute(
             self._worker_with_effort(),
@@ -64,7 +64,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         self.assertEqual(result.argv[result.argv.index("--effort") + 1], "xhigh")
 
     def test_build_execute_includes_claude_session_plugin_and_skill_dir(self) -> None:
-        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
         context = WorkerExecutionContext(
@@ -96,7 +96,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
         )
 
     def test_build_conclude_omits_claude_capabilities(self) -> None:
-        from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver
+        from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
         context = WorkerExecutionContext(

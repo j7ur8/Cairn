@@ -148,6 +148,8 @@ Edit `config.yaml` and fill in your LLM endpoints and API keys, then start both 
  
 This exports the repository host path for Docker socket worker mounts, builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher loads `config.yaml` from the repository host path and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
 
+Mounting `/var/run/docker.sock` gives the dispatcher effective host Docker administration rights. Treat the dispatcher container as privileged infrastructure: run it only on an isolated host or VM, prefer a Docker socket proxy with an allowlist when possible, and consider rootless Docker or a separate worker-runner host for production deployments.
+
 Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP capability. On macOS / Docker Desktop, start Chrome on the host before running a project:
 
 ```bash
@@ -158,6 +160,20 @@ Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP 
 ```
 
 The worker container connects through Docker's host alias. Cairn resolves `host.docker.internal` to the current container-visible IP before handing the URL to Chrome DevTools, because Chrome may reject `Host: host.docker.internal:9222`. Select `chrome-devtools-host` for the task stage that will use the browser; if the project can complete in Bootstrap, select it under Bootstrap.
+
+### Operations
+
+Run database migrations with `uv run --project cairn alembic upgrade head`. The server also runs migrations during startup, but explicit migration steps are easier to observe and roll back during deployments.
+
+Back up PostgreSQL with `pg_dump` or your managed database snapshot mechanism before upgrades. Restore into an empty database, then run `alembic upgrade head` before starting the server and dispatcher.
+
+Configuration hot reload is intentionally limited. UI-managed dispatch settings, worker definitions, capabilities, roles, task timeouts, and prompt resources can reload the dispatcher. Database URL, JWT secret, server bind/logging, and most infrastructure paths should be treated as restart-required settings.
+
+Keep `server.yaml`, `config.yaml`, `config.resources.yaml`, and `.env` out of git. Example files contain placeholders only. Rotate `server.auth.jwt_secret` by issuing fresh user and dispatcher tokens, updating both server and dispatcher config, then restarting both processes. Rotate provider API keys in `config.yaml` and trigger dispatcher reload or restart workers.
+
+Monitor `/health`, dispatcher `/healthz`, and `/metrics`. Alert on server health `degraded`, dispatcher health `degraded`, missing dispatcher ticks, repeated dispatcher transient failures, high task failure rates, PostgreSQL errors, and observability retention/write failures.
+
+Production Docker images should be pinned by digest (`image@sha256:...`) and should not use `latest`. The included Dockerfiles pin their base image digests and global npm packages; update those pins deliberately during dependency maintenance.
  
 ### Manual
  

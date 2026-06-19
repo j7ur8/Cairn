@@ -221,6 +221,21 @@ roles:
         self.assertEqual(cfg.capabilities.mcp_servers, [])
         self.assertEqual(cfg.server.base_url, "http://server")
 
+    def test_mock_bootstrap_complete_outcome_keeps_legacy_config_compatible(self) -> None:
+        from cairn.shared.config.mock_behavior import resolve_mock_behavior
+
+        behavior = resolve_mock_behavior(
+            "mock",
+            {
+                "MOCK_BOOTSTRAP": (
+                    '{"delay":[0,0],"outcomes":{"complete":"1.0","fact":"0.0",'
+                    '"rejected":"0.0","invalid_json":"0.0","invalid_payload":"0.0","command_fail":"0.0"}}'
+                )
+            },
+        )
+
+        self.assertEqual(behavior["bootstrap"]["outcomes"]["fact"], 1.0)
+
     def test_system_config_uses_explicit_server_path_override(self) -> None:
         from cairn.server import runtime_config
 

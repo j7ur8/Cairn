@@ -26,12 +26,15 @@ class DbMigrationTests(unittest.TestCase):
         self.db.reset_for_tests()
 
     def test_alembic_version_records_head(self) -> None:
+        from alembic.script import ScriptDirectory
+
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql
 
             row = sql.fetchone(conn, "SELECT version_num FROM alembic_version")
             assert row is not None
-        self.assertEqual(row["version_num"], "0004_prompt_snapshots")
+        head = ScriptDirectory.from_config(self.db.alembic_config()).get_current_head()
+        self.assertEqual(row["version_num"], head)
 
     def test_core_indexes_exist(self) -> None:
         expected = {
@@ -48,6 +51,7 @@ class DbMigrationTests(unittest.TestCase):
             "idx_project_execution_capabilities_project_task",
             "idx_facts_project",
             "idx_llm_executions_started",
+            "idx_health_check_results_profile_checked",
         }
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql

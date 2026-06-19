@@ -67,11 +67,13 @@ def save_dispatch_data(data: dict[str, Any], *, reload_dispatcher: bool = True) 
     workers = (data.get("worker_pool") or {}).get("workers") if isinstance(data.get("worker_pool"), dict) else []
     if not (workers or []):
         _atomic_write_yaml(config_yaml_path(), data)
+        _reset_runtime_config()
         return
     _validate_dispatch_data(data)
     config_store().save_dispatch(data)
     if reload_dispatcher:
         trigger_dispatcher_reload()
+    _reset_runtime_config()
 
 
 def save_resources_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> None:
@@ -82,6 +84,13 @@ def save_resources_data(data: dict[str, Any], *, reload_dispatcher: bool = True)
     config_store().save_resources(data)
     if reload_dispatcher:
         trigger_dispatcher_reload()
+    _reset_runtime_config()
+
+
+def _reset_runtime_config() -> None:
+    from cairn.server.runtime_config import reset_runtime_config_cache
+
+    reset_runtime_config_cache()
 
 
 def trigger_dispatcher_reload() -> None:

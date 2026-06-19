@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from cairn.server import db
 from cairn.server.application.project_commands import (
@@ -23,11 +23,14 @@ from cairn.server.application.project_creation import (
     ProjectCreationDraft,
     create_project_from_draft,
 )
-from cairn.server.application.project_read import (
+from cairn.server.application.project_queries import (
     get_project_detail,
+    get_project_graph_delta,
     get_project_poll_state,
     list_project_summaries,
+    list_project_summaries_page,
     list_project_work_summaries,
+    list_project_work_summaries_page,
 )
 from cairn.server.application.reason_commands import (
     claim_reason,
@@ -36,33 +39,46 @@ from cairn.server.application.reason_commands import (
     reason_state,
     release_reason,
 )
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     CompleteRequest,
     CreateProjectRequest,
     HeartbeatRequest,
+    ProjectPollStateResponse,
     ReasonClaimRequest,
     ReasonFinishRequest,
     ReasonState,
     ReopenRequest,
-    ProjectPollStateResponse,
     ReopenResponse,
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )
-from cairn.shared.contracts import Intent, ProjectDetail, ProjectMeta, ProjectSummary, ProjectWorkSummary
+from cairn.shared.contracts import (
+    Intent,
+    ProjectDetail,
+    ProjectGraphDelta,
+    ProjectMeta,
+    ProjectSummary,
+    ProjectSummaryPage,
+    ProjectWorkSummary,
+    ProjectWorkSummaryPage,
+)
 
 router = APIRouter(tags=["projects"])
 
 
-@router.get("/projects", response_model=list[ProjectSummary])
-def list_projects():
+@router.get("/projects", response_model=list[ProjectSummary] | ProjectSummaryPage)
+def list_projects(limit: int | None = Query(default=None, ge=1, le=200), cursor: str | None = None):
     with db.session_scope() as conn:
+        if limit is not None:
+            return list_project_summaries_page(conn, limit=limit, cursor=cursor)
         return list_project_summaries(conn)
 
 
-@router.get("/projects/work", response_model=list[ProjectWorkSummary])
-def list_project_work():
+@router.get("/projects/work", response_model=list[ProjectWorkSummary] | ProjectWorkSummaryPage)
+def list_project_work(limit: int | None = Query(default=None, ge=1, le=200), cursor: str | None = None):
     with db.session_scope() as conn:
+        if limit is not None:
+            return list_project_work_summaries_page(conn, limit=limit, cursor=cursor)
         return list_project_work_summaries(conn)
 
 
@@ -97,6 +113,21 @@ def get_project(project_id: str):
 def get_project_poll(project_id: str):
     with db.session_scope() as conn:
         return get_project_poll_state(conn, project_id)
+
+
+@router.get("/projects/{project_id}/graph", response_model=ProjectGraphDelta)
+def get_project_graph(
+    project_id: str,
+    after_graph_revision: int | None = Query(default=None, ge=0),
+    after_timeline_revision: int | None = Query(default=None, ge=0),
+):
+    with db.session_scope() as conn:
+        return get_project_graph_delta(
+            conn,
+            project_id,
+            after_graph_revision=after_graph_revision,
+            after_timeline_revision=after_timeline_revision,
+        )
 
 
 @router.delete("/projects/{project_id}", status_code=204)

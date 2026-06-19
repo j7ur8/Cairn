@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from cairn.server.capability_expansion import TASK_TYPES, CatalogEntry, catalog_map_from_items
 from cairn.server.config.capabilities import update_yaml_mcp_probe_results
-from cairn.server.models_pkg import CapabilityHealthEntry, TaskCapabilities, TaskCapabilitiesMap
+from cairn.server.schemas import CapabilityHealthEntry, TaskCapabilities, TaskCapabilitiesMap
 
 PROBE_TIMEOUT_SECONDS = 1.5
 CHROME_DEVTOOLS_PROBE_TYPE = "chrome_devtools_http"

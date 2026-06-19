@@ -10,7 +10,7 @@ from cairn.server.application.intent_commands import (
 from cairn.server.application.intent_commands import (
     create_intent as create_intent_command,
 )
-from cairn.server.models_pkg import (
+from cairn.server.schemas import (
     ConcludeRequest,
     ConcludeResponse,
     CreateIntentRequest,

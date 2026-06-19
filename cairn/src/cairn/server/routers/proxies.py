@@ -12,7 +12,7 @@ from cairn.server.config.proxies import (
     list_yaml_proxies,
     update_yaml_proxy,
 )
-from cairn.server.models_pkg.proxies import ProxyCreate, ProxyUpdate
+from cairn.server.schemas.proxies import ProxyCreate, ProxyUpdate
 from cairn.server.security.deps import current_active_superuser
 from cairn.shared.contracts import ProxyConfig, ProxySummary
 
