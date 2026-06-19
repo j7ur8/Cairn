@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-06-17
+生成日期：2026-06-20
 -->
 
 # Cairn 架构与设计文档
@@ -149,14 +149,14 @@ sequenceDiagram
 | Dispatcher Control/Probe | `cairn/src/cairn/dispatcher/health_server.py`, `cairn/src/cairn/dispatcher/mcp_probe.py` | Dispatcher 本地 HTTP 控制面，处理 health/metrics/reload 和 MCP initialize/tools-list 探测 | `/healthz`, `/metrics`, `/reload`, `/mcp-probe` | JSON health/probe result, Prometheus metrics | ContainerManager, shared config |
 | Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
 | Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；热点 SQL 仍只在 execution/event/view/usage/retention repository/query 模块，application/router 不感知 SQL 细节 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
-| Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由原生 ES modules 装配，按 `shared/`、`app/`、`workspace/` 分层，Settings 按域拆分 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind |
+| Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由原生 ES modules 装配，按 `shared/`、`app/`、`workspace/` 分层；项目视图使用轻量 poll-state revision 判断是否刷新完整图 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind |
 | Shared Observability | `cairn/src/cairn/shared/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
 | Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
 | Capabilities | `capabilities/` | 技能、角色、payload、模板、MCP 配置素材 | YAML/Markdown | Worker prompt context | Dispatcher, prompt builder |
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
 | Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
 
-当前 Alembic head 为 `0004_prompt_snapshots`。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+当前 Alembic head 为 `0005_project_poll_revisions`，新增 `projects.graph_revision` 与 `projects.timeline_revision`，服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
 前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_close.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state.settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
 
@@ -167,6 +167,7 @@ sequenceDiagram
 | 调用方 | 被调用方 | 协议/方式 | 用途 |
 |--------|----------|-----------|------|
 | SPA | Cairn Server | HTTP + Bearer token | 项目、图、配置、文件、观测 UI |
+| SPA | Cairn Server | `GET /projects/{id}/poll-state` | 读取 title/status/reason/counts/revision，只有 revision 变化时刷新完整项目图或时间线 |
 | Dispatcher | Cairn Server | HTTP + service JWT | 读取项目、claim/heartbeat/conclude、写观测事件 |
 | Cairn Server | Dispatcher health server | HTTP + service token | 触发 dispatcher reload；通过 `/mcp-probe` 在 worker image 内探测 MCP initialize/tools-list |
 | Server | PostgreSQL | SQLAlchemy session | 持久化 projects/facts/intents/users/events |
@@ -219,6 +220,7 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 | 数据 | 写入方 | 读取方 |
 |------|--------|--------|
 | projects/facts/intents/hints | Server routers, Dispatcher through API | SPA, Dispatcher, export/replay |
+| projects.graph_revision/timeline_revision | project、intent、hint、reason、lease 命令 | SPA poll-state 和项目列表局部刷新 |
 | project_execution_configs | project creation/replay create-only snapshot | Dispatcher, project detail APIs |
 | server.yaml | operator | Server runtime、Dispatcher runtime merge、container limits read API |
 | config.yaml | Server system settings routers, operator | Server runtime、Dispatcher；UI 可写 settings/runtime/tasks/observability/log-retention |
@@ -269,4 +271,4 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 
 - 用户表包含 `is_active` 和 `is_superuser`。
 - `/auth/users` 明确要求 `current_active_superuser`。
-- 多个系统管理面接口当前只要求已登录，未显式要求 superuser；详见 `CODEBASE_ANALYSIS.md` 的已知问题。
+- 敏感写接口和 secret/report/check 管理接口使用 `current_active_superuser`；catalog 和项目快照读取依赖全局 Bearer token。

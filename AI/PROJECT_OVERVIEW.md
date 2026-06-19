@@ -4,7 +4,7 @@
 
 @update: 本文件应在项目发生重大变更（如核心目标调整、技术栈升级、目录重构）时更新。
 
-生成日期：2026-06-17
+生成日期：2026-06-20
 -->
 
 # Cairn 项目概览
@@ -26,7 +26,7 @@ Cairn 采用 Blackboard Architecture。Server 维护事实、意图和提示构�
 | 调度与运行 | ThreadPoolExecutor, Docker SDK, requests |
 | 认证 | JWT, bcrypt |
 | 观测 | Prometheus metrics, 结构化日志, LLM execution events |
-| 前端 | 无构建 SPA, FastAPI partials, Alpine.js ES modules, Tailwind CDN/vendor |
+| 前端 | 无构建 SPA, FastAPI partials, Alpine.js ES modules under `static/js/app`, `static/js/workspace`, `static/js/shared`, Tailwind CDN/vendor |
 | 部署 | `./start.sh` + Docker Compose, uv |
 
 ## 3. 目录结构
@@ -44,7 +44,7 @@ Cairn/
 │   ├── pyproject.toml                # Python 包、依赖和 CLI 入口
 │   ├── alembic.ini                   # Alembic 配置
 │   ├── migrations/                   # PostgreSQL schema migration
-│   ├── src/cairn/                    # Server、Dispatcher、Shared、Observability 分层源码
+│   ├── src/cairn/                    # Server、Dispatcher、Shared 分层源码；前端静态模块在 server/static/js
 │   └── tests/                        # 单元与集成测试
 ├── capabilities/
 │   ├── skills/                       # 领域能力 Skill
@@ -88,7 +88,7 @@ uv run --project cairn python -m pytest -m 'not db'
 uv run --project cairn python -m pytest -m db
 ```
 
-无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。DB 集成测试还包含热点查询 `EXPLAIN` 验收，用于防止 project summary、observability、retention 和 replay 查询退回高成本计划；执行配置测试覆盖创建时冻结的 snapshot 不可覆盖，以及 Dispatcher 缓存返回值防 mutation 污染。
+无本地 PostgreSQL 时，DB 集成测试通过 availability probe clean skip；引用 `reset_postgres_db()` 的测试收集时自动标记为 `db`，`-m 'not db'` 不触发数据库初始化。DB 集成测试还包含热点查询 `EXPLAIN` 验收，用于防止 project summary、observability、retention 和 replay 查询退回高成本计划；执行配置测试覆盖创建时冻结的 snapshot 不可覆盖，以及 Dispatcher 缓存返回值防 mutation 污染。当前项目视图还使用 `/projects/{id}/poll-state` 的 `graph_revision` / `timeline_revision` 做轻量轮询，只有 revision 变化时刷新完整图或时间线。
 
 ## 5. 关键链接
 

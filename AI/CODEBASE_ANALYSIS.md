@@ -8,7 +8,7 @@
 3. 如数据模型或 API 端点有变更，同步更新 ARCHITECTURE.md 中的相关图表
 4. 新增的函数入口点不超过 15 个上限时，追加到入口点列表；超过则替换次重要的
 
-生成日期：2026-06-17
+生成日期：2026-06-20
 -->
 
 # Cairn 全面代码分析
@@ -39,7 +39,7 @@ Cairn 的核心不是固定渗透测试流程，而是一个通用 problem-solvi
 | HTTP Client | requests, tenacity | Dispatcher 调 Server |
 | 认证 | PyJWT, bcrypt | JWT + 密码 hash |
 | 观测 | prometheus-client | HTTP/Dispatcher/Worker metrics |
-| 前端 | Static HTML partials, Alpine, Tailwind, Cytoscape | `server/partials/*` 启动时由 `assemble_index()` 拼装为 SPA shell；Alpine root 由 `static/js/parts.*.js` slices 合并；无构建静态资源 |
+| 前端 | Static HTML partials, Alpine ES modules, Tailwind, Cytoscape | `server/partials/*` 启动时由 `assemble_index()` 拼装为 SPA shell；Alpine root 由 `static/js/app/index.js` 组合 `app/`、`workspace/`、`shared/` 模块；无构建静态资源 |
 | 测试 | pytest + unittest 风格测试文件 | dev 依赖声明 `pytest`，统一入口为 `python -m pytest` |
 
 ## 2. 工程目录结构
@@ -75,10 +75,12 @@ Cairn/
 | `cairn/src/cairn/cli.py` | CLI 入口，启动 Server、Dispatcher 和 DB 命令 |
 | `cairn/src/cairn/server/app.py` | FastAPI app、lifespan、全局鉴权、路由注册、静态文件 |
 | `cairn/src/cairn/server/partials/` | SPA HTML partials，由 `assemble_index()` 拼装 |
-| `cairn/src/cairn/server/static/js/cairn-app.js` | 合并 `CairnParts` slices，保留 duplicate key guard |
-| `cairn/src/cairn/server/static/js/parts.settings*.js` | Settings 导航和聚合 System 管理表单；旧 runtime/tasks/observability/log-retention 分散接口已收敛到 `/system-settings` |
-| `cairn/src/cairn/server/static/js/parts.prompts.js` | Prompt group / role prompt editor 状态和 API 调用 |
-| `cairn/src/cairn/server/static/js/parts.ai_profiles.js`, `parts.proxies.js`, `parts.capabilities.js` | AI Profile、Proxy、Capability 管理与项目选择状态拆分 |
+| `cairn/src/cairn/server/static/js/app/index.js` | Alpine app 入口，导入并组合 core、settings、prompts、AI profile、proxy、workspace 状态模块 |
+| `cairn/src/cairn/server/static/js/app/create-app-state.js` | 合并 app state fragments，默认阻止重复 key 静默覆盖 |
+| `cairn/src/cairn/server/static/js/app/state.core.js` | 全局 API、轮询、登录、导航等核心状态；使用 `/projects/{id}/poll-state` 判定是否刷新完整图或时间线 |
+| `cairn/src/cairn/server/static/js/app/state.settings*.js`, `state.prompts.js`, `state.ai_profiles.js`, `state.proxies.js` | Settings、Prompt group、AI Profile、Proxy 管理状态 |
+| `cairn/src/cairn/server/static/js/workspace/` | 项目列表/图、能力选择、LLM log、replay 等工作区状态 |
+| `cairn/src/cairn/server/static/js/shared/` | API client、表单、偏好、默认值、summary、capability selection 等共享 JS helper |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
 | `cairn/src/cairn/server/orm.py` | 数据表、索引、约束定义 |
 | `cairn/src/cairn/server/application/` | 项目、intent、reason、hints/files/attachments、execution config、capabilities、export、replay 等 HTTP 用例编排；replay 已拆为 service、orchestration、route、attachments、step advancer |
@@ -123,6 +125,7 @@ Cairn/
 | 算法/机制 | 文件位置 | 功能描述 | 复杂度/特性 | 备注 |
 |-----------|----------|----------|-------------|------|
 | Fact-Intent graph expansion | `server/domain/*`, `server/application/*`, `dispatcher/scheduler/*` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
+| Project poll revisions | `server/repositories/projects.py`, `server/application/*`, `server/static/js/app/state.core.js` | 图变更递增 `graph_revision`，title/status/hints/files 等时间线变更递增 `timeline_revision`；SPA 轻量轮询 poll-state 后按 revision 决定是否拉完整项目 | O(1) project row update + 聚合 counts | 降低高频轮询时完整 graph API 压力 |
 | Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
@@ -237,6 +240,8 @@ erDiagram
         text title
         text status
         text created_at
+        bigint graph_revision
+        bigint timeline_revision
         text proxy_id
         text reason_worker
         text reason_run_id
@@ -282,6 +287,7 @@ erDiagram
 | `replay_runs` | `replay_project_id` unique |
 | `replay_steps` | `(run_id, source_intent_id)` unique |
 | `project_execution_configs` | `project_id` primary key；创建/replay 时 insert-only，重复写入是 server invariant failure |
+| `projects.graph_revision`, `projects.timeline_revision` | Alembic `0005_project_poll_revisions` 添加，默认为 0；新项目创建时写入 1 |
 | `proxies` | `type IN ('socks5','http','https')` |
 | `ai_profile_check_requests` | `status IN ('pending','running','completed','failed')` |
 
@@ -300,7 +306,7 @@ erDiagram
 
 | 实体 | 状态 |
 |------|------|
-| Project | `active`、`stopped`、`completed` |
+| Project | `active`、`stopped`、`completed`；另有 `graph_revision`/`timeline_revision` 计数用于 UI polling，不是业务状态 |
 | Intent | open、claimed、concluded、goal completion |
 | Reason | idle、claimed、heartbeat、finished、backoff/blocked |
 | Replay step | `pending`、running/concluded 类状态由 replay 服务维护 |
@@ -308,13 +314,13 @@ erDiagram
 
 ## 7. API 端点
 
-项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器约 85 个。
+项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器 86 个。
 
 | 分组 | 主要端点 | 用途 | 认证 |
 |------|----------|------|------|
 | App | `GET /`, `GET /health`, `GET /metrics` | SPA、健康检查、Prometheus | public |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/refresh`, `POST /auth/users` | 登录、用户信息、刷新、创建用户 | login public；users 需要 superuser |
-| Projects | `GET/POST /projects`, `GET/DELETE /projects/{id}`, `PUT /projects/{id}/title/status` | 项目 CRUD 和状态管理 | Bearer |
+| Projects | `GET/POST /projects`, `GET /projects/work`, `GET/DELETE /projects/{id}`, `GET /projects/{id}/poll-state`, `PUT /projects/{id}/title/status` | 项目 CRUD、调度摘要、轻量轮询状态和状态管理 | Bearer |
 | Execution Configs | `GET /projects/{id}/execution-configs`, `GET /projects/{id}/execution-configs/{task_type}` | 读取创建时冻结的执行配置快照；无 PATCH/更新端点 | Bearer |
 | Reason | `/projects/{id}/reason/*` | reason claim/heartbeat/release/state/finish | Bearer |
 | Complete/Reopen | `POST /projects/{id}/complete`, `POST /projects/{id}/reopen` | 完成或重开项目 | Bearer |
@@ -322,7 +328,7 @@ erDiagram
 | Hints | `POST /projects/{id}/hints` | 添加人工提示 | Bearer |
 | Attachments/Files | `POST /projects/{id}/attachments`, `GET /projects/{id}/files`, `/download` | 附件上传和文件浏览 | Bearer |
 | Export/Replay | `GET /projects/{id}/export`, `POST /projects/{id}/replay-runs` | 导出与复现 | Bearer |
-| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities` | 能力和角色管理；admin MCP probe 经 dispatcher `/mcp-probe` 执行真实 initialize/tools-list | Catalog Bearer；admin 写入/import/probe 需要 superuser |
+| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities` | 能力和角色管理；admin MCP probe 经 dispatcher `/mcp-probe` 执行真实 initialize/tools-list | Catalog/project snapshot Bearer；admin 写入/import/probe 需要 superuser |
 | AI Profiles | `/ai-profiles/*`, `/projects/{id}/ai-profiles` | AI profile catalog、secret、health check | Bearer |
 | Proxies/Settings | `/proxies/*`, `/task-timeouts/defaults` | 系统代理配置和任务超时默认值读取 | Bearer；proxy 写入需要 superuser |
 | System Config | `GET/PUT /system-settings`, `GET /container-limits` | 聚合读写 `settings`、runtime limits、task timeouts、observability、server log/retention；container limits 从固定 `server.yaml` 只读 | GET Bearer；PUT superuser |
@@ -426,11 +432,12 @@ uv run --project cairn cairn db migrate
 
 当前验证状态：
 
-- 仓库当前有 51 个 `test_*.py` 测试文件。
+- 仓库当前有 55 个顶层 `test_*.py` 测试文件。
 - CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src` 和 pytest coverage。
 - 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
 - 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
 - 2026-06-17 新增/更新 execution config 回归覆盖 create-only snapshot、防覆盖、Dispatcher resolver deep-copy 缓存隔离，以及 reload/project clear 缓存失效。
+- 2026-06-20 当前源码包含 project poll-state revision 回归：`test_projects_router.py` 覆盖 `graph_revision`、`timeline_revision`、hint-only timeline bump、intent lifecycle graph bump、conclude/title 分流；`test_static_cache.py` 检查前端使用 poll-state 而不是每 tick 拉完整项目。
 - 2026-06-17 热点查询回归覆盖 config loader 测试路径、project summary 预聚合、execution list 分页后聚合、event view usage 收敛、retention `DELETE ... USING`、replay reachable subgraph，以及 `EXPLAIN` 无 `SubPlan`/join delete 验收。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
@@ -442,6 +449,7 @@ uv run --project cairn cairn db migrate
 | 类型 | 位置 | 说明 |
 |------|------|------|
 | SECURITY | `docker-compose.yaml` | Dispatcher 需要 Docker socket，注释已说明 docker.sock RCE blast radius |
+| TODO/FIXME/HACK | authored source | 当前扫描未发现项目自有显式 TODO/FIXME/HACK 标记 |
 | TODO | `server/static/vendor/*` | vendor 依赖内部 TODO，不属于项目业务代码 |
 | XXX placeholder | `capabilities/templates/*` | 报告模板中的占位字段 |
 
@@ -457,6 +465,7 @@ uv run --project cairn cairn db migrate
 | 已修复 | `facts` 缺 project_id 索引、`llm_executions` 缺 started_at 索引 | `migrations/versions/0003_add_scan_indexes.py` | 新增 `idx_facts_project`（project_id）和 `idx_llm_executions_started`（started_at）；orm.py 同步更新 |
 | Low | Dispatcher 阶段入口仍偏大 | `dispatcher/tasks/bootstrap.py`, `dispatcher/tasks/explore.py`, `dispatcher/tasks/reason.py` | common/process/writeback/release/outcome/text/snapshot 已拆分；TaskSubmitter 提交流水线已统一，阶段主流程仍可继续收敛 |
 | Low | Dispatcher `/mcp-probe` 为同步 probe，会创建 startup container 并顺序探测目标 MCP | `dispatcher/mcp_probe.py`, `dispatcher/health_server.py` | 适合 admin 手动健康检查；不要把 probe-all 放入高频自动轮询，否则会增加 Docker daemon 和 worker image 启动压力 |
+| Low | review docs 曾在工作树中被删除，容易丢失架构上下文 | `AI/` | 本次已恢复并更新；后续 review 应检查 `AI/` 是否仍受版本控制 |
 
 下一阶段可优化空间：
 
@@ -476,7 +485,8 @@ uv run --project cairn cairn db migrate
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
 | 注意 | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
 | 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
-| 注意 | 当前 Alembic head 是 `0004_prompt_snapshots`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | 当前 Alembic head 是 `0005_project_poll_revisions`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | `GET /projects/{id}/poll-state` 只返回轻量 summary/revision；完整 graph 仍来自 `GET /projects/{id}`，前端按 graph/timeline revision 分流刷新。 |
 | 注意 | Execution config 是项目创建时冻结的 snapshot，`version` 固定作为 metadata；需要修改配置时应创建 replay/new project，而不是覆盖原 project snapshot。 |
 | 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后仍可能成为 hot path；项目列表/调度 summaries 已用 repository 预聚合 counts 避免逐项目子查询。 |

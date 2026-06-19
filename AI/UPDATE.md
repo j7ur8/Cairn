@@ -5,6 +5,16 @@
 
 # 更新日志
 
+## 2026-06-20 — Review 与仓库清理同步
+
+- 恢复并更新被工作树删除的 `AI/ARCHITECTURE.md`、`AI/CODEBASE_ANALYSIS.md`、`AI/PROJECT_OVERVIEW.md`，保持 review 文档继续受版本控制。
+- 同步当前 Alembic head：`0005_project_poll_revisions`，记录 `projects.graph_revision` / `timeline_revision` 与 `/projects/{project_id}/poll-state` 轻量轮询模型。
+- 同步前端架构：旧 `parts.*`/`cairn-app.js` 描述替换为 `static/js/app/index.js` + `app/`、`workspace/`、`shared/` ES module 分层。
+- 同步统计：当前扫描约 398 个源码/测试/前端文本文件、86 个 FastAPI route decorator、55 个顶层 `test_*.py` 文件；自有源码未发现显式 TODO/FIXME/HACK 标记。
+- 扩展 `.gitignore`，覆盖 Python cache、virtualenv、coverage/build output、Node/frontend local artifacts、logs、runtime data、本地 config/secrets 和本地 assistant/tool state。
+
+---
+
 ## 2026-06-17 — Execution Config 不可变性与 Dispatcher 缓存隔离同步
 
 - 同步 execution config 语义：`project_execution_configs` 是项目创建/replay 创建时写入的一次性 snapshot，底层 repository 改为 `insert_project_execution_config()`；同一 `project_id` 再次持久化会抛 `ServerInvariantError("project execution config already exists")`，不再 delete child rows 或 upsert 覆盖。
