@@ -40,7 +40,6 @@ def prepare_task_execution(
         return None
     capabilities = inject_project_capabilities(
         config,
-        config.runtime.prompt_group,
         container_manager,
         container_name,
         project_id,

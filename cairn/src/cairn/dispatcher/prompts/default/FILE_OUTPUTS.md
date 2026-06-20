@@ -1,3 +1,5 @@
+# Task
+
 Use project-relative paths for generated artifacts whenever possible.
 
 - `reports/` stores final reports and stage summaries.

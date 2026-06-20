@@ -18,9 +18,10 @@ from cairn.dispatcher.capability_mcp import (
     mcp_json,
 )
 from cairn.dispatcher.capability_probe import validate_selected_mcp
-from cairn.dispatcher.prompt_resources import load_prompt_group_files_appendix
+from cairn.dispatcher.prompting import format_remote_support_appendix
+from cairn.dispatcher.prompt_resources import load_prompt_files_appendix
 from cairn.dispatcher.workers.base import WorkerExecutionContext
-from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
+from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, RemoteSupportConfig, SkillCapabilityConfig, TaskType
 
 LOG = logging.getLogger(__name__)
 
@@ -43,7 +44,6 @@ class CapabilityWriter(Protocol):
 
 def inject_project_capabilities(
     config: DispatchConfig,
-    prompt_group: str,
     container_manager: CapabilityWriter,
     container_name: str,
     project_id: str,
@@ -58,12 +58,21 @@ def inject_project_capabilities(
     files_errors: list[str] = []
     files_appendix = ""
     if include_files_appendix:
-        files_appendix, files_errors = load_prompt_group_files_appendix(prompt_group)
+        files_appendix, files_errors = load_prompt_files_appendix()
+    remote_support = getattr(config, "remote_support", RemoteSupportConfig())
+    remote_support_appendix = format_remote_support_appendix(remote_support)
 
     def render_files_only_instructions() -> str:
-        if not files_appendix.strip():
+        if not files_appendix.strip() and not remote_support_appendix.strip():
             return ""
-        return instructions("", "", [], [], files_appendix=files_appendix)
+        return instructions(
+            "",
+            "",
+            [],
+            [],
+            files_appendix=files_appendix,
+            remote_support_appendix=remote_support_appendix,
+        )
 
     if not selection_data:
         if not include_files_appendix:
@@ -200,6 +209,7 @@ def inject_project_capabilities(
         injected_mcp_servers,
         injected_skills,
         files_appendix=files_appendix,
+        remote_support_appendix=remote_support_appendix,
     )
     return CapabilityInjection(
         instructions=rendered_instructions,

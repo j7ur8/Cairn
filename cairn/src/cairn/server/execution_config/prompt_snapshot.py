@@ -8,6 +8,7 @@ from typing import Any
 
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
 
+DEFAULT_PROMPT_GROUP = "default"
 PROMPT_SNAPSHOT_NAMES = (
     "bootstrap.md",
     "bootstrap_conclude.md",
@@ -40,7 +41,8 @@ def _sort_prompt_names(names: list[str]) -> list[str]:
     return sorted(names, key=lambda name: (0, core_order[name]) if name in core_order else (1, name))
 
 
-def load_prompt_snapshot(prompt_group: str) -> dict[str, Any]:
+def load_prompt_snapshot() -> dict[str, Any]:
+    prompt_group = DEFAULT_PROMPT_GROUP
     prompts_dir = resources.files("cairn.dispatcher.prompts")
     group_dir = prompts_dir.joinpath(prompt_group)
     if not group_dir.is_dir():

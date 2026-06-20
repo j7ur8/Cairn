@@ -28,7 +28,7 @@ def build_project_execution_config_snapshot(
 ) -> ProjectExecutionConfigSnapshot:
     revision = config_revision()
     dispatch_config = load_dispatch_config(dispatch_config_path())
-    prompt_snapshot = load_prompt_snapshot(dispatch_config.runtime.prompt_group)
+    prompt_snapshot = load_prompt_snapshot()
     role = get_yaml_role_snapshot(role_id) if role_id else None
     role_default_skill_ids = [
         str(item).strip()

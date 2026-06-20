@@ -141,7 +141,6 @@ class RuntimeConfig(BaseModel):
     max_project_workers: int = Field(gt=0)
     interval: int = Field(gt=0)
     healthcheck_timeout: int = Field(gt=0)
-    prompt_group: str = Field(min_length=1)
 
 
 class DispatcherConfig(BaseModel):

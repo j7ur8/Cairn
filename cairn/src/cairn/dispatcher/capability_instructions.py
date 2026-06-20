@@ -13,6 +13,7 @@ def instructions(
     skills: list[SkillCapabilityConfig],
     *,
     files_appendix: str = "",
+    remote_support_appendix: str = "",
 ) -> str:
     lines = [
         "# Project Capabilities",
@@ -47,6 +48,8 @@ def instructions(
             lines.append("")
     if files_appendix.strip():
         lines.extend(["## Files", files_appendix.strip(), ""])
+    if remote_support_appendix.strip():
+        lines.extend(["## Remote Support", remote_support_appendix.strip(), ""])
     lines.extend(
         [
             "Use these capabilities only for the current Cairn project/challenge.",

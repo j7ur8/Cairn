@@ -15,7 +15,6 @@ dispatcher:
     max_running_projects: 3
     max_project_workers: 2
     healthcheck_timeout: 10
-    prompt_group: mock
 tasks:
   bootstrap:
     timeout: 120

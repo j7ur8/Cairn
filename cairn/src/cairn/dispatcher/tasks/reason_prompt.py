@@ -61,7 +61,6 @@ def build_reason_execute_prompt(
         load_prompt_from_execution_config(
             prepared.execution_config,
             "reason.md",
-            config.runtime.prompt_group,
             reporter,
         ),
         {

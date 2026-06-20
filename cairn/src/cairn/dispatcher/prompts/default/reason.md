@@ -6,7 +6,7 @@ You need to judge two things:
 
 {role_instructions}
 
-# Output Requirements
+## Output Requirements
 Return exactly one marker-wrapped JSON object. The marker chooses the reason state. Do not output markdown fences, explanations, or text outside the marker pair. The JSON inside the marker must be valid, including proper escaping of quotation marks.
 
 If Goal has been satisfied, return:
@@ -24,7 +24,7 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 {"accepted": true, "data": {}}
 00003462130721312360912
 
-## Rules
+### Rules
 - First determine whether the facts already satisfy Goal. If they do, `data.complete.from` must come from `Valid facts`, and `data.complete.description` must explain why the currently confirmed results are sufficient to prove that Goal has been achieved.
 - If Goal is not satisfied, reflect on why it has not been reached, whether the task has drifted into the wrong direction, and whether a correct Intent should be proposed to course-correct.
 - Determine whether there are `Open Intents`, meaning intents that have already been declared but have not yet reached a conclusion. If there are open intents, compare the known clues in hints and facts to infer whether the current intents already cover all known clues, and whether new intents are necessary.
@@ -35,18 +35,18 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - An Intent may originate from multiple facts.
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
-## Context
-### Graph
+### Context
+#### Graph
 ```
 {graph_yaml}
 ```
 
-### Valid facts
+#### Valid facts
 ```
 {fact_ids}
 ```
 
-### Open Intents
+#### Open Intents
 ```
 {open_intents}
 ```

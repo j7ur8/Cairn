@@ -58,7 +58,7 @@ class DispatcherLoop:
     def _init_core(self, config_path: Path) -> None:
         self.config_path = config_path
         self.config = load_dispatch_config(config_path)
-        validate_prompt_resources(self.config.runtime.prompt_group)
+        validate_prompt_resources()
         self.client = CairnClient(self.config.server_url, api_token=self.config.system.auth.dispatcher_api_token)
         self._last_tick_at: float | None = None
         self._transient_failure_count = 0

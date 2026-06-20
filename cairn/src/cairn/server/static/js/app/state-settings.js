@@ -33,11 +33,7 @@ export function createSettingsState() {
     async loadSettingsSection(section = this.settingsSection) {
       const loaders = {
         system: () => this.loadSystemSettings(),
-        prompts: async () => {
-          if (!this.runtimeLimitsForm?.prompt_group) await this.loadSystemSettings();
-          this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || this.promptGroupSelected;
-          await this.loadPromptGroups();
-        },
+        prompts: () => this.loadPrompts(),
         ai: () => this.loadAiProfiles(),
         capabilities: () => this.loadCapabilityAdmin(),
         proxies: () => this.loadProxies(),

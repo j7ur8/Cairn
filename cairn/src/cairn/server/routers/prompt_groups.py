@@ -13,10 +13,7 @@ from cairn.server.security.deps import current_active_superuser
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
 
 router = APIRouter(tags=["prompt-groups"])
-
-
-class PromptGroupSummary(BaseModel):
-    groups: list[str]
+DEFAULT_PROMPT_GROUP = "default"
 
 
 class PromptGroupTemplateUpdate(BaseModel):
@@ -48,19 +45,11 @@ def _roles_root() -> Path:
     return (resources_yaml_path().parent / "capabilities" / "roles").resolve()
 
 
-def _validate_group_name(group: str) -> str:
-    if not group or group in {".", ".."}:
-        raise HTTPException(status_code=404, detail="prompt group not found")
-    if any(ch in group for ch in ("/", "\\")) or not all(ch.isalnum() or ch in {"_", "-", "."} for ch in group):
-        raise HTTPException(status_code=404, detail="prompt group not found")
-    return group
-
-
-def _group_dir(group: str) -> Path:
+def _default_group_dir() -> Path:
     root = _prompts_root()
-    group_path = (root / _validate_group_name(group)).resolve()
+    group_path = (root / DEFAULT_PROMPT_GROUP).resolve()
     if not group_path.is_relative_to(root) or not group_path.is_dir():
-        raise HTTPException(status_code=404, detail="prompt group not found")
+        raise HTTPException(status_code=404, detail="default prompt templates not found")
     return group_path
 
 
@@ -73,9 +62,9 @@ def _validate_template_name(name: str) -> str:
     return name
 
 
-def _template_path(group: str, name: str) -> Path:
+def _template_path(name: str) -> Path:
     name = _validate_template_name(name)
-    group_path = _group_dir(group)
+    group_path = _default_group_dir()
     target = (group_path / Path(name)).resolve()
     if not target.is_relative_to(group_path) or not target.is_file():
         raise HTTPException(status_code=404, detail="prompt template not found")
@@ -102,8 +91,8 @@ def _role_prompt_path(path: str) -> Path:
     return target
 
 
-def _validate_template_content(group: str, name: str, content: str) -> None:
-    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(group, DEFAULT_PROMPT_REQUIRED_TOKENS)
+def _validate_template_content(name: str, content: str) -> None:
+    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(DEFAULT_PROMPT_GROUP, DEFAULT_PROMPT_REQUIRED_TOKENS)
     missing = [token for token in required_tokens.get(name, ()) if token not in content]
     if missing:
         raise HTTPException(
@@ -112,11 +101,11 @@ def _validate_template_content(group: str, name: str, content: str) -> None:
         )
 
 
-def _detail_for_group(group: str) -> dict[str, Any]:
-    if not is_complete_prompt_group_dir(_group_dir(group)):
-        raise HTTPException(status_code=400, detail=f"prompt group {group} missing resource: FILE_OUTPUTS.md")
+def _detail_for_group() -> dict[str, Any]:
+    if not is_complete_prompt_group_dir(_default_group_dir()):
+        raise HTTPException(status_code=400, detail="default prompt templates missing resource: FILE_OUTPUTS.md")
     try:
-        return load_prompt_snapshot(group)
+        return load_prompt_snapshot()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -148,21 +137,9 @@ def _detail_for_role_prompts() -> dict[str, Any]:
     }
 
 
-@router.get("/prompt-groups", response_model=PromptGroupSummary)
-def list_prompt_groups():
-    root = _prompts_root()
-    groups = sorted(
-        child.name
-        for child in root.iterdir()
-        if is_complete_prompt_group_dir(child)
-    )
-    return {"groups": groups}
-
-
-@router.get("/prompt-groups/{group}", response_model=PromptGroupDetail)
-def read_prompt_group(group: str):
-    _group_dir(group)
-    return _detail_for_group(group)
+@router.get("/prompt-templates", response_model=PromptGroupDetail)
+def read_prompt_group():
+    return _detail_for_group()
 
 
 @router.get("/role-prompts", response_model=RolePromptDetail)
@@ -170,19 +147,18 @@ def read_role_prompts():
     return _detail_for_role_prompts()
 
 
-@router.put("/prompt-groups/{group}/{name}", response_model=PromptGroupDetail)
+@router.put("/prompt-templates/{name}", response_model=PromptGroupDetail)
 def update_prompt_template_legacy(
-    group: str,
     name: str,
     body: PromptGroupTemplateUpdate,
     _superuser=Depends(current_active_superuser),
 ):
     if "/" in name:
         raise HTTPException(status_code=400, detail="invalid prompt template name")
-    target = _template_path(group, name)
-    _validate_template_content(group, name, body.content)
+    target = _template_path(name)
+    _validate_template_content(name, body.content)
     target.write_text(body.content, encoding="utf-8")
-    return _detail_for_group(group)
+    return _detail_for_group()
 
 
 @router.put("/role-prompts/{role_path:path}", response_model=RolePromptDetail)
@@ -196,15 +172,14 @@ def update_role_prompt(
     return _detail_for_role_prompts()
 
 
-@router.put("/prompt-groups/{group}/templates/{template_path:path}", response_model=PromptGroupDetail)
+@router.put("/prompt-templates/templates/{template_path:path}", response_model=PromptGroupDetail)
 def update_prompt_template(
-    group: str,
     template_path: str,
     body: PromptGroupTemplateUpdate,
     _superuser=Depends(current_active_superuser),
 ):
     name = _validate_template_name(template_path)
-    target = _template_path(group, name)
-    _validate_template_content(group, name, body.content)
+    target = _template_path(name)
+    _validate_template_content(name, body.content)
     target.write_text(body.content, encoding="utf-8")
-    return _detail_for_group(group)
+    return _detail_for_group()

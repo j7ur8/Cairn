@@ -1,7 +1,7 @@
 export function createSettingsAdminState() {
   return {
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
-    runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20, prompt_group: 'default' },
+    runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20 },
     taskTimeoutsForm: {
       bootstrap_timeout: 300, bootstrap_conclude_timeout: 90,
       explore_timeout: 300, explore_conclude_timeout: 90,
@@ -41,7 +41,6 @@ export function createSettingsAdminState() {
       Object.assign(this.observabilityForm, o);
       this.observabilityForm.redaction_patterns_text = (o.redaction_patterns || []).join('\n');
       Object.assign(this.serverLogRetentionForm, data.server_log_retention || {});
-      if (!this.promptGroupSelected) this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || 'default';
     },
 
     systemSettingsPayload() {

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from cairn.dispatcher.contracts import parse_sentinel_fact_output
 from cairn.dispatcher.prompting import (
-    format_remote_support_instructions,
     load_prompt_from_execution_config,
     render_prompt,
 )
@@ -33,12 +32,10 @@ def _build_prompt(ctx: IntentTaskContext) -> str:
         load_prompt_from_execution_config(
             prepared.execution_config,
             "bootstrap.md",
-            ctx.config.runtime.prompt_group,
             ctx.reporter,
         ),
         {
             **bootstrap_prompt_replacements(ctx.project),
-            "remote_support_instructions": format_remote_support_instructions(ctx.config.remote_support),
             "capability_instructions": prepared.capabilities.instructions,
             "role_instructions": prepared.role.instructions,
         },

@@ -80,7 +80,6 @@ class DbMigrationTests(unittest.TestCase):
                   AND (table_name, column_name) IN (
                     ('intent_sources', 'position'),
                     ('ai_profile_check_requests', 'error_message'),
-                    ('project_execution_configs', 'prompt_group'),
                     ('project_execution_configs', 'prompts_sha256')
                   )
                 """
@@ -88,7 +87,6 @@ class DbMigrationTests(unittest.TestCase):
         defaults = {(row["table_name"], row["column_name"]): row["column_default"] for row in rows}
         self.assertIn("0", defaults[("intent_sources", "position")])
         self.assertIn("''", defaults[("ai_profile_check_requests", "error_message")])
-        self.assertIn("''", defaults[("project_execution_configs", "prompt_group")])
         self.assertIn("''", defaults[("project_execution_configs", "prompts_sha256")])
 
     def test_prompt_snapshot_columns_exist(self) -> None:
@@ -102,12 +100,12 @@ class DbMigrationTests(unittest.TestCase):
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'project_execution_configs'
-                  AND column_name IN ('prompt_group', 'prompts_json', 'prompts_sha256')
+                  AND column_name IN ('prompts_json', 'prompts_sha256')
                 """
             )
         self.assertEqual(
             {row["column_name"] for row in rows},
-            {"prompt_group", "prompts_json", "prompts_sha256"},
+            {"prompts_json", "prompts_sha256"},
         )
 
 

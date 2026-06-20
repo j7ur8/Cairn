@@ -40,11 +40,6 @@ def _column_exists(table_name: str, column_name: str) -> bool:
 def upgrade() -> None:
     if not _table_exists("project_execution_configs"):
         return
-    if not _column_exists("project_execution_configs", "prompt_group"):
-        op.add_column(
-            "project_execution_configs",
-            sa.Column("prompt_group", sa.Text(), nullable=False, server_default=""),
-        )
     if not _column_exists("project_execution_configs", "prompts_json"):
         op.add_column(
             "project_execution_configs",
@@ -64,5 +59,3 @@ def downgrade() -> None:
         op.drop_column("project_execution_configs", "prompts_sha256")
     if _column_exists("project_execution_configs", "prompts_json"):
         op.drop_column("project_execution_configs", "prompts_json")
-    if _column_exists("project_execution_configs", "prompt_group"):
-        op.drop_column("project_execution_configs", "prompt_group")

@@ -28,11 +28,11 @@ def insert_project_execution_config(
         """
         INSERT INTO project_execution_configs (
             project_id, version, role_id, role_json, proxy_id,
-            dispatch_sha256, resources_sha256, prompt_group, prompts_json,
+            dispatch_sha256, resources_sha256, prompts_json,
             prompts_sha256, created_at, updated_at
         ) VALUES (
             :project_id, :version, :role_id, :role_json, :proxy_id,
-            :dispatch_sha256, :resources_sha256, :prompt_group, :prompts_json,
+            :dispatch_sha256, :resources_sha256, :prompts_json,
             :prompts_sha256, :created_at, :updated_at
         )
         """,
@@ -44,7 +44,6 @@ def insert_project_execution_config(
             "proxy_id": snapshot.proxy_id,
             "dispatch_sha256": snapshot.revision["dispatch_sha256"],
             "resources_sha256": snapshot.revision["resources_sha256"],
-            "prompt_group": snapshot.prompt_snapshot["prompt_group"],
             "prompts_json": json.dumps(snapshot.prompt_snapshot, ensure_ascii=False, sort_keys=True),
             "prompts_sha256": snapshot.prompt_snapshot["prompts_sha256"],
             "created_at": now,

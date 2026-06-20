@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from importlib import resources
 
+DEFAULT_PROMPT_GROUP = "default"
 
-def load_prompt_group_files_appendix(prompt_group: str) -> tuple[str, list[str]]:
+
+def load_prompt_files_appendix() -> tuple[str, list[str]]:
+    prompt_group = DEFAULT_PROMPT_GROUP
     try:
         text = (
             resources.files("cairn.dispatcher.prompts")

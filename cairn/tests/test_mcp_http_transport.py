@@ -111,7 +111,6 @@ dispatcher:
     max_running_projects: 1
     max_project_workers: 1
     healthcheck_timeout: 1
-    prompt_group: "default"
 tasks:
   bootstrap: {timeout: 1, conclude_timeout: 1}
   reason: {timeout: 1, max_intents: 1}
@@ -275,7 +274,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         return SimpleNamespace(
-            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[
                     McpServerCapabilityConfig(
@@ -319,7 +317,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
-            "default",
             manager,
             "worker",
             "proj",
@@ -360,7 +357,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
         config = SimpleNamespace(
-            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[],
                 skills=[
@@ -387,7 +383,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
-            "default",
             manager,
             "worker",
             "proj",
@@ -418,7 +413,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
         config = SimpleNamespace(
-            runtime=SimpleNamespace(prompt_group="default"),
             capabilities=SimpleNamespace(
                 mcp_servers=[],
                 skills=[
@@ -445,7 +439,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
-            "default",
             manager,
             "worker",
             "proj",
@@ -476,7 +469,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
-            "default",
             manager,
             "worker",
             "proj",
@@ -502,7 +494,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore"]),
-            "default",
             manager,
             "worker",
             "proj",
@@ -523,7 +514,6 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["reason"]),
-            "default",
             manager,
             "worker",
             "proj",
@@ -539,6 +529,73 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
 
+    def test_explore_injection_includes_remote_support_without_selected_capabilities(self):
+        from types import SimpleNamespace
+
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.shared.config import RemoteDnslogConfig, RemoteSshConfig, RemoteSupportConfig
+
+        config = SimpleNamespace(
+            capabilities=self._config(["reason"]).capabilities,
+            remote_support=RemoteSupportConfig(
+                enabled=True,
+                dnslog=RemoteDnslogConfig(url="https://dnslog.example"),
+                ssh=RemoteSshConfig(host="helper.example", port=2222, username="operator", password="secret"),
+            ),
+        )
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            config,
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            self._selection(),
+        )
+
+        self.assertEqual(result.mcp_servers, [])
+        self.assertEqual(result.skills, [])
+        self.assertIn("# Project Capabilities", result.instructions)
+        self.assertIn("## Files", result.instructions)
+        self.assertIn("## Remote Support", result.instructions)
+        self.assertIn("CAIRN_DNSLOG_URL", result.instructions)
+        self.assertIn("CAIRN_REMOTE_SSH_HOST", result.instructions)
+        self.assertIn("CAIRN_REMOTE_SSH_PASSWORD", result.instructions)
+        self.assertNotIn("# Remote Support", result.instructions.splitlines())
+        self.assertEqual(manager.files, [])
+        self.assertEqual(manager.directories, [])
+
+    def test_explore_injection_excludes_remote_support_when_disabled(self):
+        from types import SimpleNamespace
+
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.shared.config import RemoteDnslogConfig, RemoteSupportConfig
+
+        config = SimpleNamespace(
+            capabilities=self._config(["reason"]).capabilities,
+            remote_support=RemoteSupportConfig(
+                enabled=False,
+                dnslog=RemoteDnslogConfig(url="https://dnslog.example"),
+            ),
+        )
+
+        manager = self.FakeContainerManager()
+        result = inject_project_capabilities(
+            config,
+            manager,
+            "worker",
+            "proj",
+            "explore",
+            "task",
+            self._selection(),
+        )
+
+        self.assertIn("## Files", result.instructions)
+        self.assertNotIn("## Remote Support", result.instructions)
+        self.assertNotIn("CAIRN_DNSLOG_URL", result.instructions)
+
     def test_explore_injection_reports_missing_files_appendix_without_blocking(self):
         from unittest.mock import patch
 
@@ -546,12 +603,11 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         manager = self.FakeContainerManager()
         with patch(
-            "cairn.dispatcher.capabilities.load_prompt_group_files_appendix",
+            "cairn.dispatcher.capabilities.load_prompt_files_appendix",
             return_value=("", ["files: prompt group default missing FILE_OUTPUTS.md"]),
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
-                "default",
                 manager,
                 "worker",
                 "proj",
@@ -573,12 +629,11 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         manager = self.FakeContainerManager()
         with patch(
-            "cairn.dispatcher.capabilities.load_prompt_group_files_appendix",
+            "cairn.dispatcher.capabilities.load_prompt_files_appendix",
             return_value=("", ["files: prompt group default FILE_OUTPUTS.md is empty"]),
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
-                "default",
                 manager,
                 "worker",
                 "proj",

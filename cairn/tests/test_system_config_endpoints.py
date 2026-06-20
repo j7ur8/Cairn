@@ -39,7 +39,6 @@ class SystemSettingsSchemaTests(unittest.TestCase):
             max_project_workers=4,
             interval=3,
             healthcheck_timeout=20,
-            prompt_group="default",
         )
         self.assertEqual(r.max_workers, 8)
         self.assertIsNone(ContainerLimits().nano_cpus)
@@ -53,16 +52,6 @@ class SystemSettingsSchemaTests(unittest.TestCase):
                 max_project_workers=1,
                 interval=1,
                 healthcheck_timeout=1,
-                prompt_group="x",
-            )
-        with self.assertRaises(Exception):
-            RuntimeLimits(
-                max_workers=1,
-                max_running_projects=1,
-                max_project_workers=1,
-                interval=1,
-                healthcheck_timeout=1,
-                prompt_group="",
             )
         with self.assertRaises(Exception):
             ServerLogRetention(log_format="xml")  # type: ignore[arg-type]
@@ -109,7 +98,6 @@ class SystemSettingsEndpointTests(unittest.TestCase):
                     "max_running_projects": 2,
                     "max_project_workers": 2,
                     "healthcheck_timeout": 1,
-                    "prompt_group": "default",
                 },
             },
             "tasks": {
@@ -144,7 +132,6 @@ class SystemSettingsEndpointTests(unittest.TestCase):
 
         self.assertEqual(result.settings.intent_timeout, 5)
         self.assertEqual(result.runtime_limits.max_workers, 2)
-        self.assertEqual(result.runtime_limits.prompt_group, "default")
         self.assertEqual(result.task_timeouts.reason.max_intents, 2)
         self.assertTrue(result.observability.record_prompts)
         self.assertTrue(result.observability.record_stdout)
@@ -162,7 +149,6 @@ class SystemSettingsEndpointTests(unittest.TestCase):
         body.runtime_limits.max_project_workers = 6
         body.runtime_limits.interval = 5
         body.runtime_limits.healthcheck_timeout = 30
-        body.runtime_limits.prompt_group = "production"
         body.task_timeouts.bootstrap.timeout = 600
         body.task_timeouts.bootstrap.conclude_timeout = 120
         body.task_timeouts.explore.timeout = 650
@@ -190,7 +176,6 @@ class SystemSettingsEndpointTests(unittest.TestCase):
 
         self.assertEqual(result.settings.intent_timeout, 15)
         self.assertEqual(reread.runtime_limits.max_workers, 16)
-        self.assertEqual(reread.runtime_limits.prompt_group, "production")
         self.assertEqual(reread.task_timeouts.bootstrap.conclude_timeout, 120)
         self.assertEqual(reread.task_timeouts.explore.timeout, 650)
         self.assertEqual(reread.task_timeouts.reason.max_intents, 7)

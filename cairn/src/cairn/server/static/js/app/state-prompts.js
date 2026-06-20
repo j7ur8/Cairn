@@ -1,25 +1,17 @@
 export function createPromptsState() {
   return {
     promptTemplateNames: [],
-    promptGroups: [],
-    promptGroupSelected: '',
     promptTemplateSelected: 'bootstrap.md',
-    promptGroupDetail: null,
+    promptTemplateDetail: null,
     rolePromptDetail: null,
     promptEditorContent: '',
     promptEditorSaving: false,
     promptEditorLoading: false,
 
-    async loadPromptGroups() {
+    async loadPrompts() {
       this.promptEditorLoading = true;
       try {
-        if (!this.runtimeLimitsForm.prompt_group) await this.loadSystemSettings();
-        const data = await this.api('GET', '/prompt-groups');
-        this.promptGroups = Array.isArray(data.groups) ? data.groups : [];
-        if (!this.promptGroupSelected) {
-          this.promptGroupSelected = this.runtimeLimitsForm.prompt_group || this.promptGroups[0] || '';
-        }
-        if (this.promptGroupSelected) await this.loadPromptGroup(this.promptGroupSelected);
+        await this.loadPromptGroup();
       } catch(e) {
         this.showToast(e.message, 'error');
       } finally {
@@ -27,16 +19,14 @@ export function createPromptsState() {
       }
     },
 
-    async loadPromptGroup(group = this.promptGroupSelected) {
-      if (!group) return;
-      this.promptGroupSelected = group;
+    async loadPromptGroup() {
       this.promptEditorLoading = true;
       try {
         const [detail, roles] = await Promise.all([
-          this.api('GET', `/prompt-groups/${encodeURIComponent(group)}`),
+          this.api('GET', '/prompt-templates'),
           this.api('GET', '/role-prompts'),
         ]);
-        this.promptGroupDetail = detail;
+        this.promptTemplateDetail = detail;
         this.rolePromptDetail = roles || { role_names: [], roles: {}, role_sha256: {} };
         const promptNames = this.sortedPromptTemplateNames(
           Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
@@ -83,11 +73,11 @@ export function createPromptsState() {
 
     promptResourceKey(type, path) {
       if (type === 'role') return `roles/${path}`;
-      return `prompts/${this.promptGroupSelected}/${path}`;
+      return `prompts/${path}`;
     },
 
     promptEditorResources() {
-      const detail = this.promptGroupDetail || {};
+      const detail = this.promptTemplateDetail || {};
       const roles = this.rolePromptDetail || {};
       const promptNames = this.sortedPromptTemplateNames(
         Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
@@ -144,7 +134,7 @@ export function createPromptsState() {
       const resource = this.promptSelectedResource();
       if (!resource) return '';
       if (resource.type === 'role') return this.rolePromptDetail?.roles?.[resource.path] || '';
-      return this.promptGroupDetail?.prompts?.[resource.path] || '';
+      return this.promptTemplateDetail?.prompts?.[resource.path] || '';
     },
 
     promptSelectedWritable() {
@@ -165,8 +155,8 @@ export function createPromptsState() {
       return resource?.sha || '';
     },
 
-    promptGroupSha() {
-      return this.promptGroupDetail?.prompts_sha256 || '';
+    promptTemplateSetSha() {
+      return this.promptTemplateDetail?.prompts_sha256 || '';
     },
 
     promptTemplateRoutePath(name) {
@@ -175,7 +165,7 @@ export function createPromptsState() {
 
     async savePromptTemplate() {
       const resource = this.promptSelectedResource();
-      if (!this.promptGroupSelected || !resource || resource.writable === false) return;
+      if (!resource || resource.writable === false) return;
       this.promptEditorSaving = true;
       try {
         if (resource.type === 'role') {
@@ -191,12 +181,12 @@ export function createPromptsState() {
         } else {
           const detail = await this.api(
             'PUT',
-            `/prompt-groups/${encodeURIComponent(this.promptGroupSelected)}/templates/${this.promptTemplateRoutePath(resource.path)}`,
+            `/prompt-templates/templates/${this.promptTemplateRoutePath(resource.path)}`,
             { content: this.promptEditorContent || '' },
           );
-          this.promptGroupDetail = detail;
+          this.promptTemplateDetail = detail;
           this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
-          this.promptEditorContent = this.promptGroupDetail?.prompts?.[resource.path] || '';
+          this.promptEditorContent = this.promptTemplateDetail?.prompts?.[resource.path] || '';
           this.showToast('Prompt template saved');
         }
       } catch(e) {

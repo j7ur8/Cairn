@@ -18,18 +18,18 @@ Normal return example:
 - Do not put long data blobs in the marked text.
 - On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
-# Context
-## Origin
+## Context
+### Origin
 ```
 {origin}
 ```
 
-## Goal
+### Goal
 ```
 {goal}
 ```
 
-## Hints
+### Hints
 ```
 {hints}
 ```

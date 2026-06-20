@@ -61,7 +61,6 @@ def run_bootstrap_conclude_fallback(
         load_prompt_from_execution_config(
             execution_config,
             "bootstrap_conclude.md",
-            config.runtime.prompt_group,
             reporter,
         ),
         bootstrap_prompt_replacements(project),

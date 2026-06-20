@@ -223,7 +223,6 @@ def upgrade() -> None:
         sa.Column("proxy_id", sa.Text(), nullable=True),
         sa.Column("dispatch_sha256", sa.Text(), server_default="", nullable=False),
         sa.Column("resources_sha256", sa.Text(), server_default="", nullable=False),
-        sa.Column("prompt_group", sa.Text(), server_default="", nullable=False),
         sa.Column("prompts_json", sa.Text(), nullable=True),
         sa.Column("prompts_sha256", sa.Text(), server_default="", nullable=False),
         sa.Column("created_at", sa.Text(), nullable=False),

@@ -4,8 +4,11 @@ from importlib import resources
 
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
 
+DEFAULT_PROMPT_GROUP = "default"
 
-def validate_prompt_resources(prompt_group: str) -> None:
+
+def validate_prompt_resources() -> None:
+    prompt_group = DEFAULT_PROMPT_GROUP
     prompts_dir = resources.files("cairn.dispatcher.prompts")
     group_dir = prompts_dir.joinpath(prompt_group)
     if not group_dir.is_dir():

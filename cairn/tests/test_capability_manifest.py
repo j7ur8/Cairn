@@ -249,6 +249,26 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         self.assertIn("reports/ stores summaries.", text)
         self.assertLess(text.index("## Files"), text.index("Use these capabilities only for the current Cairn project/challenge."))
 
+    def test_execute_instructions_render_remote_support_as_subsection(self) -> None:
+        from cairn.dispatcher.capability_instructions import instructions
+
+        text = instructions(
+            "/tmp/cap/mcp.json",
+            "/tmp/cap/skills",
+            [],
+            [],
+            remote_support_appendix="Authorized Remote Support may be available.\n\n- CAIRN_DNSLOG_URL:",
+        )
+
+        self.assertIn("# Project Capabilities", text)
+        self.assertIn("## Remote Support", text)
+        self.assertIn("CAIRN_DNSLOG_URL", text)
+        self.assertNotIn("# Remote Support", text.splitlines())
+        self.assertLess(
+            text.index("## Remote Support"),
+            text.index("Use these capabilities only for the current Cairn project/challenge."),
+        )
+
     def test_reason_instructions_render_metadata_without_paths(self) -> None:
         from cairn.dispatcher.capability_instructions import reason_instructions
         from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
@@ -285,30 +305,30 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         self.assertNotIn("/tmp/cap", text)
         self.assertNotIn("## Files", text)
 
-    def test_load_prompt_group_files_appendix_reads_file_outputs_document(self) -> None:
+    def test_load_prompt_files_appendix_reads_file_outputs_document(self) -> None:
         from cairn.dispatcher import prompt_resources as mod
 
         with tempfile.TemporaryDirectory() as tmp:
-            group_dir = Path(tmp) / "mock"
+            group_dir = Path(tmp) / "default"
             group_dir.mkdir()
             (group_dir / "FILE_OUTPUTS.md").write_text("Use reports/.\n", encoding="utf-8")
             with mock.patch.object(mod.resources, "files") as files:
                 files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
-                text, errors = mod.load_prompt_group_files_appendix("mock")
+                text, errors = mod.load_prompt_files_appendix()
 
         self.assertEqual(text, "Use reports/.")
         self.assertEqual(errors, [])
 
-    def test_load_prompt_group_files_appendix_reports_missing_file(self) -> None:
+    def test_load_prompt_files_appendix_reports_missing_file(self) -> None:
         from cairn.dispatcher import prompt_resources as mod
 
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(mod.resources, "files") as files:
                 files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
-                text, errors = mod.load_prompt_group_files_appendix("missing")
+                text, errors = mod.load_prompt_files_appendix()
 
         self.assertEqual(text, "")
-        self.assertEqual(errors, ["files: prompt group missing missing FILE_OUTPUTS.md"])
+        self.assertEqual(errors, ["files: prompt group default missing FILE_OUTPUTS.md"])
 
 
 if __name__ == "__main__":

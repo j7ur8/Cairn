@@ -34,7 +34,7 @@ def _make_config(*workers):
     runtime = RuntimeConfig(
         interval=1, max_workers=1, max_project_workers=1,
         max_running_projects=1,
-        healthcheck_timeout=1, prompt_group="g",
+        healthcheck_timeout=1,
     )
     tasks = TasksConfig(
         bootstrap=BootstrapTaskConfig(timeout=5, conclude_timeout=5),

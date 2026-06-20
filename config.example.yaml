@@ -17,7 +17,6 @@ dispatcher:
     max_running_projects: 3
     max_project_workers: 4
     healthcheck_timeout: 20
-    prompt_group: default
 tasks:
   bootstrap:
     timeout: 300

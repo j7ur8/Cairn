@@ -216,7 +216,6 @@ class ProjectExecutionConfigRow(Base):
     proxy_id: Mapped[str | None] = mapped_column(Text)
     dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     resources_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    prompt_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     prompts_json: Mapped[str | None] = mapped_column(Text)
     prompts_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)

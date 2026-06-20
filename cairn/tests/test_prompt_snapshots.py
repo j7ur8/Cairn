@@ -11,6 +11,18 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class PromptSnapshotTests(unittest.TestCase):
+    def test_prompt_markdown_files_have_only_task_h1(self) -> None:
+        prompts_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts"
+
+        for path in prompts_dir.rglob("*.md"):
+            with self.subTest(path=path.relative_to(prompts_dir).as_posix()):
+                h1s = [
+                    line.removeprefix("# ").strip()
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("# ") and not line.startswith("## ")
+                ]
+                self.assertEqual(h1s, ["Task"])
+
     def test_default_templates_keep_role_in_task_and_exclude_it_from_conclude(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
 
@@ -23,9 +35,9 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("# Task\n", bootstrap)
         self.assertIn("# Task\n", explore)
         self.assertIn("# Task\n", reason)
-        self.assertIn("{role_instructions}", bootstrap.split("# Output Requirements", 1)[0])
-        self.assertIn("{role_instructions}", explore.split("# Output Requirements", 1)[0])
-        self.assertIn("{role_instructions}", reason.split("# Output Requirements", 1)[0])
+        self.assertIn("{role_instructions}", bootstrap.split("## Output Requirements", 1)[0])
+        self.assertIn("{role_instructions}", explore.split("## Output Requirements", 1)[0])
+        self.assertIn("{role_instructions}", reason.split("## Output Requirements", 1)[0])
         self.assertNotIn("{role_instructions}", bootstrap_conclude)
         self.assertNotIn("{role_instructions}", explore_conclude)
 
@@ -33,7 +45,7 @@ class PromptSnapshotTests(unittest.TestCase):
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         explore = (default_dir / "explore.md").read_text(encoding="utf-8")
 
-        output_requirements = explore.split("# Output Requirements", 1)[1].split("# Rules", 1)[0]
+        output_requirements = explore.split("## Output Requirements", 1)[1].split("## Rules", 1)[0]
         self.assertIn("32173462130721312360912", output_requirements)
         self.assertIn("plain text", output_requirements)
         self.assertIn("Do not output JSON", output_requirements)
@@ -43,7 +55,7 @@ class PromptSnapshotTests(unittest.TestCase):
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         reason = (default_dir / "reason.md").read_text(encoding="utf-8")
 
-        output_requirements = reason.split("# Output Requirements", 1)[1].split("## Rules", 1)[0]
+        output_requirements = reason.split("## Output Requirements", 1)[1].split("### Rules", 1)[0]
         self.assertIn("32173462130721312360912", output_requirements)
         self.assertIn("84913462130721312360912", output_requirements)
         self.assertIn("00003462130721312360912", output_requirements)
@@ -63,27 +75,39 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("{open_intents}", reason)
         self.assertIn("{max_intents}", reason)
 
+    def test_default_bootstrap_and_explore_use_capability_instructions_only(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
+        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+
+        for name, prompt in (("bootstrap.md", bootstrap), ("explore.md", explore)):
+            with self.subTest(name=name):
+                self.assertIn("{capability_instructions}", prompt)
+                self.assertNotIn("{remote_" "support_instructions}", prompt)
+                h1s = [line for line in prompt.splitlines() if line.startswith("# ") and not line.startswith("## ")]
+                self.assertEqual(h1s, ["# Task"])
+
     def test_load_prompt_snapshot_hash_changes_with_content(self) -> None:
         from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
 
-        first = load_prompt_snapshot("mock")
+        first = load_prompt_snapshot()
         original = first["prompts"]["reason.md"]
         prompts = dict(first["prompts"])
         prompts["reason.md"] = f"{original}\nextra"
         with tempfile.TemporaryDirectory() as tmp:
-            group_dir = Path(tmp) / "mock"
+            group_dir = Path(tmp) / "default"
             group_dir.mkdir()
             for name, content in prompts.items():
                 (group_dir / name).write_text(content, encoding="utf-8")
             with mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files") as files:
                 files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
-                changed = load_prompt_snapshot("mock")
+                changed = load_prompt_snapshot()
 
         self.assertEqual(
             set(first["prompts"]),
             {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md", "FILE_OUTPUTS.md"},
         )
-        self.assertEqual(first["prompt_group"], "mock")
+        self.assertEqual(first["prompt_group"], "default")
         self.assertNotEqual(first["prompts_sha256"], changed["prompts_sha256"])
 
     def test_load_prompt_from_execution_config_uses_snapshot(self) -> None:
@@ -93,7 +117,6 @@ class PromptSnapshotTests(unittest.TestCase):
         prompt = load_prompt_from_execution_config(
             {"prompt_snapshot": {"prompts": {"reason.md": "SNAPSHOT"}}},
             "reason.md",
-            "mock",
             reporter,
         )
 
@@ -105,10 +128,10 @@ class PromptSnapshotTests(unittest.TestCase):
 
         reporter = mock.Mock()
         with mock.patch("cairn.dispatcher.prompting.load_prompt", return_value="CURRENT") as fallback:
-            prompt = load_prompt_from_execution_config({}, "reason.md", "mock", reporter)
+            prompt = load_prompt_from_execution_config({}, "reason.md", reporter)
 
         self.assertEqual(prompt, "CURRENT")
-        fallback.assert_called_once_with("mock", "reason.md")
+        fallback.assert_called_once_with("reason.md")
         reporter.emit_error.assert_called_once()
 
 

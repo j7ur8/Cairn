@@ -91,7 +91,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             header = sql.fetchone(
                 conn,
                 """
-                SELECT prompt_group, prompts_json, prompts_sha256
+                SELECT prompts_json, prompts_sha256
                 FROM project_execution_configs
                 WHERE project_id = :project_id
                 """,
@@ -126,7 +126,6 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual([row["task_type"] for row in ai_rows], ["bootstrap", "explore", "reason"])
         assert header is not None
         prompt_snapshot = json.loads(header["prompts_json"])
-        self.assertEqual(header["prompt_group"], "default")
         self.assertEqual(prompt_snapshot["prompt_group"], "default")
         self.assertEqual(
             set(prompt_snapshot["prompts"]),

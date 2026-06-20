@@ -32,8 +32,6 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         _write_prompt_group(self.root, "default")
-        _write_prompt_group(self.root, "custom")
-
         import cairn.server.routers.prompt_groups as prompt_groups
 
         self.router = prompt_groups
@@ -55,24 +53,12 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.root_patch.stop()
         self.tmp.cleanup()
 
-    def test_list_prompt_groups(self) -> None:
-        result = self.router.list_prompt_groups()
-
-        self.assertEqual(result["groups"], ["custom", "default"])
-
-    def test_list_prompt_groups_excludes_group_missing_file_outputs(self) -> None:
-        (self.root / "custom" / "FILE_OUTPUTS.md").unlink()
-
-        result = self.router.list_prompt_groups()
-
-        self.assertEqual(result["groups"], ["default"])
-
     def test_read_prompt_group_returns_templates_and_hashes(self) -> None:
         roles_dir = self.root / "default" / "roles"
         roles_dir.mkdir()
         (roles_dir / "redteam.md").write_text("extra role prompt\n", encoding="utf-8")
 
-        result = self.router.read_prompt_group("default")
+        result = self.router.read_prompt_group()
 
         self.assertEqual(result["prompt_group"], "default")
         self.assertEqual(
@@ -98,7 +84,7 @@ class PromptGroupAdminTests(unittest.TestCase):
         (self.root / "default" / "FILE_OUTPUTS.md").unlink()
 
         with self.assertRaises(HTTPException) as cm:
-            self.router.read_prompt_group("default")
+            self.router.read_prompt_group()
 
         self.assertEqual(cm.exception.status_code, 400)
         self.assertIn("missing resource: FILE_OUTPUTS.md", cm.exception.detail)
@@ -133,10 +119,10 @@ class PromptGroupAdminTests(unittest.TestCase):
     def test_update_prompt_template_writes_file_and_updates_hash(self) -> None:
         from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS
 
-        before = self.router.read_prompt_group("default")
+        before = self.router.read_prompt_group()
         content = "updated reason\n" + " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS["reason.md"]) + "\n"
         body = self.router.PromptGroupTemplateUpdate(content=content)
-        after = self.router.update_prompt_template_legacy("default", "reason.md", body)
+        after = self.router.update_prompt_template_legacy("reason.md", body)
 
         self.assertEqual((self.root / "default" / "reason.md").read_text(encoding="utf-8"), content)
         self.assertEqual(after["prompts"]["reason.md"], content)
@@ -148,10 +134,10 @@ class PromptGroupAdminTests(unittest.TestCase):
         roles_dir.mkdir()
         (roles_dir / "redteam.md").write_text("original role prompt\n", encoding="utf-8")
 
-        before = self.router.read_prompt_group("default")
+        before = self.router.read_prompt_group()
         content = "updated role prompt\n"
         body = self.router.PromptGroupTemplateUpdate(content=content)
-        after = self.router.update_prompt_template("default", "roles/redteam.md", body)
+        after = self.router.update_prompt_template("roles/redteam.md", body)
 
         self.assertEqual((roles_dir / "redteam.md").read_text(encoding="utf-8"), content)
         self.assertEqual(after["prompts"]["roles/redteam.md"], content)
@@ -164,14 +150,14 @@ class PromptGroupAdminTests(unittest.TestCase):
         (roles_dir / "redteam.md").write_text("original role prompt\n", encoding="utf-8")
         body = self.router.PromptGroupTemplateUpdate(content="no placeholders required here\n")
 
-        after = self.router.update_prompt_template("default", "roles/redteam.md", body)
+        after = self.router.update_prompt_template("roles/redteam.md", body)
 
         self.assertEqual(after["prompts"]["roles/redteam.md"], "no placeholders required here\n")
 
     def test_file_outputs_template_is_writable_without_placeholder_validation(self) -> None:
         body = self.router.PromptGroupTemplateUpdate(content="updated file outputs\n")
 
-        after = self.router.update_prompt_template_legacy("default", "FILE_OUTPUTS.md", body)
+        after = self.router.update_prompt_template_legacy("FILE_OUTPUTS.md", body)
 
         self.assertEqual((self.root / "default" / "FILE_OUTPUTS.md").read_text(encoding="utf-8"), "updated file outputs\n")
         self.assertEqual(after["prompts"]["FILE_OUTPUTS.md"], "updated file outputs\n")
@@ -183,25 +169,21 @@ class PromptGroupAdminTests(unittest.TestCase):
         body = self.router.PromptGroupTemplateUpdate(content="{graph_yaml}\n")
 
         with self.assertRaises(HTTPException) as cm:
-            self.router.update_prompt_template_legacy("default", "reason.md", body)
+            self.router.update_prompt_template_legacy("reason.md", body)
 
         self.assertEqual(cm.exception.status_code, 400)
         self.assertIn("missing placeholders", cm.exception.detail)
         self.assertEqual((self.root / "default" / "reason.md").read_text(encoding="utf-8"), original)
 
-    def test_invalid_group_name_and_template_name_are_rejected(self) -> None:
+    def test_invalid_template_name_is_rejected(self) -> None:
         from fastapi import HTTPException
 
-        with self.assertRaises(HTTPException) as group_cm:
-            self.router.read_prompt_group("../default")
         with self.assertRaises(HTTPException) as name_cm:
             self.router.update_prompt_template_legacy(
-                "default",
                 "../reason.md",
                 self.router.PromptGroupTemplateUpdate(content="x"),
             )
 
-        self.assertEqual(group_cm.exception.status_code, 404)
         self.assertEqual(name_cm.exception.status_code, 400)
 
     def test_nested_template_invalid_paths_are_rejected(self) -> None:
@@ -211,7 +193,6 @@ class PromptGroupAdminTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaises(HTTPException) as cm:
                     self.router.update_prompt_template(
-                        "default",
                         name,
                         self.router.PromptGroupTemplateUpdate(content="x"),
                     )
@@ -239,8 +220,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
 
             const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
             const state = createPromptsState();
-            state.promptGroupSelected = 'default';
-            state.promptGroupDetail = {{
+            state.promptTemplateDetail = {{
               prompt_names: ['reason.md', 'roles/redteam.md'],
               prompts: {{
                 'reason.md': 'reason prompt',
@@ -290,8 +270,8 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         )
         result = json.loads(completed.stdout)
 
-        self.assertEqual(result["labels"]["prompts/default/reason.md"], "reason.md")
-        self.assertEqual(result["labels"]["prompts/default/roles/redteam.md"], "redteam.md")
+        self.assertEqual(result["labels"]["prompts/reason.md"], "reason.md")
+        self.assertEqual(result["labels"]["prompts/roles/redteam.md"], "redteam.md")
         self.assertEqual(result["labels"]["roles/cypher-ctf-operator/ROLE.md"], "cypher-ctf-operator")
         self.assertEqual(result["labels"]["roles/legacy/custom.md"], "legacy")
         self.assertEqual(result["labels"]["roles/custom.md"], "custom.md")
@@ -331,15 +311,19 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn("async saveServerSettings()", settings)
         self.assertIn("async loadSystemSettings()", settings_admin)
         self.assertIn("async saveSystemSettings()", settings_admin)
-        self.assertIn("async loadPromptGroups()", prompts)
-        self.assertIn("async loadPromptGroup(group = this.promptGroupSelected)", prompts)
+        self.assertIn("async loadPrompts()", prompts)
+        self.assertIn("async loadPromptGroup()", prompts)
+        self.assertIn("/prompt-templates", prompts)
         self.assertIn("promptTemplateRoutePath(name)", prompts)
         self.assertIn("settingsSection === 'prompts'", view)
-        self.assertIn('data-testid="prompts-group"', view)
+        self.assertNotIn('data-testid="prompts-group"', view)
         self.assertIn('data-testid="prompts-editor"', view)
         self.assertIn('data-testid="prompts-save"', view)
         self.assertIn("promptEditorResources()", prompts)
         self.assertIn("promptSelectedWritable()", prompts)
+        self.assertNotIn("promptGroupSelected", prompts)
+        self.assertNotIn("promptGroups", prompts)
+        self.assertNotIn("/prompt-groups", prompts)
         self.assertNotIn("promptTemplateNames: ['bootstrap.md'", prompts)
         self.assertNotIn("/prompt-groups", capabilities)
         self.assertNotIn("/role-prompts", capabilities)

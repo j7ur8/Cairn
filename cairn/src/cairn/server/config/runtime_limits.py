@@ -16,7 +16,7 @@ def get_runtime_limits() -> RuntimeLimits:
         raise HTTPException(500, "config.yaml dispatcher.runtime section missing")
     missing = [k for k in (
         "max_workers", "max_running_projects", "max_project_workers",
-        "interval", "healthcheck_timeout", "prompt_group",
+        "interval", "healthcheck_timeout",
     ) if k not in runtime]
     if missing:
         raise HTTPException(500, f"config.yaml dispatcher.runtime missing: {', '.join(missing)}")
@@ -26,7 +26,6 @@ def get_runtime_limits() -> RuntimeLimits:
         max_project_workers=int(runtime["max_project_workers"]),
         interval=int(runtime["interval"]),
         healthcheck_timeout=int(runtime["healthcheck_timeout"]),
-        prompt_group=str(runtime["prompt_group"]),
     )
 
 

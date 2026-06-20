@@ -50,10 +50,6 @@
             <label class="text-[11px] text-slate-400 mb-1 block font-medium">Healthcheck Timeout (seconds)</label>
             <input type="number" x-model.number="runtimeLimitsForm.healthcheck_timeout" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
           </div>
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Prompt Group</label>
-            <input type="text" x-model="runtimeLimitsForm.prompt_group" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-          </div>
         </div>
         <div x-show="runtimeLimitsForm.max_project_workers > runtimeLimitsForm.max_workers" class="text-[11px] text-rose-500 font-medium">max_project_workers cannot exceed max_workers</div>
       </div>
@@ -620,21 +616,13 @@
           <p class="text-[11px] text-slate-400 mt-0.5">Edit system prompt source templates for new execution snapshots. Existing project snapshots remain unchanged.</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <button data-testid="prompts-reload" @click="loadPromptGroup(promptGroupSelected)" :disabled="promptEditorLoading || !promptGroupSelected" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed">Reload</button>
-          <button data-testid="prompts-save" @click="savePromptTemplate()" :disabled="promptEditorSaving || !promptGroupSelected || !promptTemplateSelected || !promptSelectedWritable()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed" x-text="promptEditorSaving ? 'Saving...' : 'Save'"></button>
+          <button data-testid="prompts-reload" @click="loadPromptGroup()" :disabled="promptEditorLoading" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed">Reload</button>
+          <button data-testid="prompts-save" @click="savePromptTemplate()" :disabled="promptEditorSaving || !promptTemplateSelected || !promptSelectedWritable()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed" x-text="promptEditorSaving ? 'Saving...' : 'Save'"></button>
         </div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
         <div class="min-h-0 flex flex-col gap-3">
-          <div class="shrink-0">
-            <label class="text-[11px] text-slate-400 mb-1 block font-medium">Group</label>
-            <select data-testid="prompts-group" x-model="promptGroupSelected" @change="loadPromptGroup(promptGroupSelected)" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-              <template x-for="group in promptGroups" :key="`prompt-group:${group}`">
-                <option :value="group" x-text="group"></option>
-              </template>
-            </select>
-          </div>
           <div class="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
             <div class="text-[11px] text-slate-400 font-medium">Resources</div>
             <template x-if="promptTemplateNames.length === 0">
@@ -659,8 +647,8 @@
               <div data-testid="prompts-template-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptTemplateSha() || '-'"></div>
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Group sha256</div>
-              <div data-testid="prompts-group-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptGroupSha() || '-'"></div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Template set sha256</div>
+              <div data-testid="prompts-template-set-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptTemplateSetSha() || '-'"></div>
             </div>
           </div>
           <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>

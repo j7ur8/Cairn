@@ -69,7 +69,6 @@ def _read_runtime_limits(data: dict[str, Any]) -> RuntimeLimits:
             "max_project_workers",
             "interval",
             "healthcheck_timeout",
-            "prompt_group",
         )
         if key not in runtime
     ]
@@ -81,7 +80,6 @@ def _read_runtime_limits(data: dict[str, Any]) -> RuntimeLimits:
         max_project_workers=int(runtime["max_project_workers"]),
         interval=int(runtime["interval"]),
         healthcheck_timeout=int(runtime["healthcheck_timeout"]),
-        prompt_group=str(runtime["prompt_group"]),
     )
 
 

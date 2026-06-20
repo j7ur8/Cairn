@@ -110,7 +110,6 @@ def minimal_dispatcher_config() -> dict[str, Any]:
             "max_running_projects": 2,
             "max_project_workers": 2,
             "healthcheck_timeout": 1,
-            "prompt_group": "default",
         },
     }
 

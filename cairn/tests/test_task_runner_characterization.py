@@ -148,7 +148,6 @@ def _patch_bootstrap(
     p(mock.patch.object(bootstrap_mod, "render_prompt", return_value="PROMPT"))
     p(mock.patch.object(bootstrap_mod, "load_prompt_from_execution_config", return_value="TMPL"))
     p(mock.patch.object(bootstrap_mod, "bootstrap_prompt_replacements", return_value={}))
-    p(mock.patch.object(bootstrap_mod, "format_remote_support_instructions", return_value=""))
     p(mock.patch.object(bootstrap_mod, "project_capability_data", return_value={}))
     p(mock.patch.object(bootstrap_mod, "capability_manifest_payload", return_value={}))
     fallback = p(mock.patch.object(bootstrap_mod, "run_bootstrap_conclude_fallback", return_value="failed"))
@@ -199,11 +198,10 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         self.assertEqual(buffer.text(), "89abcdef")
         self.assertTrue(buffer.truncated)
 
-    def test_prepare_task_execution_passes_runtime_prompt_group_to_capability_injection(self) -> None:
+    def test_prepare_task_execution_uses_default_capability_injection(self) -> None:
         import cairn.dispatcher.tasks.runner as runner_mod
 
         config = mock.Mock()
-        config.runtime.prompt_group = "mock"
         client = mock.Mock()
         reporter = mock.Mock()
         role_injection = mock.Mock(summary="", errors=[])
@@ -228,7 +226,8 @@ class BootstrapCharacterizationTests(unittest.TestCase):
 
         self.assertIsNotNone(prepared)
         inject_caps.assert_called_once()
-        self.assertEqual(inject_caps.call_args.args[1], "mock")
+        self.assertEqual(inject_caps.call_args.args[1], mock.ANY)
+        self.assertEqual(inject_caps.call_args.args[2], "worker")
 
     def test_role_instructions_render_inside_task_section(self) -> None:
         template = (_REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default" / "bootstrap.md").read_text(
@@ -241,13 +240,12 @@ class BootstrapCharacterizationTests(unittest.TestCase):
                 "origin": "origin",
                 "goal": "goal",
                 "hints": "[]",
-                "remote_support_instructions": "",
                 "capability_instructions": "",
                 "role_instructions": "## Project Type\nThis is a CTF project.",
             },
         )
 
-        task_section = prompt.split("# Output Requirements", 1)[0]
+        task_section = prompt.split("## Output Requirements", 1)[0]
         self.assertIn("## Project Type\nThis is a CTF project.", task_section)
         self.assertNotIn("selected a primary role", prompt)
 
@@ -394,7 +392,6 @@ def _run_explore(cancellation, lease_failure=None):
 class ExploreCharacterizationTests(unittest.TestCase):
     def test_explore_conclude_prompt_does_not_include_role_instructions(self) -> None:
         config = mock.Mock()
-        config.runtime.prompt_group = "default"
         container_manager = mock.Mock()
         intent = mock.Mock(id="intent_1", description="intent description")
 
@@ -408,10 +405,10 @@ class ExploreCharacterizationTests(unittest.TestCase):
                 "prompt_snapshot": {
                     "prompts": {
                         "explore_conclude.md": (
-                            "# Task\nsummary only\n\n# Context\n"
-                            "## Graph\n```\n{graph_yaml}\n```\n"
-                            "## Current Intent\n```\n{intent_id}\n```\n"
-                            "## Current Intent Description\n```\n{intent_description}\n```\n"
+                            "# Task\nsummary only\n\n## Context\n"
+                            "### Graph\n```\n{graph_yaml}\n```\n"
+                            "### Current Intent\n```\n{intent_id}\n```\n"
+                            "### Current Intent Description\n```\n{intent_description}\n```\n"
                         )
                     }
                 }

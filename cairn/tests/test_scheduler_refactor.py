@@ -263,7 +263,6 @@ class TaskSubmitterTests(unittest.TestCase):
         next_config.system.auth.dispatcher_api_token = "next-token"
         next_config.container = object()
         next_config.runtime.max_workers = 3
-        next_config.runtime.prompt_group = "default"
         next_config.workers = [object()]
 
         loop = MagicMock()

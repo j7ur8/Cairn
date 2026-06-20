@@ -20,7 +20,6 @@ def _dispatch_config_payload(mcp_servers: list[dict]) -> dict:
                 "max_running_projects": 1,
                 "max_project_workers": 1,
                 "healthcheck_timeout": 1,
-                "prompt_group": "default",
             }
         },
         "tasks": {

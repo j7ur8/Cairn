@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from cairn.dispatcher.prompting import (
-    format_remote_support_instructions,
     load_prompt_from_execution_config,
     render_prompt,
 )
@@ -28,7 +27,6 @@ def build_explore_execute_prompt(
         load_prompt_from_execution_config(
             prepared.execution_config,
             "explore.md",
-            config.runtime.prompt_group,
             reporter,
         ),
         {
@@ -40,7 +38,6 @@ def build_explore_execute_prompt(
             ),
             "intent_id": intent.id,
             "intent_description": intent.description,
-            "remote_support_instructions": format_remote_support_instructions(config.remote_support),
             "capability_instructions": prepared.capabilities.instructions,
             "role_instructions": prepared.role.instructions,
         },
@@ -61,7 +58,6 @@ def build_explore_conclude_prompt(
         load_prompt_from_execution_config(
             execution_config,
             "explore_conclude.md",
-            config.runtime.prompt_group,
             reporter,
         ),
         {

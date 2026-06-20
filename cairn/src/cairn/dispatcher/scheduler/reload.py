@@ -31,7 +31,7 @@ class DispatcherReloader:
             raise PermissionError("invalid reload token")
         with self.lock:
             next_config = load_dispatch_config(self.config_path)
-            validate_prompt_resources(next_config.runtime.prompt_group)
+            validate_prompt_resources()
             next_client = CairnClient(next_config.server_url, api_token=next_config.system.auth.dispatcher_api_token)
             next_container_manager = ContainerManager(
                 next_config.container,
