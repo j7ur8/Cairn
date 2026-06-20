@@ -17,7 +17,7 @@ from cairn.server.config.capabilities import (
     list_yaml_capabilities,
     upsert_yaml_capability,
 )
-from cairn.server.config.roles import list_yaml_roles
+from cairn.server.config.roles import list_yaml_roles, update_yaml_role_default_skills
 from cairn.server.schemas import (
     CapabilityAdminRequest,
     CapabilityAdminResponse,
@@ -28,6 +28,7 @@ from cairn.server.schemas import (
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectRoleResponse,
+    RoleDefaultSkillsUpdate,
     RoleCatalogItem,
 )
 from cairn.server.security.deps import current_active_superuser
@@ -129,6 +130,15 @@ def update_project_capabilities(
 @router.get("/roles/catalog", response_model=list[RoleCatalogItem])
 def get_role_catalog():
     return list_yaml_roles()
+
+
+@router.put("/roles/admin/{role_id}/default-skills", response_model=RoleCatalogItem)
+def update_role_default_skills(
+    role_id: str,
+    body: RoleDefaultSkillsUpdate,
+    _superuser=Depends(current_active_superuser),
+):
+    return update_yaml_role_default_skills(role_id, body.default_skill_ids)
 
 
 @router.get("/projects/{project_id}/role", response_model=ProjectRoleResponse)

@@ -90,17 +90,83 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertIn("missing resource: FILE_OUTPUTS.md", cm.exception.detail)
 
     def test_read_role_prompts_returns_markdown_files_and_hashes(self) -> None:
+        import yaml
+
         role_root = self.root / "capabilities" / "roles"
         (role_root / "cypher-ctf-operator").mkdir(parents=True)
         (role_root / "cypher-ctf-operator" / "ROLE.md").write_text("ctf role\n", encoding="utf-8")
         (role_root / "cypher-pentest-operator").mkdir(parents=True)
         (role_root / "cypher-pentest-operator" / "ROLE.md").write_text("pentest role\n", encoding="utf-8")
+        (self.root / "config.resources.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {"mcp_servers": [], "skills": []},
+                    "roles": [
+                        {
+                            "id": "cypher-ctf-operator",
+                            "name": "CTF Operator",
+                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
+                            "default_skill_ids": ["cypher-ctf"],
+                            "available": True,
+                        },
+                        {
+                            "id": "cypher-pentest-operator",
+                            "name": "Pentest Operator",
+                            "default_skill_ids": [],
+                            "available": False,
+                        },
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
 
         result = self.router.read_role_prompts()
 
         self.assertEqual(result["role_names"], ["cypher-ctf-operator/ROLE.md", "cypher-pentest-operator/ROLE.md"])
         self.assertEqual(result["roles"]["cypher-ctf-operator/ROLE.md"], "ctf role\n")
         self.assertRegex(result["role_sha256"]["cypher-ctf-operator/ROLE.md"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            result["role_metadata"]["cypher-ctf-operator/ROLE.md"],
+            {
+                "role_id": "cypher-ctf-operator",
+                "name": "CTF Operator",
+                "default_skill_ids": ["cypher-ctf"],
+                "available": True,
+            },
+        )
+        self.assertFalse(result["role_metadata"]["cypher-pentest-operator/ROLE.md"]["available"])
+
+    def test_read_role_prompts_metadata_prefers_source_path(self) -> None:
+        import yaml
+
+        role_root = self.root / "capabilities" / "roles"
+        (role_root / "custom-location").mkdir(parents=True)
+        (role_root / "custom-location" / "ROLE.md").write_text("custom role\n", encoding="utf-8")
+        (self.root / "config.resources.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {"mcp_servers": [], "skills": []},
+                    "roles": [
+                        {
+                            "id": "role-id",
+                            "name": "Role Name",
+                            "source_path": "capabilities/roles/custom-location/ROLE.md",
+                            "default_skill_ids": ["skill1"],
+                        }
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.router.read_role_prompts()
+
+        self.assertIn("custom-location/ROLE.md", result["role_metadata"])
+        self.assertEqual(result["role_metadata"]["custom-location/ROLE.md"]["role_id"], "role-id")
+        self.assertNotIn("role-id/ROLE.md", result["role_metadata"])
 
     def test_update_role_prompt_writes_file_and_updates_hash(self) -> None:
         role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
@@ -244,12 +310,25 @@ class PromptSettingsFrontendTests(unittest.TestCase):
                 'legacy/custom.md': 'legacy-sha',
                 'custom.md': 'custom-sha',
               }},
+              role_metadata: {{
+                'cypher-ctf-operator/ROLE.md': {{
+                  role_id: 'cypher-ctf-operator',
+                  name: 'CTF Operator',
+                  default_skill_ids: ['cypher-ctf'],
+                  available: true,
+                }},
+              }},
             }};
+            state.promptCapabilityCatalog = [
+              {{ id: 'cypher-ctf', name: 'CTF', kind: 'skill' }},
+              {{ id: 'kali-server-mcp', name: 'Kali', kind: 'mcp_server' }},
+            ];
 
             const resources = state.promptEditorResources();
             const roleResource = resources.find(resource => resource.path === 'cypher-ctf-operator/ROLE.md');
             state.promptTemplateNames = resources.map(resource => resource.key);
             state.promptTemplateSelected = roleResource.key;
+            state.syncPromptRoleRequiredSkills();
 
             console.log(JSON.stringify({{
               labels: Object.fromEntries(resources.map(resource => [resource.key, state.promptResourceDisplayName(resource)])),
@@ -258,6 +337,11 @@ class PromptSettingsFrontendTests(unittest.TestCase):
               selectedContent: state.promptSelectedResourceContent(),
               selectedSha: state.promptTemplateSha(),
               routePath: state.promptTemplateRoutePath(roleResource.path),
+              isRole: state.promptSelectedIsRole(),
+              roleName: state.promptSelectedRoleName(),
+              selectedSkillIds: state.promptRoleRequiredSkillIds,
+              skillOptions: state.promptAvailableSkillOptions().map(item => item.id),
+              canEditRequiredSkills: state.promptRoleCanEditRequiredSkills(),
               groups: resources.filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
             }}));
         """
@@ -280,7 +364,96 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertEqual(result["selectedContent"], "ctf role")
         self.assertEqual(result["selectedSha"], "role-sha")
         self.assertEqual(result["routePath"], "cypher-ctf-operator/ROLE.md")
+        self.assertTrue(result["isRole"])
+        self.assertEqual(result["roleName"], "CTF Operator")
+        self.assertEqual(result["selectedSkillIds"], ["cypher-ctf"])
+        self.assertEqual(result["skillOptions"], ["cypher-ctf"])
+        self.assertTrue(result["canEditRequiredSkills"])
         self.assertEqual(result["groups"], ["Prompt Templates", "Role Prompts"])
+
+    def test_prompt_save_updates_role_default_skills_only_for_role_prompts(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required to execute frontend state helper")
+
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
+        script = f"""
+            import {{ pathToFileURL }} from 'node:url';
+
+            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
+            const state = createPromptsState();
+            const calls = [];
+            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
+            state.api = async (method, path, body) => {{
+              calls.push([method, path, body || null]);
+              if (path === '/role-prompts/cypher-ctf-operator/ROLE.md') {{
+                return {{
+                  role_names: ['cypher-ctf-operator/ROLE.md'],
+                  roles: {{ 'cypher-ctf-operator/ROLE.md': body.content }},
+                  role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'new-role-sha' }},
+                  role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
+                }};
+              }}
+              if (path === '/roles/admin/cypher-ctf-operator/default-skills') {{
+                return {{ id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: body.default_skill_ids, available: true }};
+              }}
+              if (path === '/prompt-templates/templates/reason.md') {{
+                return {{
+                  prompt_names: ['reason.md'],
+                  prompts: {{ 'reason.md': body.content }},
+                  prompt_sha256: {{ 'reason.md': 'new-prompt-sha' }},
+                  prompts_sha256: 'new-set-sha',
+                }};
+              }}
+              throw new Error(`unexpected api call: ${{method}} ${{path}}`);
+            }};
+            state.promptTemplateDetail = {{
+              prompt_names: ['reason.md'],
+              prompts: {{ 'reason.md': 'reason prompt' }},
+              prompt_sha256: {{ 'reason.md': 'reason-sha' }},
+              prompts_sha256: 'set-sha',
+            }};
+            state.rolePromptDetail = {{
+              role_names: ['cypher-ctf-operator/ROLE.md'],
+              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
+              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
+              role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
+            }};
+            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
+
+            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
+            state.promptEditorContent = 'updated role';
+            state.promptRoleRequiredSkillIds = ['skill-a', 'skill-b'];
+            await state.savePromptTemplate();
+
+            state.promptTemplateSelected = 'prompts/reason.md';
+            state.promptEditorContent = 'updated reason';
+            await state.savePromptTemplate();
+
+            console.log(JSON.stringify({{
+              calls,
+              roleSkillIds: state.rolePromptDetail.role_metadata['cypher-ctf-operator/ROLE.md'].default_skill_ids,
+            }}));
+        """
+
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
+        self.assertEqual(api_calls[0][1], "/role-prompts/cypher-ctf-operator/ROLE.md")
+        self.assertEqual(api_calls[1][1], "/roles/admin/cypher-ctf-operator/default-skills")
+        self.assertEqual(api_calls[1][2], {"default_skill_ids": ["skill-a", "skill-b"]})
+        self.assertEqual(api_calls[2][1], "/prompt-templates/templates/reason.md")
+        self.assertEqual(
+            [call[1] for call in api_calls].count("/roles/admin/cypher-ctf-operator/default-skills"),
+            1,
+        )
+        self.assertEqual(result["roleSkillIds"], ["skill-a", "skill-b"])
 
     def test_settings_contains_prompt_editor_controls(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
@@ -314,15 +487,26 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn("async loadPrompts()", prompts)
         self.assertIn("async loadPromptGroup()", prompts)
         self.assertIn("/prompt-templates", prompts)
+        self.assertIn("/capabilities/catalog", prompts)
+        self.assertIn("/roles/admin/", prompts)
+        self.assertIn("/default-skills", prompts)
         self.assertIn("promptTemplateRoutePath(name)", prompts)
+        self.assertIn("promptSelectedIsRole()", prompts)
+        self.assertIn("promptRoleRequiredSkillIds", prompts)
         self.assertIn("settingsSection === 'prompts'", view)
         self.assertNotIn('data-testid="prompts-group"', view)
         self.assertIn('data-testid="prompts-editor"', view)
         self.assertIn('data-testid="prompts-save"', view)
+        self.assertIn('data-testid="role-required-skills"', view)
+        self.assertIn("Required Skills", view)
+        self.assertIn('x-show="promptSelectedIsRole()"', view)
+        self.assertIn('x-model="promptRoleRequiredSkillIds"', view)
         self.assertIn("promptEditorResources()", prompts)
         self.assertIn("promptSelectedWritable()", prompts)
         self.assertNotIn("promptGroupSelected", prompts)
         self.assertNotIn("promptGroups", prompts)
+        self.assertNotIn("deleteCapabilityAdmin", prompts)
+        self.assertNotIn("/capabilities/admin/", prompts)
         self.assertNotIn("/prompt-groups", prompts)
         self.assertNotIn("promptTemplateNames: ['bootstrap.md'", prompts)
         self.assertNotIn("/prompt-groups", capabilities)

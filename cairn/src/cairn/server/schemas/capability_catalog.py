@@ -166,6 +166,23 @@ class RoleCatalogItem(BaseModel):
         return deduped
 
 
+class RoleDefaultSkillsUpdate(BaseModel):
+    default_skill_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in value or []:
+            key = (item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        return deduped
+
+
 class ProjectRole(BaseModel):
     project_id: str
     role_id: str

@@ -4,6 +4,8 @@ export function createPromptsState() {
     promptTemplateSelected: 'bootstrap.md',
     promptTemplateDetail: null,
     rolePromptDetail: null,
+    promptCapabilityCatalog: [],
+    promptRoleRequiredSkillIds: [],
     promptEditorContent: '',
     promptEditorSaving: false,
     promptEditorLoading: false,
@@ -22,12 +24,14 @@ export function createPromptsState() {
     async loadPromptGroup() {
       this.promptEditorLoading = true;
       try {
-        const [detail, roles] = await Promise.all([
+        const [detail, roles, catalog] = await Promise.all([
           this.api('GET', '/prompt-templates'),
           this.api('GET', '/role-prompts'),
+          this.api('GET', '/capabilities/catalog'),
         ]);
         this.promptTemplateDetail = detail;
-        this.rolePromptDetail = roles || { role_names: [], roles: {}, role_sha256: {} };
+        this.rolePromptDetail = roles || { role_names: [], roles: {}, role_sha256: {}, role_metadata: {} };
+        this.promptCapabilityCatalog = Array.isArray(catalog) ? catalog : [];
         const promptNames = this.sortedPromptTemplateNames(
           Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
         );
@@ -46,6 +50,7 @@ export function createPromptsState() {
           this.promptTemplateSelected = legacySelected || this.promptTemplateNames[0] || '';
         }
         this.promptEditorContent = this.promptSelectedResourceContent();
+        this.syncPromptRoleRequiredSkills();
       } catch(e) {
         this.showToast(e.message, 'error');
       } finally {
@@ -101,6 +106,7 @@ export function createPromptsState() {
           groupLabel: 'Role Prompts',
           writable: true,
           sha: roles.role_sha256?.[name] || '',
+          metadata: roles.role_metadata?.[name] || null,
         })),
       ];
     },
@@ -142,11 +148,45 @@ export function createPromptsState() {
       return !!resource && resource.writable !== false;
     },
 
+    promptSelectedIsRole() {
+      return this.promptSelectedResource()?.type === 'role';
+    },
+
+    promptSelectedRoleMetadata() {
+      const resource = this.promptSelectedResource();
+      if (!resource || resource.type !== 'role') return null;
+      return this.rolePromptDetail?.role_metadata?.[resource.path] || resource.metadata || null;
+    },
+
+    promptSelectedRoleName() {
+      const meta = this.promptSelectedRoleMetadata();
+      if (meta?.name) return meta.name;
+      return this.promptResourceDisplayName(this.promptSelectedResource());
+    },
+
+    promptAvailableSkillOptions() {
+      return (this.promptCapabilityCatalog || [])
+        .filter(item => item && item.kind === 'skill')
+        .sort((a, b) => String(a.name || a.id || '').localeCompare(String(b.name || b.id || '')));
+    },
+
+    promptRoleCanEditRequiredSkills() {
+      return !!this.promptSelectedRoleMetadata()?.role_id;
+    },
+
+    syncPromptRoleRequiredSkills() {
+      const meta = this.promptSelectedRoleMetadata();
+      this.promptRoleRequiredSkillIds = Array.isArray(meta?.default_skill_ids)
+        ? [...meta.default_skill_ids]
+        : [];
+    },
+
     selectPromptTemplate(name) {
       const key = typeof name === 'string' ? name : name?.key;
       if (!this.promptTemplateNames.includes(key)) return;
       this.promptTemplateSelected = key;
       this.promptEditorContent = this.promptSelectedResourceContent();
+      this.syncPromptRoleRequiredSkills();
     },
 
     promptTemplateSha(name = this.promptTemplateSelected) {
@@ -167,16 +207,39 @@ export function createPromptsState() {
       const resource = this.promptSelectedResource();
       if (!resource || resource.writable === false) return;
       this.promptEditorSaving = true;
+      const submittedContent = this.promptEditorContent || '';
+      const submittedSkillIds = [...(this.promptRoleRequiredSkillIds || [])];
       try {
         if (resource.type === 'role') {
-          const detail = await this.api(
+          const meta = this.promptSelectedRoleMetadata();
+          const promptDetail = await this.api(
             'PUT',
             `/role-prompts/${this.promptTemplateRoutePath(resource.path)}`,
-            { content: this.promptEditorContent || '' },
+            { content: submittedContent },
           );
+          let updatedRole = null;
+          if (meta?.role_id) {
+            updatedRole = await this.api(
+              'PUT',
+              `/roles/admin/${encodeURIComponent(meta.role_id)}/default-skills`,
+              { default_skill_ids: submittedSkillIds },
+            );
+          }
+          const detail = promptDetail;
+          if (updatedRole) {
+            detail.role_metadata = detail.role_metadata || {};
+            detail.role_metadata[resource.path] = {
+              ...(detail.role_metadata[resource.path] || {}),
+              role_id: updatedRole.id,
+              name: updatedRole.name,
+              default_skill_ids: updatedRole.default_skill_ids || [],
+              available: updatedRole.available,
+            };
+          }
           this.rolePromptDetail = detail;
           this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
-          this.promptEditorContent = this.rolePromptDetail?.roles?.[resource.path] || '';
+          this.promptEditorContent = submittedContent;
+          this.promptRoleRequiredSkillIds = submittedSkillIds;
           this.showToast('Role prompt saved');
         } else {
           const detail = await this.api(

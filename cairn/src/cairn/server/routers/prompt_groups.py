@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import yaml
 
 import cairn.dispatcher.prompts as prompt_package
 from cairn.server.config.files import _text_sha256, resources_yaml_path
@@ -32,6 +33,7 @@ class RolePromptDetail(BaseModel):
     role_names: list[str]
     roles: dict[str, str]
     role_sha256: dict[str, str]
+    role_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 def _prompts_root() -> Path:
@@ -134,7 +136,63 @@ def _detail_for_role_prompts() -> dict[str, Any]:
         "role_names": list(prompts.keys()),
         "roles": prompts,
         "role_sha256": sha256,
+        "role_metadata": _role_prompt_metadata(prompts.keys()),
     }
+
+
+def _role_prompt_metadata(prompt_names: Any) -> dict[str, dict[str, Any]]:
+    names = list(prompt_names)
+    try:
+        data = yaml.safe_load(resources_yaml_path().read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - metadata should not break prompt editing
+        return {}
+    roles_raw = data.get("roles")
+    roles = roles_raw if isinstance(roles_raw, list) else []
+    metadata: dict[str, dict[str, Any]] = {}
+    for role in roles:
+        if not isinstance(role, dict):
+            continue
+        role_id = str(role.get("id") or "").strip()
+        if not role_id:
+            continue
+        prompt_path = _prompt_path_for_role(role)
+        if prompt_path not in names:
+            continue
+        metadata[prompt_path] = {
+            "role_id": role_id,
+            "name": str(role.get("name") or role_id),
+            "default_skill_ids": _normalize_metadata_skill_ids(role.get("default_skill_ids") or []),
+            "available": bool(role.get("available", True)),
+        }
+    return metadata
+
+
+def _prompt_path_for_role(role: dict[str, Any]) -> str:
+    role_id = str(role.get("id") or "").strip()
+    data_path = resources_yaml_path()
+    root = _roles_root()
+    if role.get("source_path"):
+        path = Path(str(role["source_path"]))
+        if not path.is_absolute():
+            path = data_path.parent / path
+        try:
+            return path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            pass
+    return f"{role_id}/ROLE.md"
+
+
+def _normalize_metadata_skill_ids(value: Any) -> list[str]:
+    items = value if isinstance(value, list) else []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in items:
+        skill_id = str(item or "").strip()
+        if not skill_id or skill_id in seen:
+            continue
+        seen.add(skill_id)
+        normalized.append(skill_id)
+    return normalized
 
 
 @router.get("/prompt-templates", response_model=PromptGroupDetail)

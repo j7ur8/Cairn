@@ -652,6 +652,29 @@
             </div>
           </div>
           <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>
+          <div data-testid="role-required-skills" x-show="promptSelectedIsRole()" x-cloak class="shrink-0 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-xs font-semibold text-slate-700">Required Skills</div>
+                <div class="text-[10px] text-slate-400" x-text="promptRoleCanEditRequiredSkills() ? promptSelectedRoleName() : 'No role configuration is linked to this prompt.'"></div>
+              </div>
+              <div class="text-[10px] font-mono text-slate-400" x-text="`${promptRoleRequiredSkillIds.length} selected`"></div>
+            </div>
+            <template x-if="promptRoleCanEditRequiredSkills() && promptAvailableSkillOptions().length === 0">
+              <p class="mt-2 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-400">No skills configured.</p>
+            </template>
+            <div x-show="promptRoleCanEditRequiredSkills() && promptAvailableSkillOptions().length > 0" class="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+              <template x-for="skill in promptAvailableSkillOptions()" :key="`role-required-skill:${skill.id}`">
+                <label class="flex min-w-0 items-start gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-600 hover:bg-slate-50 transition">
+                  <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-brand-500 focus:ring-brand-100" :value="skill.id" x-model="promptRoleRequiredSkillIds" :disabled="!promptRoleCanEditRequiredSkills()">
+                  <span class="min-w-0">
+                    <span class="block truncate font-semibold text-slate-700" x-text="skill.name || skill.id"></span>
+                    <span class="block truncate font-mono text-[10px] text-slate-400" x-text="skill.id"></span>
+                  </span>
+                </label>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
     </section>

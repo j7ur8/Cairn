@@ -232,6 +232,111 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(boot_snapshots[0].capability_id, "role-skill")
         self.assertEqual(boot_snapshots[0].source, "role_default")
 
+    def test_role_default_skills_update_writes_only_role_list(self) -> None:
+        import yaml
+
+        from cairn.server.routers.capabilities import update_role_default_skills
+        from cairn.server.schemas import RoleDefaultSkillsUpdate
+
+        skill_dir = self.yaml.root / "role-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Role Skill\n", encoding="utf-8")
+        data = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        data["capabilities"]["skills"] = [
+            {
+                "id": "role-skill",
+                "name": "Role Skill",
+                "source_path": str(skill_dir),
+                "task_types": ["bootstrap"],
+            },
+            {
+                "id": "other-skill",
+                "name": "Other Skill",
+                "source_path": str(skill_dir),
+                "task_types": ["bootstrap"],
+            },
+        ]
+        data["roles"] = [
+            {
+                "id": "role1",
+                "name": "Role",
+                "prompt": "prompt",
+                "default_skill_ids": ["other-skill"],
+                "task_types": ["bootstrap"],
+            }
+        ]
+        self.yaml.capabilities_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        role = update_role_default_skills(
+            "role1",
+            RoleDefaultSkillsUpdate(default_skill_ids=[" role-skill ", "role-skill", "", "other-skill"]),
+        )
+
+        after = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        self.assertEqual(role.default_skill_ids, ["role-skill", "other-skill"])
+        self.assertEqual(after["roles"][0]["default_skill_ids"], ["role-skill", "other-skill"])
+        self.assertEqual([item["id"] for item in after["capabilities"]["skills"]], ["role-skill", "other-skill"])
+        self.assertTrue((skill_dir / "SKILL.md").exists())
+
+        role = update_role_default_skills("role1", RoleDefaultSkillsUpdate(default_skill_ids=["other-skill"]))
+        after = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        self.assertEqual(role.default_skill_ids, ["other-skill"])
+        self.assertEqual(after["capabilities"]["skills"][0]["id"], "role-skill")
+        self.assertTrue((skill_dir / "SKILL.md").exists())
+
+    def test_role_default_skills_rejects_unknown_skill_without_writing(self) -> None:
+        import yaml
+        from fastapi import HTTPException
+
+        from cairn.server.routers.capabilities import update_role_default_skills
+        from cairn.server.schemas import RoleDefaultSkillsUpdate
+
+        data = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        data["roles"] = [
+            {
+                "id": "role1",
+                "name": "Role",
+                "prompt": "prompt",
+                "default_skill_ids": [],
+                "task_types": ["bootstrap"],
+            }
+        ]
+        self.yaml.capabilities_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        before = self.yaml.capabilities_path.read_text(encoding="utf-8")
+
+        with self.assertRaises(HTTPException) as cm:
+            update_role_default_skills("role1", RoleDefaultSkillsUpdate(default_skill_ids=["missing-skill"]))
+
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertEqual(self.yaml.capabilities_path.read_text(encoding="utf-8"), before)
+
+    def test_role_default_skills_rejects_unknown_role_without_writing(self) -> None:
+        import yaml
+        from fastapi import HTTPException
+
+        from cairn.server.routers.capabilities import update_role_default_skills
+        from cairn.server.schemas import RoleDefaultSkillsUpdate
+
+        skill_dir = self.yaml.root / "role-skill"
+        skill_dir.mkdir()
+        data = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        data["capabilities"]["skills"] = [
+            {
+                "id": "role-skill",
+                "name": "Role Skill",
+                "source_path": str(skill_dir),
+                "task_types": ["bootstrap"],
+            }
+        ]
+        self.yaml.capabilities_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        before = self.yaml.capabilities_path.read_text(encoding="utf-8")
+
+        with self.assertRaises(HTTPException) as cm:
+            update_role_default_skills("missing-role", RoleDefaultSkillsUpdate(default_skill_ids=["role-skill"]))
+
+        self.assertEqual(cm.exception.status_code, 404)
+        self.assertEqual(self.yaml.capabilities_path.read_text(encoding="utf-8"), before)
+
     def test_probe_mcp_success_updates_yaml_status(self) -> None:
         from cairn.server.routers.capabilities import (
             get_capability_catalog,

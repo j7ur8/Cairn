@@ -19,6 +19,7 @@ from cairn.server.schemas.capability_catalog import (
     CapabilitySource,
     ProjectRole,
     ProjectRoleResponse,
+    RoleDefaultSkillsUpdate,
     RoleCatalogItem,
     TaskCapabilities,
     TaskCapabilitiesMap,
