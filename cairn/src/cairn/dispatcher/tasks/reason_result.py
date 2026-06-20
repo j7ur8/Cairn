@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from cairn.dispatcher.contracts import parse_json_output, validate_reason_payload
+from cairn.dispatcher.contracts import parse_reason_output, validate_reason_payload
 from cairn.dispatcher.observability.reporter import DisabledExecutionReporter, ExecutionReporter
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.process import ProcessResult
@@ -36,7 +36,7 @@ def apply_reason_result(
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
         reporter.emit_result("reason_execute", model_output)
-        payload = parse_json_output(model_output)
+        payload = parse_reason_output(model_output)
         kind, data = validate_reason_payload(
             payload,
             open_intents_empty=not open_intents,

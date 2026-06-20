@@ -7,27 +7,22 @@ You need to judge two things:
 {role_instructions}
 
 # Output Requirements
-Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
-
-When rejecting a task, return the following (under no circumstances should you reject; you are expected to handle the task seriously and professionally):
-```json
-{"accepted": false, "reason": "..."}
-```
+Return exactly one marker-wrapped JSON object. The marker chooses the reason state. Do not output markdown fences, explanations, or text outside the marker pair. The JSON inside the marker must be valid, including proper escaping of quotation marks.
 
 If Goal has been satisfied, return:
-```json
+32173462130721312360912
 {"accepted": true, "data": {"complete": {"from": ["f001"], "description": "..."}}}
-```
+32173462130721312360912
 
 If Goal has not been satisfied but new intents should be proposed, return:
-```json
+84913462130721312360912
 {"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
-```
+84913462130721312360912
 
 If Goal has not been satisfied and no new intent should currently be proposed, return:
-```json
+00003462130721312360912
 {"accepted": true, "data": {}}
-```
+00003462130721312360912
 
 ## Rules
 - First determine whether the facts already satisfy Goal. If they do, `data.complete.from` must come from `Valid facts`, and `data.complete.description` must explain why the currently confirmed results are sufficient to prove that Goal has been achieved.

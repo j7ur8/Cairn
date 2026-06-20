@@ -96,6 +96,68 @@ class ContractParsingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no JSON object found"):
             parse_json_output(stdout)
 
+    def test_parse_reason_output_parses_complete_marker_payload(self) -> None:
+        from cairn.dispatcher.contracts import parse_reason_output, validate_reason_payload
+
+        stdout = (
+            '32173462130721312360912{"accepted":true,"data":{"complete":'
+            '{"from":["f001"],"description":"done"}}}32173462130721312360912'
+        )
+
+        payload = parse_reason_output(stdout)
+        self.assertEqual(
+            validate_reason_payload(payload, open_intents_empty=True, max_intents=2),
+            ("complete", {"from": ["f001"], "description": "done"}),
+        )
+
+    def test_parse_reason_output_parses_intents_marker_payload(self) -> None:
+        from cairn.dispatcher.contracts import parse_reason_output, validate_reason_payload
+
+        stdout = (
+            '84913462130721312360912{"accepted":true,"data":{"intents":'
+            '[{"from":["f001"],"description":"next"}]}}84913462130721312360912'
+        )
+
+        payload = parse_reason_output(stdout)
+        self.assertEqual(
+            validate_reason_payload(payload, open_intents_empty=True, max_intents=2),
+            ("intents", [{"from": ["f001"], "description": "next"}]),
+        )
+
+    def test_parse_reason_output_parses_noop_marker_payload(self) -> None:
+        from cairn.dispatcher.contracts import parse_reason_output, validate_reason_payload
+
+        stdout = '00003462130721312360912{"accepted":true,"data":{}}00003462130721312360912'
+
+        payload = parse_reason_output(stdout)
+        self.assertEqual(
+            validate_reason_payload(payload, open_intents_empty=False, max_intents=2),
+            ("noop", None),
+        )
+
+    def test_parse_reason_output_rejects_marker_payload_mismatch(self) -> None:
+        from cairn.dispatcher.contracts import parse_reason_output
+
+        stdout = (
+            '32173462130721312360912{"accepted":true,"data":{"intents":'
+            '[{"from":["f001"],"description":"next"}]}}32173462130721312360912'
+        )
+
+        with self.assertRaisesRegex(ValueError, "complete sentinel requires"):
+            parse_reason_output(stdout)
+
+    def test_parse_reason_output_falls_back_to_unwrapped_json(self) -> None:
+        from cairn.dispatcher.contracts import parse_reason_output, validate_reason_payload
+
+        payload = parse_reason_output(
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"legacy"}]}}'
+        )
+
+        self.assertEqual(
+            validate_reason_payload(payload, open_intents_empty=True, max_intents=2),
+            ("intents", [{"from": ["f001"], "description": "legacy"}]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

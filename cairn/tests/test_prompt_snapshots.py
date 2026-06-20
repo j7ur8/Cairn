@@ -29,6 +29,29 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertNotIn("{role_instructions}", bootstrap_conclude)
         self.assertNotIn("{role_instructions}", explore_conclude)
 
+    def test_default_explore_uses_plain_text_sentinel_output(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+
+        output_requirements = explore.split("# Output Requirements", 1)[1].split("# Rules", 1)[0]
+        self.assertIn("32173462130721312360912", output_requirements)
+        self.assertIn("plain text", output_requirements)
+        self.assertIn("Do not output JSON", output_requirements)
+        self.assertNotIn("Return only one raw JSON object", output_requirements)
+
+    def test_default_reason_uses_marker_gated_output(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
+
+        output_requirements = reason.split("# Output Requirements", 1)[1].split("## Rules", 1)[0]
+        self.assertIn("32173462130721312360912", output_requirements)
+        self.assertIn("84913462130721312360912", output_requirements)
+        self.assertIn("00003462130721312360912", output_requirements)
+        self.assertIn('{"accepted": true, "data": {"complete"', output_requirements)
+        self.assertIn('{"accepted": true, "data": {"intents"', output_requirements)
+        self.assertIn('{"accepted": true, "data": {}}', output_requirements)
+        self.assertNotIn("Return only one raw JSON object", output_requirements)
+
     def test_load_prompt_snapshot_hash_changes_with_content(self) -> None:
         from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
 

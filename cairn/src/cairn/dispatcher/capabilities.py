@@ -10,7 +10,6 @@ from cairn.dispatcher.capability_catalog import catalog_payload  # noqa: F401  (
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
 from cairn.dispatcher.capability_instructions import (
     instructions,
-    reason_instructions,
     summary,
 )
 from cairn.dispatcher.capability_mcp import (
@@ -52,6 +51,9 @@ def inject_project_capabilities(
     task_instance_id: str,
     selection_data: dict[str, Any] | None,
 ) -> CapabilityInjection:
+    if task_type == "reason":
+        return CapabilityInjection("", "", [], [], [], WorkerExecutionContext())
+
     include_files_appendix = task_type != "reason"
     files_errors: list[str] = []
     files_appendix = ""
@@ -143,17 +145,6 @@ def inject_project_capabilities(
             [],
             errors,
             WorkerExecutionContext(),
-        )
-
-    if task_type == "reason":
-        rendered_instructions = reason_instructions(mcp_servers, skills)
-        return CapabilityInjection(
-            instructions=rendered_instructions,
-            summary=summary([item.id for item in mcp_servers], [item.id for item in skills], errors),
-            mcp_servers=[item.id for item in mcp_servers],
-            skills=[item.id for item in skills],
-            errors=errors,
-            context=WorkerExecutionContext(),
         )
 
     capability_root = f"{CAPABILITY_ROOT}/{_safe_path_segment(project_id)}/{_safe_path_segment(task_instance_id)}"

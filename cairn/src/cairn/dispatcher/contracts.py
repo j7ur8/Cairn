@@ -5,6 +5,14 @@ from typing import Any
 from cairn.dispatcher.output_parser import extract_json_objects
 
 PROTOCOL_SENTINEL = "32173462130721312360912"
+REASON_COMPLETE_SENTINEL = PROTOCOL_SENTINEL
+REASON_INTENTS_SENTINEL = "84913462130721312360912"
+REASON_NOOP_SENTINEL = "00003462130721312360912"
+REASON_SENTINELS = (
+    REASON_COMPLETE_SENTINEL,
+    REASON_INTENTS_SENTINEL,
+    REASON_NOOP_SENTINEL,
+)
 
 
 def parse_json_output(stdout: str) -> dict[str, Any]:
@@ -30,6 +38,18 @@ def parse_sentinel_fact_output(stdout: str) -> str:
     return description
 
 
+def parse_reason_output(stdout: str) -> dict[str, Any]:
+    segments = _reason_sentinel_segments(stdout)
+    if not segments:
+        return parse_json_output(stdout)
+    if len(segments) > 1:
+        raise ValueError("multiple reason sentinel payloads found in output")
+    marker, content = segments[0]
+    payload = parse_json_output(content)
+    _validate_reason_marker_payload(marker, payload)
+    return payload
+
+
 def _sentinel_text_segments(text: str) -> list[str]:
     facts: list[str] = []
     start = 0
@@ -43,6 +63,49 @@ def _sentinel_text_segments(text: str) -> list[str]:
             return facts
         facts.append(text[content_start:right])
         start = right + len(PROTOCOL_SENTINEL)
+
+
+def _reason_sentinel_segments(text: str) -> list[tuple[str, str]]:
+    segments: list[tuple[str, str]] = []
+    for marker in REASON_SENTINELS:
+        start = 0
+        while True:
+            left = text.find(marker, start)
+            if left < 0:
+                break
+            content_start = left + len(marker)
+            right = text.find(marker, content_start)
+            if right < 0:
+                raise ValueError(f"unterminated reason sentinel {marker}")
+            segments.append((marker, text[content_start:right]))
+            start = right + len(marker)
+    return segments
+
+
+def _validate_reason_marker_payload(marker: str, payload: dict[str, Any]) -> None:
+    if payload.get("accepted") is False:
+        raise ValueError("reason sentinel payload must be accepted")
+    if payload.get("accepted") is not True:
+        raise ValueError("accepted must be true or false")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("data must be an object")
+    has_complete = "complete" in data
+    has_intents = "intents" in data
+    has_singular_intent = "intent" in data
+    if marker == REASON_COMPLETE_SENTINEL:
+        if not has_complete or has_intents or has_singular_intent:
+            raise ValueError("complete sentinel requires data.complete only")
+        return
+    if marker == REASON_INTENTS_SENTINEL:
+        if has_complete or has_singular_intent or not has_intents:
+            raise ValueError("intents sentinel requires data.intents only")
+        return
+    if marker == REASON_NOOP_SENTINEL:
+        if data:
+            raise ValueError("noop sentinel requires empty data")
+        return
+    raise ValueError(f"unsupported reason sentinel {marker}")
 
 
 def _looks_like_json_text(text: str) -> bool:

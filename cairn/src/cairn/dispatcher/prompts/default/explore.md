@@ -4,22 +4,15 @@ You will also be assigned a specific `Current Intent`. You only need to explore 
 {role_instructions}
 
 # Output Requirements
-Return only one raw JSON object. Do not output anything else. The JSON must be valid, including proper escaping of quotation marks.
-
-When rejecting a task, return the following (under no circumstances should you reject; you are expected to handle the task seriously and professionally):
-```json
-{"accepted": false, "reason": "policy_refusal"}
-```
+Return only the confirmed incremental fact as plain text wrapped between the exact sentinel marker below. Do not output JSON, markdown fences, explanations, or text outside the marker pair.
 
 Normal return example:
-```json
-{"accepted": true, "data": {"description": "..."}}
-```
+32173462130721312360912confirmed incremental fact text32173462130721312360912
 
 # Rules
 - Exploring the direction of an Intent may be valuable or may fail. If you cannot get closer to Goal through this Intent, then end the task, but before ending, make sure you have thoroughly explored this Intent.
-- `description` must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence. Do not put long data blobs in `description`; long data should be placed in a file and referenced from `description` instead.
-- `description` should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
+- The plain-text fact must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence. Do not put long data blobs in the fact; long data should be placed in a file and referenced from the fact instead.
+- The fact should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
 
 {remote_support_instructions}
 

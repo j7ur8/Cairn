@@ -355,8 +355,10 @@ def _patch_explore(
     p(mock.patch.object(explore_mod, "build_explore_execute_prompt", return_value="PROMPT"))
     fallback = p(mock.patch.object(explore_mod, "run_explore_conclude_fallback", return_value="failed"))
     if validate_raises:
+        p(mock.patch.object(explore_mod, "parse_sentinel_fact_output", side_effect=ValueError("bad sentinel")))
         p(mock.patch.object(explore_mod, "parse_json_output", side_effect=ValueError("bad json")))
     else:
+        p(mock.patch.object(explore_mod, "parse_sentinel_fact_output", side_effect=ValueError("bad sentinel")))
         p(mock.patch.object(explore_mod, "parse_json_output", return_value={}))
         p(mock.patch.object(explore_mod, "validate_explore_payload", return_value=validate_return))
     p(mock.patch.object(
@@ -453,6 +455,42 @@ class ExploreCharacterizationTests(unittest.TestCase):
         with _patch_explore(process_result=_result(returncode=0), validate_raises=True) as (es, release, fallback, canc):
             _run_explore(canc)
         fallback.assert_called_once()
+
+    def test_sentinel_fact_parse_is_used_for_success(self) -> None:
+        with _patch_explore(process_result=_result(returncode=0, stdout="MODEL OUT")) as (es, release, fallback, canc):
+            parse = es.enter_context(mock.patch.object(explore_mod, "parse_sentinel_fact_output", return_value="sentinel fact"))
+            parse_json = es.enter_context(mock.patch.object(explore_mod, "parse_json_output"))
+            es.enter_context(mock.patch.object(explore_mod._EXPLORE_SPEC, "validate", side_effect=explore_mod._validate))
+            write = es.enter_context(mock.patch.object(
+                explore_mod,
+                "write_conclude_result_with_fact_id",
+                return_value=mock.Mock(status="success", fact_id="fact_1"),
+            ))
+            outcome = _run_explore(canc)
+        self.assertEqual(outcome, "success")
+        parse.assert_called_once_with("MODEL OUT")
+        parse_json.assert_not_called()
+        write.assert_called_once()
+
+    def test_json_parse_fallback_is_retained_for_explore_success(self) -> None:
+        with _patch_explore(process_result=_result(returncode=0, stdout="MODEL OUT")) as (es, release, fallback, canc):
+            sentinel = es.enter_context(mock.patch.object(
+                explore_mod,
+                "parse_sentinel_fact_output",
+                side_effect=ValueError("bad sentinel"),
+            ))
+            parse_json = es.enter_context(mock.patch.object(explore_mod, "parse_json_output", return_value={}))
+            validate = es.enter_context(mock.patch.object(
+                explore_mod,
+                "validate_explore_payload",
+                return_value=("fact", "json fact"),
+            ))
+            es.enter_context(mock.patch.object(explore_mod._EXPLORE_SPEC, "validate", side_effect=explore_mod._validate))
+            outcome = _run_explore(canc)
+        self.assertEqual(outcome, "success")
+        sentinel.assert_called_once_with("MODEL OUT")
+        parse_json.assert_called_once_with("MODEL OUT")
+        validate.assert_called_once_with({})
 
     def test_command_failure_releases_and_returns_failed(self) -> None:
         with _patch_explore(process_result=_result(returncode=2)) as (es, release, fallback, canc):

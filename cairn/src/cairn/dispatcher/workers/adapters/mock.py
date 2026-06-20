@@ -74,16 +74,19 @@ if phase=="reason":
     max_i=prompt.get("max_intents",3)
     from_ids=[random.choice(fact_ids)] if fact_ids else []
     if outcome=="complete":
-        print(json.dumps({"accepted":True,"data":{"complete":{"from":from_ids,"description":f"mock complete from {from_ids[0]}"}}}, ensure_ascii=False))
+        payload=json.dumps({"accepted":True,"data":{"complete":{"from":from_ids,"description":f"mock complete from {from_ids[0]}"}}}, ensure_ascii=False)
+        print(f"32173462130721312360912{payload}32173462130721312360912")
     elif outcome=="intent":
         count=random.randint(1,max(1,max_i))
         intents=[]
         for idx in range(count):
             fi=[random.choice(fact_ids)] if fact_ids else []
             intents.append({"from":fi,"description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}"})
-        print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
+        payload=json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False)
+        print(f"84913462130721312360912{payload}84913462130721312360912")
     elif outcome=="noop":
-        print(json.dumps({"accepted":True,"data":{}}, ensure_ascii=False))
+        payload=json.dumps({"accepted":True,"data":{}}, ensure_ascii=False)
+        print(f"00003462130721312360912{payload}00003462130721312360912")
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:
@@ -110,7 +113,7 @@ if phase=="bootstrap_conclude":
 
 if outcome=="fact":
     label = prompt.get("intent_id") or phase
-    if phase=="explore_conclude":
+    if phase in ("explore_execute","explore_conclude"):
         print(f"32173462130721312360912mock fact for {label}32173462130721312360912")
     else:
         print(json.dumps({"accepted":True,"data":{"description":f"mock fact for {label}"}} , ensure_ascii=False))

@@ -470,7 +470,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertIn("cypher-pentest", result.instructions)
         self.assertNotIn("skills/cypher-ad", result.instructions)
 
-    def test_reason_injection_uses_metadata_only_without_runtime_resources(self):
+    def test_reason_injection_returns_no_capability_metadata_or_runtime_resources(self):
         from cairn.dispatcher.capabilities import inject_project_capabilities
 
         manager = self.FakeContainerManager()
@@ -485,16 +485,11 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             self._selection(),
         )
 
-        self.assertEqual(result.mcp_servers, ["m"])
-        self.assertEqual(result.skills, ["s"])
-        self.assertIn("intent design only", result.instructions)
-        self.assertIn("m: MCP", result.instructions)
-        self.assertIn("Description: metadata mcp", result.instructions)
-        self.assertIn("s: Skill", result.instructions)
-        self.assertIn("Description: metadata skill", result.instructions)
-        self.assertNotIn("## Files", result.instructions)
-        self.assertNotIn("mcp.json", result.instructions)
-        self.assertNotIn("Directory root", result.instructions)
+        self.assertEqual(result.instructions, "")
+        self.assertEqual(result.summary, "")
+        self.assertEqual(result.mcp_servers, [])
+        self.assertEqual(result.skills, [])
+        self.assertEqual(result.errors, [])
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
         self.assertEqual(result.context.mcp_config_path, "")

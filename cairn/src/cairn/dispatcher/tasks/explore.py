@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cairn.dispatcher.contracts import parse_json_output, validate_explore_payload
+from cairn.dispatcher.contracts import parse_json_output, parse_sentinel_fact_output, validate_explore_payload
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.explore_prompt import build_explore_execute_prompt
 from cairn.dispatcher.tasks.explore_result import run_explore_conclude_fallback
@@ -29,8 +29,11 @@ def _build_prompt(ctx: IntentTaskContext) -> str:
 
 
 def _validate(model_output: str) -> tuple[str, object]:
-    payload = parse_json_output(model_output)
-    return validate_explore_payload(payload)
+    try:
+        return "fact", parse_sentinel_fact_output(model_output)
+    except ValueError:
+        payload = parse_json_output(model_output)
+        return validate_explore_payload(payload)
 
 
 def _write_success(ctx: IntentTaskContext, payload) -> IntentWriteOutcome:
