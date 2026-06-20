@@ -148,6 +148,14 @@ Edit `config.yaml` and fill in your LLM endpoints and API keys, then start both 
  
 This exports the repository host path for Docker socket worker mounts, builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher loads `config.yaml` from the repository host path and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
 
+Stop Cairn with:
+
+```bash
+./stop.sh
+```
+
+This removes dispatcher-managed worker containers labeled `cairn.managed=true`, then runs `docker compose down --remove-orphans` for the core stack. PostgreSQL data, `./datas`, images, and configuration files are preserved. Extra arguments are passed through to `docker compose down`, for example `./stop.sh --timeout 30`.
+
 Mounting `/var/run/docker.sock` gives the dispatcher effective host Docker administration rights. Treat the dispatcher container as privileged infrastructure: run it only on an isolated host or VM, prefer a Docker socket proxy with an allowlist when possible, and consider rootless Docker or a separate worker-runner host for production deployments.
 
 Optional host-browser workflows can use the built-in `chrome-devtools-host` MCP capability. On macOS / Docker Desktop, start Chrome on the host before running a project:

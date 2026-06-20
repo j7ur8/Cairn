@@ -43,6 +43,7 @@ services:
       - ./server.yaml:/cairn/server.yaml
       - ./config.yaml:/cairn/config.yaml
       - ./config.resources.yaml:/cairn/config.resources.yaml
+      - ./capabilities:/cairn/capabilities
     depends_on:
       cairn-postgres:
         condition: service_healthy
