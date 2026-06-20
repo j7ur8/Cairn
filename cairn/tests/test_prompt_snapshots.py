@@ -52,6 +52,17 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn('{"accepted": true, "data": {}}', output_requirements)
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
+    def test_default_reason_excludes_capability_instructions_placeholder(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("{capability_instructions}", reason)
+        self.assertIn("{role_instructions}", reason)
+        self.assertIn("{graph_yaml}", reason)
+        self.assertIn("{fact_ids}", reason)
+        self.assertIn("{open_intents}", reason)
+        self.assertIn("{max_intents}", reason)
+
     def test_load_prompt_snapshot_hash_changes_with_content(self) -> None:
         from cairn.server.execution_config.prompt_snapshot import load_prompt_snapshot
 

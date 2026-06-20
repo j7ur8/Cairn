@@ -41,7 +41,6 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         "{fact_ids}",
         "{open_intents}",
         "{max_intents}",
-        "{capability_instructions}",
         "{role_instructions}",
     ),
     "explore.md": (

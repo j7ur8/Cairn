@@ -35,8 +35,6 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - An Intent may originate from multiple facts.
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
-{capability_instructions}
-
 ## Context
 ### Graph
 ```
