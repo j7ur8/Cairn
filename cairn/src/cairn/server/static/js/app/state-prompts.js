@@ -155,6 +155,7 @@ export function createPromptsState() {
     promptSelectedRoleMetadata() {
       const resource = this.promptSelectedResource();
       if (!resource || resource.type !== 'role') return null;
+      if (this.rolePromptDetail?.role_metadata_error) return null;
       return this.rolePromptDetail?.role_metadata?.[resource.path] || resource.metadata || null;
     },
 
@@ -171,7 +172,11 @@ export function createPromptsState() {
     },
 
     promptRoleCanEditRequiredSkills() {
-      return !!this.promptSelectedRoleMetadata()?.role_id;
+      return !this.promptRoleMetadataError() && !!this.promptSelectedRoleMetadata()?.role_id;
+    },
+
+    promptRoleMetadataError() {
+      return this.rolePromptDetail?.role_metadata_error || '';
     },
 
     syncPromptRoleRequiredSkills() {
@@ -212,30 +217,14 @@ export function createPromptsState() {
       try {
         if (resource.type === 'role') {
           const meta = this.promptSelectedRoleMetadata();
-          const promptDetail = await this.api(
+          if (!meta?.role_id) {
+            throw new Error(this.promptRoleMetadataError() || 'No role configuration is linked to this prompt.');
+          }
+          const detail = await this.api(
             'PUT',
-            `/role-prompts/${this.promptTemplateRoutePath(resource.path)}`,
-            { content: submittedContent },
+            `/roles/admin/${encodeURIComponent(meta.role_id)}/prompt-settings`,
+            { content: submittedContent, default_skill_ids: submittedSkillIds },
           );
-          let updatedRole = null;
-          if (meta?.role_id) {
-            updatedRole = await this.api(
-              'PUT',
-              `/roles/admin/${encodeURIComponent(meta.role_id)}/default-skills`,
-              { default_skill_ids: submittedSkillIds },
-            );
-          }
-          const detail = promptDetail;
-          if (updatedRole) {
-            detail.role_metadata = detail.role_metadata || {};
-            detail.role_metadata[resource.path] = {
-              ...(detail.role_metadata[resource.path] || {}),
-              role_id: updatedRole.id,
-              name: updatedRole.name,
-              default_skill_ids: updatedRole.default_skill_ids || [],
-              available: updatedRole.available,
-            };
-          }
           this.rolePromptDetail = detail;
           this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
           this.promptEditorContent = submittedContent;

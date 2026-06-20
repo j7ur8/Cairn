@@ -9,6 +9,20 @@ from cairn.shared.config.constants import TaskType, _check_known_task_types
 from cairn.shared.task_types import builtin_task_type_names
 
 
+def normalize_default_skill_ids(value: list[str] | None) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in value or []:
+        key = str(item or "").strip()
+        if not key or key in seen:
+            continue
+        if any(ch.isspace() for ch in key) or "/" in key or "\\" in key:
+            raise ValueError("default_skill_ids must not contain whitespace, '/', or '\\'")
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
 class RoleConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -58,17 +72,7 @@ class RoleConfig(BaseModel):
     @field_validator("default_skill_ids")
     @classmethod
     def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for item in value or []:
-            key = (item or "").strip()
-            if not key or key in seen:
-                continue
-            if any(ch.isspace() for ch in key) or "/" in key or "\\" in key:
-                raise ValueError("default_skill_ids must not contain whitespace, '/', or '\\'")
-            seen.add(key)
-            deduped.append(key)
-        return deduped
+        return normalize_default_skill_ids(value)
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> RoleConfig:

@@ -28,7 +28,7 @@ from cairn.server.schemas import (
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectRoleResponse,
-    RoleDefaultSkillsUpdate,
+    RoleDefaultSkillsUpdateRequest,
     RoleCatalogItem,
 )
 from cairn.server.security.deps import current_active_superuser
@@ -135,7 +135,7 @@ def get_role_catalog():
 @router.put("/roles/admin/{role_id}/default-skills", response_model=RoleCatalogItem)
 def update_role_default_skills(
     role_id: str,
-    body: RoleDefaultSkillsUpdate,
+    body: RoleDefaultSkillsUpdateRequest,
     _superuser=Depends(current_active_superuser),
 ):
     return update_yaml_role_default_skills(role_id, body.default_skill_ids)

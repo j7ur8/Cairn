@@ -168,6 +168,18 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertEqual(result["role_metadata"]["custom-location/ROLE.md"]["role_id"], "role-id")
         self.assertNotIn("role-id/ROLE.md", result["role_metadata"])
 
+    def test_read_role_prompts_reports_metadata_load_error(self) -> None:
+        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
+        role_root.mkdir(parents=True)
+        (role_root / "ROLE.md").write_text("ctf role\n", encoding="utf-8")
+        (self.root / "config.resources.yaml").write_text("roles: [\n", encoding="utf-8")
+
+        result = self.router.read_role_prompts()
+
+        self.assertEqual(result["roles"]["cypher-ctf-operator/ROLE.md"], "ctf role\n")
+        self.assertEqual(result["role_metadata"], {})
+        self.assertIn("failed to load role metadata", result["role_metadata_error"])
+
     def test_update_role_prompt_writes_file_and_updates_hash(self) -> None:
         role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
         role_root.mkdir(parents=True)
@@ -181,6 +193,146 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), "updated role prompt\n")
         self.assertEqual(after["roles"]["cypher-ctf-operator/ROLE.md"], "updated role prompt\n")
         self.assertNotEqual(before["role_sha256"]["cypher-ctf-operator/ROLE.md"], after["role_sha256"]["cypher-ctf-operator/ROLE.md"])
+
+    def test_update_role_prompt_settings_updates_prompt_and_default_skills(self) -> None:
+        import yaml
+
+        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
+        role_root.mkdir(parents=True)
+        target = role_root / "ROLE.md"
+        target.write_text("original role prompt\n", encoding="utf-8")
+        (self.root / "skill-a").mkdir()
+        (self.root / "skill-b").mkdir()
+        (self.root / "config.resources.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {
+                        "mcp_servers": [],
+                        "skills": [
+                            {"id": "skill-a", "name": "Skill A", "source_path": str(self.root / "skill-a")},
+                            {"id": "skill-b", "name": "Skill B", "source_path": str(self.root / "skill-b")},
+                        ],
+                    },
+                    "roles": [
+                        {
+                            "id": "cypher-ctf-operator",
+                            "name": "CTF Operator",
+                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
+                            "default_skill_ids": ["skill-b"],
+                        }
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        body = self.router.RolePromptSettingsUpdateRequest(
+            content="updated role prompt\n",
+            default_skill_ids=[" skill-a ", "skill-a", "", "skill-b"],
+        )
+
+        with mock.patch.object(self.router, "save_resources_data") as save:
+            save.side_effect = lambda data: (self.root / "config.resources.yaml").write_text(
+                yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+            )
+            after = self.router.update_role_prompt_settings("cypher-ctf-operator", body)
+
+        data = yaml.safe_load((self.root / "config.resources.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(target.read_text(encoding="utf-8"), "updated role prompt\n")
+        self.assertEqual(data["roles"][0]["default_skill_ids"], ["skill-a", "skill-b"])
+        self.assertEqual(after["roles"]["cypher-ctf-operator/ROLE.md"], "updated role prompt\n")
+        self.assertEqual(
+            after["role_metadata"]["cypher-ctf-operator/ROLE.md"]["default_skill_ids"],
+            ["skill-a", "skill-b"],
+        )
+
+    def test_update_role_prompt_settings_rolls_back_prompt_when_yaml_save_fails(self) -> None:
+        import yaml
+        from fastapi import HTTPException
+
+        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
+        role_root.mkdir(parents=True)
+        target = role_root / "ROLE.md"
+        target.write_text("original role prompt\n", encoding="utf-8")
+        (self.root / "skill-a").mkdir()
+        (self.root / "config.resources.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {
+                        "mcp_servers": [],
+                        "skills": [{"id": "skill-a", "name": "Skill A", "source_path": str(self.root / "skill-a")}],
+                    },
+                    "roles": [
+                        {
+                            "id": "cypher-ctf-operator",
+                            "name": "CTF Operator",
+                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
+                            "default_skill_ids": [],
+                        }
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        original_yaml = (self.root / "config.resources.yaml").read_text(encoding="utf-8")
+        body = self.router.RolePromptSettingsUpdateRequest(content="updated role prompt\n", default_skill_ids=["skill-a"])
+
+        def write_then_fail(data):
+            (self.root / "config.resources.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+            raise HTTPException(503, "reload failed")
+
+        with mock.patch.object(self.router, "save_resources_data", side_effect=write_then_fail):
+            with self.assertRaises(HTTPException) as cm:
+                self.router.update_role_prompt_settings("cypher-ctf-operator", body)
+
+        self.assertEqual(cm.exception.status_code, 503)
+        self.assertEqual(target.read_text(encoding="utf-8"), "original role prompt\n")
+        self.assertEqual((self.root / "config.resources.yaml").read_text(encoding="utf-8"), original_yaml)
+
+    def test_update_role_prompt_settings_rejects_unknown_role_or_skill_without_writing(self) -> None:
+        import yaml
+        from fastapi import HTTPException
+
+        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
+        role_root.mkdir(parents=True)
+        target = role_root / "ROLE.md"
+        target.write_text("original role prompt\n", encoding="utf-8")
+        (self.root / "config.resources.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {"mcp_servers": [], "skills": []},
+                    "roles": [
+                        {
+                            "id": "cypher-ctf-operator",
+                            "name": "CTF Operator",
+                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
+                            "default_skill_ids": [],
+                        }
+                    ],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        original_yaml = (self.root / "config.resources.yaml").read_text(encoding="utf-8")
+
+        for role_id, skill_ids, status in (
+            ("missing-role", [], 404),
+            ("cypher-ctf-operator", ["missing-skill"], 400),
+        ):
+            with self.subTest(role_id=role_id, skill_ids=skill_ids):
+                with self.assertRaises(HTTPException) as cm:
+                    self.router.update_role_prompt_settings(
+                        role_id,
+                        self.router.RolePromptSettingsUpdateRequest(
+                            content="updated role prompt\n",
+                            default_skill_ids=skill_ids,
+                        ),
+                    )
+                self.assertEqual(cm.exception.status_code, status)
+                self.assertEqual(target.read_text(encoding="utf-8"), "original role prompt\n")
+                self.assertEqual((self.root / "config.resources.yaml").read_text(encoding="utf-8"), original_yaml)
 
     def test_update_prompt_template_writes_file_and_updates_hash(self) -> None:
         from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS
@@ -386,16 +538,13 @@ class PromptSettingsFrontendTests(unittest.TestCase):
             state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
             state.api = async (method, path, body) => {{
               calls.push([method, path, body || null]);
-              if (path === '/role-prompts/cypher-ctf-operator/ROLE.md') {{
+              if (path === '/roles/admin/cypher-ctf-operator/prompt-settings') {{
                 return {{
                   role_names: ['cypher-ctf-operator/ROLE.md'],
                   roles: {{ 'cypher-ctf-operator/ROLE.md': body.content }},
                   role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'new-role-sha' }},
-                  role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
+                  role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: body.default_skill_ids, available: true }} }},
                 }};
-              }}
-              if (path === '/roles/admin/cypher-ctf-operator/default-skills') {{
-                return {{ id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: body.default_skill_ids, available: true }};
               }}
               if (path === '/prompt-templates/templates/reason.md') {{
                 return {{
@@ -445,15 +594,121 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         result = json.loads(completed.stdout)
 
         api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
-        self.assertEqual(api_calls[0][1], "/role-prompts/cypher-ctf-operator/ROLE.md")
-        self.assertEqual(api_calls[1][1], "/roles/admin/cypher-ctf-operator/default-skills")
-        self.assertEqual(api_calls[1][2], {"default_skill_ids": ["skill-a", "skill-b"]})
-        self.assertEqual(api_calls[2][1], "/prompt-templates/templates/reason.md")
+        self.assertEqual(api_calls[0][1], "/roles/admin/cypher-ctf-operator/prompt-settings")
+        self.assertEqual(api_calls[0][2], {"content": "updated role", "default_skill_ids": ["skill-a", "skill-b"]})
+        self.assertEqual(api_calls[1][1], "/prompt-templates/templates/reason.md")
         self.assertEqual(
             [call[1] for call in api_calls].count("/roles/admin/cypher-ctf-operator/default-skills"),
-            1,
+            0,
         )
         self.assertEqual(result["roleSkillIds"], ["skill-a", "skill-b"])
+
+    def test_prompt_save_failure_keeps_role_editor_state(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required to execute frontend state helper")
+
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
+        script = f"""
+            import {{ pathToFileURL }} from 'node:url';
+
+            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
+            const state = createPromptsState();
+            const calls = [];
+            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
+            state.api = async (method, path, body) => {{
+              calls.push([method, path, body || null]);
+              throw new Error('save failed');
+            }};
+            state.promptTemplateDetail = {{ prompt_names: [], prompts: {{}}, prompt_sha256: {{}}, prompts_sha256: 'set-sha' }};
+            state.rolePromptDetail = {{
+              role_names: ['cypher-ctf-operator/ROLE.md'],
+              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
+              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
+              role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
+            }};
+            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
+            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
+            state.promptEditorContent = 'unsaved role';
+            state.promptRoleRequiredSkillIds = ['skill-a'];
+
+            await state.savePromptTemplate();
+
+            console.log(JSON.stringify({{
+              calls,
+              editorContent: state.promptEditorContent,
+              skillIds: state.promptRoleRequiredSkillIds,
+            }}));
+        """
+
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
+        self.assertEqual(api_calls[0][1], "/roles/admin/cypher-ctf-operator/prompt-settings")
+        self.assertEqual(result["editorContent"], "unsaved role")
+        self.assertEqual(result["skillIds"], ["skill-a"])
+
+    def test_prompt_required_skills_disabled_when_metadata_errors(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required to execute frontend state helper")
+
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
+        script = f"""
+            import {{ pathToFileURL }} from 'node:url';
+
+            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
+            const state = createPromptsState();
+            const calls = [];
+            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
+            state.api = async (method, path, body) => {{
+              calls.push([method, path, body || null]);
+              throw new Error('should not call api');
+            }};
+            state.promptTemplateDetail = {{ prompt_names: [], prompts: {{}}, prompt_sha256: {{}}, prompts_sha256: 'set-sha' }};
+            state.rolePromptDetail = {{
+              role_names: ['cypher-ctf-operator/ROLE.md'],
+              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
+              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
+              role_metadata: {{}},
+              role_metadata_error: 'failed to load role metadata: yaml error',
+            }};
+            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
+            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
+            state.promptEditorContent = 'unsaved role';
+            state.promptRoleRequiredSkillIds = ['skill-a'];
+
+            await state.savePromptTemplate();
+
+            console.log(JSON.stringify({{
+              calls,
+              canEdit: state.promptRoleCanEditRequiredSkills(),
+              error: state.promptRoleMetadataError(),
+              editorContent: state.promptEditorContent,
+              skillIds: state.promptRoleRequiredSkillIds,
+            }}));
+        """
+
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
+        self.assertEqual(api_calls, [])
+        self.assertFalse(result["canEdit"])
+        self.assertIn("failed to load role metadata", result["error"])
+        self.assertEqual(result["editorContent"], "unsaved role")
+        self.assertEqual(result["skillIds"], ["skill-a"])
 
     def test_settings_contains_prompt_editor_controls(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
@@ -489,7 +744,8 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn("/prompt-templates", prompts)
         self.assertIn("/capabilities/catalog", prompts)
         self.assertIn("/roles/admin/", prompts)
-        self.assertIn("/default-skills", prompts)
+        self.assertIn("/prompt-settings", prompts)
+        self.assertNotIn("/default-skills", prompts)
         self.assertIn("promptTemplateRoutePath(name)", prompts)
         self.assertIn("promptSelectedIsRole()", prompts)
         self.assertIn("promptRoleRequiredSkillIds", prompts)

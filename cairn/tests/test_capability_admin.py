@@ -236,7 +236,7 @@ class CapabilityAdminTests(unittest.TestCase):
         import yaml
 
         from cairn.server.routers.capabilities import update_role_default_skills
-        from cairn.server.schemas import RoleDefaultSkillsUpdate
+        from cairn.server.schemas import RoleDefaultSkillsUpdateRequest
 
         skill_dir = self.yaml.root / "role-skill"
         skill_dir.mkdir()
@@ -269,7 +269,7 @@ class CapabilityAdminTests(unittest.TestCase):
 
         role = update_role_default_skills(
             "role1",
-            RoleDefaultSkillsUpdate(default_skill_ids=[" role-skill ", "role-skill", "", "other-skill"]),
+            RoleDefaultSkillsUpdateRequest(default_skill_ids=[" role-skill ", "role-skill", "", "other-skill"]),
         )
 
         after = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
@@ -278,7 +278,7 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in after["capabilities"]["skills"]], ["role-skill", "other-skill"])
         self.assertTrue((skill_dir / "SKILL.md").exists())
 
-        role = update_role_default_skills("role1", RoleDefaultSkillsUpdate(default_skill_ids=["other-skill"]))
+        role = update_role_default_skills("role1", RoleDefaultSkillsUpdateRequest(default_skill_ids=["other-skill"]))
         after = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
         self.assertEqual(role.default_skill_ids, ["other-skill"])
         self.assertEqual(after["capabilities"]["skills"][0]["id"], "role-skill")
@@ -289,7 +289,7 @@ class CapabilityAdminTests(unittest.TestCase):
         from fastapi import HTTPException
 
         from cairn.server.routers.capabilities import update_role_default_skills
-        from cairn.server.schemas import RoleDefaultSkillsUpdate
+        from cairn.server.schemas import RoleDefaultSkillsUpdateRequest
 
         data = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
         data["roles"] = [
@@ -305,7 +305,7 @@ class CapabilityAdminTests(unittest.TestCase):
         before = self.yaml.capabilities_path.read_text(encoding="utf-8")
 
         with self.assertRaises(HTTPException) as cm:
-            update_role_default_skills("role1", RoleDefaultSkillsUpdate(default_skill_ids=["missing-skill"]))
+            update_role_default_skills("role1", RoleDefaultSkillsUpdateRequest(default_skill_ids=["missing-skill"]))
 
         self.assertEqual(cm.exception.status_code, 400)
         self.assertEqual(self.yaml.capabilities_path.read_text(encoding="utf-8"), before)
@@ -315,7 +315,7 @@ class CapabilityAdminTests(unittest.TestCase):
         from fastapi import HTTPException
 
         from cairn.server.routers.capabilities import update_role_default_skills
-        from cairn.server.schemas import RoleDefaultSkillsUpdate
+        from cairn.server.schemas import RoleDefaultSkillsUpdateRequest
 
         skill_dir = self.yaml.root / "role-skill"
         skill_dir.mkdir()
@@ -332,10 +332,20 @@ class CapabilityAdminTests(unittest.TestCase):
         before = self.yaml.capabilities_path.read_text(encoding="utf-8")
 
         with self.assertRaises(HTTPException) as cm:
-            update_role_default_skills("missing-role", RoleDefaultSkillsUpdate(default_skill_ids=["role-skill"]))
+            update_role_default_skills("missing-role", RoleDefaultSkillsUpdateRequest(default_skill_ids=["role-skill"]))
 
         self.assertEqual(cm.exception.status_code, 404)
         self.assertEqual(self.yaml.capabilities_path.read_text(encoding="utf-8"), before)
+
+    def test_role_default_skills_request_rejects_path_like_ids(self) -> None:
+        from pydantic import ValidationError
+
+        from cairn.server.schemas import RoleDefaultSkillsUpdateRequest
+
+        for skill_id in ("bad skill", "bad/skill", "bad\\skill"):
+            with self.subTest(skill_id=skill_id):
+                with self.assertRaises(ValidationError):
+                    RoleDefaultSkillsUpdateRequest(default_skill_ids=[skill_id])
 
     def test_probe_mcp_success_updates_yaml_status(self) -> None:
         from cairn.server.routers.capabilities import (

@@ -4,14 +4,16 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import yaml
 
 import cairn.dispatcher.prompts as prompt_package
-from cairn.server.config.files import _text_sha256, resources_yaml_path
+from cairn.server.config.files import _overwrite_yaml, _text_sha256, resources_yaml_path, save_resources_data
+from cairn.server.config.roles import set_role_default_skills_in_data
 from cairn.server.execution_config.prompt_snapshot import is_complete_prompt_group_dir, load_prompt_snapshot
 from cairn.server.security.deps import current_active_superuser
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
+from cairn.shared.config.role_models import normalize_default_skill_ids
 
 router = APIRouter(tags=["prompt-groups"])
 DEFAULT_PROMPT_GROUP = "default"
@@ -19,6 +21,16 @@ DEFAULT_PROMPT_GROUP = "default"
 
 class PromptGroupTemplateUpdate(BaseModel):
     content: str
+
+
+class RolePromptSettingsUpdateRequest(BaseModel):
+    content: str
+    default_skill_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
+        return normalize_default_skill_ids(value)
 
 
 class PromptGroupDetail(BaseModel):
@@ -34,6 +46,7 @@ class RolePromptDetail(BaseModel):
     roles: dict[str, str]
     role_sha256: dict[str, str]
     role_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    role_metadata_error: str | None = None
 
 
 def _prompts_root() -> Path:
@@ -132,39 +145,46 @@ def _detail_for_role_prompts() -> dict[str, Any]:
         content = _role_prompt_path(name).read_text(encoding="utf-8")
         prompts[name] = content
         sha256[name] = _text_sha256(content)
+    metadata, metadata_error = _role_prompt_metadata(prompts.keys())
     return {
         "role_names": list(prompts.keys()),
         "roles": prompts,
         "role_sha256": sha256,
-        "role_metadata": _role_prompt_metadata(prompts.keys()),
+        "role_metadata": metadata,
+        "role_metadata_error": metadata_error,
     }
 
 
-def _role_prompt_metadata(prompt_names: Any) -> dict[str, dict[str, Any]]:
+def _role_prompt_metadata(prompt_names: Any) -> tuple[dict[str, dict[str, Any]], str | None]:
     names = list(prompt_names)
     try:
         data = yaml.safe_load(resources_yaml_path().read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001 - metadata should not break prompt editing
-        return {}
+    except Exception as exc:  # noqa: BLE001 - prompt content remains editable when metadata is broken
+        return {}, f"failed to load role metadata: {exc}"
+    if not isinstance(data, dict):
+        return {}, "failed to load role metadata: config.resources.yaml must contain a mapping"
     roles_raw = data.get("roles")
     roles = roles_raw if isinstance(roles_raw, list) else []
     metadata: dict[str, dict[str, Any]] = {}
-    for role in roles:
-        if not isinstance(role, dict):
-            continue
-        role_id = str(role.get("id") or "").strip()
-        if not role_id:
-            continue
-        prompt_path = _prompt_path_for_role(role)
-        if prompt_path not in names:
-            continue
-        metadata[prompt_path] = {
-            "role_id": role_id,
-            "name": str(role.get("name") or role_id),
-            "default_skill_ids": _normalize_metadata_skill_ids(role.get("default_skill_ids") or []),
-            "available": bool(role.get("available", True)),
-        }
-    return metadata
+    try:
+        for role in roles:
+            if not isinstance(role, dict):
+                continue
+            role_id = str(role.get("id") or "").strip()
+            if not role_id:
+                continue
+            prompt_path = _prompt_path_for_role(role)
+            if prompt_path not in names:
+                continue
+            metadata[prompt_path] = {
+                "role_id": role_id,
+                "name": str(role.get("name") or role_id),
+                "default_skill_ids": _normalize_metadata_skill_ids(role.get("default_skill_ids") or []),
+                "available": bool(role.get("available", True)),
+            }
+    except ValueError as exc:
+        return {}, f"failed to load role metadata: {exc}"
+    return metadata, None
 
 
 def _prompt_path_for_role(role: dict[str, Any]) -> str:
@@ -184,15 +204,26 @@ def _prompt_path_for_role(role: dict[str, Any]) -> str:
 
 def _normalize_metadata_skill_ids(value: Any) -> list[str]:
     items = value if isinstance(value, list) else []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in items:
-        skill_id = str(item or "").strip()
-        if not skill_id or skill_id in seen:
-            continue
-        seen.add(skill_id)
-        normalized.append(skill_id)
-    return normalized
+    return normalize_default_skill_ids(items)
+
+
+def _load_resources_data_for_role_prompt_settings() -> dict[str, Any]:
+    try:
+        data = yaml.safe_load(resources_yaml_path().read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"failed to load role metadata: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(500, "failed to load role metadata: config.resources.yaml must contain a mapping")
+    return data
+
+
+def _role_for_id(data: dict[str, Any], role_id: str) -> dict[str, Any]:
+    roles_raw = data.get("roles")
+    roles = roles_raw if isinstance(roles_raw, list) else []
+    target = next((role for role in roles if isinstance(role, dict) and role.get("id") == role_id), None)
+    if target is None:
+        raise HTTPException(404, f"role not found: {role_id}")
+    return target
 
 
 @router.get("/prompt-templates", response_model=PromptGroupDetail)
@@ -227,6 +258,29 @@ def update_role_prompt(
 ):
     target = _role_prompt_path(role_path)
     target.write_text(body.content, encoding="utf-8")
+    return _detail_for_role_prompts()
+
+
+@router.put("/roles/admin/{role_id}/prompt-settings", response_model=RolePromptDetail)
+def update_role_prompt_settings(
+    role_id: str,
+    body: RolePromptSettingsUpdateRequest,
+    _superuser=Depends(current_active_superuser),
+):
+    data = _load_resources_data_for_role_prompt_settings()
+    role = _role_for_id(data, role_id)
+    role_prompt_path = _prompt_path_for_role(role)
+    target = _role_prompt_path(role_prompt_path)
+    set_role_default_skills_in_data(data, role_id, body.default_skill_ids)
+    original_resources = resources_yaml_path().read_text(encoding="utf-8")
+    original = target.read_text(encoding="utf-8")
+    target.write_text(body.content, encoding="utf-8")
+    try:
+        save_resources_data(data)
+    except Exception:
+        target.write_text(original, encoding="utf-8")
+        _overwrite_yaml(resources_yaml_path(), original_resources)
+        raise
     return _detail_for_role_prompts()
 
 

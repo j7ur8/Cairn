@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from cairn.shared.config.role_models import normalize_default_skill_ids
 from cairn.shared.task_types import TASK_TYPE_REGISTRY, builtin_task_type_names
 
 CapabilitySource = Literal["builtin", "user"]
@@ -155,32 +156,16 @@ class RoleCatalogItem(BaseModel):
     @field_validator("default_skill_ids")
     @classmethod
     def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for item in value or []:
-            key = (item or "").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            deduped.append(key)
-        return deduped
+        return normalize_default_skill_ids(value)
 
 
-class RoleDefaultSkillsUpdate(BaseModel):
+class RoleDefaultSkillsUpdateRequest(BaseModel):
     default_skill_ids: list[str] = Field(default_factory=list)
 
     @field_validator("default_skill_ids")
     @classmethod
     def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for item in value or []:
-            key = (item or "").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            deduped.append(key)
-        return deduped
+        return normalize_default_skill_ids(value)
 
 
 class ProjectRole(BaseModel):
