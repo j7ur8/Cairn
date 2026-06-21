@@ -5,6 +5,7 @@ import sys
 import unittest
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -53,6 +54,29 @@ def _project(*, intents=None, facts=None, hints=None):
         intents=intents or [],
         hints=hints or [],
         proxy=None,
+    )
+
+
+def _summary(
+    *,
+    fact_count: int = 3,
+    intent_count: int = 0,
+    working_intent_count: int = 0,
+    unclaimed_intent_count: int = 0,
+    hint_count: int = 0,
+):
+    from cairn.shared.contracts import ProjectWorkSummary
+
+    return ProjectWorkSummary(
+        id="proj_001",
+        title="T",
+        status="active",
+        created_at=_ts(),
+        fact_count=fact_count,
+        intent_count=intent_count,
+        working_intent_count=working_intent_count,
+        unclaimed_intent_count=unclaimed_intent_count,
+        hint_count=hint_count,
     )
 
 
@@ -113,6 +137,129 @@ class WorkPlannerTests(unittest.TestCase):
                 ReasonCheckpoint(fact_count=2, hint_count=0, open_intent_count=0),
             )
         )
+
+
+class ProjectDispatcherDispatchTests(unittest.TestCase):
+    def _services(self, project, *, checkpoint=None, running_intent_ids=None):
+        services = MagicMock()
+        services.container_manager.container_name.return_value = "cairn-proj_001"
+        services.cleanup.is_pending.return_value = False
+        services.project_running_task_count.return_value = 0
+        services.project_running_task_summary.return_value = []
+        services.config = SimpleNamespace(runtime=SimpleNamespace(max_project_workers=4))
+        services.advance_replay_project.return_value = None
+        services.client.get_project.return_value = project
+        services.project_running_explore_intents.return_value = set(running_intent_ids or [])
+        services.reason_checkpoint.return_value = checkpoint
+        services.dispatch_explore.return_value = True
+        services.dispatch_reason.return_value = True
+        return services
+
+    def test_unclaimed_intent_dispatches_explore_not_reason(self) -> None:
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact
+
+        intent = _intent("i001")
+        project = _project(
+            intents=[intent],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+        )
+        services = self._services(project)
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(
+            _summary(intent_count=1, unclaimed_intent_count=1)
+        )
+
+        self.assertTrue(dispatched)
+        services.dispatch_explore.assert_called_once_with(project, intent)
+        services.dispatch_reason.assert_not_called()
+
+    def test_claimed_or_running_open_intents_block_reason(self) -> None:
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact
+
+        claimed = _intent("i001", worker="worker-a")
+        running = _intent("i002")
+        project = _project(
+            intents=[claimed, running],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+        )
+        services = self._services(project, running_intent_ids={"i002"})
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(
+            _summary(intent_count=2, working_intent_count=2)
+        )
+
+        self.assertFalse(dispatched)
+        services.dispatch_explore.assert_not_called()
+        services.dispatch_reason.assert_not_called()
+        self.assertTrue(
+            any(
+                call.args[1] == "project:proj_001:skip:open_intents_pending"
+                for call in services.log_changed.call_args_list
+            )
+        )
+
+    def test_changed_facts_and_hints_do_not_dispatch_reason_until_open_intents_finish(self) -> None:
+        from cairn.dispatcher.models import ReasonCheckpoint
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact, Hint
+
+        project = _project(
+            intents=[_intent("i001", worker="worker-a")],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+            hints=[Hint(id="h001", content="hint", creator="worker-a", created_at=_ts())],
+        )
+        services = self._services(
+            project,
+            checkpoint=ReasonCheckpoint(fact_count=2, hint_count=0, open_intent_count=1),
+        )
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(
+            _summary(intent_count=1, working_intent_count=1, hint_count=1)
+        )
+
+        self.assertFalse(dispatched)
+        services.dispatch_explore.assert_not_called()
+        services.dispatch_reason.assert_not_called()
+
+    def test_open_intents_reaching_zero_allows_reason_dispatch(self) -> None:
+        from cairn.dispatcher.models import ReasonCheckpoint
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact
+
+        project = _project(
+            intents=[_intent("i001", to="f001"), _intent("i002", to="f001")],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+        )
+        services = self._services(
+            project,
+            checkpoint=ReasonCheckpoint(fact_count=2, hint_count=0, open_intent_count=2),
+        )
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(_summary(intent_count=2))
+
+        self.assertTrue(dispatched)
+        services.dispatch_explore.assert_not_called()
+        services.dispatch_reason.assert_called_once()
+        _, trigger, _ = services.dispatch_reason.call_args.args
+        self.assertEqual(trigger, "facts:2->3,open_intents:2->0")
 
 
 class RuntimeTaskRegistryTests(unittest.TestCase):

@@ -121,6 +121,25 @@ class ProjectDispatcher:
         if unclaimed_intents:
             newest = max(unclaimed_intents, key=lambda i: i.created_at)
             return services.dispatch_explore(project, newest)
+        open_intent_count = self.project_open_intent_count(project)
+        if open_intent_count > 0:
+            open_intent_ids = [
+                intent.id
+                for intent in project.intents
+                if intent.to is None and (intent.worker is not None or intent.id in running_intent_ids)
+            ]
+            services.log_changed(
+                LOG,
+                f"{skip_scope}:open_intents_pending",
+                logging.DEBUG,
+                "skip reason project=%s because open intents are still pending open_intents=%s "
+                "unclaimed_intents=%s running_or_claimed_intents=%s",
+                summary.id,
+                open_intent_count,
+                summary.unclaimed_intent_count,
+                sorted(open_intent_ids),
+            )
+            return False
         if project.project.reason is not None:
             services.log_changed(
                 LOG,
@@ -141,7 +160,7 @@ class ProjectDispatcher:
                 summary.id,
                 len(project.facts),
                 len(project.hints),
-                self.project_open_intent_count(project),
+                open_intent_count,
                 len(project.intents),
             )
             return False
