@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -94,6 +95,10 @@ class IntentRow(Base):
     last_heartbeat_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     concluded_at: Mapped[str | None] = mapped_column(Text)
+    priority_score: Mapped[float | None] = mapped_column(Float)
+    intent_kind: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    score_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class IntentSourceRow(Base):

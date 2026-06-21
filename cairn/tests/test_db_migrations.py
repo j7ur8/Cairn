@@ -108,6 +108,25 @@ class DbMigrationTests(unittest.TestCase):
             {"prompts_json", "prompts_sha256"},
         )
 
+    def test_intent_priority_metadata_columns_exist(self) -> None:
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            rows = sql.fetchall(
+                conn,
+                """
+                SELECT column_name, column_default, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'intents'
+                  AND column_name IN ('priority_score', 'intent_kind', 'tags', 'score_reason')
+                """
+            )
+        columns = {row["column_name"]: row for row in rows}
+        self.assertEqual(set(columns), {"priority_score", "intent_kind", "tags", "score_reason"})
+        self.assertEqual(columns["tags"]["is_nullable"], "NO")
+        self.assertIn("'[]'", columns["tags"]["column_default"])
+
 
 if __name__ == "__main__":
     unittest.main()

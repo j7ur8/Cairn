@@ -26,6 +26,8 @@ def _intent(
     creator: str = "worker",
     worker: str | None = None,
     to: str | None = None,
+    priority_score: float | None = None,
+    created_at: str | None = None,
 ):
     from cairn.shared.contracts import Intent
 
@@ -36,8 +38,9 @@ def _intent(
         description=description,
         creator=creator,
         worker=worker,
-        created_at=_ts(int(intent_id[-1]) if intent_id[-1].isdigit() else 0),
+        created_at=created_at or _ts(int(intent_id[-1]) if intent_id[-1].isdigit() else 0),
         concluded_at=None,
+        priority_score=priority_score,
     )
 
 
@@ -177,6 +180,38 @@ class ProjectDispatcherDispatchTests(unittest.TestCase):
         self.assertTrue(dispatched)
         services.dispatch_explore.assert_called_once_with(project, intent)
         services.dispatch_reason.assert_not_called()
+
+    def test_high_priority_unclaimed_intent_dispatches_first(self) -> None:
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact
+
+        low_recent = _intent("i003", priority_score=0.2)
+        high_old = _intent("i001", priority_score=0.9)
+        project = _project(
+            intents=[low_recent, high_old],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+        )
+        services = self._services(project)
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(
+            _summary(intent_count=2, unclaimed_intent_count=2)
+        )
+
+        self.assertTrue(dispatched)
+        services.dispatch_explore.assert_called_once_with(project, high_old)
+
+    def test_priority_tie_breaks_by_created_at_then_id(self) -> None:
+        from cairn.dispatcher.scheduler.frontier_priority import intent_priority_key
+
+        old = _intent("i001", priority_score=0.5, created_at=_ts(1))
+        newer_low_id = _intent("i002", priority_score=0.5, created_at=_ts(2))
+        newer_high_id = _intent("i003", priority_score=0.5, created_at=_ts(2))
+
+        self.assertEqual(max([old, newer_low_id, newer_high_id], key=intent_priority_key), newer_high_id)
 
     def test_claimed_or_running_open_intents_block_reason(self) -> None:
         from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher

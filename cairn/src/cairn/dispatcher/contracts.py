@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from cairn.dispatcher.output_parser import extract_json_objects
 
+DEFAULT_INTENT_PRIORITY = 0.5
 PROTOCOL_SENTINEL = "32173462130721312360912"
 REASON_COMPLETE_SENTINEL = PROTOCOL_SENTINEL
 REASON_INTENTS_SENTINEL = "84913462130721312360912"
@@ -220,6 +222,7 @@ def validate_reason_payload(
         for i, intent in enumerate(intents):
             if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
                 raise ValueError(f"invalid intent at index {i}")
+            _normalize_reason_intent(intent, i)
         if not intents and open_intents_empty:
             raise ValueError("intents must not be empty when open_intents is empty")
         intents = intents[:max_intents]
@@ -229,6 +232,33 @@ def validate_reason_payload(
     if open_intents_empty:
         raise ValueError("intents is required when open_intents is empty")
     return "noop", None
+
+
+def _normalize_reason_intent(intent: dict[str, Any], index: int) -> None:
+    priority_score = intent.get("priority_score", DEFAULT_INTENT_PRIORITY)
+    if isinstance(priority_score, bool) or not isinstance(priority_score, int | float):
+        raise ValueError(f"invalid priority_score at intent index {index}")
+    priority = float(priority_score)
+    if not math.isfinite(priority) or priority < 0.0 or priority > 1.0:
+        raise ValueError(f"priority_score out of range at intent index {index}")
+    intent["priority_score"] = priority
+
+    tags = intent.get("tags", [])
+    if tags is None:
+        tags = []
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError(f"invalid tags at intent index {index}")
+    intent["tags"] = [tag.strip() for tag in tags if tag.strip()]
+
+    intent_kind = intent.get("intent_kind")
+    if intent_kind is not None and not isinstance(intent_kind, str):
+        raise ValueError(f"invalid intent_kind at intent index {index}")
+    intent["intent_kind"] = intent_kind.strip() if isinstance(intent_kind, str) and intent_kind.strip() else None
+
+    score_reason = intent.get("score_reason")
+    if score_reason is not None and not isinstance(score_reason, str):
+        raise ValueError(f"invalid score_reason at intent index {index}")
+    intent["score_reason"] = score_reason.strip() if isinstance(score_reason, str) and score_reason.strip() else None
 
 
 def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:

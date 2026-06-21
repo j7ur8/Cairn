@@ -70,7 +70,8 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertNotIn("{capability_instructions}", reason)
         self.assertIn("{role_instructions}", reason)
-        self.assertIn("{graph_yaml}", reason)
+        self.assertIn("{fact_view}", reason)
+        self.assertIn("{full_graph}", reason)
         self.assertIn("{fact_ids}", reason)
         self.assertIn("{open_intents}", reason)
         self.assertIn("{max_intents}", reason)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from cairn.dispatcher.scheduler.frontier_priority import intent_priority_key
 from cairn.dispatcher.scheduler.work_planner import (
     BOOTSTRAP_INTENT_CREATOR,
     BOOTSTRAP_INTENT_DESCRIPTION,
@@ -119,8 +120,8 @@ class ProjectDispatcher:
                 sorted(running_intent_ids),
             )
         if unclaimed_intents:
-            newest = max(unclaimed_intents, key=lambda i: i.created_at)
-            return services.dispatch_explore(project, newest)
+            selected = max(unclaimed_intents, key=intent_priority_key)
+            return services.dispatch_explore(project, selected)
         open_intent_count = self.project_open_intent_count(project)
         if open_intent_count > 0:
             open_intent_ids = [

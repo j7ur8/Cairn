@@ -51,6 +51,10 @@ def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Inte
         description=body.description,
         creator=body.creator,
         worker=body.worker,
+        priority_score=body.priority_score,
+        intent_kind=body.intent_kind,
+        tags=body.tags,
+        score_reason=body.score_reason,
         now=now,
     )
     projects.bump_revisions(project_id, graph=True, timeline=True)
@@ -65,6 +69,10 @@ def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Inte
         last_heartbeat_at=now if claimed else None,
         created_at=now,
         concluded_at=None,
+        priority_score=body.priority_score,
+        intent_kind=body.intent_kind,
+        tags=body.tags,
+        score_reason=body.score_reason,
     )
 
 

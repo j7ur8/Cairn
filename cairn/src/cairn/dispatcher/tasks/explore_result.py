@@ -18,7 +18,7 @@ from cairn.dispatcher.tasks.task_release import best_effort_release
 from cairn.dispatcher.tasks.task_text import preview
 from cairn.dispatcher.tasks.task_writeback import write_conclude_result_with_fact_id
 from cairn.shared.config import DispatchConfig, WorkerConfig
-from cairn.shared.contracts import Intent
+from cairn.shared.contracts import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ def run_explore_conclude_fallback(
     container_manager: ContainerRuntime,
     worker: WorkerConfig,
     driver: Any,
+    project: ProjectDetail,
     project_id: str,
     intent: Intent,
     export_yaml: str,
@@ -62,6 +63,7 @@ def run_explore_conclude_fallback(
         container_manager=container_manager,
         container_name=container_name,
         export_yaml=export_yaml,
+        project=project,
         intent=intent,
         execution_config=execution_config,
         reporter=reporter,

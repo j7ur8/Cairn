@@ -64,6 +64,10 @@ def export_project_yaml(conn: Any, project_id: str) -> str:
                 "worker": intent["worker"],
                 "created_at": format_export_timestamp(intent["created_at"]),
                 "concluded_at": format_export_timestamp(intent["concluded_at"]),
+                "priority_score": intent["priority_score"],
+                "intent_kind": intent["intent_kind"],
+                "tags": intent["tags"],
+                "score_reason": intent["score_reason"],
             }
         )
 

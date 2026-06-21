@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from cairn.server.repositories import sql
@@ -16,6 +17,10 @@ def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dic
         "last_heartbeat_at": row["last_heartbeat_at"],
         "created_at": row["created_at"],
         "concluded_at": row["concluded_at"],
+        "priority_score": row["priority_score"],
+        "intent_kind": row["intent_kind"],
+        "tags": _decode_tags(row["tags"]),
+        "score_reason": row["score_reason"],
     }
 
 
@@ -32,6 +37,10 @@ class IntentRepository:
         description: str,
         creator: str,
         worker: str | None,
+        priority_score: float | None = None,
+        intent_kind: str | None = None,
+        tags: list[str] | None = None,
+        score_reason: str | None = None,
         now: str,
     ) -> None:
         claimed = worker is not None
@@ -40,10 +49,12 @@ class IntentRepository:
             """
             INSERT INTO intents (
                 id, project_id, to_fact_id, description, creator, worker,
-                last_heartbeat_at, created_at, concluded_at
+                last_heartbeat_at, created_at, concluded_at,
+                priority_score, intent_kind, tags, score_reason
             ) VALUES (
                 :intent_id, :project_id, NULL, :description, :creator, :worker,
-                :last_heartbeat_at, :created_at, NULL
+                :last_heartbeat_at, :created_at, NULL,
+                :priority_score, :intent_kind, :tags, :score_reason
             )
             """,
             {
@@ -54,6 +65,10 @@ class IntentRepository:
                 "worker": worker,
                 "last_heartbeat_at": now if claimed else None,
                 "created_at": now,
+                "priority_score": priority_score,
+                "intent_kind": intent_kind,
+                "tags": json.dumps(tags or []),
+                "score_reason": score_reason,
             },
         )
         self.insert_sources(intent_id, project_id, source_fact_ids)
@@ -73,10 +88,10 @@ class IntentRepository:
             """
             INSERT INTO intents (
                 id, project_id, to_fact_id, description, creator, worker,
-                last_heartbeat_at, created_at, concluded_at
+                last_heartbeat_at, created_at, concluded_at, tags
             ) VALUES (
                 :intent_id, :project_id, 'goal', :description, :worker, :worker,
-                :now, :now, :now
+                :now, :now, :now, '[]'
             )
             """,
             {
@@ -105,10 +120,10 @@ class IntentRepository:
             """
             INSERT INTO intents (
                 id, project_id, to_fact_id, description, creator, worker,
-                last_heartbeat_at, created_at, concluded_at
+                last_heartbeat_at, created_at, concluded_at, tags
             ) VALUES (
                 :intent_id, :project_id, :to_fact_id, :description, :creator, :creator,
-                :now, :now, :now
+                :now, :now, :now, '[]'
             )
             """,
             {
@@ -358,3 +373,19 @@ def _hydrate_intent_sources_batch(
         pid = row["project_id"]
         result.setdefault(pid, []).append(_intent_projection(row, sources_by_intent))
     return result
+
+
+def _decode_tags(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if not isinstance(value, str):
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, str)]

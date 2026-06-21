@@ -16,6 +16,10 @@ def intent_to_model(row: Any) -> Intent:
         last_heartbeat_at=row["last_heartbeat_at"],
         created_at=row["created_at"],
         concluded_at=row["concluded_at"],
+        priority_score=row["priority_score"],
+        intent_kind=row["intent_kind"],
+        tags=list(row["tags"]),
+        score_reason=row["score_reason"],
     )
 
 

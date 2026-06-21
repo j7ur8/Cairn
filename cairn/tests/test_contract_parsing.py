@@ -121,7 +121,19 @@ class ContractParsingTests(unittest.TestCase):
         payload = parse_reason_output(stdout)
         self.assertEqual(
             validate_reason_payload(payload, open_intents_empty=True, max_intents=2),
-            ("intents", [{"from": ["f001"], "description": "next"}]),
+            (
+                "intents",
+                [
+                    {
+                        "from": ["f001"],
+                        "description": "next",
+                        "priority_score": 0.5,
+                        "intent_kind": None,
+                        "tags": [],
+                        "score_reason": None,
+                    }
+                ],
+            ),
         )
 
     def test_parse_reason_output_parses_noop_marker_payload(self) -> None:
@@ -155,8 +167,81 @@ class ContractParsingTests(unittest.TestCase):
 
         self.assertEqual(
             validate_reason_payload(payload, open_intents_empty=True, max_intents=2),
-            ("intents", [{"from": ["f001"], "description": "legacy"}]),
+            (
+                "intents",
+                [
+                    {
+                        "from": ["f001"],
+                        "description": "legacy",
+                        "priority_score": 0.5,
+                        "intent_kind": None,
+                        "tags": [],
+                        "score_reason": None,
+                    }
+                ],
+            ),
         )
+
+    def test_reason_intent_priority_metadata_is_normalized(self) -> None:
+        from cairn.dispatcher.contracts import validate_reason_payload
+
+        payload = {
+            "accepted": True,
+            "data": {
+                "intents": [
+                    {
+                        "from": ["f001"],
+                        "description": "next",
+                        "priority_score": 0.9,
+                        "intent_kind": " exploit ",
+                        "tags": [" rce ", ""],
+                        "score_reason": " direct path ",
+                    },
+                    {"from": ["f002"], "description": "default"},
+                ]
+            },
+        }
+
+        kind, data = validate_reason_payload(payload, open_intents_empty=True, max_intents=3)
+
+        self.assertEqual(kind, "intents")
+        self.assertEqual(
+            data,
+            [
+                {
+                    "from": ["f001"],
+                    "description": "next",
+                    "priority_score": 0.9,
+                    "intent_kind": "exploit",
+                    "tags": ["rce"],
+                    "score_reason": "direct path",
+                },
+                {
+                    "from": ["f002"],
+                    "description": "default",
+                    "priority_score": 0.5,
+                    "intent_kind": None,
+                    "tags": [],
+                    "score_reason": None,
+                },
+            ],
+        )
+
+    def test_reason_intent_priority_rejects_bool_string_and_out_of_range(self) -> None:
+        from cairn.dispatcher.contracts import validate_reason_payload
+
+        for value in (True, "0.9", -0.1, 1.1):
+            with self.subTest(value=value):
+                payload = {
+                    "accepted": True,
+                    "data": {
+                        "intents": [
+                            {"from": ["f001"], "description": "next", "priority_score": value}
+                        ]
+                    },
+                }
+                with self.assertRaisesRegex(ValueError, "priority_score"):
+                    validate_reason_payload(payload, open_intents_empty=True, max_intents=1)
 
 
 if __name__ == "__main__":

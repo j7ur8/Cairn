@@ -110,6 +110,31 @@ class IntentRouterTests(unittest.TestCase):
         renewed = intents.heartbeat("proj_t", created.id, HeartbeatRequest(worker="worker_a"))
         self.assertEqual(renewed.worker, "worker_a")
 
+    def test_create_intent_round_trips_priority_metadata(self) -> None:
+        from cairn.server.routers import intents
+        from cairn.server.schemas import CreateIntentRequest
+
+        self._create_project()
+        created = intents.create_intent(
+            "proj_t",
+            CreateIntentRequest(
+                **{
+                    "from": ["origin"],
+                    "description": "investigate high value path",
+                    "creator": "worker_a",
+                    "priority_score": 0.85,
+                    "intent_kind": "exploit",
+                    "tags": ["rce", "fast"],
+                    "score_reason": "direct path to goal",
+                }
+            ),
+        )
+
+        self.assertEqual(created.priority_score, 0.85)
+        self.assertEqual(created.intent_kind, "exploit")
+        self.assertEqual(created.tags, ["rce", "fast"])
+        self.assertEqual(created.score_reason, "direct path to goal")
+
     def test_project_reads_do_not_expire_leases(self) -> None:
         from cairn.server.routers import projects
 

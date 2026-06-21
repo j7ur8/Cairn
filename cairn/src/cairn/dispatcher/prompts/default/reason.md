@@ -1,5 +1,5 @@
 # Task
-You will receive a YAML snapshot of the task graph. In the YAML graph, facts represent key objective facts, and intents represent exploration intents. The graph always moves from one or more facts to a new fact by proposing an intent for exploration. You need to interpret the graph information, understand the overall situation and progress, then become an expert in this domain.
+You will receive a compact YAML view of the task graph and a full graph YAML fallback. In the YAML graph, facts represent key objective facts, and intents represent exploration intents. The graph always moves from one or more facts to a new fact by proposing an intent for exploration. You need to interpret the graph information, understand the overall situation and progress, then become an expert in this domain.
 You need to judge two things:
 1. Whether the current facts already satisfy Goal
 2. If not, whether new intents should currently be proposed
@@ -16,7 +16,7 @@ If Goal has been satisfied, return:
 
 If Goal has not been satisfied but new intents should be proposed, return:
 84913462130721312360912
-{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
+{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "...", "priority_score": 0.8, "intent_kind": "recon", "tags": ["auth"], "score_reason": "why this frontier should run before lower-value alternatives"}]}}
 84913462130721312360912
 
 If Goal has not been satisfied and no new intent should currently be proposed, return:
@@ -31,14 +31,21 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - If `Open Intents` is empty, you must propose new intents.
 - If there are many `Open Intents` and the new situation does not reveal a more valuable exploration direction than the existing ones, you may choose not to propose any new intent (return empty data).
 - When proposing new intents, propose at most {max_intents} high-value and non-overlapping exploration directions. Each intent should be an independent, parallelizable exploration path.
+- Each proposed intent may include `priority_score` from 0.0 to 1.0. Use higher scores for frontier work that is more likely to advance Goal soon. If unsure, use 0.5.
+- Each proposed intent may include `intent_kind`, `tags`, and `score_reason`. Keep tags short and use `score_reason` only to explain scheduling priority.
 - Each Intent should be a high-value exploration direction. It does not need to be overly detailed. Focus on the core insight and a clear direction. Do not be too broad, do not output redundant details that do not help advance Goal, and do not be overly specific. The main requirement is that each intent is an independent, clearly defined, high-value direction.
 - An Intent may originate from multiple facts.
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
 ### Context
-#### Graph
+#### Fact View
 ```
-{graph_yaml}
+{fact_view}
+```
+
+#### Full Graph
+```
+{full_graph}
 ```
 
 #### Valid facts

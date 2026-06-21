@@ -110,11 +110,31 @@ class TaskApiClient(HttpClientBase):
             json={"from": from_ids, "description": description, "worker": worker},
         )
 
-    def create_intent(self, project_id: str, from_ids: list[str], description: str, creator: str) -> ApiResult:
+    def create_intent(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        creator: str,
+        *,
+        priority_score: float | None = None,
+        intent_kind: str | None = None,
+        tags: list[str] | None = None,
+        score_reason: str | None = None,
+    ) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/intents",
-            json={"from": from_ids, "description": description, "creator": creator, "worker": None},
+            json={
+                "from": from_ids,
+                "description": description,
+                "creator": creator,
+                "worker": None,
+                "priority_score": priority_score,
+                "intent_kind": intent_kind,
+                "tags": tags or [],
+                "score_reason": score_reason,
+            },
         )
 
     def advance_replay_run(self, project_id: str) -> ApiResult:

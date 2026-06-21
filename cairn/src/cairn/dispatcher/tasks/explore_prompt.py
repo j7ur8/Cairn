@@ -7,10 +7,11 @@ from cairn.dispatcher.prompting import (
     render_prompt,
 )
 from cairn.dispatcher.tasks.context import ContainerRuntime
+from cairn.dispatcher.tasks.fact_views import FactViewRenderer
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
-from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference
+from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference, write_task_snapshot_reference
 from cairn.shared.config import DispatchConfig
-from cairn.shared.contracts import Intent
+from cairn.shared.contracts import Intent, ProjectDetail
 
 
 def build_explore_execute_prompt(
@@ -19,10 +20,29 @@ def build_explore_execute_prompt(
     container_manager: ContainerRuntime,
     container_name: str,
     export_yaml: str,
+    project: ProjectDetail,
     intent: Intent,
     prepared: PreparedTaskExecution,
     reporter: Any | None = None,
 ) -> str:
+    full_graph_reference = write_graph_snapshot_reference(
+        container_manager,
+        container_name,
+        export_yaml.strip(),
+        phase="explore_execute",
+    )
+    fact_view = FactViewRenderer().render_worker_view(
+        project,
+        intent=intent,
+        full_graph_reference=full_graph_reference,
+    )
+    fact_view_reference = write_task_snapshot_reference(
+        container_manager,
+        container_name,
+        fact_view.yaml_text.strip(),
+        filename="worker-view.yaml",
+        phase="explore_execute",
+    )
     return render_prompt(
         load_prompt_from_execution_config(
             prepared.execution_config,
@@ -30,12 +50,9 @@ def build_explore_execute_prompt(
             reporter,
         ),
         {
-            "graph_yaml": write_graph_snapshot_reference(
-                container_manager,
-                container_name,
-                export_yaml.strip(),
-                phase="explore_execute",
-            ),
+            "fact_view": fact_view_reference,
+            "full_graph": full_graph_reference,
+            "graph_yaml": full_graph_reference,
             "intent_id": intent.id,
             "intent_description": intent.description,
             "capability_instructions": prepared.capabilities.instructions,
@@ -50,10 +67,29 @@ def build_explore_conclude_prompt(
     container_manager: ContainerRuntime,
     container_name: str,
     export_yaml: str,
+    project: ProjectDetail,
     intent: Intent,
     execution_config: dict | None = None,
     reporter: Any | None = None,
 ) -> str:
+    full_graph_reference = write_graph_snapshot_reference(
+        container_manager,
+        container_name,
+        export_yaml.strip(),
+        phase="explore_conclude",
+    )
+    fact_view = FactViewRenderer().render_conclude_view(
+        project,
+        intent=intent,
+        full_graph_reference=full_graph_reference,
+    )
+    fact_view_reference = write_task_snapshot_reference(
+        container_manager,
+        container_name,
+        fact_view.yaml_text.strip(),
+        filename="conclude-view.yaml",
+        phase="explore_conclude",
+    )
     return render_prompt(
         load_prompt_from_execution_config(
             execution_config,
@@ -61,12 +97,9 @@ def build_explore_conclude_prompt(
             reporter,
         ),
         {
-            "graph_yaml": write_graph_snapshot_reference(
-                container_manager,
-                container_name,
-                export_yaml.strip(),
-                phase="explore_conclude",
-            ),
+            "fact_view": fact_view_reference,
+            "full_graph": full_graph_reference,
+            "graph_yaml": full_graph_reference,
             "intent_id": intent.id,
             "intent_description": intent.description,
         },

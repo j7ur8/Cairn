@@ -10,8 +10,9 @@ from cairn.dispatcher.prompting import (
     render_prompt,
 )
 from cairn.dispatcher.tasks.context import ContainerRuntime
+from cairn.dispatcher.tasks.fact_views import FactViewRenderer
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
-from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference
+from cairn.dispatcher.tasks.task_snapshot import write_graph_snapshot_reference, write_task_snapshot_reference
 from cairn.shared.config import DispatchConfig, WorkerConfig
 from cairn.shared.contracts import ProjectDetail
 
@@ -57,6 +58,23 @@ def build_reason_execute_prompt(
         len(project.hints),
         len(open_intents),
     )
+    full_graph_reference = write_graph_snapshot_reference(
+        container_manager,
+        container_name,
+        export_yaml.strip(),
+        phase="reason_execute",
+    )
+    fact_view = FactViewRenderer().render_reason_view(
+        project,
+        full_graph_reference=full_graph_reference,
+    )
+    fact_view_reference = write_task_snapshot_reference(
+        container_manager,
+        container_name,
+        fact_view.yaml_text.strip(),
+        filename="reason-view.yaml",
+        phase="reason_execute",
+    )
     prompt = render_prompt(
         load_prompt_from_execution_config(
             prepared.execution_config,
@@ -64,12 +82,9 @@ def build_reason_execute_prompt(
             reporter,
         ),
         {
-            "graph_yaml": write_graph_snapshot_reference(
-                container_manager,
-                container_name,
-                export_yaml.strip(),
-                phase="reason_execute",
-            ),
+            "fact_view": fact_view_reference,
+            "full_graph": full_graph_reference,
+            "graph_yaml": full_graph_reference,
             "fact_ids": format_fact_ids(allowed_fact_ids),
             "open_intents": format_open_intents(open_intents),
             "max_intents": str(config.tasks.reason.max_intents),

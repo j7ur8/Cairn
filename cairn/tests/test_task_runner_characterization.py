@@ -96,11 +96,33 @@ def _result(*, returncode=0, stdout="{}", stderr="", timed_out=False, cancelled=
 
 
 def _project():
-    return mock.Mock(project=mock.Mock(id="proj_1"))
+    from cairn.shared.contracts import Fact, ProjectDetail, ProjectMeta
+
+    return ProjectDetail(
+        project=ProjectMeta(id="proj_1", title="T", status="active", created_at="2026-06-06T00:00:00Z"),
+        facts=[
+            Fact(id="origin", description="origin"),
+            Fact(id="goal", description="goal"),
+        ],
+        intents=[],
+        hints=[],
+        proxy=None,
+    )
 
 
 def _intent():
-    return mock.Mock(id="intent_1")
+    from cairn.shared.contracts import Intent
+
+    return Intent(
+        id="intent_1",
+        **{"from": ["origin"]},
+        to=None,
+        description="intent description",
+        creator="reason",
+        worker=None,
+        created_at="2026-06-06T00:00:00Z",
+        concluded_at=None,
+    )
 
 
 def _worker():
@@ -393,13 +415,14 @@ class ExploreCharacterizationTests(unittest.TestCase):
     def test_explore_conclude_prompt_does_not_include_role_instructions(self) -> None:
         config = mock.Mock()
         container_manager = mock.Mock()
-        intent = mock.Mock(id="intent_1", description="intent description")
+        intent = _intent()
 
         prompt = build_explore_conclude_prompt(
             config=config,
             container_manager=container_manager,
             container_name="container",
             export_yaml="graph: []",
+            project=_project(),
             intent=intent,
             execution_config={
                 "prompt_snapshot": {

@@ -152,7 +152,16 @@ def _create_intents(
     created = 0
     created_ids: list[str] = []
     for intent_data in data:
-        response = client.create_intent(project_id, intent_data["from"], intent_data["description"], worker_name)
+        response = client.create_intent(
+            project_id,
+            intent_data["from"],
+            intent_data["description"],
+            worker_name,
+            priority_score=intent_data.get("priority_score"),
+            intent_kind=intent_data.get("intent_kind"),
+            tags=intent_data.get("tags"),
+            score_reason=intent_data.get("score_reason"),
+        )
         if response.status_code == 403:
             LOG.info(
                 "project became inactive during reason intent create project=%s worker=%s created=%s",
