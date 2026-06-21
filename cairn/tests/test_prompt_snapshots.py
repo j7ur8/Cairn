@@ -51,6 +51,19 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("Do not output JSON", output_requirements)
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
+    def test_default_bootstrap_is_bounded_initial_reconnaissance(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("keep working and do not stop", bootstrap)
+        self.assertIn("business purpose", bootstrap)
+        self.assertIn("application type", bootstrap)
+        self.assertIn("entrypoints", bootstrap)
+        self.assertIn("initial reconnaissance", bootstrap)
+        self.assertIn("deep exploitation", bootstrap)
+        self.assertIn("brute force", bootstrap)
+        self.assertIn("large fuzzing", bootstrap)
+
     def test_default_reason_uses_marker_gated_output(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         reason = (default_dir / "reason.md").read_text(encoding="utf-8")

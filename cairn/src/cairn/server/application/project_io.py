@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -9,6 +10,7 @@ from typing import Any, BinaryIO
 
 from fastapi import HTTPException
 
+from cairn.server.domain.errors import ServerInvariantError
 from cairn.server.domain.projects import require_project, require_project_hint_writable
 from cairn.server.domain.time import utcnow
 from cairn.server.repositories.ids import IdRepository
@@ -73,6 +75,12 @@ def create_hint(conn: Any, project_id: str, body: CreateHintRequest) -> Hint:
     projects.insert_hint(project_id, hint_id, body.content, body.creator, now)
     projects.bump_revisions(project_id, timeline=True)
     return Hint(id=hint_id, content=body.content, creator=body.creator, created_at=now)
+
+
+def prepare_project_storage(project_id: str) -> None:
+    pid = validate_project_id(project_id)
+    _reset_project_storage_dir(project_files_root(), pid)
+    _reset_project_storage_dir(host_attachment_root(), pid)
 
 
 def upload_project_attachments(
@@ -146,6 +154,27 @@ def cleanup_paths(paths: list[Path]) -> None:
             target.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _reset_project_storage_dir(root: Path, project_id: str) -> None:
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        root_resolved = root.resolve(strict=False)
+        target = root / project_id
+        if target.parent.resolve(strict=False) != root_resolved:
+            raise ServerInvariantError("project storage target escaped storage root")
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.exists():
+            if not target.is_dir():
+                target.unlink()
+            else:
+                shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=False)
+    except ServerInvariantError:
+        raise
+    except OSError as exc:
+        raise ServerInvariantError(f"failed to prepare project storage: {exc}") from exc
 
 
 def list_project_files(conn: Any, project_id: str) -> ProjectFilesResponse:

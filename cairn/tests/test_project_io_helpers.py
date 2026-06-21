@@ -134,5 +134,70 @@ class CleanupPathsTests(unittest.TestCase):
             self.assertFalse(present.exists())
 
 
+class PrepareProjectStorageTests(unittest.TestCase):
+    def test_clears_existing_project_files_and_attachments(self) -> None:
+        from cairn.server.application.project_io import prepare_project_storage
+        from helpers import TempYamlConfig
+
+        with TempYamlConfig() as cfg:
+            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
+            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+            project_dir = project_root / "proj_clean"
+            attachment_dir = attachments_root / "proj_clean"
+            (project_dir / "reports").mkdir(parents=True)
+            (project_dir / "reports" / "old.md").write_text("old", encoding="utf-8")
+            attachment_dir.mkdir(parents=True)
+            (attachment_dir / "file.zip").write_text("old", encoding="utf-8")
+
+            prepare_project_storage("proj_clean")
+
+            self.assertEqual(list(project_dir.iterdir()), [])
+            self.assertEqual(list(attachment_dir.iterdir()), [])
+
+    def test_creates_missing_project_storage_dirs(self) -> None:
+        from cairn.server.application.project_io import prepare_project_storage
+        from helpers import TempYamlConfig
+
+        with TempYamlConfig() as cfg:
+            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
+            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+
+            prepare_project_storage("proj_missing")
+
+            self.assertTrue((project_root / "proj_missing").is_dir())
+            self.assertTrue((attachments_root / "proj_missing").is_dir())
+            self.assertEqual(list((project_root / "proj_missing").iterdir()), [])
+            self.assertEqual(list((attachments_root / "proj_missing").iterdir()), [])
+
+    def test_replaces_file_and_symlink_targets_with_directories(self) -> None:
+        from cairn.server.application.project_io import prepare_project_storage
+        from helpers import TempYamlConfig
+
+        with TempYamlConfig() as cfg:
+            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
+            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+            project_root.mkdir(parents=True)
+            attachments_root.mkdir(parents=True)
+            (project_root / "proj_replace").write_text("old", encoding="utf-8")
+            outside = Path(cfg.root) / "outside"
+            outside.mkdir()
+            (attachments_root / "proj_replace").symlink_to(outside, target_is_directory=True)
+
+            prepare_project_storage("proj_replace")
+
+            self.assertTrue((project_root / "proj_replace").is_dir())
+            self.assertTrue((attachments_root / "proj_replace").is_dir())
+            self.assertFalse((attachments_root / "proj_replace").is_symlink())
+            self.assertTrue(outside.is_dir())
+
+    def test_rejects_invalid_project_id(self) -> None:
+        from fastapi import HTTPException
+
+        from cairn.server.application.project_io import prepare_project_storage
+
+        with self.assertRaises(HTTPException):
+            prepare_project_storage("../escape")
+
+
 if __name__ == "__main__":
     unittest.main()

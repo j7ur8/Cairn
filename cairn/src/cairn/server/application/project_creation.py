@@ -7,6 +7,7 @@ from typing import Any, Literal
 from cairn.server.ai_profile_service import (
     require_complete_ai_profile_selections,
 )
+from cairn.server.application.project_io import prepare_project_storage
 from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.domain.errors import BadRequestError, DomainError
 from cairn.server.domain.time import utcnow
@@ -81,6 +82,11 @@ def create_project_from_draft(
             updated_at=proxy.updated_at,
         )
 
+    ai_profiles = require_complete_ai_profile_selections(draft.ai_profiles)
+    if draft.task_timeouts is None:
+        raise DomainError("task_timeouts is required", status_code=422)
+    prepare_project_storage(pid)
+
     try:
         projects.insert_project(
             project_id=pid,
@@ -104,9 +110,6 @@ def create_project_from_draft(
         projects.insert_hint(pid, hid, hint.content, hint.creator, now)
         hints.append(Hint(id=hid, content=hint.content, creator=hint.creator, created_at=now))
 
-    ai_profiles = require_complete_ai_profile_selections(draft.ai_profiles)
-    if draft.task_timeouts is None:
-        raise DomainError("task_timeouts is required", status_code=422)
     persist_project_execution_configs(
         conn,
         pid,

@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from sqlalchemy import text
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -60,6 +64,28 @@ _MINIMAL_CREATE: dict = {
 }
 
 
+def _complete_create_payload(profile_id: str) -> dict:
+    selection = {
+        "primary_profile_id": profile_id,
+        "primary_model": "gpt-test",
+        "primary_reasoning_type": "medium",
+        "fallback_profile_ids": [],
+    }
+    return {
+        **_MINIMAL_CREATE,
+        "task_timeouts": {
+            "bootstrap": {"timeout": 5, "conclude_timeout": 5},
+            "explore": {"timeout": 5, "conclude_timeout": 5},
+            "reason": {"timeout": 5, "max_intents": 2},
+        },
+        "ai_profiles": {
+            "bootstrap": selection,
+            "explore": selection,
+            "reason": selection,
+        },
+    }
+
+
 class ProjectsRouterTests(unittest.TestCase):
     def setUp(self) -> None:
         """Reset the DB schema for every test — clean isolation."""
@@ -70,6 +96,21 @@ class ProjectsRouterTests(unittest.TestCase):
 
         from cairn.server.app import app
         return TestClient(app)
+
+    def _create_ai_profile_id(self, client, token: str) -> str:
+        response = client.post(
+            "/ai-profiles",
+            json={
+                "name": "test-profile",
+                "worker_type": "codex",
+                "model": "gpt-test",
+                "api_key_env": "OPENAI_API_KEY",
+                "sk": "test-key",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.json()["id"]
 
     # ------------------------------------------------------------------
     # Happy-path CRUD --------------------------------------------------
@@ -86,6 +127,64 @@ class ProjectsRouterTests(unittest.TestCase):
         self.assertEqual(body["project"]["title"], "smoke-project")
         self.assertIn("facts", body)
         self.assertIn("intents", body)
+
+    def test_create_project_clears_reused_storage_dirs(self) -> None:
+        from cairn.server import runtime_config
+
+        old_project_root = runtime_config.system_config().paths.resolved_project_files_root
+        old_attachments_root = runtime_config.system_config().paths.resolved_attachments_root
+        with tempfile.TemporaryDirectory() as td:
+            project_root = Path(td) / "project-files"
+            attachments_root = Path(td) / "attachments"
+            runtime_config.system_config().paths.project_files_root = str(project_root)
+            runtime_config.system_config().paths.attachments_root = str(attachments_root)
+            try:
+                (project_root / "proj_001" / "reports").mkdir(parents=True)
+                (project_root / "proj_001" / "reports" / "stale.md").write_text("old", encoding="utf-8")
+                (attachments_root / "proj_001").mkdir(parents=True)
+                (attachments_root / "proj_001" / "stale.zip").write_text("old", encoding="utf-8")
+
+                with self._client() as c:
+                    token = _login_token(c)
+                    profile_id = self._create_ai_profile_id(c, token)
+                    created = c.post(
+                        "/projects",
+                        json=_complete_create_payload(profile_id),
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    pid = created.json()["project"]["id"]
+                    files = c.get(f"/projects/{pid}/files", headers={"Authorization": f"Bearer {token}"})
+            finally:
+                runtime_config.system_config().paths.project_files_root = old_project_root
+                runtime_config.system_config().paths.attachments_root = old_attachments_root
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(pid, "proj_001")
+        self.assertEqual(files.status_code, 200)
+        self.assertEqual(files.json()["files"], [])
+
+    def test_create_project_storage_failure_rolls_back_database_row(self) -> None:
+        from cairn.server import db
+        from cairn.server.domain.errors import ServerInvariantError
+
+        with self._client() as c:
+            token = _login_token(c)
+            profile_id = self._create_ai_profile_id(c, token)
+            with patch(
+                "cairn.server.application.project_creation.prepare_project_storage",
+                side_effect=ServerInvariantError("storage unavailable"),
+            ):
+                r = c.post(
+                    "/projects",
+                    json=_complete_create_payload(profile_id),
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+        self.assertEqual(r.status_code, 500)
+        self.assertEqual(r.json()["detail"], "storage unavailable")
+        with db.session_scope() as conn:
+            rows = conn.execute(text("SELECT id FROM projects")).fetchall()
+        self.assertEqual(rows, [])
 
     def test_list_projects_empty_when_none(self) -> None:
         with self._client() as c:
