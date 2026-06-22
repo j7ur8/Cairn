@@ -127,6 +127,7 @@ Cairn/
 | Fact-Intent graph expansion | `server/domain/*`, `server/application/*`, `dispatcher/scheduler/*` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
 | Project poll revisions | `server/repositories/projects.py`, `server/application/*`, `server/static/js/app/state-core.js` | 图变更递增 `graph_revision`，title/status/hints/files 等时间线变更递增 `timeline_revision`；SPA 轻量轮询 poll-state 后按 revision 决定是否拉完整项目 | O(1) project row update + 聚合 counts | 降低高频轮询时完整 graph API 压力 |
 | Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
+| Frontier branch priority | `dispatcher/scheduler/frontier_priority.py`, `dispatcher/prompts/default/reason.md` | 对 Reason 提议的 leaf branch 结合 expected value、depth、coverage、mechanism proximity 和运行态做调度打分 | 与候选 intent 数线性相关 | mechanism proximity 使用领域无关语义：decision gate、state transition、data boundary、invariant check、persisted state、confirmed primitive、causal mechanism |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
 | Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
@@ -200,6 +201,8 @@ sequenceDiagram
     D->>S: POST /projects/{id}/reason/finish
     S->>DB: update project_reason_state and release reason lease
 ```
+
+Reason prompt 只接受 marker-wrapped JSON 三态输出：complete、intents、noop。新增 intent 仍走 fact-intent graph 写回，但每个候选必须保持 leaf-level branch metadata：`branch_key` 使用至少三段的稳定层级 key，`branch_depth` 只在同一 leaf 内递增，`expected_value` 表示长期价值。Prompt 的调度启发保持领域无关，优先靠近 decision gate、state transition、data boundary、invariant check、persisted state、confirmed primitive 或 causal mechanism 的方向；历史案例、具体漏洞类型和安全 payload 词不应出现在默认 Reason prompt 中。
 
 ### 附件上传与文件下载
 

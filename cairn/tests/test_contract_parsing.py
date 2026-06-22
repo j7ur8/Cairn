@@ -9,6 +9,35 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class ContractParsingTests(unittest.TestCase):
+    def test_default_reason_prompt_keeps_branch_guidance_generic(self) -> None:
+        prompt = (_REPO / "cairn/src/cairn/dispatcher/prompts/default/reason.md").read_text()
+
+        forbidden_terms = [
+            "auth.sqli",
+            "qdpm",
+            "check_php",
+            "osint.writeup",
+            "proj_002",
+            "proj_004",
+            "payload",
+            "credential",
+            "authorization",
+            "stored secret",
+        ]
+        for term in forbidden_terms:
+            with self.subTest(term=term):
+                self.assertNotIn(term, prompt.lower())
+        self.assertIn("area.family.method", prompt)
+        self.assertIn("at least three non-empty segments", prompt)
+        self.assertIn("mechanism proximity", prompt)
+        self.assertIn("decision gate", prompt)
+        self.assertIn("state transition", prompt)
+        self.assertIn("data boundary", prompt)
+        self.assertIn("invariant check", prompt)
+        self.assertIn("persisted state", prompt)
+        self.assertIn("confirmed primitive", prompt)
+        self.assertIn("causal mechanism", prompt)
+
     def test_parse_sentinel_fact_output_parses_sentinel_fact_text(self) -> None:
         from cairn.dispatcher.contracts import parse_sentinel_fact_output
 
@@ -131,6 +160,9 @@ class ContractParsingTests(unittest.TestCase):
                         "intent_kind": None,
                         "tags": [],
                         "score_reason": None,
+                        "branch_key": None,
+                        "branch_depth": 0,
+                        "expected_value": None,
                     }
                 ],
             ),
@@ -177,6 +209,9 @@ class ContractParsingTests(unittest.TestCase):
                         "intent_kind": None,
                         "tags": [],
                         "score_reason": None,
+                        "branch_key": None,
+                        "branch_depth": 0,
+                        "expected_value": None,
                     }
                 ],
             ),
@@ -196,6 +231,9 @@ class ContractParsingTests(unittest.TestCase):
                         "intent_kind": " exploit ",
                         "tags": [" rce ", ""],
                         "score_reason": " direct path ",
+                        "branch_key": " access.input.parser ",
+                        "branch_depth": 2,
+                        "expected_value": 0.82,
                     },
                     {"from": ["f002"], "description": "default"},
                 ]
@@ -215,6 +253,9 @@ class ContractParsingTests(unittest.TestCase):
                     "intent_kind": "exploit",
                     "tags": ["rce"],
                     "score_reason": "direct path",
+                    "branch_key": "access.input.parser",
+                    "branch_depth": 2,
+                    "expected_value": 0.82,
                 },
                 {
                     "from": ["f002"],
@@ -223,6 +264,9 @@ class ContractParsingTests(unittest.TestCase):
                     "intent_kind": None,
                     "tags": [],
                     "score_reason": None,
+                    "branch_key": None,
+                    "branch_depth": 0,
+                    "expected_value": None,
                 },
             ],
         )
@@ -242,6 +286,50 @@ class ContractParsingTests(unittest.TestCase):
                 }
                 with self.assertRaisesRegex(ValueError, "priority_score"):
                     validate_reason_payload(payload, open_intents_empty=True, max_intents=1)
+
+    def test_reason_intent_branch_metadata_rejects_invalid_values(self) -> None:
+        from cairn.dispatcher.contracts import validate_reason_payload
+
+        invalid_cases = [
+            ("branch_key", 123, "branch_key"),
+            ("branch_key", " ", "branch_key"),
+            ("branch_depth", -1, "branch_depth"),
+            ("branch_depth", 1.5, "branch_depth"),
+            ("expected_value", True, "expected_value"),
+            ("expected_value", -0.1, "expected_value"),
+            ("expected_value", 1.1, "expected_value"),
+        ]
+        for field, value, message in invalid_cases:
+            with self.subTest(field=field, value=value):
+                payload = {
+                    "accepted": True,
+                    "data": {
+                        "intents": [
+                            {"from": ["f001"], "description": "next", field: value}
+                        ]
+                    },
+                }
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_reason_payload(payload, open_intents_empty=True, max_intents=1)
+
+    def test_reason_intent_family_branch_key_warns_but_remains_accepted(self) -> None:
+        from cairn.dispatcher.contracts import validate_reason_payload
+
+        payload = {
+            "accepted": True,
+            "data": {
+                "intents": [
+                    {"from": ["f001"], "description": "next", "branch_key": "area.family"}
+                ]
+            },
+        }
+
+        with self.assertLogs("cairn.dispatcher.contracts", level="WARNING") as logs:
+            kind, data = validate_reason_payload(payload, open_intents_empty=True, max_intents=1)
+
+        self.assertEqual(kind, "intents")
+        self.assertEqual(data[0]["branch_key"], "area.family")
+        self.assertIn("non-leaf branch_key", logs.output[0])
 
 
 if __name__ == "__main__":

@@ -20,6 +20,9 @@ def intent_to_model(row: Any) -> Intent:
         intent_kind=row["intent_kind"],
         tags=list(row["tags"]),
         score_reason=row["score_reason"],
+        branch_key=row["branch_key"],
+        branch_depth=row["branch_depth"],
+        expected_value=row["expected_value"],
     )
 
 

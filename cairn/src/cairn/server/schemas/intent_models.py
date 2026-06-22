@@ -14,10 +14,13 @@ class CreateIntentRequest(BaseModel):
     intent_kind: str | None = None
     tags: list[str] = Field(default_factory=list)
     score_reason: str | None = None
+    branch_key: str | None = None
+    branch_depth: int = 0
+    expected_value: float | None = None
 
     model_config = {"populate_by_name": True}
 
-    @field_validator("description", "creator", "worker", "intent_kind", "score_reason")
+    @field_validator("description", "creator", "worker", "intent_kind", "score_reason", "branch_key")
     @classmethod
     def validate_non_empty_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -45,6 +48,22 @@ class CreateIntentRequest(BaseModel):
             return None
         if value < 0.0 or value > 1.0:
             raise ValueError("priority_score must be between 0.0 and 1.0")
+        return value
+
+    @field_validator("branch_depth")
+    @classmethod
+    def validate_branch_depth(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("branch_depth must be greater than or equal to 0")
+        return value
+
+    @field_validator("expected_value")
+    @classmethod
+    def validate_expected_value(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value < 0.0 or value > 1.0:
+            raise ValueError("expected_value must be between 0.0 and 1.0")
         return value
 
     @field_validator("tags")

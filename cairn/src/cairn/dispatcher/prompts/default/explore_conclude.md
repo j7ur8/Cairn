@@ -17,6 +17,8 @@ Normal return example:
 - The marked text must contain already confirmed objective factual conclusions. Do not output plans, guesses, or explanatory filler. Do not put long data blobs in the marked text;
 - Read the Fact View first. Read the Full Graph only if the view is insufficient or you need omitted details.
 - The marked text should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
+- When summarizing a negative or partial result, include the tested method or scope, the concrete failure limit, and any adjacent sibling method or broader direction that remains untested or not excluded. Do not summarize one failed method as a whole-family failure unless the confirmed evidence covers the whole family.
+- If the result changes support for the broader direction, state whether it still has supporting evidence, has contrary evidence, or is only partially covered.
 - On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 ## Context

@@ -127,6 +127,25 @@ class DbMigrationTests(unittest.TestCase):
         self.assertEqual(columns["tags"]["is_nullable"], "NO")
         self.assertIn("'[]'", columns["tags"]["column_default"])
 
+    def test_intent_branch_metadata_columns_exist(self) -> None:
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            rows = sql.fetchall(
+                conn,
+                """
+                SELECT column_name, column_default, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'intents'
+                  AND column_name IN ('branch_key', 'branch_depth', 'expected_value')
+                """
+            )
+        columns = {row["column_name"]: row for row in rows}
+        self.assertEqual(set(columns), {"branch_key", "branch_depth", "expected_value"})
+        self.assertEqual(columns["branch_depth"]["is_nullable"], "NO")
+        self.assertIn("0", columns["branch_depth"]["column_default"])
+
 
 if __name__ == "__main__":
     unittest.main()

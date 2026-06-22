@@ -55,6 +55,9 @@ def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Inte
         intent_kind=body.intent_kind,
         tags=body.tags,
         score_reason=body.score_reason,
+        branch_key=body.branch_key,
+        branch_depth=body.branch_depth,
+        expected_value=body.expected_value,
         now=now,
     )
     projects.bump_revisions(project_id, graph=True, timeline=True)
@@ -73,6 +76,9 @@ def create_intent(conn: Any, project_id: str, body: CreateIntentRequest) -> Inte
         intent_kind=body.intent_kind,
         tags=body.tags,
         score_reason=body.score_reason,
+        branch_key=body.branch_key,
+        branch_depth=body.branch_depth,
+        expected_value=body.expected_value,
     )
 
 

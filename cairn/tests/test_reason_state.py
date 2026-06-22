@@ -1,19 +1,38 @@
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault('CAIRN_JWT_SECRET', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 os.environ.setdefault('CAIRN_SECRETS_KEY', 'test-jwt-secret-do-not-use-in-prod-32bytes')
 
-import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 from helpers import reset_postgres_db
+
+
+class _FakeReasonReporter:
+    def __init__(self) -> None:
+        self.results: list[tuple[str, str, list[str] | None]] = []
+
+    def emit_result(
+        self,
+        phase: str,
+        content: str,
+        *,
+        produced_fact_id: str | None = None,
+        created_intent_ids: list[str] | None = None,
+    ) -> None:
+        self.results.append((phase, content, created_intent_ids))
+
+    def emit_error(self, phase: str, event_kind: str, content: str) -> None:
+        pass
 
 
 class ReasonContractTests(unittest.TestCase):
@@ -79,7 +98,82 @@ class ReasonContractTests(unittest.TestCase):
             max_intents=2,
         )
         self.assertEqual(kind, "intents")
-        self.assertEqual(data, [{"from": ["f001"], "description": "try another path"}])
+        self.assertEqual(
+            data,
+            [
+                {
+                    "from": ["f001"],
+                    "description": "try another path",
+                    "priority_score": 0.5,
+                    "tags": [],
+                    "intent_kind": None,
+                    "score_reason": None,
+                    "branch_key": None,
+                    "branch_depth": 0,
+                    "expected_value": None,
+                }
+            ],
+        )
+
+    def test_reason_write_event_includes_branch_metadata_for_created_intents(self) -> None:
+        from cairn.dispatcher.runtime.process import ProcessResult
+        from cairn.dispatcher.tasks.reason_result import apply_reason_result
+
+        reporter = _FakeReasonReporter()
+
+        class FakeClient:
+            def create_intent(self, project_id, from_ids, description, creator, **kwargs):
+                self.kwargs = kwargs
+                return SimpleNamespace(ok=True, status_code=200, data={"id": "i123"}, text="")
+
+        payload = {
+            "accepted": True,
+            "data": {
+                "intents": [
+                    {
+                        "from": ["f001"],
+                        "description": "test access input parser path",
+                        "branch_key": "access.input.parser",
+                        "branch_depth": 1,
+                        "expected_value": 0.82,
+                        "priority_score": 0.76,
+                        "intent_kind": "exploit",
+                        "tags": ["access", "parser"],
+                        "score_reason": "direct gate path",
+                    }
+                ]
+            },
+        }
+        result = apply_reason_result(
+            client=FakeClient(),
+            driver=SimpleNamespace(extract_response_text=lambda stdout, stderr: stdout),
+            project_id="proj_t",
+            worker_name="reason",
+            result=ProcessResult(
+                returncode=0,
+                stdout=json.dumps(payload),
+                stderr="",
+                timed_out=False,
+            ),
+            open_intents=[],
+            max_intents=2,
+            execute_ms=1,
+            total_ms=1,
+            reporter=reporter,
+        )
+
+        self.assertEqual(result.outcome, "success")
+        self.assertEqual(result.finish_outcome, "intents")
+        phase, content, created_ids = reporter.results[-1]
+        self.assertEqual(phase, "reason_write")
+        self.assertEqual(created_ids, ["i123"])
+        event = json.loads(content)
+        self.assertEqual(event["intent_id"], "i123")
+        self.assertEqual(event["branch_key"], "access.input.parser")
+        self.assertEqual(event["branch_depth"], 1)
+        self.assertEqual(event["expected_value"], 0.82)
+        self.assertEqual(event["priority_score"], 0.76)
+        self.assertEqual(event["score_reason"], "direct gate path")
 
 
 class ReasonStateServiceTests(unittest.TestCase):

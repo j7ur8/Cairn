@@ -51,6 +51,17 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("Do not output JSON", output_requirements)
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
+    def test_default_explore_prompts_preserve_partial_negative_scope(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        explore_conclude = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+
+        for name, prompt in (("explore.md", explore), ("explore_conclude.md", explore_conclude)):
+            with self.subTest(name=name):
+                self.assertIn("tested method or scope", prompt)
+                self.assertIn("sibling", prompt)
+                self.assertIn("whole-family", prompt)
+
     def test_default_bootstrap_is_bounded_initial_reconnaissance(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")

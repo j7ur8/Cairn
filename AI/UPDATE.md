@@ -5,6 +5,22 @@
 
 # 更新日志
 
+## 2026-06-22 — Reason prompt 机制邻近中性化
+
+- 同步 default `reason.md`：mechanism proximity 启发改为通用状态空间搜索语义，使用 `decision gate`、`state transition`、`data boundary`、`invariant check`、`persisted state`、`confirmed primitive`、`causal mechanism`，移除偏安全域的 credential/authorization/stored-secret 表达。
+- 保持 Reason 三态 marker JSON、`branch_key`、`branch_depth`、`expected_value` 和 scheduler/fact view 契约不变；仅调整 prompt 语义和 prompt contract 测试断言。
+- 当前验证：`cd cairn && uv run pytest tests/test_contract_parsing.py tests/test_prompt_snapshots.py` 通过（30 passed）。
+
+---
+
+## 2026-06-22 — Intent branch 调度元数据同步
+
+- 同步当前 Alembic head：`0008_intent_branch_metadata`，记录 intent `branch_key`、`branch_depth`、`expected_value` 字段用于 leaf-level 调度和图导出。
+- 同步 Reason/Scheduler 行为：Reason prompt 使用领域无关的证据覆盖/假设回访规则；Scheduler 对同一 leaf branch 做并发排除，对 sibling leaf 不继承 depth penalty，并记录 effective score 组成。
+- 当前验证：`cd cairn && uv run pytest tests/test_scheduler_refactor.py tests/test_fact_views.py tests/test_contract_parsing.py tests/test_reason_state.py tests/test_intents_router.py tests/test_db_migrations.py tests/test_graph_state.py` 通过（50 passed, 16 skipped）。
+
+---
+
 ## 2026-06-20 — 命名规范入口与主流命名重命名
 
 - 新增 `AI/NAMING.md`，记录 Python PEP 8、FastAPI 分层、前端 kebab-case、配置环境后缀和协议文件例外。

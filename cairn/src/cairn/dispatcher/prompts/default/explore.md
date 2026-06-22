@@ -14,6 +14,8 @@ Normal return example:
 - Read the Fact View first. Read the Full Graph only if the view is insufficient or you need omitted details.
 - The plain-text fact must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence. Do not put long data blobs in the fact; long data should be placed in a file and referenced from the fact instead.
 - The fact should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
+- When the result is negative or partial, state the tested method or scope, the concrete failure limit, and any adjacent sibling method or broader direction that remains untested or not excluded. Do not turn one method failure into a whole-family failure unless the evidence actually covers the whole family.
+- When evidence still supports or weakens the broader direction after a partial result, say so plainly in the fact. This lets later reasoning separate a dead leaf from a still-valuable family.
 
 {capability_instructions}
 

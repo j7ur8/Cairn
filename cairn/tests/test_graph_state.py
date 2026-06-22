@@ -165,7 +165,7 @@ class GraphStateTests(unittest.TestCase):
               project: { status: 'active' },
               facts: [{ id: 'origin', description: 'Origin fact' }],
               intents: [
-                { id: 'i002', description: 'Open intent text', from: ['origin'], to: '', priority_score: 0.9, intent_kind: 'exploit', tags: ['rce'], score_reason: 'near goal' },
+                { id: 'i002', description: 'Open intent text', from: ['origin'], to: '', priority_score: 0.9, intent_kind: 'exploit', tags: ['rce'], score_reason: 'near goal', branch_key: 'access.input.parser', branch_depth: 1, expected_value: 0.8 },
               ],
             };
             state.selectedNode = { type: 'intent', id: 'i002' };
@@ -177,6 +177,9 @@ class GraphStateTests(unittest.TestCase):
               intent_kind: intent.intent_kind,
               tags: intent.tags,
               score_reason: intent.score_reason,
+              branch_key: intent.branch_key,
+              branch_depth: intent.branch_depth,
+              expected_value: intent.expected_value,
             }));
             """
         )
@@ -195,5 +198,8 @@ class GraphStateTests(unittest.TestCase):
                 "intent_kind": "exploit",
                 "tags": ["rce"],
                 "score_reason": "near goal",
+                "branch_key": "access.input.parser",
+                "branch_depth": 1,
+                "expected_value": 0.8,
             },
         )

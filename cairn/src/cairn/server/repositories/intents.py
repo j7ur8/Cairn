@@ -21,6 +21,9 @@ def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dic
         "intent_kind": row["intent_kind"],
         "tags": _decode_tags(row["tags"]),
         "score_reason": row["score_reason"],
+        "branch_key": row["branch_key"],
+        "branch_depth": row["branch_depth"],
+        "expected_value": row["expected_value"],
     }
 
 
@@ -41,6 +44,9 @@ class IntentRepository:
         intent_kind: str | None = None,
         tags: list[str] | None = None,
         score_reason: str | None = None,
+        branch_key: str | None = None,
+        branch_depth: int = 0,
+        expected_value: float | None = None,
         now: str,
     ) -> None:
         claimed = worker is not None
@@ -50,11 +56,13 @@ class IntentRepository:
             INSERT INTO intents (
                 id, project_id, to_fact_id, description, creator, worker,
                 last_heartbeat_at, created_at, concluded_at,
-                priority_score, intent_kind, tags, score_reason
+                priority_score, intent_kind, tags, score_reason,
+                branch_key, branch_depth, expected_value
             ) VALUES (
                 :intent_id, :project_id, NULL, :description, :creator, :worker,
                 :last_heartbeat_at, :created_at, NULL,
-                :priority_score, :intent_kind, :tags, :score_reason
+                :priority_score, :intent_kind, :tags, :score_reason,
+                :branch_key, :branch_depth, :expected_value
             )
             """,
             {
@@ -69,6 +77,9 @@ class IntentRepository:
                 "intent_kind": intent_kind,
                 "tags": json.dumps(tags or []),
                 "score_reason": score_reason,
+                "branch_key": branch_key,
+                "branch_depth": branch_depth,
+                "expected_value": expected_value,
             },
         )
         self.insert_sources(intent_id, project_id, source_fact_ids)

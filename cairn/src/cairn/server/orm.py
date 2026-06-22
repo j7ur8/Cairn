@@ -99,6 +99,9 @@ class IntentRow(Base):
     intent_kind: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     score_reason: Mapped[str | None] = mapped_column(Text)
+    branch_key: Mapped[str | None] = mapped_column(Text)
+    branch_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    expected_value: Mapped[float | None] = mapped_column(Float)
 
 
 class IntentSourceRow(Base):
