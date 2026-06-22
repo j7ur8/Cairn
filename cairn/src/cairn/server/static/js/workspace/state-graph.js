@@ -527,6 +527,7 @@ export function createWorkspaceGraphState() {
       this.selectedTimelineEntryId = null;
       this.selectedNode = { type:'intent', id: intentId };
       this.applyLineageHighlightForIntent(intentId);
+      this.syncLlmExecutionSelectionForIntent?.(intentId);
     },
 
     selectFact(fact) {

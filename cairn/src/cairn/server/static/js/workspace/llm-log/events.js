@@ -110,6 +110,29 @@ export function createWorkspaceLogEventState() {
       });
     },
 
+    syncLlmExecutionSelectionForIntent(intentId) {
+      const targetId = String(intentId || '');
+      if (!targetId) return false;
+      const execution = (this.llmExecutions || []).find(item => item?.intent_id === targetId);
+      if (!execution?.id) return false;
+      if (this.llmSelectedExecutionId === execution.id) {
+        this.resetLlmEventPagination();
+        return true;
+      }
+      this.llmSelectedExecutionId = execution.id;
+      this.llmEventViewStats = null;
+      this.resetLlmEventPagination();
+      return true;
+    },
+
+    async refreshCurrentLlmLog() {
+      const selectedBeforeRefresh = this.llmSelectedExecutionId;
+      await this.loadLlmExecutions(true);
+      if (this.llmSelectedExecutionId === selectedBeforeRefresh) {
+        this.resetLlmEventPagination();
+      }
+    },
+
     llmEventViewUrl({ executionId = '', after = 0, limit = 300, includeEventKinds = true } = {}) {
       const params = new URLSearchParams();
       params.set('limit', String(limit));

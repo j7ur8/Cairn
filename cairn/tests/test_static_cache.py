@@ -123,6 +123,14 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("return this.isAllLlmExecutionsSelected() ? '' : this.llmSelectedExecutionId;", html)
         self.assertNotIn("const running = next.find(execution => execution.process_state === 'running');", html)
 
+    def test_execution_log_refresh_and_intent_selection_are_wired(self) -> None:
+        html = _frontend_source()
+        self.assertIn('title="Refresh Execution Log"', html)
+        self.assertIn('@click="refreshCurrentLlmLog()"', html)
+        self.assertIn("async refreshCurrentLlmLog()", html)
+        self.assertIn("syncLlmExecutionSelectionForIntent(intentId)", html)
+        self.assertIn("this.syncLlmExecutionSelectionForIntent?.(intentId);", html)
+
     def test_project_graph_uses_cytoscape_dagre_surface(self) -> None:
         html = _frontend_source()
         self.assertIn('id="cy"', html)
