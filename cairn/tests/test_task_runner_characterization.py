@@ -141,6 +141,7 @@ import contextlib
 
 import cairn.dispatcher.tasks.bootstrap as bootstrap_mod
 import cairn.dispatcher.tasks.intent_task as intent_task_mod
+import cairn.dispatcher.tasks.reason as reason_mod
 from cairn.dispatcher.tasks.explore_prompt import build_explore_conclude_prompt
 
 
@@ -346,6 +347,33 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         self.assertEqual(outcome, "failed")
         release.assert_called_once()
 
+    def test_cancelled_before_start_releases_without_lifecycle_or_container(self) -> None:
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+
+        cancellation = TaskCancellation()
+        cancellation.cancel("deleted")
+        services = _services()
+
+        with mock.patch.object(intent_task_mod, "get_driver") as get_driver, \
+             mock.patch.object(intent_task_mod, "TaskLifecycle") as lifecycle_cls, \
+             mock.patch.object(intent_task_mod, "best_effort_release") as release:
+            outcome = bootstrap_mod.run_bootstrap_task(
+                services,
+                TaskInvocation(
+                    project=_project(),
+                    intent=_intent(),
+                    worker=_worker(),
+                    execution_config={"task_timeout": {}},
+                    cancellation=cancellation,
+                ),
+            )
+
+        self.assertEqual(outcome, "cancelled")
+        release.assert_called_once()
+        get_driver.assert_not_called()
+        lifecycle_cls.assert_not_called()
+        services.container_runtime.ensure_running.assert_not_called()
+
 
 import cairn.dispatcher.tasks.explore as explore_mod
 
@@ -528,6 +556,39 @@ class ExploreCharacterizationTests(unittest.TestCase):
             outcome = _run_explore(canc)
         self.assertEqual(outcome, "failed")
         release.assert_called_once()
+
+
+class ReasonCharacterizationTests(unittest.TestCase):
+    def test_cancelled_before_start_releases_without_lifecycle_or_container(self) -> None:
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+
+        cancellation = TaskCancellation()
+        cancellation.cancel("deleted")
+        services = _services()
+
+        with mock.patch.object(reason_mod, "get_driver") as get_driver, \
+             mock.patch.object(reason_mod, "TaskLifecycle") as lifecycle_cls, \
+             mock.patch.object(reason_mod, "best_effort_release_reason") as release_reason:
+            outcome = reason_mod.run_reason_task(
+                services,
+                TaskInvocation(
+                    project=_project(),
+                    worker=_worker(),
+                    execution_config={"task_timeout": {}},
+                    cancellation=cancellation,
+                    export_yaml="export_yaml",
+                    reason_run_id="reason_run_1",
+                    reason_trigger="facts:1",
+                    reason_trigger_hash="hash",
+                ),
+            )
+
+        self.assertEqual(outcome, "cancelled")
+        release_reason.assert_called_once()
+        get_driver.assert_not_called()
+        lifecycle_cls.assert_not_called()
+        services.container_runtime.ensure_running.assert_not_called()
+        services.client.finish_reason.assert_not_called()
 
 
 if __name__ == "__main__":

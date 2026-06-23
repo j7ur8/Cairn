@@ -23,6 +23,25 @@ except ModuleNotFoundError:  # Allows scheduler pure logic to import without Doc
 LOG = logging.getLogger(__name__)
 EXEC_KILL_JOIN_TIMEOUT_SECONDS = 5.0
 DEFAULT_STREAM_TAIL_BYTES = 4 * 1024 * 1024
+_PROC_PARENT_LIST_SCRIPT = r"""
+for stat in /proc/[0-9]*/stat; do
+    [ -r "$stat" ] || continue
+    proc_pid=${stat#/proc/}
+    proc_pid=${proc_pid%/stat}
+    case "$proc_pid" in
+        ""|*[!0-9]*) continue ;;
+    esac
+    if IFS= read -r line < "$stat"; then
+        rest=${line##*) }
+        set -- $rest
+        proc_ppid=$2
+        case "$proc_ppid" in
+            ""|*[!0-9]*) continue ;;
+        esac
+        printf '%s %s\n' "$proc_pid" "$proc_ppid"
+    fi
+done
+"""
 
 
 @dataclass(slots=True)
@@ -204,6 +223,67 @@ class ManagedProcess:
             time.sleep(0.1)
 
     def _kill_pid(self, pid: int) -> None:
+        for descendant_pid in self._descendant_pids(pid):
+            self._kill_single_pid(descendant_pid, log_failure=False)
+        self._kill_single_pid(pid, log_failure=True)
+
+    def _descendant_pids(self, pid: int) -> list[int]:
+        pairs = self._proc_parent_pairs()
+        if not pairs:
+            return []
+        children_by_parent: dict[int, list[int]] = {}
+        for child_pid, parent_pid in pairs:
+            if child_pid == parent_pid:
+                continue
+            children_by_parent.setdefault(parent_pid, []).append(child_pid)
+
+        descendants: list[int] = []
+        visited: set[int] = set()
+
+        def visit(parent_pid: int) -> None:
+            for child_pid in sorted(children_by_parent.get(parent_pid, [])):
+                if child_pid in visited:
+                    continue
+                visited.add(child_pid)
+                visit(child_pid)
+                descendants.append(child_pid)
+
+        visit(pid)
+        return descendants
+
+    def _proc_parent_pairs(self) -> list[tuple[int, int]]:
+        for shell in ("/bin/sh", "sh"):
+            try:
+                result = self._container.exec_run(
+                    [shell, "-c", _PROC_PARENT_LIST_SCRIPT],
+                    stdout=True,
+                    stderr=False,
+                )
+            except APIError as exc:
+                LOG.debug("failed to inspect container process tree shell=%s container=%s error=%s", shell, self._container.name, exc)
+                continue
+            exit_code = self._exec_result_exit_code(result)
+            if exit_code not in (None, 0):
+                continue
+            return self._parse_proc_parent_pairs(self._exec_result_output(result))
+        return []
+
+    @staticmethod
+    def _parse_proc_parent_pairs(output: bytes | str | None) -> list[tuple[int, int]]:
+        pairs: list[tuple[int, int]] = []
+        for line in ManagedProcess._decode(output).splitlines():
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            try:
+                child_pid = int(parts[0])
+                parent_pid = int(parts[1])
+            except ValueError:
+                continue
+            pairs.append((child_pid, parent_pid))
+        return pairs
+
+    def _kill_single_pid(self, pid: int, *, log_failure: bool) -> None:
         last_error: str | None = None
         for command in (
             ["kill", "-KILL", str(pid)],
@@ -215,11 +295,29 @@ class ManagedProcess:
             except APIError as exc:
                 last_error = str(exc)
                 continue
-            exit_code = result.exit_code if hasattr(result, "exit_code") else None
+            exit_code = self._exec_result_exit_code(result)
             if exit_code in (None, 0, 1):
                 return
-        if last_error is not None:
+        if log_failure and last_error is not None:
             LOG.warning("failed to kill container exec pid=%s container=%s error=%s", pid, self._container.name, last_error)
+
+    @staticmethod
+    def _exec_result_exit_code(result: Any) -> int | None:
+        if hasattr(result, "exit_code"):
+            exit_code = result.exit_code
+            return int(exit_code) if exit_code is not None else None
+        if isinstance(result, tuple) and result:
+            exit_code = result[0]
+            return int(exit_code) if exit_code is not None else None
+        return None
+
+    @staticmethod
+    def _exec_result_output(result: Any) -> bytes | str | None:
+        if hasattr(result, "output"):
+            return result.output
+        if isinstance(result, tuple) and len(result) > 1:
+            return result[1]
+        return None
 
     def _notify_output(self, stream: str, chunk: str) -> None:
         if self.on_output is None:

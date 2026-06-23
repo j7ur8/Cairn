@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
 from cairn.dispatcher.tasks.lifecycle import TaskLifecycle, TaskRunContext
@@ -39,6 +40,9 @@ def run_reason_task(
     hint_count = invocation.hint_count
     open_intent_count = invocation.open_intent_count
     cancellation = invocation.cancellation
+    if cancellation.reason is not None:
+        best_effort_release_reason(client, project.project.id, worker.name, reason_run_id)
+        return "cancelled"
     driver = get_driver(worker.type)
     lifecycle = TaskLifecycle(
         TaskRunContext(
@@ -61,6 +65,18 @@ def run_reason_task(
     lifecycle.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
+        cancelled = _cancelled_before_reason_exec(
+            cancellation,
+            project.project.id,
+            worker.name,
+            "reason_healthcheck",
+            reporter,
+        )
+        if cancelled is not None:
+            outcome = "cancelled"
+            reason_finish_outcome = "cancelled"
+            reason_finish_error = cancelled
+            return outcome
 
         LOG.info(
             "starting container exec project=%s worker=%s phase=reason_healthcheck timeout=%ss",
@@ -116,6 +132,18 @@ def run_reason_task(
             reason_finish_error = preview(healthcheck.result.stderr)
             reporter.emit_error("reason_healthcheck", "error", healthcheck.result.stderr)
             return outcome
+        cancelled = _cancelled_before_reason_exec(
+            cancellation,
+            project.project.id,
+            worker.name,
+            "reason_execute",
+            reporter,
+        )
+        if cancelled is not None:
+            outcome = "cancelled"
+            reason_finish_outcome = "cancelled"
+            reason_finish_error = cancelled
+            return outcome
         prepared = prepare_task_execution(
             config=config,
             client=client,
@@ -146,6 +174,18 @@ def run_reason_task(
             reporter=reporter,
         )
         reporter.emit_prompt("reason_execute", prompt)
+        cancelled = _cancelled_before_reason_exec(
+            cancellation,
+            project.project.id,
+            worker.name,
+            "reason_execute",
+            reporter,
+        )
+        if cancelled is not None:
+            outcome = "cancelled"
+            reason_finish_outcome = "cancelled"
+            reason_finish_error = cancelled
+            return outcome
 
         session = driver.prepare_session()
         command = driver.build_execute(worker, prompt, session, capabilities.context)
@@ -263,3 +303,24 @@ def run_reason_task(
             )
         lifecycle.finish(outcome)
         best_effort_release_reason(client, project.project.id, worker.name, reason_run_id)
+
+
+def _cancelled_before_reason_exec(
+    cancellation,
+    project_id: str,
+    worker_name: str,
+    phase: str,
+    reporter: Any,
+) -> str | None:
+    cancelled = cancellation.reason
+    if cancelled is None:
+        return None
+    LOG.info(
+        "reason cancelled before container exec project=%s worker=%s phase=%s reason=%s",
+        project_id,
+        worker_name,
+        phase,
+        cancelled,
+    )
+    reporter.emit_error(phase, "cancelled", cancelled)
+    return cancelled

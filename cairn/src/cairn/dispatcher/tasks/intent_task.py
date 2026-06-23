@@ -107,6 +107,9 @@ def run_intent_task(
     cancellation = invocation.cancellation
     export_yaml = invocation.export_yaml
     project_id = project.project.id
+    if cancellation.reason is not None:
+        best_effort_release(client, project_id, intent.id, worker.name)
+        return "cancelled"
     driver = get_driver(worker.type)
     lifecycle = TaskLifecycle(
         TaskRunContext(
@@ -125,6 +128,11 @@ def run_intent_task(
     lifecycle.start()
     try:
         container_name = container_manager.ensure_running(project_id)
+        cancelled = _cancelled_before_exec(cancellation, spec.task_type, project_id, intent.id, worker.name, spec.exec_phase, reporter)
+        if cancelled is not None:
+            best_effort_release(client, project_id, intent.id, worker.name)
+            outcome = "cancelled"
+            return outcome
 
         healthcheck_outcome = run_intent_healthcheck_gate(
             task_type=spec.task_type,
@@ -143,6 +151,11 @@ def run_intent_task(
         )
         if healthcheck_outcome is not None:
             outcome = healthcheck_outcome
+            return outcome
+        cancelled = _cancelled_before_exec(cancellation, spec.task_type, project_id, intent.id, worker.name, spec.exec_phase, reporter)
+        if cancelled is not None:
+            best_effort_release(client, project_id, intent.id, worker.name)
+            outcome = "cancelled"
             return outcome
 
         if spec.emit_capability_manifest is not None:
@@ -176,6 +189,11 @@ def run_intent_task(
         )
         prompt = spec.build_prompt(ctx)
         reporter.emit_prompt(spec.exec_phase, prompt)
+        cancelled = _cancelled_before_exec(cancellation, spec.task_type, project_id, intent.id, worker.name, spec.exec_phase, reporter)
+        if cancelled is not None:
+            best_effort_release(client, project_id, intent.id, worker.name)
+            outcome = "cancelled"
+            return outcome
 
         execute = driver.build_execute(worker, prompt, session, prepared.capabilities.context)
         ctx.session = execute.session
@@ -206,6 +224,30 @@ def run_intent_task(
         return outcome
     finally:
         lifecycle.finish(outcome)
+
+
+def _cancelled_before_exec(
+    cancellation: TaskCancellation,
+    task_type: str,
+    project_id: str,
+    intent_id: str,
+    worker_name: str,
+    phase: str,
+    reporter: Any,
+) -> str | None:
+    cancelled = cancellation.reason
+    if cancelled is None:
+        return None
+    LOG.info(
+        "%s cancelled before container exec project=%s intent=%s worker=%s reason=%s",
+        task_type,
+        project_id,
+        intent_id,
+        worker_name,
+        cancelled,
+    )
+    reporter.emit_error(phase, "cancelled", cancelled)
+    return cancelled
 
 
 # Exceptions treated as "bad model output" -> conclude fallback. Anything

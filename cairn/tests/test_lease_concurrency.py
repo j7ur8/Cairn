@@ -4,6 +4,8 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -67,6 +69,7 @@ class TaskCancellationHandoffTests(unittest.TestCase):
         self.assertFalse(cancellation.cancel("second"))
         # reason reflects the first winner.
         self.assertEqual(cancellation.reason, "first")
+        self.assertEqual(proc.cancel_reasons, ["first"])
 
     def test_concurrent_cancels_have_single_winner(self) -> None:
         from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -121,6 +124,94 @@ class HeartbeatFailureVisibilityTests(unittest.TestCase):
         self.assertIsNotNone(failure)
         assert failure is not None
         self.assertEqual(failure.status_code, 403)
+
+
+class ManagedProcessKillTests(unittest.TestCase):
+    def _process(self, container) -> object:
+        from cairn.dispatcher.runtime.process import ManagedProcess
+
+        return ManagedProcess(container, ["run"], {})
+
+    def test_kill_pid_kills_descendants_before_parent(self) -> None:
+        container = mock.Mock()
+        container.name = "worker"
+        container.client.api = mock.Mock()
+        commands: list[list[str]] = []
+        proc_listing = "\n".join(
+            [
+                "10 1",
+                "11 10",
+                "12 10",
+                "13 11",
+                "14 13",
+            ]
+        )
+
+        def exec_run(command, **_kwargs):
+            commands.append(command)
+            if command[:2] == ["/bin/sh", "-c"]:
+                return SimpleNamespace(exit_code=0, output=proc_listing.encode())
+            return SimpleNamespace(exit_code=0, output=b"")
+
+        container.exec_run.side_effect = exec_run
+        process = self._process(container)
+
+        process._kill_pid(10)
+
+        self.assertEqual(
+            [command for command in commands if command and command[0] == "kill"],
+            [
+                ["kill", "-KILL", "14"],
+                ["kill", "-KILL", "13"],
+                ["kill", "-KILL", "11"],
+                ["kill", "-KILL", "12"],
+                ["kill", "-KILL", "10"],
+            ],
+        )
+
+    def test_kill_pid_falls_back_to_direct_kill_when_proc_listing_fails(self) -> None:
+        from cairn.dispatcher.runtime.process import APIError
+
+        container = mock.Mock()
+        container.name = "worker"
+        container.client.api = mock.Mock()
+        commands: list[list[str]] = []
+
+        def exec_run(command, **_kwargs):
+            commands.append(command)
+            if command[:2] in (["/bin/sh", "-c"], ["sh", "-c"]):
+                return SimpleNamespace(exit_code=2, output=b"")
+            return SimpleNamespace(exit_code=0, output=b"")
+
+        container.exec_run.side_effect = exec_run
+        process = self._process(container)
+
+        process._kill_pid(42)
+
+        self.assertEqual(commands[-1], ["kill", "-KILL", "42"])
+        self.assertEqual([command for command in commands if command and command[0] == "kill"], [["kill", "-KILL", "42"]])
+
+        container.exec_run.side_effect = APIError("docker failed")
+        process._kill_pid(42)
+
+    def test_kill_pid_without_children_matches_direct_kill(self) -> None:
+        container = mock.Mock()
+        container.name = "worker"
+        container.client.api = mock.Mock()
+        commands: list[list[str]] = []
+
+        def exec_run(command, **_kwargs):
+            commands.append(command)
+            if command[:2] == ["/bin/sh", "-c"]:
+                return SimpleNamespace(exit_code=0, output=b"42 1\n")
+            return SimpleNamespace(exit_code=0, output=b"")
+
+        container.exec_run.side_effect = exec_run
+        process = self._process(container)
+
+        process._kill_pid(42)
+
+        self.assertEqual([command for command in commands if command and command[0] == "kill"], [["kill", "-KILL", "42"]])
 
 
 if __name__ == "__main__":

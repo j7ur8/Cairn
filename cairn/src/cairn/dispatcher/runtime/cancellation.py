@@ -30,13 +30,13 @@ class TaskCancellation:
 
     def cancel(self, reason: str) -> bool:
         with self._lock:
-            already_cancelled = self._reason is not None
-            if not already_cancelled:
-                self._reason = reason
+            if self._reason is not None:
+                return False
+            self._reason = reason
             process = self._process
         if process is not None:
             process.cancel(reason)
-        return not already_cancelled
+        return True
 
     @property
     def is_cancelled(self) -> bool:
