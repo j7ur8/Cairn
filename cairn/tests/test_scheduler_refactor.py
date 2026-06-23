@@ -27,10 +27,6 @@ def _intent(
     creator: str = "worker",
     worker: str | None = None,
     to: str | None = None,
-    priority_score: float | None = None,
-    branch_key: str | None = None,
-    branch_depth: int = 0,
-    expected_value: float | None = None,
     created_at: str | None = None,
 ):
     from cairn.shared.contracts import Intent
@@ -44,10 +40,6 @@ def _intent(
         worker=worker,
         created_at=created_at or _ts(int(intent_id[-1]) if intent_id[-1].isdigit() else 0),
         concluded_at=None,
-        priority_score=priority_score,
-        branch_key=branch_key,
-        branch_depth=branch_depth,
-        expected_value=expected_value,
     )
 
 
@@ -188,14 +180,14 @@ class ProjectDispatcherDispatchTests(unittest.TestCase):
         services.dispatch_explore.assert_called_once_with(project, intent)
         services.dispatch_reason.assert_not_called()
 
-    def test_high_priority_unclaimed_intent_dispatches_first(self) -> None:
+    def test_newest_unclaimed_intent_dispatches_first(self) -> None:
         from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
         from cairn.shared.contracts import Fact
 
-        low_recent = _intent("i003", priority_score=0.2)
-        high_old = _intent("i001", priority_score=0.9)
+        recent = _intent("i003")
+        old = _intent("i001")
         project = _project(
-            intents=[low_recent, high_old],
+            intents=[recent, old],
             facts=[
                 Fact(id="origin", description="origin"),
                 Fact(id="goal", description="goal"),
@@ -209,242 +201,7 @@ class ProjectDispatcherDispatchTests(unittest.TestCase):
         )
 
         self.assertTrue(dispatched)
-        services.dispatch_explore.assert_called_once_with(project, high_old)
-
-    def test_priority_tie_breaks_by_created_at_then_id(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import intent_priority_key
-
-        old = _intent("i001", priority_score=0.5, created_at=_ts(1))
-        newer_low_id = _intent("i002", priority_score=0.5, created_at=_ts(2))
-        newer_high_id = _intent("i003", priority_score=0.5, created_at=_ts(2))
-
-        self.assertEqual(max([old, newer_low_id, newer_high_id], key=intent_priority_key), newer_high_id)
-
-    def test_branch_selector_skips_branch_already_running_when_alternative_exists(self) -> None:
-        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
-        from cairn.shared.contracts import Fact
-
-        running_same_branch = _intent("i001", worker="worker-a", branch_key="access.primary.method_a")
-        same_branch_high_priority = _intent(
-            "i002",
-            priority_score=1.0,
-            branch_key="access.primary.method_a",
-            expected_value=1.0,
-        )
-        other_branch = _intent(
-            "i003",
-            priority_score=0.55,
-            branch_key="access.primary.method_b",
-            expected_value=0.7,
-        )
-        project = _project(
-            intents=[running_same_branch, same_branch_high_priority, other_branch],
-            facts=[
-                Fact(id="origin", description="origin"),
-                Fact(id="goal", description="goal"),
-                Fact(id="f001", description="new"),
-            ],
-        )
-        services = self._services(project)
-
-        dispatched = ProjectDispatcher(services).try_dispatch_project(
-            _summary(intent_count=3, working_intent_count=1, unclaimed_intent_count=2)
-        )
-
-        self.assertTrue(dispatched)
-        services.dispatch_explore.assert_called_once_with(project, other_branch)
-
-    def test_branch_selector_skips_when_only_same_leaf_branch_is_running(self) -> None:
-        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
-        from cairn.shared.contracts import Fact
-
-        running_same_branch = _intent("i001", worker="worker-a", branch_key="access.primary.method_a")
-        only_candidate = _intent("i002", priority_score=0.7, branch_key="access.primary.method_a")
-        project = _project(
-            intents=[running_same_branch, only_candidate],
-            facts=[
-                Fact(id="origin", description="origin"),
-                Fact(id="goal", description="goal"),
-                Fact(id="f001", description="new"),
-            ],
-        )
-        services = self._services(project)
-
-        dispatched = ProjectDispatcher(services).try_dispatch_project(
-            _summary(intent_count=2, working_intent_count=1, unclaimed_intent_count=1)
-        )
-
-        self.assertFalse(dispatched)
-        services.dispatch_explore.assert_not_called()
-        self.assertTrue(
-            any(
-                call.args[1] == "project:proj_001:skip:leaf_branch_running"
-                for call in services.log_changed.call_args_list
-            )
-        )
-
-    def test_branch_depth_reduces_effective_score(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import select_next_intent
-
-        deep = _intent("i001", priority_score=0.8, branch_key="area.family.method_a", branch_depth=5)
-        shallow = _intent("i002", priority_score=0.6, branch_key="other.family.method_b", branch_depth=0)
-
-        self.assertIs(
-            select_next_intent(
-                project_intents=[deep, shallow],
-                unclaimed_intents=[deep, shallow],
-                running_intent_ids=set(),
-            ),
-            shallow,
-        )
-
-    def test_sibling_leaf_does_not_inherit_completed_branch_depth(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import select_next_intent
-
-        completed_deep_leaf = _intent(
-            "i001",
-            to="f001",
-            priority_score=0.9,
-            branch_key="area.family.method_a",
-            branch_depth=6,
-        )
-        sibling_leaf = _intent(
-            "i002",
-            priority_score=0.61,
-            branch_key="area.family.method_b",
-            branch_depth=0,
-        )
-        weak_novel_leaf = _intent(
-            "i003",
-            priority_score=0.60,
-            branch_key="other.family.method_c",
-            branch_depth=0,
-        )
-
-        self.assertIs(
-            select_next_intent(
-                project_intents=[completed_deep_leaf, sibling_leaf, weak_novel_leaf],
-                unclaimed_intents=[sibling_leaf, weak_novel_leaf],
-                running_intent_ids=set(),
-            ),
-            sibling_leaf,
-        )
-
-    def test_evidence_and_coverage_gap_can_beat_weak_novelty(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import effective_score_by_intent, select_next_intent
-        from cairn.shared.contracts import Fact
-
-        source_fact = Fact(
-            id="f001",
-            description="Strong evidence remains for this direction, but prior work left a coverage gap.",
-        )
-        high_evidence_sibling = _intent(
-            "i001",
-            from_ids=["f001"],
-            description="Cover the untested sibling method in the same high-value family.",
-            priority_score=0.48,
-            branch_key="core.family.method_b",
-            branch_depth=0,
-        )
-        low_evidence_novel = _intent(
-            "i002",
-            description="Try a new unrelated direction without supporting clues.",
-            priority_score=0.62,
-            branch_key="novel.family.method_c",
-            branch_depth=0,
-        )
-
-        scores = effective_score_by_intent(
-            project_intents=[high_evidence_sibling, low_evidence_novel],
-            candidate_intents=[high_evidence_sibling, low_evidence_novel],
-            running_intent_ids=set(),
-            project_facts=[source_fact],
-        )
-
-        self.assertGreater(scores["i001"].evidence_strength_bonus, 0)
-        self.assertGreater(scores["i001"].coverage_gap_bonus, 0)
-        self.assertIs(
-            select_next_intent(
-                project_intents=[high_evidence_sibling, low_evidence_novel],
-                unclaimed_intents=[high_evidence_sibling, low_evidence_novel],
-                running_intent_ids=set(),
-                project_facts=[source_fact],
-            ),
-            high_evidence_sibling,
-        )
-
-    def test_mechanism_proximity_and_bounded_negative_scope_boost_sibling_leaf(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import effective_score_by_intent, select_next_intent
-        from cairn.shared.contracts import Fact
-
-        source_fact = Fact(
-            id="f001",
-            description=(
-                "Strong evidence remains near the direct gate. The tested parser method failed, "
-                "but this was partial coverage and the sibling encoding method is not ruled out."
-            ),
-        )
-        sibling_leaf = _intent(
-            "i001",
-            from_ids=["f001"],
-            description="Exercise the direct gate through the untested sibling encoding method.",
-            priority_score=0.45,
-            branch_key="core.gate.encoding",
-            branch_depth=0,
-        )
-        weak_novelty = _intent(
-            "i002",
-            description="Inspect unrelated framework provenance.",
-            priority_score=0.61,
-            branch_key="surface.framework.provenance",
-            branch_depth=0,
-        )
-
-        scores = effective_score_by_intent(
-            project_intents=[sibling_leaf, weak_novelty],
-            candidate_intents=[sibling_leaf, weak_novelty],
-            running_intent_ids=set(),
-            project_facts=[source_fact],
-        )
-
-        self.assertEqual(scores["i001"].negative_scope, "bounded")
-        self.assertGreater(scores["i001"].mechanism_proximity_bonus, 0)
-        self.assertGreater(scores["i001"].coverage_gap_bonus, 0)
-        self.assertIs(
-            select_next_intent(
-                project_intents=[sibling_leaf, weak_novelty],
-                unclaimed_intents=[sibling_leaf, weak_novelty],
-                running_intent_ids=set(),
-                project_facts=[source_fact],
-            ),
-            sibling_leaf,
-        )
-
-    def test_unbounded_negative_evidence_suppresses_leaf_evidence_bonus(self) -> None:
-        from cairn.dispatcher.scheduler.frontier_priority import effective_score_by_intent
-        from cairn.shared.contracts import Fact
-
-        source_fact = Fact(
-            id="f001",
-            description="The same leaf failed repeatedly with no evidence and no supporting signal.",
-        )
-        leaf = _intent(
-            "i001",
-            from_ids=["f001"],
-            description="Retry same leaf despite failure.",
-            priority_score=0.7,
-            branch_key="core.gate.parser",
-        )
-
-        scores = effective_score_by_intent(
-            project_intents=[leaf],
-            candidate_intents=[leaf],
-            running_intent_ids=set(),
-            project_facts=[source_fact],
-        )
-
-        self.assertEqual(scores["i001"].negative_scope, "leaf")
-        self.assertEqual(scores["i001"].evidence_strength_bonus, 0)
+        services.dispatch_explore.assert_called_once_with(project, recent)
 
     def test_claimed_or_running_open_intents_block_reason(self) -> None:
         from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher

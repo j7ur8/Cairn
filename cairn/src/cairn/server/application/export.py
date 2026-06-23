@@ -64,13 +64,6 @@ def export_project_yaml(conn: Any, project_id: str) -> str:
                 "worker": intent["worker"],
                 "created_at": format_export_timestamp(intent["created_at"]),
                 "concluded_at": format_export_timestamp(intent["concluded_at"]),
-                "priority_score": intent["priority_score"],
-                "intent_kind": intent["intent_kind"],
-                "tags": intent["tags"],
-                "score_reason": intent["score_reason"],
-                "branch_key": intent["branch_key"],
-                "branch_depth": intent["branch_depth"],
-                "expected_value": intent["expected_value"],
             }
         )
 
@@ -111,10 +104,6 @@ def export_project_timeline(conn: Any, project_id: str) -> str:
 
         ts = format_export_timestamp(intent["created_at"]) or ""
         meta = f"  from: {from_str}"
-        if intent["branch_key"]:
-            meta += f"\n  branch: {intent['branch_key']} depth={intent['branch_depth']}"
-            if intent["expected_value"] is not None:
-                meta += f" expected_value={intent['expected_value']}"
         if intent["worker"] and not intent["concluded_at"]:
             meta += f"\n  worker: {intent['worker']} (in progress)"
         block = f"[{ts}] INTENT DECLARED {intent['id']} by {intent['creator']}\n{meta}\n  {intent['description']}"

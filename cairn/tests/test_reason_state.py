@@ -98,34 +98,20 @@ class ReasonContractTests(unittest.TestCase):
             max_intents=2,
         )
         self.assertEqual(kind, "intents")
-        self.assertEqual(
-            data,
-            [
-                {
-                    "from": ["f001"],
-                    "description": "try another path",
-                    "priority_score": 0.5,
-                    "tags": [],
-                    "intent_kind": None,
-                    "score_reason": None,
-                    "branch_key": None,
-                    "branch_depth": 0,
-                    "expected_value": None,
-                }
-            ],
-        )
+        self.assertEqual(data, [{"from": ["f001"], "description": "try another path"}])
 
-    def test_reason_write_event_includes_branch_metadata_for_created_intents(self) -> None:
+    def test_reason_write_event_reports_created_intents(self) -> None:
         from cairn.dispatcher.runtime.process import ProcessResult
         from cairn.dispatcher.tasks.reason_result import apply_reason_result
 
         reporter = _FakeReasonReporter()
 
         class FakeClient:
-            def create_intent(self, project_id, from_ids, description, creator, **kwargs):
-                self.kwargs = kwargs
+            def create_intent(self, project_id, from_ids, description, creator):
+                self.args = (project_id, from_ids, description, creator)
                 return SimpleNamespace(ok=True, status_code=200, data={"id": "i123"}, text="")
 
+        client = FakeClient()
         payload = {
             "accepted": True,
             "data": {
@@ -133,19 +119,12 @@ class ReasonContractTests(unittest.TestCase):
                     {
                         "from": ["f001"],
                         "description": "test access input parser path",
-                        "branch_key": "access.input.parser",
-                        "branch_depth": 1,
-                        "expected_value": 0.82,
-                        "priority_score": 0.76,
-                        "intent_kind": "exploit",
-                        "tags": ["access", "parser"],
-                        "score_reason": "direct gate path",
                     }
                 ]
             },
         }
         result = apply_reason_result(
-            client=FakeClient(),
+            client=client,
             driver=SimpleNamespace(extract_response_text=lambda stdout, stderr: stdout),
             project_id="proj_t",
             worker_name="reason",
@@ -167,13 +146,8 @@ class ReasonContractTests(unittest.TestCase):
         phase, content, created_ids = reporter.results[-1]
         self.assertEqual(phase, "reason_write")
         self.assertEqual(created_ids, ["i123"])
-        event = json.loads(content)
-        self.assertEqual(event["intent_id"], "i123")
-        self.assertEqual(event["branch_key"], "access.input.parser")
-        self.assertEqual(event["branch_depth"], 1)
-        self.assertEqual(event["expected_value"], 0.82)
-        self.assertEqual(event["priority_score"], 0.76)
-        self.assertEqual(event["score_reason"], "direct gate path")
+        self.assertEqual(content, "created 1 intents")
+        self.assertEqual(client.args, ("proj_t", ["f001"], "test access input parser path", "reason"))
 
 
 class ReasonStateServiceTests(unittest.TestCase):

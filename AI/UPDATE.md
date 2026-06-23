@@ -5,18 +5,35 @@
 
 # 更新日志
 
+## 2026-06-23 — Intent metadata 文档残留清理
+
+- 同步当前 Alembic head：`0009_drop_intent_metadata`，记录已废弃的 intent metadata 字段 `priority_score`、`intent_kind`、`tags`、`score_reason`、`branch_key`、`branch_depth`、`expected_value` 已由该 migration 移除。
+- 同步 Reason/Scheduler 文档：Reason 三态协议的新 intent 只要求 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent，并在 claimed/running open intents 未结束时跳过 Reason。
+- 本次仅清理文档残留，不删除历史 `0007` / `0008` migration 文件。
+
+---
+
+## 2026-06-22 — Graph/Execution Log 前端联动同步
+
+- 同步前端 graph intent 选择行为：`state-graph.js` 在选中 intent 后调用 LLM log state，按 `llmExecutions[].intent_id` 选择对应 execution 并刷新当前日志 preview/page cards；无匹配时保留当前 Execution Log 选择。
+- 同步 Execution Log header 行为：新增 `Refresh Execution Log` 按钮，调用 `refreshCurrentLlmLog()` 强制刷新 execution list 与当前 execution 事件视图，不改变 graph/detail/replay 状态且不强制展开折叠面板。
+- 同步测试说明：`test_graph_state.py` 覆盖匹配、多匹配取第一个、无匹配保留；`test_static_cache.py` 覆盖 assembled frontend 的按钮和联动调用。
+- 当前验证：`cd cairn && uv run pytest tests/test_graph_state.py tests/test_static_cache.py` 通过（5 passed, 22 skipped）；`node scripts/check_frontend.mjs` 通过。
+
+---
+
 ## 2026-06-22 — Reason prompt 机制邻近中性化
 
 - 同步 default `reason.md`：mechanism proximity 启发改为通用状态空间搜索语义，使用 `decision gate`、`state transition`、`data boundary`、`invariant check`、`persisted state`、`confirmed primitive`、`causal mechanism`，移除偏安全域的 credential/authorization/stored-secret 表达。
-- 保持 Reason 三态 marker JSON、`branch_key`、`branch_depth`、`expected_value` 和 scheduler/fact view 契约不变；仅调整 prompt 语义和 prompt contract 测试断言。
+- 后续 `0009_drop_intent_metadata` 已移除旧 intent metadata 字段；当前 Reason 三态 marker JSON 的新增 intent 只保留 `from` 与 `description`。
 - 当前验证：`cd cairn && uv run pytest tests/test_contract_parsing.py tests/test_prompt_snapshots.py` 通过（30 passed）。
 
 ---
 
 ## 2026-06-22 — Intent branch 调度元数据同步
 
-- 同步当前 Alembic head：`0008_intent_branch_metadata`，记录 intent `branch_key`、`branch_depth`、`expected_value` 字段用于 leaf-level 调度和图导出。
-- 同步 Reason/Scheduler 行为：Reason prompt 使用领域无关的证据覆盖/假设回访规则；Scheduler 对同一 leaf branch 做并发排除，对 sibling leaf 不继承 depth penalty，并记录 effective score 组成。
+- 旧同步记录：当时曾短期引入 intent 调度元数据字段。
+- 当前状态：这些字段以及 `priority_score`、`intent_kind`、`tags`、`score_reason` 已由 `0009_drop_intent_metadata` 废弃并移除；Scheduler 不再计算 branch priority。
 - 当前验证：`cd cairn && uv run pytest tests/test_scheduler_refactor.py tests/test_fact_views.py tests/test_contract_parsing.py tests/test_reason_state.py tests/test_intents_router.py tests/test_db_migrations.py tests/test_graph_state.py` 通过（50 passed, 16 skipped）。
 
 ---

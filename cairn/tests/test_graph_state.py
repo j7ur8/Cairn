@@ -36,7 +36,7 @@ class GraphStateTests(unittest.TestCase):
               ],
               intents: [
                 { id: 'i001', description: 'Concluded intent text', from: ['origin'], to: 'fact_a' },
-                { id: 'i002', description: 'Open intent text', from: ['fact_a'], to: '', priority_score: 0.9, intent_kind: 'exploit', tags: ['rce'], score_reason: 'near goal' },
+                { id: 'i002', description: 'Open intent text', from: ['fact_a'], to: '' },
               ],
             };
             state.summarizeFactLabel = fact => fact.id;
@@ -152,54 +152,4 @@ class GraphStateTests(unittest.TestCase):
         self.assertEqual(
             self._run_node_json(script),
             {"llmSelectedExecutionId": "exec-current", "resetCount": 0},
-        )
-
-    def test_open_intent_priority_metadata_stays_on_project_record(self) -> None:
-        script = textwrap.dedent(
-            """
-            import { pathToFileURL } from 'node:url';
-
-            const mod = await import(pathToFileURL('cairn/src/cairn/server/static/js/workspace/state-graph.js'));
-            const state = mod.createWorkspaceGraphState();
-            state.project = {
-              project: { status: 'active' },
-              facts: [{ id: 'origin', description: 'Origin fact' }],
-              intents: [
-                { id: 'i002', description: 'Open intent text', from: ['origin'], to: '', priority_score: 0.9, intent_kind: 'exploit', tags: ['rce'], score_reason: 'near goal', branch_key: 'access.input.parser', branch_depth: 1, expected_value: 0.8 },
-              ],
-            };
-            state.selectedNode = { type: 'intent', id: 'i002' };
-            state.actorName = () => 'worker';
-            state.projectIsActive = () => true;
-            const intent = state.selectedOpenIntentRecord();
-            console.log(JSON.stringify({
-              priority_score: intent.priority_score,
-              intent_kind: intent.intent_kind,
-              tags: intent.tags,
-              score_reason: intent.score_reason,
-              branch_key: intent.branch_key,
-              branch_depth: intent.branch_depth,
-              expected_value: intent.expected_value,
-            }));
-            """
-        )
-        result = subprocess.run(
-            ["node", "--input-type=module", "-e", script],
-            cwd=_REPO,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-        self.assertEqual(
-            json.loads(result.stdout),
-            {
-                "priority_score": 0.9,
-                "intent_kind": "exploit",
-                "tags": ["rce"],
-                "score_reason": "near goal",
-                "branch_key": "access.input.parser",
-                "branch_depth": 1,
-                "expected_value": 0.8,
-            },
         )

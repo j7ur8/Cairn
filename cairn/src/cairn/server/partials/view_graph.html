@@ -593,27 +593,6 @@
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().creator"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || '—'"></span></div>
-                <template x-if="selectedIntentRecord().priority_score !== null && selectedIntentRecord().priority_score !== undefined">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Priority</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().priority_score"></span></div>
-                </template>
-                <template x-if="selectedIntentRecord().branch_key">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Branch</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().branch_key"></span></div>
-                </template>
-                <template x-if="selectedIntentRecord().branch_depth !== null && selectedIntentRecord().branch_depth !== undefined">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Branch depth</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().branch_depth"></span></div>
-                </template>
-                <template x-if="selectedIntentRecord().expected_value !== null && selectedIntentRecord().expected_value !== undefined">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Expected value</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().expected_value"></span></div>
-                </template>
-                <template x-if="selectedIntentRecord().intent_kind">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Kind</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().intent_kind"></span></div>
-                </template>
-                <template x-if="Array.isArray(selectedIntentRecord().tags) && selectedIntentRecord().tags.length">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Tags</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().tags.join(' ')"></span></div>
-                </template>
-                <template x-if="selectedIntentRecord().score_reason">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Score reason</span><span class="text-slate-600 text-right break-words" x-text="selectedIntentRecord().score_reason"></span></div>
-                </template>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Heartbeat</span><span class="text-slate-600 text-right break-words" x-text="selectedIntentRecord().last_heartbeat_at ? formatTime(selectedIntentRecord().last_heartbeat_at) : '—'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().created_at)"></span></div>
                 <template x-if="selectedIntentRecord().concluded_at">

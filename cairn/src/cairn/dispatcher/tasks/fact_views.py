@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 import yaml
 
-from cairn.dispatcher.scheduler.frontier_priority import intent_priority_key
 from cairn.shared.contracts import Fact, Intent, ProjectDetail
 
 REASON_VIEW_CHAR_BUDGET = 16_000
@@ -180,12 +178,11 @@ class FactViewRenderer:
         }
 
         if view_type == FactViewType.REASON:
-            payload["branch_coverage"] = self._branch_coverage_items(project)
             payload["open_intents"] = [
                 self._intent_item(open_intent)
                 for open_intent in sorted(
                     [item for item in project.intents if item.to is None],
-                    key=intent_priority_key,
+                    key=lambda item: item.created_at,
                     reverse=True,
                 )[:12]
             ]
@@ -282,61 +279,8 @@ class FactViewRenderer:
             "description": intent.description,
             "creator": intent.creator,
             "worker": intent.worker,
-            "priority_score": intent.priority_score,
-            "intent_kind": intent.intent_kind,
-            "tags": intent.tags,
-            "score_reason": intent.score_reason,
-            "branch_key": intent.branch_key,
-            "branch_depth": intent.branch_depth,
-            "expected_value": intent.expected_value,
             "created_at": intent.created_at,
             "concluded_at": intent.concluded_at,
-        }
-
-    def _branch_coverage_items(self, project: ProjectDetail) -> list[dict[str, Any]]:
-        facts_by_id = {fact.id: fact for fact in project.facts}
-        by_family: dict[str, list[Intent]] = defaultdict(list)
-        for intent in project.intents:
-            family = _branch_family(intent.branch_key)
-            if family is None:
-                continue
-            by_family[family].append(intent)
-
-        items: list[dict[str, Any]] = []
-        for family, intents in by_family.items():
-            sorted_intents = sorted(intents, key=lambda item: item.concluded_at or item.created_at, reverse=True)
-            open_intents = [intent for intent in sorted_intents if intent.to is None]
-            running_intents = [intent for intent in open_intents if intent.worker is not None]
-            completed_intents = [intent for intent in sorted_intents if intent.to is not None]
-            latest = sorted_intents[0]
-            negative_scopes = _negative_scope_items(completed_intents, facts_by_id)
-            items.append(
-                {
-                    "family": family,
-                    "leaf_count": len({intent.branch_key for intent in intents if intent.branch_key}),
-                    "covered_leaf_ids": sorted(
-                        {intent.branch_key for intent in completed_intents if intent.branch_key}
-                    ),
-                    "latest_result": self._branch_latest_result(latest),
-                    "latest_negative_scope": negative_scopes[0] if negative_scopes else None,
-                    "open_coverage_gaps": _open_coverage_gaps(sorted_intents, facts_by_id),
-                    "family_supporting_facts": _family_supporting_facts(sorted_intents, facts_by_id),
-                    "positive_clues": _branch_clues(sorted_intents, positive=True),
-                    "negative_clues": _branch_clues(sorted_intents, positive=False),
-                    "open_intent_ids": [intent.id for intent in open_intents[:6]],
-                    "running_intent_ids": [intent.id for intent in running_intents[:6]],
-                    "completed_intent_ids": [intent.id for intent in completed_intents[:6]],
-                }
-            )
-        return sorted(items, key=lambda item: item["family"])[:12]
-
-    def _branch_latest_result(self, intent: Intent) -> dict[str, Any]:
-        return {
-            "intent_id": intent.id,
-            "branch_key": intent.branch_key,
-            "status": "open" if intent.to is None else "completed",
-            "to": intent.to,
-            "summary": intent.score_reason or intent.description,
         }
 
     def _intent_chain_item(self, intent: Intent) -> dict[str, Any]:
@@ -345,11 +289,6 @@ class FactViewRenderer:
             "from": intent.from_,
             "to": intent.to,
             "description": intent.description,
-            "branch_key": intent.branch_key,
-            "branch_depth": intent.branch_depth,
-            "expected_value": intent.expected_value,
-            "priority_score": intent.priority_score,
-            "score_reason": intent.score_reason,
             "created_at": intent.created_at,
             "concluded_at": intent.concluded_at,
         }
@@ -369,146 +308,3 @@ def _dedupe(values: list[str]) -> list[str]:
 def _dump_yaml(payload: dict[str, Any]) -> str:
     return yaml.dump(payload, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
-
-def _branch_family(branch_key: str | None) -> str | None:
-    if branch_key is None:
-        return None
-    parts = [part for part in branch_key.split(".") if part]
-    if not parts:
-        return None
-    if len(parts) == 1:
-        return parts[0]
-    return ".".join(parts[:-1])
-
-
-def _intent_fact_text(intent: Intent, facts_by_id: dict[str, Fact]) -> str:
-    parts = [intent.description, intent.score_reason or "", " ".join(intent.tags)]
-    if intent.to is not None and intent.to in facts_by_id:
-        parts.append(facts_by_id[intent.to].description)
-    return " ".join(parts)
-
-
-def _negative_scope_item(intent: Intent, facts_by_id: dict[str, Fact]) -> dict[str, str] | None:
-    text = _intent_fact_text(intent, facts_by_id)
-    lowered = text.lower()
-    if not any(term in lowered for term in _NEGATIVE_CLUE_TERMS):
-        return None
-    scope = _excerpt_for_terms(text, _TESTED_SCOPE_TERMS) or intent.description
-    limits = _excerpt_for_terms(text, _NEGATIVE_LIMIT_TERMS) or text
-    return {
-        "intent_id": intent.id,
-        "branch_key": intent.branch_key or "",
-        "tested_scope": scope,
-        "failure_limit": limits,
-    }
-
-
-def _negative_scope_items(intents: list[Intent], facts_by_id: dict[str, Fact]) -> list[dict[str, str]]:
-    items: list[dict[str, str]] = []
-    for intent in intents:
-        item = _negative_scope_item(intent, facts_by_id)
-        if item is not None:
-            items.append(item)
-    return items
-
-
-def _open_coverage_gaps(intents: list[Intent], facts_by_id: dict[str, Fact]) -> list[str]:
-    gaps: list[str] = []
-    for intent in intents:
-        text = _intent_fact_text(intent, facts_by_id)
-        lowered = text.lower()
-        if any(term in lowered for term in _COVERAGE_GAP_TERMS):
-            gaps.append(_excerpt_for_terms(text, _COVERAGE_GAP_TERMS) or text)
-        if len(gaps) >= 4:
-            break
-    return gaps
-
-
-def _family_supporting_facts(intents: list[Intent], facts_by_id: dict[str, Fact]) -> list[dict[str, str]]:
-    supporting: list[dict[str, str]] = []
-    for intent in intents:
-        if intent.to is None or intent.to not in facts_by_id:
-            continue
-        fact = facts_by_id[intent.to]
-        lowered = fact.description.lower()
-        if any(term in lowered for term in _POSITIVE_CLUE_TERMS):
-            supporting.append({"fact_id": fact.id, "description": fact.description})
-        if len(supporting) >= 4:
-            break
-    return supporting
-
-
-def _excerpt_for_terms(text: str, terms: tuple[str, ...]) -> str | None:
-    lowered = text.lower()
-    for term in terms:
-        index = lowered.find(term)
-        if index < 0:
-            continue
-        start = max(0, index - 80)
-        end = min(len(text), index + len(term) + 160)
-        return text[start:end].strip()
-    return None
-
-
-def _branch_clues(intents: list[Intent], *, positive: bool) -> list[str]:
-    terms = _POSITIVE_CLUE_TERMS if positive else _NEGATIVE_CLUE_TERMS
-    clues: list[str] = []
-    for intent in intents:
-        text = " ".join([intent.description, intent.score_reason or "", " ".join(intent.tags)]).lower()
-        if positive and any(term in text for term in _NEGATIVE_CLUE_TERMS):
-            continue
-        if any(term in text for term in terms):
-            clues.append(intent.score_reason or intent.description)
-        if len(clues) >= 4:
-            break
-    return clues
-
-
-_POSITIVE_CLUE_TERMS = (
-    "evidence",
-    "confirmed",
-    "signal",
-    "clue",
-    "supports",
-    "positive",
-)
-
-_NEGATIVE_CLUE_TERMS = (
-    "failed",
-    "failure",
-    "negative",
-    "not found",
-    "no evidence",
-    "ruled out",
-    "excluded",
-    "blocked",
-)
-
-_TESTED_SCOPE_TERMS = (
-    "tested",
-    "method",
-    "scope",
-    "covered",
-    "attempted",
-)
-
-_NEGATIVE_LIMIT_TERMS = (
-    "failed",
-    "failure",
-    "not found",
-    "no evidence",
-    "blocked",
-    "negative",
-)
-
-_COVERAGE_GAP_TERMS = (
-    "coverage gap",
-    "partial coverage",
-    "partially covered",
-    "untested",
-    "not tested",
-    "not ruled out",
-    "not excluded",
-    "uncovered",
-    "sibling",
-)

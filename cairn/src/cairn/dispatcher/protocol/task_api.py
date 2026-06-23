@@ -116,14 +116,6 @@ class TaskApiClient(HttpClientBase):
         from_ids: list[str],
         description: str,
         creator: str,
-        *,
-        priority_score: float | None = None,
-        intent_kind: str | None = None,
-        tags: list[str] | None = None,
-        score_reason: str | None = None,
-        branch_key: str | None = None,
-        branch_depth: int = 0,
-        expected_value: float | None = None,
     ) -> ApiResult:
         return self._request_json(
             "POST",
@@ -133,13 +125,6 @@ class TaskApiClient(HttpClientBase):
                 "description": description,
                 "creator": creator,
                 "worker": None,
-                "priority_score": priority_score,
-                "intent_kind": intent_kind,
-                "tags": tags or [],
-                "score_reason": score_reason,
-                "branch_key": branch_key,
-                "branch_depth": branch_depth,
-                "expected_value": expected_value,
             },
         )
 

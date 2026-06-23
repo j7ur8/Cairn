@@ -16,7 +16,7 @@ If Goal has been satisfied, return:
 
 If Goal has not been satisfied but new intents should be proposed, return:
 84913462130721312360912
-{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "...", "branch_key": "area.family.method", "branch_depth": 1, "expected_value": 0.82, "priority_score": 0.8, "intent_kind": "investigate", "tags": ["short-topic"], "score_reason": "why this leaf branch should run now"}]}}
+{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
 84913462130721312360912
 
 If Goal has not been satisfied and no new intent should currently be proposed, return:
@@ -31,14 +31,6 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - If `Open Intents` is empty, you must propose new intents.
 - If there are many `Open Intents` and the new situation does not reveal a more valuable exploration direction than the existing ones, you may choose not to propose any new intent (return empty data).
 - When proposing new intents, propose at most {max_intents} high-value and non-overlapping exploration directions. Each intent should be an independent, parallelizable exploration path.
-- For each candidate direction, distinguish confirmed facts, covered methods, still-uncovered sibling methods, and whether the observed failures are enough to exclude the whole direction.
-- If a high-value direction still has strong supporting evidence but only some methods in that direction were covered, propose a new leaf branch under the same broader family instead of treating the whole family as dead.
-- Prefer directions with mechanism proximity: work that directly acts on a decision gate, required state transition, data boundary, invariant check, persisted state, confirmed primitive, or other causal mechanism needed to satisfy Goal. Treat environment fingerprints, framework hints, naming coincidences, and source provenance as weaker evidence unless they connect to such a mechanism.
-- Each proposed intent must include a stable leaf-level `branch_key` for the investigation work unit. Use hierarchical names such as `area.family.method`, with at least three non-empty segments. Reuse the same key for the same leaf across turns, and use sibling leaf keys for different methods under the same broader family. Do not use family-only keys, and do not invent a new key just to bypass scheduling limits.
-- Each proposed intent must include `branch_depth` as a non-negative integer. Use `0` for a new leaf branch and increase it only when proposing another step deeper in that same leaf branch. Do not carry depth from one sibling leaf to another.
-- Each proposed intent may include `expected_value` from 0.0 to 1.0 for the branch's long-term value toward Goal. If unsure, use `null`.
-- Each proposed intent may include `priority_score` from 0.0 to 1.0. Use higher scores for frontier work that is more likely to advance Goal soon. If unsure, use 0.5.
-- Each proposed intent may include `intent_kind`, `tags`, and `score_reason`. Keep tags short and use `score_reason` only to explain scheduling priority, evidence strength, and coverage gap. Do not include long chain-of-thought, historical cases, or domain-specific examples in `score_reason`.
 - Each Intent should be a high-value exploration direction. It does not need to be overly detailed. Focus on the core insight and a clear direction. Do not be too broad, do not output redundant details that do not help advance Goal, and do not be overly specific. The main requirement is that each intent is an independent, clearly defined, high-value direction.
 - An Intent may originate from multiple facts.
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.

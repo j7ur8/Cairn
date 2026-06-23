@@ -37,11 +37,6 @@ def _intent(
     from_ids=None,
     to=None,
     description="intent",
-    priority_score=None,
-    branch_key=None,
-    branch_depth=0,
-    expected_value=None,
-    score_reason=None,
 ):
     from cairn.shared.contracts import Intent
 
@@ -54,11 +49,6 @@ def _intent(
         worker=None,
         created_at=_ts(int(intent_id[-1]) if intent_id[-1].isdigit() else 0),
         concluded_at=_ts(int(intent_id[-1]) if to else 0) if to else None,
-        priority_score=priority_score,
-        score_reason=score_reason,
-        branch_key=branch_key,
-        branch_depth=branch_depth,
-        expected_value=expected_value,
     )
 
 
@@ -79,14 +69,7 @@ class FactViewTests(unittest.TestCase):
         from cairn.dispatcher.tasks.fact_views import FactViewRenderer
         from cairn.shared.contracts import Fact
 
-        intent = _intent(
-            "i002",
-            from_ids=["f001"],
-            priority_score=0.7,
-            branch_key="area.family.method_a",
-            branch_depth=1,
-            expected_value=0.8,
-        )
+        intent = _intent("i002", from_ids=["f001"])
         project = _project(
             facts=[
                 Fact(id="origin", description="origin fact"),
@@ -102,12 +85,11 @@ class FactViewTests(unittest.TestCase):
         fact_ids = {fact["id"] for fact in data["facts"]}
         self.assertIn("f001", fact_ids)
         self.assertEqual(data["current_intent"]["id"], "i002")
-        self.assertEqual(data["current_intent"]["priority_score"], 0.7)
-        self.assertEqual(data["current_intent"]["branch_key"], "area.family.method_a")
-        self.assertEqual(data["current_intent"]["branch_depth"], 1)
-        self.assertEqual(data["current_intent"]["expected_value"], 0.8)
+        self.assertEqual(data["current_intent"]["from"], ["f001"])
+        self.assertNotIn("priority_score", data["current_intent"])
+        self.assertNotIn("branch_key", data["current_intent"])
 
-    def test_reason_view_includes_branch_coverage_summary(self) -> None:
+    def test_reason_view_includes_open_and_completed_intents_without_metadata(self) -> None:
         from cairn.dispatcher.tasks.fact_views import FactViewRenderer
         from cairn.shared.contracts import Fact
 
@@ -115,14 +97,10 @@ class FactViewTests(unittest.TestCase):
             "i001",
             to="f001",
             description="method A produced no evidence",
-            branch_key="area.family.method_a",
-            score_reason="method A failed and left method B untested",
         )
         open_sibling = _intent(
             "i002",
             description="method B has confirmed signal and coverage gap",
-            branch_key="area.family.method_b",
-            score_reason="strong evidence remains; sibling coverage gap is open",
         )
 
         view = FactViewRenderer().render_reason_view(
@@ -144,19 +122,11 @@ class FactViewTests(unittest.TestCase):
         )
         data = yaml.safe_load(view.yaml_text)
 
-        coverage = data["branch_coverage"][0]
-        self.assertEqual(coverage["family"], "area.family")
-        self.assertEqual(coverage["leaf_count"], 2)
-        self.assertEqual(coverage["covered_leaf_ids"], ["area.family.method_a"])
-        self.assertEqual(coverage["latest_result"]["branch_key"], "area.family.method_b")
-        self.assertEqual(coverage["latest_negative_scope"]["branch_key"], "area.family.method_a")
-        self.assertIn("Tested method A", coverage["latest_negative_scope"]["tested_scope"])
-        self.assertTrue(coverage["open_coverage_gaps"])
-        self.assertEqual(coverage["family_supporting_facts"][0]["fact_id"], "f001")
-        self.assertEqual(coverage["open_intent_ids"], ["i002"])
-        self.assertEqual(coverage["completed_intent_ids"], ["i001"])
-        self.assertTrue(coverage["positive_clues"])
-        self.assertTrue(coverage["negative_clues"])
+        self.assertNotIn("branch_coverage", data)
+        self.assertEqual(data["open_intents"][0]["id"], "i002")
+        self.assertEqual(data["completed_intents"][0]["id"], "i001")
+        self.assertNotIn("branch_key", data["open_intents"][0])
+        self.assertNotIn("priority_score", data["completed_intents"][0])
 
     def test_large_reason_view_reports_omitted_facts(self) -> None:
         from cairn.dispatcher.tasks.fact_views import FactViewRenderer

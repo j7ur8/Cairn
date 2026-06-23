@@ -27,13 +27,6 @@ class Intent(BaseModel):
     last_heartbeat_at: str | None = None
     created_at: str
     concluded_at: str | None = None
-    priority_score: float | None = None
-    intent_kind: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    score_reason: str | None = None
-    branch_key: str | None = None
-    branch_depth: int = 0
-    expected_value: float | None = None
 
     model_config = {"populate_by_name": True}
 

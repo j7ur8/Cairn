@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,8 +44,6 @@ class ProjectExportQuery:
             {"project_id": project_id},
         )
         intents = [dict(intent) for intent in intent_rows]
-        for intent in intents:
-            intent["tags"] = _decode_tags(intent["tags"])
         sources_by_intent = {
             row["intent_id"]: row["fact_ids"] or []
             for row in sql.fetchall(
@@ -68,19 +64,3 @@ class ProjectExportQuery:
             intents=intents,
             sources_by_intent=sources_by_intent,
         )
-
-
-def _decode_tags(value: Any) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    if not isinstance(value, str):
-        return []
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(parsed, list):
-        return []
-    return [item for item in parsed if isinstance(item, str)]

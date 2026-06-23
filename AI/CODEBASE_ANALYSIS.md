@@ -8,7 +8,7 @@
 3. 如数据模型或 API 端点有变更，同步更新 ARCHITECTURE.md 中的相关图表
 4. 新增的函数入口点不超过 15 个上限时，追加到入口点列表；超过则替换次重要的
 
-生成日期：2026-06-20
+生成日期：2026-06-22
 -->
 
 # Cairn 全面代码分析
@@ -79,7 +79,7 @@ Cairn/
 | `cairn/src/cairn/server/static/js/app/create-app-state.js` | 合并 app state fragments，默认阻止重复 key 静默覆盖 |
 | `cairn/src/cairn/server/static/js/app/state-core.js` | 全局 API、轮询、登录、导航等核心状态；使用 `/projects/{id}/poll-state` 判定是否刷新完整图或时间线 |
 | `cairn/src/cairn/server/static/js/app/state-settings*.js`, `state-prompts.js`, `state-ai-profiles.js`, `state-proxies.js` | Settings、Prompt group、AI Profile、Proxy 管理状态 |
-| `cairn/src/cairn/server/static/js/workspace/` | 项目列表/图、能力选择、LLM log、replay 等工作区状态 |
+| `cairn/src/cairn/server/static/js/workspace/` | 项目列表/图、能力选择、LLM log、replay 等工作区状态；`state-graph.js` 的 intent 选择会同步 `llm-log/events.js` 中同 `intent_id` 的 execution 选择并刷新当前日志视图 |
 | `cairn/src/cairn/server/static/js/shared/` | API client、表单、偏好、默认值、summary、capability selection 等共享 JS helper |
 | `cairn/src/cairn/server/db.py` | SQLAlchemy engine/session、Alembic migration、seed |
 | `cairn/src/cairn/server/orm.py` | 数据表、索引、约束定义 |
@@ -126,8 +126,9 @@ Cairn/
 |-----------|----------|----------|-------------|------|
 | Fact-Intent graph expansion | `server/domain/*`, `server/application/*`, `dispatcher/scheduler/*` | 通过 facts、intents、hints 逐步扩展状态空间 | 与项目图规模线性相关 | 核心业务模型 |
 | Project poll revisions | `server/repositories/projects.py`, `server/application/*`, `server/static/js/app/state-core.js` | 图变更递增 `graph_revision`，title/status/hints/files 等时间线变更递增 `timeline_revision`；SPA 轻量轮询 poll-state 后按 revision 决定是否拉完整项目 | O(1) project row update + 聚合 counts | 降低高频轮询时完整 graph API 压力 |
+| Graph intent to execution log sync | `server/static/js/workspace/state-graph.js`, `server/static/js/workspace/llm-log/events.js`, `server/partials/view_graph.html` | 点击 graph intent edge/node 后保持 detail selection，同时按 `llmExecutions[].intent_id` 选择对应 execution 并重载 latest preview/page cards；Execution Log header 的 refresh 按钮强制刷新当前 execution log | 前端状态内存查找 O(n) + 现有 log API reload | 未匹配 execution 时保留当前 log 选择；折叠面板不会被强制展开 |
 | Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
-| Frontier branch priority | `dispatcher/scheduler/frontier_priority.py`, `dispatcher/prompts/default/reason.md` | 对 Reason 提议的 leaf branch 结合 expected value、depth、coverage、mechanism proximity 和运行态做调度打分 | 与候选 intent 数线性相关 | mechanism proximity 使用领域无关语义：decision gate、state transition、data boundary、invariant check、persisted state、confirmed primitive、causal mechanism |
+| Intent scheduling | `dispatcher/scheduler/project_dispatcher.py`, `dispatcher/prompts/default/reason.md` | Reason 只产出 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent | 与 open intent 数线性相关 | claimed/running open intents 未结束时跳过 Reason，避免并发追加新分支 |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
 | Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
@@ -202,7 +203,7 @@ sequenceDiagram
     S->>DB: update project_reason_state and release reason lease
 ```
 
-Reason prompt 只接受 marker-wrapped JSON 三态输出：complete、intents、noop。新增 intent 仍走 fact-intent graph 写回，但每个候选必须保持 leaf-level branch metadata：`branch_key` 使用至少三段的稳定层级 key，`branch_depth` 只在同一 leaf 内递增，`expected_value` 表示长期价值。Prompt 的调度启发保持领域无关，优先靠近 decision gate、state transition、data boundary、invariant check、persisted state、confirmed primitive 或 causal mechanism 的方向；历史案例、具体漏洞类型和安全 payload 词不应出现在默认 Reason prompt 中。
+Reason prompt 只接受 marker-wrapped JSON 三态输出：complete、intents、noop。新增 intent 仍走 fact-intent graph 写回，每个候选只要求包含来源 `from` 和 `description`。Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent；当仍有 claimed/running open intents 未结束时跳过 Reason，避免并发追加新 intent。
 
 ### 附件上传与文件下载
 
@@ -441,6 +442,7 @@ uv run --project cairn cairn db migrate
 - 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
 - 2026-06-17 新增/更新 execution config 回归覆盖 create-only snapshot、防覆盖、Dispatcher resolver deep-copy 缓存隔离，以及 reload/project clear 缓存失效。
 - 2026-06-20 当前源码包含 project poll-state revision 回归：`test_projects_router.py` 覆盖 `graph_revision`、`timeline_revision`、hint-only timeline bump、intent lifecycle graph bump、conclude/title 分流；`test_static_cache.py` 检查前端使用 poll-state 而不是每 tick 拉完整项目。
+- 2026-06-22 前端 graph/log 联动回归：`test_graph_state.py` 覆盖 intent selection 选择匹配 execution、多个匹配取列表第一个、无匹配保留当前 execution；`test_static_cache.py` 断言 assembled frontend 包含 Execution Log refresh 按钮和 `syncLlmExecutionSelectionForIntent()` 调用。
 - 2026-06-17 热点查询回归覆盖 config loader 测试路径、project summary 预聚合、execution list 分页后聚合、event view usage 收敛、retention `DELETE ... USING`、replay reachable subgraph，以及 `EXPLAIN` 无 `SubPlan`/join delete 验收。
 - 2026-06-13 当前环境使用 `uv run python -m pytest -q -m db` 通过：38 passed, 91 skipped, 181 deselected；无本地 DB 的用例通过 availability probe clean skip。
 - 重点回归通过：architecture boundaries、scheduler refactor、hints/attachments/files、execution configs、capabilities、replay、observability、retention、contract parsing。
@@ -490,6 +492,7 @@ uv run --project cairn cairn db migrate
 | 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
 | 注意 | 当前 Alembic head 是 `0005_project_poll_revisions`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 注意 | `GET /projects/{id}/poll-state` 只返回轻量 summary/revision；完整 graph 仍来自 `GET /projects/{id}`，前端按 graph/timeline revision 分流刷新。 |
+| 注意 | Graph intent 选择只在当前 `llmExecutions` 列表中查找同 `intent_id` execution；若列表尚未包含该 execution，不改变当前 Execution Log 选择。 |
 | 注意 | Execution config 是项目创建时冻结的 snapshot，`version` 固定作为 metadata；需要修改配置时应创建 replay/new project，而不是覆盖原 project snapshot。 |
 | 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后仍可能成为 hot path；项目列表/调度 summaries 已用 repository 预聚合 counts 避免逐项目子查询。 |

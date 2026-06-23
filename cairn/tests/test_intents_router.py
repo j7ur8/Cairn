@@ -110,7 +110,7 @@ class IntentRouterTests(unittest.TestCase):
         renewed = intents.heartbeat("proj_t", created.id, HeartbeatRequest(worker="worker_a"))
         self.assertEqual(renewed.worker, "worker_a")
 
-    def test_create_intent_round_trips_priority_metadata(self) -> None:
+    def test_create_intent_returns_core_model(self) -> None:
         from cairn.server.routers import intents
         from cairn.server.schemas import CreateIntentRequest
 
@@ -122,47 +122,13 @@ class IntentRouterTests(unittest.TestCase):
                     "from": ["origin"],
                     "description": "investigate high value path",
                     "creator": "worker_a",
-                    "priority_score": 0.85,
-                    "intent_kind": "exploit",
-                    "tags": ["rce", "fast"],
-                    "score_reason": "direct path to goal",
-                    "branch_key": "access.input.parser",
-                    "branch_depth": 2,
-                    "expected_value": 0.82,
                 }
             ),
         )
 
-        self.assertEqual(created.priority_score, 0.85)
-        self.assertEqual(created.intent_kind, "exploit")
-        self.assertEqual(created.tags, ["rce", "fast"])
-        self.assertEqual(created.score_reason, "direct path to goal")
-        self.assertEqual(created.branch_key, "access.input.parser")
-        self.assertEqual(created.branch_depth, 2)
-        self.assertEqual(created.expected_value, 0.82)
-
-    def test_create_intent_rejects_invalid_branch_metadata(self) -> None:
-        from pydantic import ValidationError
-
-        from cairn.server.schemas import CreateIntentRequest
-
-        invalid_cases = [
-            {"branch_key": " "},
-            {"branch_depth": -1},
-            {"expected_value": -0.1},
-            {"expected_value": 1.1},
-        ]
-        for fields in invalid_cases:
-            with self.subTest(fields=fields):
-                with self.assertRaises(ValidationError):
-                    CreateIntentRequest(
-                        **{
-                            "from": ["origin"],
-                            "description": "investigate",
-                            "creator": "worker_a",
-                            **fields,
-                        }
-                    )
+        self.assertEqual(created.description, "investigate high value path")
+        self.assertEqual(created.creator, "worker_a")
+        self.assertIsNone(created.worker)
 
     def test_project_reads_do_not_expire_leases(self) -> None:
         from cairn.server.routers import projects

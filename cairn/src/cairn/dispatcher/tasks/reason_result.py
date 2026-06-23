@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -152,21 +151,8 @@ def _create_intents(
 ) -> ReasonStepResult:
     created = 0
     created_ids: list[str] = []
-    created_summaries: list[dict[str, Any]] = []
     for intent_data in data:
-        response = client.create_intent(
-            project_id,
-            intent_data["from"],
-            intent_data["description"],
-            worker_name,
-            priority_score=intent_data.get("priority_score"),
-            intent_kind=intent_data.get("intent_kind"),
-            tags=intent_data.get("tags"),
-            score_reason=intent_data.get("score_reason"),
-            branch_key=intent_data.get("branch_key"),
-            branch_depth=intent_data.get("branch_depth", 0),
-            expected_value=intent_data.get("expected_value"),
-        )
+        response = client.create_intent(project_id, intent_data["from"], intent_data["description"], worker_name)
         if response.status_code == 403:
             LOG.info(
                 "project became inactive during reason intent create project=%s worker=%s created=%s",
@@ -188,31 +174,13 @@ def _create_intents(
             )
             continue
         created += 1
-        created_id = None
         if isinstance(response.data, dict) and isinstance(response.data.get("id"), str):
-            created_id = response.data["id"]
-            created_ids.append(created_id)
-        created_summaries.append(
-            {
-                "summary": f"created intent {created_id or ''}".strip(),
-                "intent_id": created_id,
-                "from": intent_data["from"],
-                "branch_key": intent_data.get("branch_key"),
-                "branch_depth": intent_data.get("branch_depth"),
-                "expected_value": intent_data.get("expected_value"),
-                "priority_score": intent_data.get("priority_score"),
-                "score_reason": intent_data.get("score_reason"),
-                "description": intent_data["description"],
-            }
-        )
+            created_ids.append(response.data["id"])
         LOG.info(
-            "reason created intent project=%s worker=%s from=%s branch=%s branch_depth=%s expected_value=%s description=%s",
+            "reason created intent project=%s worker=%s from=%s description=%s",
             project_id,
             worker_name,
             intent_data["from"],
-            intent_data.get("branch_key"),
-            intent_data.get("branch_depth"),
-            intent_data.get("expected_value"),
             intent_data["description"],
         )
     LOG.info(
@@ -237,7 +205,7 @@ def _create_intents(
         return ReasonStepResult("failed", "failed", f"created no intents attempted={len(data)}")
     reporter.emit_result(
         "reason_write",
-        "\n".join(json.dumps(item, ensure_ascii=False) for item in created_summaries),
+        f"created {created} intents",
         created_intent_ids=created_ids,
     )
     return ReasonStepResult("success", "intents")

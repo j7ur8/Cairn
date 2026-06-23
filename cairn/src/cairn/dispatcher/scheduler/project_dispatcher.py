@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 import logging
-
-from cairn.dispatcher.scheduler.frontier_priority import (
-    effective_score_by_intent,
-    selectable_intents,
-)
 from cairn.dispatcher.scheduler.work_planner import (
     BOOTSTRAP_INTENT_CREATOR,
     BOOTSTRAP_INTENT_DESCRIPTION,
@@ -123,57 +118,8 @@ class ProjectDispatcher:
                 sorted(running_intent_ids),
             )
         if unclaimed_intents:
-            selectable = selectable_intents(
-                project_intents=project.intents,
-                candidate_intents=unclaimed_intents,
-                running_intent_ids=running_intent_ids,
-            )
-            if not selectable:
-                services.log_changed(
-                    LOG,
-                    f"{skip_scope}:leaf_branch_running",
-                    logging.DEBUG,
-                    "skip explore project=%s because all unclaimed leaf branches are already running intents=%s branches=%s",
-                    summary.id,
-                    [intent.id for intent in unclaimed_intents],
-                    [intent.branch_key for intent in unclaimed_intents],
-                )
-                return False
-            score_by_id = effective_score_by_intent(
-                project_intents=project.intents,
-                candidate_intents=selectable,
-                running_intent_ids=running_intent_ids,
-                project_facts=project.facts,
-            )
-            for intent in selectable:
-                score = score_by_id[intent.id]
-                LOG.debug(
-                    "intent effective score project=%s intent=%s branch=%s effective=%.3f "
-                    "priority=%.3f expected_value_bonus=%.3f novelty_bonus=%.3f "
-                    "evidence_strength_bonus=%.3f coverage_gap_bonus=%.3f "
-                    "mechanism_proximity_bonus=%.3f negative_scope=%s "
-                    "same_branch_running_penalty=%.3f branch_depth_penalty=%.3f "
-                    "repeated_branch_open_penalty=%.3f",
-                    summary.id,
-                    intent.id,
-                    intent.branch_key,
-                    score.effective_score,
-                    score.priority_score,
-                    score.expected_value_bonus,
-                    score.novelty_bonus,
-                    score.evidence_strength_bonus,
-                    score.coverage_gap_bonus,
-                    score.mechanism_proximity_bonus,
-                    score.negative_scope,
-                    score.same_branch_running_penalty,
-                    score.branch_depth_penalty,
-                    score.repeated_branch_open_penalty,
-                )
-            selected = max(
-                selectable,
-                key=lambda intent: (score_by_id[intent.id].effective_score, intent.created_at, intent.id),
-            )
-            return services.dispatch_explore(project, selected)
+            newest = max(unclaimed_intents, key=lambda i: i.created_at)
+            return services.dispatch_explore(project, newest)
         open_intent_count = self.project_open_intent_count(project)
         if open_intent_count > 0:
             open_intent_ids = [

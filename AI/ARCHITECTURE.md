@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-06-20
+生成日期：2026-06-22
 -->
 
 # Cairn 架构与设计文档
@@ -156,9 +156,11 @@ sequenceDiagram
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
 | Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
 
-当前 Alembic head 为 `0008_intent_branch_metadata`，新增 intent branch metadata 字段（`branch_key`、`branch_depth`、`expected_value`）用于 leaf-level 调度和图导出；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+当前 Alembic head 为 `0009_drop_intent_metadata`，移除已废弃的 intent priority/branch metadata 字段；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
 前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_close.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
+
+Project graph 与 Execution Log 在前端状态层保持轻耦合联动：`workspace/state-graph.js` 的 intent 选择流程继续维护右侧 detail selection，同时调用 LLM log state 的 `syncLlmExecutionSelectionForIntent()`，按当前 `llmExecutions` 排序选择同 `intent_id` 的第一个 execution 并刷新 latest preview/page cards；找不到匹配时保留当前 log 选择。Execution Log header 还提供 `refreshCurrentLlmLog()` 手动刷新按钮，只强制刷新 execution list 与当前 execution 的事件视图，不改变 graph/detail/replay 状态，也不强制展开已折叠面板。
 
 ## 4. 内部模块间通信
 
@@ -237,7 +239,7 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 | Mapper | `server/mappers/` | 只做 row/projection 到 API/domain DTO 的转换，不查 SQL |
 | Adapter | `dispatcher/workers/adapters/` | 对接 Claude Code、Codex、mock |
 | Scheduler Coordinators | `dispatcher/scheduler/` | `DispatcherLoop` 保持生命周期外壳，tick/dispatch/runtime/submitter 协作者依赖 `SchedulerServices` 或具体 resolver，而不是完整 loop |
-| Frontier Branch Scheduling | `dispatcher/scheduler/frontier_priority.py`, default `reason.md` | Reason 产出 stable leaf `branch_key`、`branch_depth`、`expected_value`；Scheduler 基于 leaf coverage、depth、expected value 和领域无关 mechanism proximity 排序，机制邻近词汇保持 decision gate/state transition/data boundary/invariant check/persisted state 等通用状态空间语义 |
+| Intent Scheduling | `dispatcher/scheduler/project_dispatcher.py`, default `reason.md` | Reason 只产出 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent，并在 claimed/running open intents 未结束时跳过 Reason |
 | Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用不可变 execution config snapshot、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
 | Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
 | Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
