@@ -245,7 +245,6 @@ export function createWorkspaceLogEventState() {
         const data = await this.api('GET', this.llmEventViewUrl({
           executionId,
           limit: this.llmLatestEventLimit,
-          includeEventKinds: false,
         }));
         if (this._llmLatestRequestToken === requestToken
           && this.selectedLlmExecutionIdForQuery() === executionId) {

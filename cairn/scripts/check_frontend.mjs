@@ -194,6 +194,11 @@ function checkWorkspaceLogPaginationHelpers() {
     assert.match(source, /filterLatestLlmPreviewRows\\(rows\\)/);
     assert.match(source, /mergeLlmCommandEvents\\(this\\.filterLatestLlmPreviewRows\\(rows\\)\\)/);
     assert.match(source, /\\.slice\\(0, 3\\)/);
+    assert.equal(
+      source.includes('includeEventKinds: false'),
+      false,
+      'latest LLM preview must use the visible event-kind allowlist',
+    );
   `);
 }
 

@@ -106,6 +106,15 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn(">No recent events<", html)
         self.assertNotIn("x-show=\"llmLatestLoading\">Loading</span>", html)
 
+    def test_execution_log_latest_preview_uses_visible_event_kind_allowlist(self) -> None:
+        html = _frontend_source()
+        latest_start = html.index("async loadLatestLlmEvents()")
+        latest_end = html.index("estimateLlmPageSize()", latest_start)
+        latest_source = html[latest_start:latest_end]
+        self.assertIn("this.llmEventViewUrl({", latest_source)
+        self.assertIn("limit: this.llmLatestEventLimit,", latest_source)
+        self.assertNotIn("includeEventKinds: false", latest_source)
+
     def test_execution_log_uses_page_tokens_for_cards_pagination(self) -> None:
         html = _frontend_source()
         self.assertIn("llmEventCardsUrl({ executionId = '', pageSize = this.llmPageSize, pageToken = '' } = {})", html)
