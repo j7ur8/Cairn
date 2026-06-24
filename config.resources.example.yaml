@@ -25,9 +25,8 @@ capabilities:
       image.
     - A CTF or pentest workflow has identified a concrete tool-assisted action to
       run.
-    activation_hint: Use this MCP only when an actual Kali command needs to run. If
-      cypher-ctf or cypher-pentest is already injected for the task, follow that skill's
-      workflow before choosing commands and recording evidence.
+    activation_hint: Use this MCP only when an actual Kali command needs to run. Follow
+      the active task workflow before choosing commands and recording evidence.
     task_types:
     - bootstrap
     - explore
@@ -48,8 +47,7 @@ capabilities:
       validation results.
     activation_hint: Use this MCP only inside authorized scope. Before invoking a
       module, state the target, module, payload/options, expected validation, and
-      cleanup requirements; if cypher-pentest is already injected, follow its scope,
-      ROE, and reporting workflow.
+      cleanup requirements; follow the active scope, ROE, and reporting workflow.
     task_types:
     - bootstrap
     - explore
@@ -94,49 +92,27 @@ capabilities:
     task_types:
     - bootstrap
     - explore
-  - id: cypher-ctf
-    name: Cypher CTF
-    description: CTF orchestration — triages challenge types and delegates to specialist
-      sub-skills (pwn, reverse, crypto, forensics, web).
-    source_path: ./capabilities/skills/cypher-ctf
+  - id: ctf-web-js-analysis
+    name: CTF Web JS Analysis
+    description: Static-first CTF Web JavaScript analysis for visible JS collection,
+      source maps/chunks, API extraction, frontend leak discovery, and defensive JS
+      boundary identification.
+    source_path: ./capabilities/skills/ctf-web-js-analysis
     use_when:
-    - The project is a CTF challenge, cyber range, HTB/THM-style box, competition
-      sandbox, or flag/proof recovery task.
-    - The goal requires a reproducible solve path, exploit script, flag capture, shell
-      proof, or final writeup.
-    - Challenge triage is needed across web, pwn, reverse, crypto, forensics, blockchain,
-      or full-box categories.
-    activation_hint: Read this skill's SKILL.md for CTF guidance, classify the challenge
-      from current evidence, then read matching bundled specialist guidance under
-      skills/<sub-skill-id>/SKILL.md only when its signals fit before deciding whether
-      to use Kali, Metasploit, browser, or other tools.
-    task_types:
-    - bootstrap
-    - explore
-  - id: cypher-pentest
-    name: Cypher Pentest
-    description: Pentest orchestration — scope enforcement, vulnerability triage,
-      sub-skill delegation, evidence and reporting.
-    source_path: ./capabilities/skills/cypher-pentest
-    use_when:
-    - The project is an authorized penetration test, bug bounty, external attack surface
-      assessment, internal network test, or lab pentest.
-    - Scope, ROE, evidence capture, impact validation, cleanup, and report-ready findings
-      are required.
-    - The task involves web/API testing, service exploitation, AD, cloud, container,
-      post-exploitation, or vulnerability validation.
-    activation_hint: Read this skill's SKILL.md for pentest guidance and enforce scope/ROE
-      before any tool action. Read matching local bundled guidance under capabilities/skills/cypher-pentest/skills/<sub-skill-id>/SKILL.md
-      only when its signals fit; use Kali or Metasploit MCP only when a concrete tool
-      action is needed.
-    task_types:
-    - bootstrap
-    - explore
-  - id: cypher-vuln-research
-    name: Cypher Vulnerability Research
-    description: Vuln research orchestration — source audit, CVE reproduction, PoC
-      adaptation, fuzzing and root-cause analysis, sub-skill delegation.
-    source_path: ./capabilities/skills/cypher-vuln-research
+    - A CTF Web challenge needs public frontend JavaScript collection and static analysis.
+    - Visible JS bundles, chunks, source maps, manifests, or service workers may reveal
+      APIs or parameters.
+    - Frontend API endpoints, request parameters, routes, or configuration values
+      need to be extracted with evidence.
+    - Potential frontend leaks such as tokens, keys, source maps, debug flags, internal
+      hosts, or dependency issues need triage.
+    - Anti-debug, RuiShu-like, WAF, or bot-defense JavaScript must be identified as
+      a boundary before deeper runtime reverse engineering.
+    preferred_mcp_ids:
+    - chrome-devtools-host
+    activation_hint: Read this skill's SKILL.md before JS static analysis. Use chrome-devtools-host
+      only for authorized browser runtime request/HAR evidence, and hand off token/signature
+      reproduction to js-reverse-automation when needed.
     task_types:
     - bootstrap
     - explore
@@ -147,7 +123,7 @@ roles:
     reproducible exploit paths.
   source_path: ./capabilities/roles/cypher-ctf-operator/ROLE.md
   default_skill_ids:
-  - cypher-ctf
+  - ctf-web-js-analysis
   task_types:
   - bootstrap
   - explore
@@ -157,8 +133,7 @@ roles:
   description: Authorized pentest operator focused on scope, evidence, impact validation,
     cleanup, and reporting.
   source_path: ./capabilities/roles/cypher-pentest-operator/ROLE.md
-  default_skill_ids:
-  - cypher-pentest
+  default_skill_ids: []
   task_types:
   - bootstrap
   - explore
@@ -168,8 +143,7 @@ roles:
   description: Vulnerability researcher focused on root cause, reproducible PoC, exploitability,
     and fixes.
   source_path: ./capabilities/roles/cypher-vuln-researcher/ROLE.md
-  default_skill_ids:
-  - cypher-vuln-research
+  default_skill_ids: []
   task_types:
   - bootstrap
   - explore

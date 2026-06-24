@@ -229,7 +229,7 @@ export function createCoreState() {
     },
 
     roleDefaultTopLevelSkillIds() {
-      return ['cypher-ctf', 'cypher-pentest', 'cypher-vuln-research'];
+      return ['ctf-web-js-analysis'];
     },
 
     _expandRequiresForTask(task, kind, id, checked) {

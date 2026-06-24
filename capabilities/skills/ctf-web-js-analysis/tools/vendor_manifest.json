@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-06-24T09:18:06Z",
+  "tools": [
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "failed",
+      "fetched_at": null,
+      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "name": "jsluice",
+      "resolved_commit": null,
+      "url": "https://github.com/BishopFox/jsluice.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "failed",
+      "fetched_at": null,
+      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "name": "LinkFinder",
+      "resolved_commit": null,
+      "url": "https://github.com/GerbenJavado/LinkFinder.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:18:06Z",
+      "name": "xnLinkFinder",
+      "resolved_commit": "841ac8dddbc7edd728939df5db51274a63ab5863",
+      "url": "https://github.com/xnl-h4ck3r/xnLinkFinder.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "failed",
+      "fetched_at": null,
+      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "name": "katana",
+      "resolved_commit": null,
+      "url": "https://github.com/projectdiscovery/katana.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "failed",
+      "fetched_at": null,
+      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "name": "gitleaks",
+      "resolved_commit": null,
+      "url": "https://github.com/gitleaks/gitleaks.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:18:06Z",
+      "name": "trufflehog",
+      "resolved_commit": "3d196c8d11feff93b52cd2505f6b2c06085b99f3",
+      "url": "https://github.com/trufflesecurity/trufflehog.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:18:06Z",
+      "name": "retire.js",
+      "resolved_commit": "3d90e7a702c4f12d5cb3dede45a8b7cfac32480a",
+      "url": "https://github.com/RetireJS/retire.js.git"
+    },
+    {
+      "branch_or_tag": "HEAD",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:18:06Z",
+      "name": "js-beautify",
+      "resolved_commit": "a3566527205eda08b5c26fa1f1acbabb5edceed3",
+      "url": "https://github.com/beautifier/js-beautify.git"
+    }
+  ]
+}

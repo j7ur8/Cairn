@@ -166,14 +166,16 @@ roles:
         self.assertTrue(mcp_by_id["metasploit-mcp"].use_when)
         self.assertIn("Kali command", mcp_by_id["kali-server-mcp"].activation_hint)
         self.assertIn("authorized scope", mcp_by_id["metasploit-mcp"].activation_hint)
-        self.assertTrue(skill_by_id["cypher-ctf"].use_when)
-        self.assertTrue(skill_by_id["cypher-pentest"].use_when)
-        self.assertIn("SKILL.md", skill_by_id["cypher-ctf"].activation_hint)
-        self.assertIn("scope/ROE", skill_by_id["cypher-pentest"].activation_hint)
+        self.assertNotIn("cypher-ctf", skill_by_id)
+        self.assertNotIn("cypher-pentest", skill_by_id)
+        self.assertNotIn("cypher-vuln-research", skill_by_id)
+        self.assertTrue(skill_by_id["ctf-web-js-analysis"].use_when)
+        self.assertEqual(skill_by_id["ctf-web-js-analysis"].preferred_mcp_ids, ["chrome-devtools-host"])
+        self.assertIn("SKILL.md", skill_by_id["ctf-web-js-analysis"].activation_hint)
         role_by_id = {item.id: item for item in cfg.roles}
-        self.assertEqual(role_by_id["cypher-ctf-operator"].default_skill_ids, ["cypher-ctf"])
-        self.assertEqual(role_by_id["cypher-pentest-operator"].default_skill_ids, ["cypher-pentest"])
-        self.assertEqual(role_by_id["cypher-vuln-researcher"].default_skill_ids, ["cypher-vuln-research"])
+        self.assertEqual(role_by_id["cypher-ctf-operator"].default_skill_ids, ["ctf-web-js-analysis"])
+        self.assertEqual(role_by_id["cypher-pentest-operator"].default_skill_ids, [])
+        self.assertEqual(role_by_id["cypher-vuln-researcher"].default_skill_ids, [])
 
 
 if __name__ == "__main__":

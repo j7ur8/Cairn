@@ -349,20 +349,20 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             [(container, target, str(source)) for container, target, source in manager.directories],
         )
 
-    def test_cypher_ctf_injection_uses_bundled_sub_skill_directory(self):
+    def test_ctf_web_js_analysis_injection_writes_runtime_and_plugin_skill_directories(self):
         from types import SimpleNamespace
 
         from cairn.dispatcher.capabilities import inject_project_capabilities
         from cairn.shared.config import SkillCapabilityConfig
 
-        skill_path = _REPO / "capabilities" / "skills" / "cypher-ctf"
+        skill_path = _REPO / "capabilities" / "skills" / "ctf-web-js-analysis"
         config = SimpleNamespace(
             capabilities=SimpleNamespace(
                 mcp_servers=[],
                 skills=[
                     SkillCapabilityConfig(
-                        id="cypher-ctf",
-                        name="Cypher CTF",
+                        id="ctf-web-js-analysis",
+                        name="CTF Web JS Analysis",
                         source_path=str(skill_path),
                         task_types=["explore"],
                     )
@@ -372,9 +372,9 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         selection = {
             "tasks": {
                 "explore": {
-                    "selected": {"mcp_server_ids": [], "skill_ids": ["cypher-ctf"]},
+                    "selected": {"mcp_server_ids": [], "skill_ids": ["ctf-web-js-analysis"]},
                     "snapshots": [
-                        {"kind": "skill", "capability_id": "cypher-ctf", "source": "selected"},
+                        {"kind": "skill", "capability_id": "ctf-web-js-analysis", "source": "selected"},
                     ],
                 },
             }
@@ -391,77 +391,19 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             selection,
         )
 
-        self.assertEqual(result.skills, ["cypher-ctf"])
+        self.assertEqual(result.skills, ["ctf-web-js-analysis"])
         self.assertEqual(len(manager.directories), 2)
-        runtime_dir = [item for item in manager.directories if item[1].endswith("/skills/cypher-ctf")][0]
+        runtime_dir = [item for item in manager.directories if item[1].endswith("/skills/ctf-web-js-analysis")][0]
         _, target_path, source_path = runtime_dir
-        self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-ctf")
+        self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/ctf-web-js-analysis")
         self.assertEqual(Path(source_path), skill_path)
         self.assertIn(
-            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/cypher-ctf", str(skill_path)),
+            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/ctf-web-js-analysis", str(skill_path)),
             [(container, target, str(source)) for container, target, source in manager.directories],
         )
-        self.assertTrue((Path(source_path) / "skills" / "cypher-sqli" / "SKILL.md").exists())
-        self.assertIn("cypher-ctf", result.instructions)
-        self.assertNotIn("skills/cypher-sqli", result.instructions)
-
-    def test_cypher_pentest_injection_uses_bundled_sub_skill_directory(self):
-        from types import SimpleNamespace
-
-        from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.config import SkillCapabilityConfig
-
-        skill_path = _REPO / "capabilities" / "skills" / "cypher-pentest"
-        config = SimpleNamespace(
-            capabilities=SimpleNamespace(
-                mcp_servers=[],
-                skills=[
-                    SkillCapabilityConfig(
-                        id="cypher-pentest",
-                        name="Cypher Pentest",
-                        source_path=str(skill_path),
-                        task_types=["explore"],
-                    )
-                ],
-            )
-        )
-        selection = {
-            "tasks": {
-                "explore": {
-                    "selected": {"mcp_server_ids": [], "skill_ids": ["cypher-pentest"]},
-                    "snapshots": [
-                        {"kind": "skill", "capability_id": "cypher-pentest", "source": "selected"},
-                    ],
-                },
-            }
-        }
-
-        manager = self.FakeContainerManager()
-        result = inject_project_capabilities(
-            config,
-            manager,
-            "worker",
-            "proj",
-            "explore",
-            "task",
-            selection,
-        )
-
-        self.assertEqual(result.skills, ["cypher-pentest"])
-        self.assertEqual(len(manager.directories), 2)
-        runtime_dir = [item for item in manager.directories if item[1].endswith("/skills/cypher-pentest")][0]
-        _, target_path, source_path = runtime_dir
-        self.assertEqual(target_path, "/tmp/cairn-capabilities/proj/task/skills/cypher-pentest")
-        self.assertEqual(Path(source_path), skill_path)
-        self.assertIn(
-            ("worker", "/tmp/cairn-capabilities/proj/task/claude-plugin/skills/cypher-pentest", str(skill_path)),
-            [(container, target, str(source)) for container, target, source in manager.directories],
-        )
-        self.assertTrue((Path(source_path) / "skills" / "cypher-ad" / "SKILL.md").exists())
-        self.assertTrue((Path(source_path) / "skills" / "cypher-cloud" / "SKILL.md").exists())
-        self.assertTrue((Path(source_path) / "skills" / "cypher-container" / "SKILL.md").exists())
-        self.assertIn("cypher-pentest", result.instructions)
-        self.assertNotIn("skills/cypher-ad", result.instructions)
+        self.assertTrue((Path(source_path) / "SKILL.md").exists())
+        self.assertTrue((Path(source_path) / "references" / "workflow.md").exists())
+        self.assertIn("ctf-web-js-analysis", result.instructions)
 
     def test_reason_injection_returns_no_capability_metadata_or_runtime_resources(self):
         from cairn.dispatcher.capabilities import inject_project_capabilities

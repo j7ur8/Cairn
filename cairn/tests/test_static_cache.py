@@ -84,7 +84,7 @@ class StaticCacheTests(unittest.TestCase):
     def test_project_capability_picker_hides_role_default_top_level_skills(self) -> None:
         html = _frontend_source()
         self.assertIn("roleDefaultTopLevelSkillIds()", html)
-        self.assertIn("return ['cypher-ctf', 'cypher-pentest', 'cypher-vuln-research'];", html)
+        self.assertIn("return ['ctf-web-js-analysis'];", html)
         self.assertIn("selectableCapabilitiesForTask(task, items)", html)
         self.assertIn("sanitizeUserSkillIdsForProjectPayload(ids)", html)
         self.assertIn("selectableCapabilitiesForTask(task.key, newProjectCatalog.capabilities).filter(i => i.kind === 'skill')", html)
