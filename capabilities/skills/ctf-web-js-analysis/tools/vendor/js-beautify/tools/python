@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+if command -v python3 &>/dev/null; then
+    /usr/bin/env python3 $@
+else
+    /usr/bin/env python $@
+fi

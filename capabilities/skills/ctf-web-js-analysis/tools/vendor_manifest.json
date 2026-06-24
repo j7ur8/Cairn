@@ -1,22 +1,20 @@
 {
-  "generated_at": "2026-06-24T09:18:06Z",
+  "generated_at": "2026-06-24T09:40:30Z",
   "tools": [
     {
       "branch_or_tag": "HEAD",
-      "fetch_status": "failed",
-      "fetched_at": null,
-      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:40:30Z",
       "name": "jsluice",
-      "resolved_commit": null,
+      "resolved_commit": "0ddfab153e060a9eeaded4d8669233f7c071e7e4",
       "url": "https://github.com/BishopFox/jsluice.git"
     },
     {
       "branch_or_tag": "HEAD",
-      "fetch_status": "failed",
-      "fetched_at": null,
-      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:40:30Z",
       "name": "LinkFinder",
-      "resolved_commit": null,
+      "resolved_commit": "1debac5dace4724fd6187c06f133578dae51c86f",
       "url": "https://github.com/GerbenJavado/LinkFinder.git"
     },
     {
@@ -29,20 +27,18 @@
     },
     {
       "branch_or_tag": "HEAD",
-      "fetch_status": "failed",
-      "fetched_at": null,
-      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:40:30Z",
       "name": "katana",
-      "resolved_commit": null,
+      "resolved_commit": "3ae3c6da94aa9e0a7bbc8d6936d6299dbcb30c15",
       "url": "https://github.com/projectdiscovery/katana.git"
     },
     {
       "branch_or_tag": "HEAD",
-      "fetch_status": "failed",
-      "fetched_at": null,
-      "failure_reason": "git clone failed after retry: LibreSSL SSL_connect SSL_ERROR_SYSCALL in connection to github.com:443",
+      "fetch_status": "ok",
+      "fetched_at": "2026-06-24T09:40:30Z",
       "name": "gitleaks",
-      "resolved_commit": null,
+      "resolved_commit": "8ad8470035d31a209322c580153b45c18e21b980",
       "url": "https://github.com/gitleaks/gitleaks.git"
     },
     {

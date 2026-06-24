@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+
+var fs = require("fs");
+var validateRepository = require("../node/lib/repo.js").validateRepository;
+var evaluateLicense = require("../node/lib/license.js").evaluateLicense;
+
+function exitWithError(...msg) {
+  console.warn(...msg);
+  process.exit(1);
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository are synced..."
+);
+const convert = require("./convertFormat.js").convertToOldFormat;
+const data = require("./jsrepository-master.json");
+const current = require("./jsrepository.json");
+const converted = JSON.stringify(convert(data), null, 2);
+const currentString = JSON.stringify(current, null, 2);
+if (converted != currentString) {
+  exitWithError("jsrepository.json is has not been converted");
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository-v2 are synced..."
+);
+const currentV2 = require("./jsrepository-v2.json");
+const convertedV2 = JSON.stringify(convert(data, { includeQueries: true }), null, 2);
+const currentV2String = JSON.stringify(currentV2, null, 2);
+if (convertedV2 != currentV2String) {
+  exitWithError("jsrepository-v2.json is has not been converted");
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository-v3 are synced..."
+);
+const currentV3 = require("./jsrepository-v3.json");
+const convertedV3 = JSON.stringify(convert(data, { includeQueries: true, includeBackdoored: true, includeLicenses: true }), null, 2);
+const currentV3String = JSON.stringify(currentV3, null, 2);
+if (convertedV3 != currentV3String) {
+  exitWithError("jsrepository-v3.json is has not been converted");
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository-v4 are synced..."
+);
+const currentV4 = require("./jsrepository-v4.json");
+const convertedV4 = JSON.stringify(convert(data, { includeQueries: true, includeLicenses: true }), null, 2);
+const currentV4String = JSON.stringify(currentV4, null, 2);
+if (convertedV4 != currentV4String) {
+  exitWithError("jsrepository-v4.json is has not been converted");
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository-v5 are synced..."
+);
+const currentV5 = require("./jsrepository-v5.json");
+const convertedV5 = JSON.stringify(convert(data, { includeQueries: true, includeLicenses: true, includeExcludes: true }), null, 2);
+const currentV5String = JSON.stringify(currentV5, null, 2);
+if (convertedV5 != currentV5String) {
+  exitWithError("jsrepository-v5.json is has not been converted");
+}
+
+console.log(
+  "Checking that jsrepository-master and jsonrepository-v6 are synced..."
+);
+const currentV6 = require("./jsrepository-v6.json");
+const convertedV6 = JSON.stringify(convert(data, { includeQueries: true, includeLicenses: true, includeExcludes: true, includeDetails: true }), null, 2);
+const currentV6String = JSON.stringify(currentV6, null, 2);
+if (convertedV6 != currentV6String) {
+  exitWithError("jsrepository-v6.json is has not been converted");
+}
+
+console.log("Done");
+
+console.log("Validating repo format...");
+const vStart = Date.now();
+const validationResult = validateRepository(currentV4);
+const vEnd = Date.now();
+if (!validationResult.success) {
+  const errorMessage = JSON.stringify(
+    validationResult.error.format(),
+    (key, value) =>
+      Array.isArray(value) && value.length === 0 ? undefined : value,
+    2
+  );
+  exitWithError(errorMessage);
+}
+const jsRepo = validationResult.data;
+console.log("Done: " + (vEnd - vStart) + "ms");
+
+console.log("Checking for identifiers and verifying license strings...");
+let maxRetId = "0";
+let seenRetId = {};
+const retIdMapping = new Map();
+
+Object.entries(jsRepo).forEach(([k, val]) => {
+  if (val.licenses) {
+    try {
+      evaluateLicense(val.licenses, "1.0.0");
+    } catch (e) {
+      console.warn("WARN: Invalid license for " + k + ": " + e.message);
+    }
+  }
+
+  (val.vulnerabilities || [])
+    .filter((v) => {
+      let ids = v.identifiers;
+      if (!ids) return true;
+      if (ids.CVE && ids.CVE.length > 0) return false;
+      if (ids.bug) return false;
+      if (ids.blog) return false;
+      if (ids.gist) return false;
+      if (ids.issue) return false;
+      if (ids.PR) return false;
+      if (ids.tenable) return false;
+      if (ids.githubID) return false;
+      if (ids.osvdb && ids.osvdb.length > 0) return false;
+      if (ids.retid) {
+        if (
+          retIdMapping.has(ids.retid) &&
+          retIdMapping.get(ids.retid) != ids.githubID
+        ) {
+          console.warn(
+            `retid ${ids.retid} is mapped to ${retIdMapping.get(
+              ids.retid
+            )} and ${ids.githubID}`
+          );
+        }
+        retIdMapping.set(ids.retid, ids.githubID);
+        if (seenRetId[ids.retid])
+          console.warn("Already seen retid: " + ids.retid);
+        seenRetId[ids.retid] = true;
+        if (parseInt(ids.retid) > parseInt(maxRetId)) maxRetId = ids.retid;
+        return false;
+      }
+      return true;
+    })
+    .forEach((v) => {
+      console.warn(
+        "WARN: " + k + " Missing identifiers for :" + JSON.stringify(v)
+      );
+    });
+});
+console.log("Max retId: " + maxRetId);
+
+console.log("Success");

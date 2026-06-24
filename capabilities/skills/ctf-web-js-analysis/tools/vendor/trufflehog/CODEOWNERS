@@ -1,0 +1,13 @@
+# Default -- Integrations owns OSS, community, detectors, sources, analyzers
+* @trufflesecurity/integrations
+
+# Scan engine and pipeline
+pkg/decoders/ @trufflesecurity/scanning
+pkg/engine/ @trufflesecurity/scanning
+pkg/handlers/ @trufflesecurity/scanning
+pkg/iobuf/ @trufflesecurity/scanning
+pkg/sanitizer/ @trufflesecurity/scanning
+pkg/writers/ @trufflesecurity/scanning
+
+# Contracts -- co-owned, changes affect both teams
+proto/ @trufflesecurity/integrations @trufflesecurity/scanning

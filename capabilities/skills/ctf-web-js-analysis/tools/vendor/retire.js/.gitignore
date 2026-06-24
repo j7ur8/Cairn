@@ -1,0 +1,16 @@
+.DS_Store
+
+node_modules/
+spec/out/
+chrome/js/retire.js
+npm-debug.log
+firefox/js/retire.js
+firefox/lib/retire.js
+*.xpi
+
+node/lib/
+
+.idea
+tmp/
+.vscode
+chrome/extension/js/generated/

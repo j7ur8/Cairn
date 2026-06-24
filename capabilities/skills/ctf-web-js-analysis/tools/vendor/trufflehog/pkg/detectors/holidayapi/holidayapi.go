@@ -1,0 +1,75 @@
+package holidayapi
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	regexp "github.com/wasilibs/go-re2"
+
+	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detector_typepb"
+)
+
+type Scanner struct{}
+
+// Ensure the Scanner satisfies the interface at compile time.
+var _ detectors.Detector = (*Scanner)(nil)
+
+var (
+	client = detectors.NewClientWithDedup(common.SaneHttpClient())
+
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
+	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"holidayapi"}) + `\b([a-z0-9-]{36})\b`)
+)
+
+// Keywords are used for efficiently pre-filtering chunks.
+// Use identifiers in the secret preferably, or the provider name.
+func (s Scanner) Keywords() []string {
+	return []string{"holidayapi"}
+}
+
+// FromData will find and optionally verify HolidayAPI secrets in a given set of bytes.
+func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (results []detectors.Result, err error) {
+	dataStr := string(data)
+
+	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
+
+	for _, match := range matches {
+		resMatch := strings.TrimSpace(match[1])
+
+		s1 := detectors.Result{
+			DetectorType: detector_typepb.DetectorType_HolidayAPI,
+			Raw:          []byte(resMatch),
+			SecretParts:  map[string]string{"key": resMatch},
+		}
+
+		if verify {
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://holidayapi.com/v1/holidays?key=%s&country=PH&year=2020", resMatch), nil)
+			if err != nil {
+				continue
+			}
+			res, err := detectors.DoWithDedup(client, detector_typepb.DetectorType_HolidayAPI, resMatch, req)
+			if err == nil {
+				defer func() { _ = res.Body.Close() }()
+				if res.StatusCode >= 200 && res.StatusCode < 300 {
+					s1.Verified = true
+				}
+			}
+		}
+
+		results = append(results, s1)
+	}
+
+	return results, nil
+}
+
+func (s Scanner) Type() detector_typepb.DetectorType {
+	return detector_typepb.DetectorType_HolidayAPI
+}
+
+func (s Scanner) Description() string {
+	return "HolidayAPI keys are used to access holiday data for various countries and years. These keys can be used to query and retrieve holiday information programmatically."
+}

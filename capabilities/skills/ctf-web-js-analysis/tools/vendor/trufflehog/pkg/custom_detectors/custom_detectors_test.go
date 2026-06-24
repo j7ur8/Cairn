@@ -1,0 +1,996 @@
+package custom_detectors
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/custom_detectorspb"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detector_typepb"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/protoyaml"
+)
+
+func TestCustomRegexTemplateParsing(t *testing.T) {
+	testCustomRegexTemplateYaml := `name: Internal bi tool
+keywords:
+- secret_v1_
+- pat_v2_
+regex:
+  id_pat_example: ([a-zA-Z0-9]{32})
+  secret_pat_example: ([a-zA-Z0-9]{32})
+verify:
+- endpoint: http://localhost:8000/{id_pat_example}
+  unsafe: true
+  headers:
+  - 'Authorization: Bearer {secret_pat_example.0}'
+  successRanges:
+  - 200-250
+  - '288'`
+
+	var got custom_detectorspb.CustomRegex
+	assert.NoError(t, protoyaml.UnmarshalStrict([]byte(testCustomRegexTemplateYaml), &got))
+	assert.Equal(t, "Internal bi tool", got.Name)
+	assert.Equal(t, []string{"secret_v1_", "pat_v2_"}, got.Keywords)
+	assert.Equal(t, map[string]string{
+		"id_pat_example":     "([a-zA-Z0-9]{32})",
+		"secret_pat_example": "([a-zA-Z0-9]{32})",
+	}, got.Regex)
+	assert.Equal(t, 1, len(got.Verify))
+	assert.Equal(t, "http://localhost:8000/{id_pat_example}", got.Verify[0].Endpoint)
+	assert.Equal(t, true, got.Verify[0].Unsafe)
+	assert.Equal(t, []string{"Authorization: Bearer {secret_pat_example.0}"}, got.Verify[0].Headers)
+	assert.Equal(t, []string{"200-250", "288"}, got.Verify[0].SuccessRanges)
+}
+
+func TestCustomRegexTemplateParsingWithRotatedRanges(t *testing.T) {
+	testYaml := `name: test
+keywords:
+- secret
+regex:
+  token: ([a-zA-Z0-9]{32})
+verify:
+- endpoint: http://localhost:8000/
+  unsafe: true
+  headers:
+  - 'Authorization: Bearer token'
+  successRanges:
+  - '200'
+  rotatedRanges:
+  - '401'
+  - 403-404`
+
+	var got custom_detectorspb.CustomRegex
+	assert.NoError(t, protoyaml.UnmarshalStrict([]byte(testYaml), &got))
+	assert.Equal(t, 1, len(got.Verify))
+	assert.Equal(t, []string{"200"}, got.Verify[0].SuccessRanges)
+	assert.Equal(t, []string{"401", "403-404"}, got.Verify[0].RotatedRanges)
+}
+
+func TestCustomRegexWebhookParsing(t *testing.T) {
+	testCustomRegexWebhookYaml := `name: Internal bi tool
+keywords:
+- secret_v1_
+- pat_v2_
+regex:
+  id_pat_example: ([a-zA-Z0-9]{32})
+  secret_pat_example: ([a-zA-Z0-9]{32})
+verify:
+- endpoint: http://localhost:8000/
+  unsafe: true
+  headers:
+  - 'Authorization: Bearer token'`
+
+	var got custom_detectorspb.CustomRegex
+	assert.NoError(t, protoyaml.UnmarshalStrict([]byte(testCustomRegexWebhookYaml), &got))
+	assert.Equal(t, "Internal bi tool", got.Name)
+	assert.Equal(t, []string{"secret_v1_", "pat_v2_"}, got.Keywords)
+	assert.Equal(t, map[string]string{
+		"id_pat_example":     "([a-zA-Z0-9]{32})",
+		"secret_pat_example": "([a-zA-Z0-9]{32})",
+	}, got.Regex)
+	assert.Equal(t, 1, len(got.Verify))
+	assert.Equal(t, "http://localhost:8000/", got.Verify[0].Endpoint)
+	assert.Equal(t, true, got.Verify[0].Unsafe)
+	assert.Equal(t, []string{"Authorization: Bearer token"}, got.Verify[0].Headers)
+}
+
+// TestCustomDetectorsParsing tests the full `detectors` configuration.
+func TestCustomDetectorsParsing(t *testing.T) {
+	// TODO: Support both template and webhook.
+	testYamlConfig := `detectors:
+- name: Internal bi tool
+  keywords:
+  - secret_v1_
+  - pat_v2_
+  regex:
+    id_pat_example: ([a-zA-Z0-9]{32})
+    secret_pat_example: ([a-zA-Z0-9]{32})
+  verify:
+  - endpoint: http://localhost:8000/
+    unsafe: true
+    headers:
+    - 'Authorization: Bearer token'`
+
+	var messages custom_detectorspb.CustomDetectors
+	assert.NoError(t, protoyaml.UnmarshalStrict([]byte(testYamlConfig), &messages))
+	assert.Equal(t, 1, len(messages.Detectors))
+
+	got := messages.Detectors[0]
+	assert.Equal(t, "Internal bi tool", got.Name)
+	assert.Equal(t, []string{"secret_v1_", "pat_v2_"}, got.Keywords)
+	assert.Equal(t, map[string]string{
+		"id_pat_example":     "([a-zA-Z0-9]{32})",
+		"secret_pat_example": "([a-zA-Z0-9]{32})",
+	}, got.Regex)
+	assert.Equal(t, 1, len(got.Verify))
+	assert.Equal(t, "http://localhost:8000/", got.Verify[0].Endpoint)
+	assert.Equal(t, true, got.Verify[0].Unsafe)
+	assert.Equal(t, []string{"Authorization: Bearer token"}, got.Verify[0].Headers)
+}
+
+func TestFromData_InvalidRegEx(t *testing.T) {
+	c := &CustomRegexWebhook{
+		&custom_detectorspb.CustomRegex{
+			Name:     "Internal bi tool",
+			Keywords: []string{"secret_v1_", "pat_v2_"},
+			Regex: map[string]string{
+				"test": "!!?(?:?)[a-zA-Z0-9]{32}", // invalid regex
+			},
+		},
+	}
+
+	_, err := c.FromData(context.Background(), false, []byte("test"))
+	assert.Error(t, err)
+}
+
+func TestProductIndices(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []int
+		want  [][]int
+	}{
+		{
+			name:  "zero",
+			input: []int{3, 0},
+			want:  nil,
+		},
+		{
+			name:  "one input",
+			input: []int{3},
+			want:  [][]int{{0}, {1}, {2}},
+		},
+		{
+			name:  "two inputs",
+			input: []int{3, 2},
+			want: [][]int{
+				{0, 0}, {1, 0}, {2, 0},
+				{0, 1}, {1, 1}, {2, 1},
+			},
+		},
+		{
+			name:  "three inputs",
+			input: []int{3, 2, 3},
+			want: [][]int{
+				{0, 0, 0}, {1, 0, 0}, {2, 0, 0},
+				{0, 1, 0}, {1, 1, 0}, {2, 1, 0},
+				{0, 0, 1}, {1, 0, 1}, {2, 0, 1},
+				{0, 1, 1}, {1, 1, 1}, {2, 1, 1},
+				{0, 0, 2}, {1, 0, 2}, {2, 0, 2},
+				{0, 1, 2}, {1, 1, 2}, {2, 1, 2},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := productIndices(tt.input...)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestProductIndicesMax(t *testing.T) {
+	got := productIndices(2, 3, 4, 5, 6)
+	assert.GreaterOrEqual(t, 2*3*4*5*6, maxTotalMatches)
+	assert.Equal(t, maxTotalMatches, len(got))
+}
+
+func TestPermutateMatches(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string][][]string
+		want  []map[string][]string
+	}{
+		{
+			name:  "two matches",
+			input: map[string][][]string{"foo": {{"matchA"}, {"matchB"}}, "bar": {{"matchC"}}},
+			want: []map[string][]string{
+				{"foo": {"matchA"}, "bar": {"matchC"}},
+				{"foo": {"matchB"}, "bar": {"matchC"}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := permutateMatches(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestDetector(t *testing.T) {
+	detector, err := NewWebhookCustomRegex(&custom_detectorspb.CustomRegex{
+		Name: "test",
+		// "password" is normally flagged as a false positive, but CustomRegex
+		// should allow the user to decide and report it as a result.
+		Keywords: []string{"password"},
+		Regex:    map[string]string{"regex": "password=\"(.*)\""},
+	})
+	assert.NoError(t, err)
+	results, err := detector.FromData(context.Background(), false, []byte(`password="123456"`))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(results))
+	assert.Equal(t, results[0].Raw, []byte(`123456`))
+}
+
+func TestDetectorPrimarySecret(t *testing.T) {
+	detector, err := NewWebhookCustomRegex(&custom_detectorspb.CustomRegex{
+		Name:             "test",
+		Keywords:         []string{"secret"},
+		Regex:            map[string]string{"id": "id_[A-Z0-9]{10}_yy", "secret": "secret_[A-Z0-9]{10}_yy"},
+		PrimaryRegexName: "secret",
+	})
+	assert.NoError(t, err)
+	results, err := detector.FromData(context.Background(), false, []byte(`
+	// getData returns id and secret
+	func getData()(string, string){
+    	return "id_ALPHA10100_yy", "secret_YI7C90ACY1_yy"
+	}
+	`))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(results))
+	assert.Equal(t, "secret_YI7C90ACY1_yy", results[0].GetPrimarySecretValue())
+}
+
+func TestDetectorPrimarySecretFullMatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		input *custom_detectorspb.CustomRegex
+		chunk []byte
+		want  string
+	}{
+		{
+			name: "primary regex full match",
+			input: &custom_detectorspb.CustomRegex{
+				Name:             "test",
+				Keywords:         []string{"secret"},
+				Regex:            map[string]string{"secret": `secret *= *"([^"\r\n]+)"`},
+				PrimaryRegexName: "secret",
+			},
+			chunk: []byte(`
+			// some code
+			secret="mysecret"
+			// some code
+			`),
+			want: `secret="mysecret"`,
+		},
+		{
+			name: "primary regex full match multiline",
+			input: &custom_detectorspb.CustomRegex{
+				Name:             "test",
+				Keywords:         []string{"secret"},
+				Regex:            map[string]string{"secret": `secret *= *"([^"]+)"`},
+				PrimaryRegexName: "secret",
+			},
+			chunk: []byte(`
+			// some code
+			secret="mysecret
+			thatspansmultiplelines"
+			// some code
+			`),
+			want: `secret="mysecret
+			thatspansmultiplelines"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detector, err := NewWebhookCustomRegex(tt.input)
+			assert.NoError(t, err)
+			results, err := detector.FromData(context.Background(), false, tt.chunk)
+			assert.NoError(t, err)
+			assert.Equal(t, 1, len(results))
+			assert.Equal(t, tt.want, results[0].GetPrimarySecretValue())
+		})
+	}
+
+}
+
+func TestDetectorValidations(t *testing.T) {
+	type args struct {
+		CustomRegex *custom_detectorspb.CustomRegex
+		Data        string
+	}
+
+	tests := []struct {
+		name  string
+		input args
+		want  []detectors.Result
+	}{
+		{
+			name: "custom validation - contains digit",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsDigit: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStr0ngP@ssword!
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("MyStr0ngP@ssword!"),
+				},
+			},
+		},
+		{
+			name: "custom validation - does not contains digit",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsDigit: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongPassword!
+						End of file`,
+			},
+			want: nil,
+		},
+		{
+			name: "custom validation - contains lowercase",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsLowercase: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongPassword!
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("MyStrongPassword!"),
+				},
+			},
+		},
+		{
+			name: "custom validation - does not contains lowercase",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsLowercase: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MYSTRONGPASSWORD!
+						End of file`,
+			},
+			want: nil,
+		},
+		{
+			name: "custom validation - contains uppercase",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsUppercase: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongPassword!
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("MyStrongPassword!"),
+				},
+			},
+		},
+		{
+			name: "custom validation - does not contains uppercase",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsUppercase: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: mystrongpassword!
+						End of file`,
+			},
+			want: nil,
+		},
+		{
+			name: "custom validation - contains special character",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsSpecialChar: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStr@ngP@ssword!
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("MyStr@ngP@ssword!"),
+				},
+			},
+		},
+		{
+			name: "custom validation - does not contains special character",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsSpecialChar: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongPassword
+						End of file`,
+			},
+			want: nil,
+		},
+		{
+			name: "custom validation - contains uppercase and special characters",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsUppercase:   true,
+							ContainsSpecialChar: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongP@ssword
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("MyStrongP@ssword"),
+				},
+			},
+		},
+		{
+			name: "custom validation - contains uppercase but does not contain special characters",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsUppercase:   true,
+							ContainsSpecialChar: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongPassword
+						End of file`,
+			},
+			want: nil,
+		},
+		{
+			name: "custom validation - wrong regex name in validations",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password"},
+					Regex:    map[string]string{"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"wrong": {
+							ContainsUppercase: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: mystrongp@ssword
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("mystrongp@ssword"),
+				},
+			},
+		},
+		{
+			name: "custom validation - multiple regex validations",
+			input: args{
+				CustomRegex: &custom_detectorspb.CustomRegex{
+					Name:     "test",
+					Keywords: []string{"password", "api_key"},
+					Regex: map[string]string{
+						"password": `([A-Za-z0-9!@#$%^&*()_+=\-]{12,})`,
+						"api_key":  `([a-f0-9_-]{32})`,
+					},
+					Validations: map[string]*custom_detectorspb.ValidationConfig{
+						"password": {
+							ContainsUppercase:   true,
+							ContainsSpecialChar: true,
+						},
+						"api_key": {
+							ContainsSpecialChar: true,
+						},
+					},
+				},
+				Data: `This is custom example
+						This file has a random text and maybe a secret
+						Password: MyStrongP@ssword
+						API_Key: c392c9837d69b44c764cbf260b-e6184 // should be detected
+						API_Key: c392c9837d69b44c764cbf260be6184 // should be filtered by validation
+						End of file`,
+			},
+			want: []detectors.Result{
+				{
+					DetectorType: detector_typepb.DetectorType_CustomRegex,
+					DetectorName: "test",
+					Verified:     false,
+					Raw:          []byte("c392c9837d69b44c764cbf260b-e6184MyStrongP@ssword"),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detector, err := NewWebhookCustomRegex(tt.input.CustomRegex)
+			assert.NoError(t, err)
+			results, err := detector.FromData(context.Background(), false, []byte(tt.input.Data))
+			assert.NoError(t, err)
+
+			ignoreOpts := cmp.Options{
+				cmpopts.IgnoreUnexported(detectors.Result{}),
+				cmpopts.IgnoreFields(detectors.Result{}, "ExtraData"),
+			}
+			if diff := cmp.Diff(results, tt.want, ignoreOpts); diff != "" {
+				t.Errorf("CustomDetector.FromData() %s diff: (-got +want)\n%s", tt.name, diff)
+			}
+		})
+	}
+}
+
+func TestNewWebhookCustomRegex_Validation(t *testing.T) {
+	t.Parallel()
+
+	// A known-good baseline; each test case mutates exactly one thing to trigger a specific validator.
+	base := func() *custom_detectorspb.CustomRegex {
+		return &custom_detectorspb.CustomRegex{
+			Name:     "ok",
+			Keywords: []string{"kw"},
+			Regex: map[string]string{
+				"main": `\btoken_[a-z]+\b`,
+			},
+			PrimaryRegexName: "main",
+			ExcludeRegexesCapture: []string{
+				`^skip_.*$`,
+			},
+			ExcludeRegexesMatch: []string{
+				`^ignore_.*$`,
+			},
+			Verify: []*custom_detectorspb.VerifierConfig{
+				{
+					Endpoint: "https://example.com/verify",
+					Unsafe:   false,
+					Headers:  []string{"Authorization: Bearer x"},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(*custom_detectorspb.CustomRegex)
+		wantErr       bool
+		wantErrSubstr string // substring expected in error
+	}{
+		{
+			name:   "Validate everything ok",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {},
+		},
+		{
+			name: "ValidateKeywords: no keywords",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Keywords = nil
+			},
+			wantErr:       true,
+			wantErrSubstr: "no keywords",
+		},
+		{
+			name: "ValidateKeywords: empty keyword",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Keywords = []string{""}
+			},
+			wantErr:       true,
+			wantErrSubstr: "empty keyword",
+		},
+		{
+			name: "ValidateRegex: no regex",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Regex = nil
+			},
+			wantErr:       true,
+			wantErrSubstr: "no regex",
+		},
+		{
+			name: "ValidateRegex: invalid regex in map",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Regex = map[string]string{"main": "("} // invalid
+			},
+			wantErr:       true,
+			wantErrSubstr: "regex 'main':",
+		},
+		{
+			name: "ValidateRegexSlice: invalid exclude_regexes_capture",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.ExcludeRegexesCapture = []string{"("} // invalid
+			},
+			wantErr:       true,
+			wantErrSubstr: "regex '1':",
+		},
+		{
+			name: "ValidateRegexSlice: invalid exclude_regexes_match",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.ExcludeRegexesMatch = []string{"("} // invalid
+			},
+			wantErr:       true,
+			wantErrSubstr: "regex '1':",
+		},
+		{
+			name: "ValidatePrimaryRegexName: unknown primary regex name",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.PrimaryRegexName = "does-not-exist"
+			},
+			wantErr:       true,
+			wantErrSubstr: `unknown primary regex name: "does-not-exist"`,
+		},
+		{
+			name: "ValidateVerifyEndpoint: empty endpoint",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Verify = []*custom_detectorspb.VerifierConfig{
+					{Endpoint: "", Unsafe: false, Headers: []string{"A: b"}},
+				}
+			},
+			wantErr:       true,
+			wantErrSubstr: "no endpoint",
+		},
+		{
+			name: "ValidateVerifyEndpoint: http endpoint without unsafe=true",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Verify = []*custom_detectorspb.VerifierConfig{
+					{Endpoint: "http://example.com/verify", Unsafe: false, Headers: []string{"A: b"}},
+				}
+			},
+			wantErr:       true,
+			wantErrSubstr: "http endpoint must have unsafe=true",
+		},
+		{
+			name: "ValidateVerifyHeaders: header missing colon",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Verify = []*custom_detectorspb.VerifierConfig{
+					{Endpoint: "https://example.com/verify", Unsafe: false, Headers: []string{"Authorization Bearer x"}},
+				}
+			},
+			wantErr:       true,
+			wantErrSubstr: `must contain a colon`,
+		},
+		{
+			name: "ValidateVerifyRanges: invalid successRanges",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Verify = []*custom_detectorspb.VerifierConfig{
+					{Endpoint: "https://example.com/verify", Headers: []string{"A: b"}, SuccessRanges: []string{"abc"}},
+				}
+			},
+			wantErr:       true,
+			wantErrSubstr: "unable to convert http code to int",
+		},
+		{
+			name: "ValidateVerifyRanges: invalid rotatedRanges",
+			mutate: func(pb *custom_detectorspb.CustomRegex) {
+				pb.Verify = []*custom_detectorspb.VerifierConfig{
+					{Endpoint: "https://example.com/verify", Headers: []string{"A: b"}, RotatedRanges: []string{"999"}},
+				}
+			},
+			wantErr:       true,
+			wantErrSubstr: "invalid http status code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			pb := base()
+			tt.mutate(pb)
+
+			got, err := NewWebhookCustomRegex(pb)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("expected error=%v, got error=%v (result=%#v)", tt.wantErr, err != nil, got)
+			}
+			if tt.wantErr && got != nil {
+				t.Fatalf("expected nil result on error, got=%#v", got)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantErrSubstr) {
+				t.Fatalf("error mismatch:\n  got:  %q\n  want substring: %q", err.Error(), tt.wantErrSubstr)
+			}
+		})
+	}
+}
+
+func TestNewWebhookCustomRegex_EnsurePrimaryRegexNameSet(t *testing.T) {
+	t.Parallel()
+
+	pb := &custom_detectorspb.CustomRegex{
+		Name:     "test",
+		Keywords: []string{"kw"},
+		Regex: map[string]string{
+			"regex_a": `regex_a`,
+			"regex_b": `regex_b`,
+		},
+		// PrimaryRegexName is not set.
+	}
+
+	detector, err := NewWebhookCustomRegex(pb)
+	assert.NoError(t, err)
+	assert.Equal(t, "regex_a", detector.GetPrimaryRegexName(), "expected PrimaryRegexName to be set to regex_a")
+}
+
+func TestVerificationWithConfigurableRanges(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		serverStatus      int
+		successRanges     []string
+		rotatedRanges     []string
+		wantVerified      bool
+		wantVerifyErr     bool
+	}{
+		{
+			name:          "backward compat: no ranges, 200 -> verified",
+			serverStatus:  200,
+			wantVerified:  true,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "backward compat: no ranges, 401 -> unverified",
+			serverStatus:  401,
+			wantVerified:  false,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "successRanges match -> verified",
+			serverStatus:  201,
+			successRanges: []string{"200-202"},
+			wantVerified:  true,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "rotatedRanges match -> not verified, no error",
+			serverStatus:  401,
+			successRanges: []string{"200"},
+			rotatedRanges: []string{"401", "403"},
+			wantVerified:  false,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "neither match -> not verified, verification error",
+			serverStatus:  500,
+			successRanges: []string{"200"},
+			rotatedRanges: []string{"401"},
+			wantVerified:  false,
+			wantVerifyErr: true,
+		},
+		{
+			name:          "successRanges range boundary inclusive",
+			serverStatus:  250,
+			successRanges: []string{"200-250"},
+			wantVerified:  true,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "only successRanges: non-match means rotated",
+			serverStatus:  401,
+			successRanges: []string{"200"},
+			wantVerified:  false,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "only rotatedRanges: non-match means live",
+			serverStatus:  200,
+			rotatedRanges: []string{"401", "403"},
+			wantVerified:  true,
+			wantVerifyErr: false,
+		},
+		{
+			name:          "only rotatedRanges: match means rotated",
+			serverStatus:  401,
+			rotatedRanges: []string{"401"},
+			wantVerified:  false,
+			wantVerifyErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.serverStatus)
+				_, _ = w.Write([]byte(`{"status":"ok"}`))
+			}))
+			defer ts.Close()
+
+			detector, err := NewWebhookCustomRegex(&custom_detectorspb.CustomRegex{
+				Name:     "test",
+				Keywords: []string{"secret"},
+				Regex:    map[string]string{"token": `(secret_[a-zA-Z0-9]{10})`},
+				Verify: []*custom_detectorspb.VerifierConfig{
+					{
+						Endpoint:      ts.URL,
+						Unsafe:        true,
+						Headers:       []string{"Authorization: Bearer test"},
+						SuccessRanges: tt.successRanges,
+						RotatedRanges: tt.rotatedRanges,
+					},
+				},
+			})
+			assert.NoError(t, err)
+
+			results, err := detector.FromData(context.Background(), true, []byte("secret_ABCDEFGHIJ"))
+			assert.NoError(t, err)
+			assert.Equal(t, 1, len(results), "expected exactly one result")
+
+			result := results[0]
+			assert.Equal(t, tt.wantVerified, result.Verified, "Verified mismatch")
+			if tt.wantVerifyErr {
+				assert.NotNil(t, result.VerificationError(), "expected a verification error")
+			} else {
+				assert.Nil(t, result.VerificationError(), "expected no verification error")
+			}
+		})
+	}
+}
+
+func TestVerificationMixedRangedAndLegacyVerifiers(t *testing.T) {
+	t.Parallel()
+
+	// Verifier 1 has ranges configured but returns a status matching neither.
+	// Verifier 2 is legacy (no ranges) and returns 200.
+	// The result should be Verified=true with NO verification error.
+	tsRanged := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer tsRanged.Close()
+
+	tsLegacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`ok`))
+	}))
+	defer tsLegacy.Close()
+
+	detector, err := NewWebhookCustomRegex(&custom_detectorspb.CustomRegex{
+		Name:     "test",
+		Keywords: []string{"secret"},
+		Regex:    map[string]string{"token": `(secret_[a-zA-Z0-9]{10})`},
+		Verify: []*custom_detectorspb.VerifierConfig{
+			{
+				Endpoint:      tsRanged.URL,
+				Unsafe:        true,
+				Headers:       []string{"A: b"},
+				SuccessRanges: []string{"200"},
+				RotatedRanges: []string{"401"},
+			},
+			{
+				Endpoint: tsLegacy.URL,
+				Unsafe:   true,
+				Headers:  []string{"A: b"},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	results, err := detector.FromData(context.Background(), true, []byte("secret_ABCDEFGHIJ"))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(results))
+	assert.True(t, results[0].Verified, "expected Verified=true from legacy fallback")
+	assert.Nil(t, results[0].VerificationError(), "legacy success must not produce a spurious verification error")
+}
+
+func BenchmarkProductIndices(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = productIndices(3, 2, 6)
+	}
+}

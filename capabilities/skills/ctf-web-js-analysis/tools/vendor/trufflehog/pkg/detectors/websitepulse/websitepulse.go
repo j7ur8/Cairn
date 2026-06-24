@@ -1,0 +1,89 @@
+package websitepulse
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	regexp "github.com/wasilibs/go-re2"
+
+	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detector_typepb"
+)
+
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
+
+// Ensure the Scanner satisfies the interface at compile time
+var _ detectors.Detector = (*Scanner)(nil)
+
+var (
+	client = common.SaneHttpClient()
+
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives
+	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"websitepulse"}) + `\b([0-9a-f]{32})\b`)
+	idPat  = regexp.MustCompile(detectors.PrefixRegex([]string{"websitepulse"}) + `\b([0-9a-zA-Z._]{4,22})\b`)
+)
+
+// Keywords are used for efficiently pre-filtering chunks.
+// Use identifiers in the secret preferably, or the provider name.
+func (s Scanner) Keywords() []string {
+	return []string{"websitepulse"}
+}
+
+// FromData will find and optionally verify Websitepulse secrets in a given set of bytes.
+func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (results []detectors.Result, err error) {
+	dataStr := string(data)
+
+	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
+	idmatches := idPat.FindAllStringSubmatch(dataStr, -1)
+
+	for _, match := range matches {
+		resMatch := strings.TrimSpace(match[1])
+
+		for _, idmatch := range idmatches {
+			resIdMatch := strings.TrimSpace(idmatch[1])
+			s1 := detectors.Result{
+				DetectorType: detector_typepb.DetectorType_Websitepulse,
+				Raw:          []byte(resMatch),
+				SecretParts:  map[string]string{"key": resMatch},
+			}
+			if verify {
+				req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.websitepulse.com/textserver.php?method=GetContacts&username=%s&key=%s", resIdMatch, resMatch), nil)
+				if err != nil {
+					continue
+				}
+				res, err := client.Do(req)
+				if err == nil {
+					defer func() { _ = res.Body.Close() }()
+					bodyBytes, err := io.ReadAll(res.Body)
+					if err != nil {
+						continue
+					}
+					body := string(bodyBytes)
+
+					if strings.Contains(body, "Active") {
+						s1.Verified = true
+					}
+				}
+			}
+
+			results = append(results, s1)
+		}
+
+	}
+
+	return results, nil
+}
+
+func (s Scanner) Type() detector_typepb.DetectorType {
+	return detector_typepb.DetectorType_Websitepulse
+}
+
+func (s Scanner) Description() string {
+	return "Websitepulse is a web-based service that monitors websites and servers. The keys and IDs can be used to access and manage monitoring configurations."
+}

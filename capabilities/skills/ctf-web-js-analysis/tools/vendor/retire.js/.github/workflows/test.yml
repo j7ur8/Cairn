@@ -1,0 +1,41 @@
+name: Node.js CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        node-version: [26.x]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm install
+        working-directory: node
+      - run: npm run build
+        working-directory: node
+      - run: npm test
+        working-directory: node
+      - run: ./validate
+        working-directory: repository
+      - name: Restore cached data for test-detection
+        uses: actions/cache@v4
+        id: cache-testdata
+        with:
+          path: repository/tmp
+          key: ${{ runner.os }}-test-detection-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-test-detection-
+      - run: ./test-detection.js
+        working-directory: repository
