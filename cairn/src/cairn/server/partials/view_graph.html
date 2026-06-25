@@ -382,15 +382,6 @@
         </div>
       </template>
 
-      <template x-if="project.project.reason">
-        <div class="reason-graph-scan z-[1]">
-          <span class="reason-graph-grid"></span>
-          <span class="reason-graph-ambient"></span>
-          <span class="reason-graph-scanline"></span>
-          <span class="reason-graph-sweep"></span>
-        </div>
-      </template>
-
       <div class="absolute top-3 right-3 z-10 flex flex-wrap justify-end gap-2">
         <div class="flex gap-1.5" x-show="projectIsActive()">
           <button data-testid="graph-open-intent" @click="openCreateIntent()" :disabled="!canActOnSelectedFacts()"
@@ -643,7 +634,7 @@
               <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" x-text="filesError"></div>
             </template>
             <template x-if="!filesLoading && !filesError && projectFiles.length === 0">
-              {{ include "view_graph/_empty_state_card.html" BORDER_CLASS=border-slate-200; TITLE_CLASS=text-slate-300; BODY_CLASS=text-slate-300; TITLE=No downloadable files yet; BODY=Worker outputs under /home/kali/workspace/project and uploaded attachments will appear here.; SHOW_BODY=true }}
+              {{ include "view_graph/_empty_state_card.html" BORDER_CLASS=border-slate-200; TITLE_CLASS=text-slate-300; BODY_CLASS=text-slate-300; TITLE=No downloadable files yet; BODY=Worker outputs under /home/kali/workspace and uploaded attachments will appear here.; SHOW_BODY=true }}
             </template>
             <template x-for="group in projectFileGroups()" :key="group.id">
               <section x-show="group.files.length > 0" class="space-y-2">

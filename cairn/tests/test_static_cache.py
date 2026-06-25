@@ -59,6 +59,11 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("async downloadProjectFile(file)", html)
         self.assertNotIn(':href="projectFileDownloadUrl(file)"', html)
 
+    def test_project_file_display_paths_use_workspace_root(self) -> None:
+        html = _frontend_source()
+        self.assertIn("'/home/kali/workspace';", html)
+        self.assertNotIn("'/home/kali/workspace/project';", html)
+
     def test_text_export_uses_authenticated_fetch(self) -> None:
         html = _frontend_source()
         self.assertIn("async fetchText(path)", html)
@@ -169,6 +174,15 @@ class StaticCacheTests(unittest.TestCase):
         self.assertNotIn('x-ref="dagEdgesSvg"', html)
         self.assertNotIn('<template x-for="edge in flowDagViewModel().edges"', html)
         self.assertNotIn('<template x-for="junction in flowDagViewModel().junctions"', html)
+
+    def test_reason_graph_has_no_global_overlay_scan_layer(self) -> None:
+        html = _frontend_source()
+        self.assertIn("Reason Running", html)
+        self.assertNotIn("reason-graph-scan", html)
+        self.assertNotIn("reason-graph-grid", html)
+        self.assertNotIn("reason-graph-ambient", html)
+        self.assertNotIn("reason-graph-scanline", html)
+        self.assertNotIn("reason-graph-sweep", html)
 
     def test_detail_and_timeline_cards_render_full_text_without_summary_headline(self) -> None:
         html = _frontend_source()

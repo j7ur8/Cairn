@@ -32,111 +32,11 @@
     border: 1.5px solid rgba(14, 165, 233, 0.34);
     animation: reasonBeaconPulse 1.8s ease-out infinite;
   }
-  .reason-graph-scan {
-    position: absolute;
-    inset: 8px;
-    overflow: hidden;
-    pointer-events: none;
-    border-radius: 18px;
-  }
-  .reason-graph-scan::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow:
-      inset 0 0 0 1px rgba(125, 211, 252, 0.32),
-      inset 0 0 30px rgba(125, 211, 252, 0.06),
-      inset 0 0 64px rgba(56, 189, 248, 0.03);
-    animation: reasonFramePulse 2.8s ease-in-out infinite;
-  }
-  .reason-graph-scan::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    inset: 12px;
-    border-radius: 12px;
-    background:
-      linear-gradient(90deg, rgba(125, 211, 252, 0.85), rgba(125, 211, 252, 0.18)),
-      linear-gradient(180deg, rgba(125, 211, 252, 0.85), rgba(125, 211, 252, 0.18)),
-      linear-gradient(270deg, rgba(125, 211, 252, 0.85), rgba(125, 211, 252, 0.18)),
-      linear-gradient(0deg, rgba(125, 211, 252, 0.85), rgba(125, 211, 252, 0.18));
-    background-size: 18px 2px, 2px 18px, 18px 2px, 2px 18px;
-    background-position: left top, left top, right bottom, right bottom;
-    background-repeat: no-repeat;
-    opacity: 0.6;
-  }
-  .reason-graph-scan > span {
-    position: absolute;
-    inset: 0;
-    display: block;
-  }
-  .reason-graph-grid {
-    inset: 12px;
-    border-radius: 12px;
-    background:
-      repeating-linear-gradient(
-        90deg,
-        rgba(186, 230, 253, 0) 0,
-        rgba(186, 230, 253, 0) 35px,
-        rgba(186, 230, 253, 0.045) 36px,
-        rgba(186, 230, 253, 0.045) 37px
-      ),
-      repeating-linear-gradient(
-        180deg,
-        rgba(186, 230, 253, 0) 0,
-        rgba(186, 230, 253, 0) 35px,
-        rgba(186, 230, 253, 0.04) 36px,
-        rgba(186, 230, 253, 0.04) 37px
-      );
-    opacity: 0.42;
-  }
-  .reason-graph-ambient {
-    inset: 0;
-    background:
-      radial-gradient(circle at 12% 18%, rgba(56, 189, 248, 0.11), rgba(56, 189, 248, 0) 30%),
-      radial-gradient(circle at 84% 16%, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0) 24%),
-      linear-gradient(180deg, rgba(186, 230, 253, 0.055), rgba(255, 255, 255, 0) 46%);
-    animation: reasonAmbientPulse 2.4s ease-in-out infinite alternate;
-  }
-  .reason-graph-scanline {
-    inset: 0;
-  }
-  .reason-graph-scanline::before {
-    content: "";
-    position: absolute;
-    left: 10px;
-    right: 10px;
-    height: 2px;
-    top: 12%;
-    background: linear-gradient(90deg, rgba(56, 189, 248, 0), rgba(186, 230, 253, 0.96), rgba(56, 189, 248, 0));
-    box-shadow:
-      0 0 18px rgba(125, 211, 252, 0.42),
-      0 0 34px rgba(186, 230, 253, 0.16);
-    animation: reasonGraphScanline 4.2s linear infinite;
-  }
-  .reason-graph-sweep {
-    inset: -18%;
-    background: linear-gradient(
-      103deg,
-      rgba(14, 165, 233, 0) 40%,
-      rgba(56, 189, 248, 0.04) 47%,
-      rgba(255, 255, 255, 0.22) 50%,
-      rgba(125, 211, 252, 0.1) 53%,
-      rgba(14, 165, 233, 0) 60%
-    );
-    transform: translateX(-86%) skewX(-14deg);
-    animation: reasonGraphSweep 4.6s ease-in-out infinite;
-  }
   @media (prefers-reduced-motion: reduce) {
     .reason-chip-running,
     .intent-chip-running,
     .reason-panel-running::before,
-    .reason-beacon::after,
-    .reason-graph-scan::before,
-    .reason-graph-ambient,
-    .reason-graph-scanline::before,
-    .reason-graph-sweep {
+    .reason-beacon::after {
       animation: none !important;
     }
   }
@@ -185,25 +85,4 @@
   @keyframes intentChipGlow {
     0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.18); }
     50% { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0.08); }
-  }
-  @keyframes reasonGraphSweep {
-    0% { transform: translateX(-86%) skewX(-14deg); opacity: 0; }
-    18% { opacity: 1; }
-    82% { opacity: 1; }
-    100% { transform: translateX(88%) skewX(-14deg); opacity: 0; }
-  }
-  @keyframes reasonAmbientPulse {
-    0% { opacity: 0.75; }
-    100% { opacity: 1; }
-  }
-  @keyframes reasonGraphScanline {
-    0% { top: 11%; opacity: 0.18; }
-    8% { opacity: 0.55; }
-    50% { opacity: 0.42; }
-    92% { opacity: 0.55; }
-    100% { top: 87%; opacity: 0.18; }
-  }
-  @keyframes reasonFramePulse {
-    0%, 100% { opacity: 0.72; }
-    50% { opacity: 1; }
   }

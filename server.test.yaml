@@ -36,6 +36,6 @@ worker_runtime:
       read_only: true
     - name: project-files
       host_path: /tmp/cairn-test/project-files/{project_id}
-      container_path: /home/kali/workspace/project
+      container_path: /home/kali/workspace
       read_only: false
   common_env: {}

@@ -781,6 +781,10 @@ class ProjectFilesRouterTests(unittest.TestCase):
         (self.project_root / "proj_files" / "exploit").mkdir(parents=True)
         (self.project_root / "proj_files" / "reports" / "writeup.md").write_text("report", encoding="utf-8")
         (self.project_root / "proj_files" / "exploit" / "solve.py").write_text("print(1)\n", encoding="utf-8")
+        (self.project_root / "proj_files" / "reports" / "ctf-web-js-analysis").mkdir(parents=True)
+        (self.project_root / "proj_files" / "reports" / "ctf-web-js-analysis" / "information_api.json").write_text("{}", encoding="utf-8")
+        (self.project_root / "proj_files" / "reports" / "ctf-web-js-analysis" / "information_leak.json").write_text("{}", encoding="utf-8")
+        (self.project_root / "proj_files" / "reports" / "ctf-web-js-analysis" / "js_inventory.json").write_text("{}", encoding="utf-8")
         (self.attachments_root / "proj_files").mkdir(parents=True)
         (self.attachments_root / "proj_files" / "input.txt").write_text("attachment", encoding="utf-8")
 
@@ -788,6 +792,9 @@ class ProjectFilesRouterTests(unittest.TestCase):
         by_path = {item.path: item for item in response.files}
 
         self.assertEqual(by_path["reports/writeup.md"].category, "reports")
+        self.assertEqual(by_path["reports/ctf-web-js-analysis/information_api.json"].category, "reports")
+        self.assertEqual(by_path["reports/ctf-web-js-analysis/information_leak.json"].category, "reports")
+        self.assertEqual(by_path["reports/ctf-web-js-analysis/js_inventory.json"].category, "reports")
         self.assertEqual(by_path["exploit/solve.py"].category, "exploit")
         self.assertEqual(by_path["input.txt"].source, "attachment")
         self.assertEqual(by_path["input.txt"].category, "attachments")

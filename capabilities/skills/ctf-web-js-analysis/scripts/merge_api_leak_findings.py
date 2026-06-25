@@ -8,6 +8,28 @@ from pathlib import Path
 from typing import Any
 
 
+VALUE_LEVELS = {"high", "medium", "low", "info"}
+OUTPUT_FILENAMES = {"information_api.json", "information_leak.json"}
+NON_FINDING_FILENAMES = {
+    "js_urls.json",
+    "js_inventory.json",
+    "har.json",
+    "manifest.json",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock.json",
+}
+FINDING_FILENAME_SUFFIXES = (
+    "_findings.json",
+    "-findings.json",
+    ".findings.json",
+    "_tool_output.json",
+    "-tool-output.json",
+    ".tool-output.json",
+)
+FINDING_TOP_LEVEL_KEYS = {"apis", "api_findings", "leaks", "leak_findings"}
+
+
 def now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -20,6 +42,54 @@ def ensure_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def default_source(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "unknown",
+        "url": None,
+        "local_path": None,
+        "sha256": None,
+        "line": None,
+        "column": None,
+        "tool": item.get("tool"),
+    }
+
+
+def ensure_source(value: Any, item: dict[str, Any]) -> dict[str, Any]:
+    return value if isinstance(value, dict) else default_source(item)
+
+
+def normalize_value(item: dict[str, Any]) -> Any:
+    if "value" in item:
+        value = item.get("value")
+        if isinstance(value, str) and value in VALUE_LEVELS:
+            return value
+        return value
+    if "confidence" in item:
+        return "low"
+    return "info"
+
+
+def has_finding_top_level_keys(path: Path) -> bool:
+    try:
+        data = load_json(path)
+    except (json.JSONDecodeError, OSError):
+        return False
+    return isinstance(data, dict) and any(key in data for key in FINDING_TOP_LEVEL_KEYS)
+
+
+def is_default_scan_input(path: Path) -> bool:
+    name = path.name
+    if name in OUTPUT_FILENAMES or name in NON_FINDING_FILENAMES:
+        return False
+    if any(name.endswith(suffix) for suffix in FINDING_FILENAME_SUFFIXES):
+        return True
+    return has_finding_top_level_keys(path)
+
+
+def default_inputs(artifact_dir: Path) -> list[Path]:
+    return [path for path in artifact_dir.glob("*.json") if is_default_scan_input(path)]
+
+
 def normalize_api(item: dict[str, Any], idx: int) -> dict[str, Any]:
     return {
         "id": item.get("id") or f"api-{idx:03d}",
@@ -28,9 +98,9 @@ def normalize_api(item: dict[str, Any], idx: int) -> dict[str, Any]:
         "parameters": ensure_list(item.get("parameters")),
         "headers": ensure_list(item.get("headers")),
         "auth_context": item.get("auth_context"),
-        "source": item.get("source") or {"type": "unknown", "url": None, "local_path": None, "sha256": None, "tool": item.get("tool")},
+        "source": ensure_source(item.get("source"), item),
         "evidence": ensure_list(item.get("evidence")),
-        "confidence": item.get("confidence") or "static_candidate",
+        "value": normalize_value(item),
         "notes": ensure_list(item.get("notes")),
     }
 
@@ -38,15 +108,10 @@ def normalize_api(item: dict[str, Any], idx: int) -> dict[str, Any]:
 def normalize_leak(item: dict[str, Any], idx: int) -> dict[str, Any]:
     return {
         "id": item.get("id") or f"leak-{idx:03d}",
+        "value": normalize_value(item),
         "type": item.get("type") or "other",
-        "summary": item.get("summary") or item.get("description") or "Potential frontend leak",
-        "value_redacted": item.get("value_redacted") or item.get("redacted"),
-        "value_sha256": item.get("value_sha256"),
-        "severity": item.get("severity") or "unknown",
-        "source": item.get("source") or {"type": "unknown", "url": None, "local_path": None, "sha256": None, "tool": item.get("tool")},
+        "source": ensure_source(item.get("source"), item),
         "evidence": ensure_list(item.get("evidence")),
-        "confidence": item.get("confidence") or "static_candidate",
-        "notes": ensure_list(item.get("notes")),
     }
 
 
@@ -82,7 +147,7 @@ def main() -> int:
     inputs = [Path(item) for item in args.tool_output]
     if not inputs:
         artifact_dir = Path(args.artifact_dir)
-        inputs = [path for path in artifact_dir.glob("*.json") if path.name not in {"information_api.json", "information_leak.json"}]
+        inputs = default_inputs(artifact_dir)
 
     apis: list[dict[str, Any]] = []
     leaks: list[dict[str, Any]] = []

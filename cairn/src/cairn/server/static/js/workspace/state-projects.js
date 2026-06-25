@@ -470,7 +470,7 @@ export function createWorkspaceProjectsState() {
     projectFileDisplayPath(file) {
       const root = file.source === 'attachment'
         ? `/home/kali/workspace/attachments/${this.selectedProjectId}`
-        : '/home/kali/workspace/project';
+        : '/home/kali/workspace';
       return `${root}/${file.path}`;
     },
 

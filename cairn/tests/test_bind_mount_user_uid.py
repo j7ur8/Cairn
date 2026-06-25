@@ -37,7 +37,7 @@ class _ContainerConfigHarness:
                 BindMountConfig(
                     name="project-files",
                     host_path="./datas/project-files/{project_id}",
-                    container_path="/home/kali/workspace/project",
+                    container_path="/home/kali/workspace",
                     read_only=False,
                 ),
             ],
@@ -137,7 +137,7 @@ class ContainerUserRuntimeTests(unittest.TestCase):
                 BindMountConfig(
                     name="project-files",
                     host_path="./datas/project-files/{project_id}",
-                    container_path="/home/kali/workspace/project",
+                    container_path="/home/kali/workspace",
                     read_only=False,
                 ),
             ],
@@ -328,7 +328,7 @@ worker_runtime:
         read_only: true
       - name: "project-files"
         host_path: "$HOST_DATAS/project-files/{project_id}"
-        container_path: "/home/kali/workspace/project"
+        container_path: "/home/kali/workspace"
         read_only: false
 
 worker_pool:

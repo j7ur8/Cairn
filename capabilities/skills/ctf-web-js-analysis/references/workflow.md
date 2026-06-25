@@ -76,7 +76,7 @@ For each candidate, record:
 - Path/URL.
 - Parameter names and their evidence.
 - Auth or dynamic headers only when observed.
-- Confirmation level: `runtime_confirmed`, `static_high`, `static_candidate`, or `inferred_low`.
+- Value for obtaining the flag: `high`, `medium`, `low`, or `info`.
 
 Success: `information_api.json` contains no fabricated parameters and every entry cites evidence.
 
@@ -91,9 +91,9 @@ Scan for:
 - Build metadata, sourcemap `sourcesContent`, comments with sensitive references.
 - Vulnerable third-party library versions as dependency findings.
 
-Redact secrets by default. Keep enough value shape for reproducibility, such as prefix/suffix and hash.
+Redact secrets by default. Keep enough safe evidence shape for reproducibility, such as prefix/suffix and hash, only in evidence fields.
 
-Success: `information_leak.json` separates confirmed secrets from low-confidence patterns and includes safe evidence.
+Success: `information_leak.json` uses only `id`, `value`, `type`, `source`, and `evidence`; each `value` explains utility for obtaining the flag.
 
 Failure: full secret values are unnecessarily printed into final prose or unsupported impact is claimed.
 
@@ -107,7 +107,7 @@ Use browser runtime only to confirm observations:
 
 Do not brute force, bypass defenses, or fuzz parameter values as part of this skill.
 
-Success: high-confidence findings have both static and runtime evidence when available.
+Success: high-value findings have both static and runtime evidence when available.
 
 Failure: runtime activity changes from observation into exploitation without explicit authorization.
 
@@ -118,4 +118,9 @@ Provide:
 - Paths to `information_api.json`, `information_leak.json`, and `js_inventory.json`.
 - Any missing collection gaps.
 - Defensive JS boundary notes.
+- A value-based explanation of how high and medium API/leak findings help reach the flag.
 - Recommended next skill only if needed, such as `js-reverse-automation` for token/signature reproduction.
+
+Before final handoff, run:
+
+`python3 <skill>/scripts/validate_outputs.py --directory <artifact-dir>`

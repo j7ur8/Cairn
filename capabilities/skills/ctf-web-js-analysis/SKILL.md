@@ -16,19 +16,19 @@ Use this skill for authorized CTF, cyber range, or explicitly permitted Web targ
 
 ## Required Outputs
 
-Always produce both files in the working artifact directory:
+Always produce both files in `reports/ctf-web-js-analysis/`:
 
-- `information_api.json`
-- `information_leak.json`
+- `reports/ctf-web-js-analysis/information_api.json`
+- `reports/ctf-web-js-analysis/information_leak.json`
 
-Every finding must include `source` and `evidence`. Use `confidence` to separate confirmed runtime observations from static candidates. If no findings are present, write valid empty files using `scripts/init_outputs.py`.
+Every finding must include `source`, `evidence`, and `value`. Use `value` to rate how useful the API or leak is for obtaining the flag, not to express evidence confidence. If no findings are present, write valid empty files using `scripts/init_outputs.py`.
 
 Read [references/output-contract.md](references/output-contract.md) before finalizing these files.
 
 ## Workflow
 
 1. Initialize output files:
-   `python3 <skill>/scripts/init_outputs.py --directory <artifact-dir>`
+   `python3 <skill>/scripts/init_outputs.py --directory reports/ctf-web-js-analysis`
 2. Collect entry evidence:
    - HTML entry pages and inline scripts.
    - Browser HAR and network request exports when `chrome-devtools-host` is available.
@@ -38,15 +38,17 @@ Read [references/output-contract.md](references/output-contract.md) before final
    - Follow chunks and source map references in scope.
    - Keep business JS, third-party libraries, defensive scripts, source maps, and config files separate in notes and inventory.
 4. Normalize inventory:
-   `python3 <skill>/scripts/normalize_js_inventory.py --root <download-dir> --urls <js_urls.json> --output <artifact-dir>/js_inventory.json`
+   `python3 <skill>/scripts/normalize_js_inventory.py --root <download-dir> --urls <js_urls.json> --output reports/ctf-web-js-analysis/js_inventory.json`
 5. Format and scan:
    - Use `js-beautify` or equivalent formatting before manual review.
    - Use LinkFinder/xnLinkFinder/jsluice style endpoint extraction where available.
    - Use gitleaks/trufflehog style leak scanning where available.
    - Use retire.js only to identify vulnerable third-party library versions; do not mix this with business API findings.
 6. Merge evidence:
-   `python3 <skill>/scripts/merge_api_leak_findings.py --artifact-dir <artifact-dir> --output-dir <artifact-dir> [--tool-output ...]`
-7. Cross-check dynamically only when authorized and useful:
+   `python3 <skill>/scripts/merge_api_leak_findings.py --artifact-dir reports/ctf-web-js-analysis --output-dir reports/ctf-web-js-analysis [--tool-output ...]`
+7. Validate final JSON outputs:
+   `python3 <skill>/scripts/validate_outputs.py --directory reports/ctf-web-js-analysis`
+8. Cross-check dynamically only when authorized and useful:
    - Use browser runtime requests/HAR to confirm candidate endpoints and parameter names.
    - Do not send guessed exploit payloads during this skill's bootstrap pass.
 
@@ -72,10 +74,11 @@ When defensive JavaScript is present:
 
 ## Evidence Standards
 
-- API findings need method, URL/path, parameters, and evidence whenever observed. If method or parameters are unknown, use `null` or an empty list and set lower confidence.
-- Leak findings need leak type, value fingerprint or safe redacted sample, source location, and evidence.
+- API findings need method, URL/path, parameters, and evidence whenever observed. If method or parameters are unknown, use `null` or an empty list and rate `value` according to utility for obtaining the flag.
+- Leak findings need leak type, value rating, source location, and evidence. Keep redacted samples or fingerprints inside evidence only when they are safe and useful for reproduction.
 - Source locations should include file path or URL, line/column when available, and SHA-256 when a local file exists.
 - Evidence should be short and reproducible: command output path, HAR request id, matched snippet, or runtime request metadata.
+- Final reports should explain API and leak findings by their `value`: why each high or medium item helps reach the flag, and why low or info items are only supporting context.
 
 ## Bundled Tools
 
