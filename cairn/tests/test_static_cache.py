@@ -255,6 +255,27 @@ class StaticCacheTests(unittest.TestCase):
             ai_section,
         )
 
+    def test_projects_view_uses_flex_height_chain_for_internal_scroll(self) -> None:
+        shell = (
+            _REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "shell_content_open.html"
+        ).read_text(encoding="utf-8")
+        view = (
+            _REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_list.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            '<main x-show="view !== \'newProject\'" x-cloak class="min-h-0 flex-1 flex flex-col overflow-hidden">',
+            shell,
+        )
+        self.assertIn(
+            '<div x-show="view === \'list\'" x-cloak class="flex-1 min-h-0 flex flex-col overflow-hidden">',
+            view,
+        )
+        self.assertIn(
+            'x-ref="projectListScroll" @scroll.passive="rememberProjectListScroll()" class="flex-1 min-h-0 h-full overflow-y-auto p-4"',
+            view,
+        )
+
     def test_cairn_app_uses_single_module_entrypoint(self) -> None:
         app_js = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "index.js").read_text(
             encoding="utf-8"
