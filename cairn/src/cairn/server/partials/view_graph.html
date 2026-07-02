@@ -671,14 +671,13 @@
           <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
             <div>
               <div class="text-xs font-semibold text-slate-700">Project Capabilities</div>
-              <div class="text-[10px] text-slate-400">MCP servers and skills enabled for this project</div>
+              <div class="text-[10px] text-slate-400">Read-only execution snapshot for this project</div>
             </div>
-            <button @click="saveCapabilities()" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white text-[11px] font-medium hover:bg-slate-700 transition">Save</button>
           </div>
           <div class="p-4 space-y-5">
             <template x-if="(capabilities.unavailable?.mcp_server_ids || []).length || (capabilities.unavailable?.skill_ids || []).length">
               <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                <span x-text="`${(capabilities.unavailable?.mcp_server_ids || []).length} MCP + ${(capabilities.unavailable?.skill_ids || []).length} skill ids not in catalog`"></span>
+                <span x-text="`${(capabilities.unavailable?.mcp_server_ids || []).length} MCP + ${(capabilities.unavailable?.skill_ids || []).length} skill ids missing from the project snapshot catalog`"></span>
               </div>
             </template>
             <template x-for="task in capabilityTaskTypes()" :key="task.key">
@@ -694,30 +693,34 @@
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
+                    <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">MCP Servers</div>
                     <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'mcp_server')" :key="`${task.key}:mcp:${item.id}`">
-                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
-                          <div class="flex items-start gap-2">
-                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'mcp_server', item.id)" @change="toggleUserCapability(task.key, 'mcp_server', item.id, $event.target.checked)">
-                            <div class="min-w-0 flex-1">
-                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                            </div>
+                      <template x-if="enabledCapabilitiesForTask(task.key, 'mcp_server').length === 0">
+                        <div class="rounded-lg border border-dashed border-slate-200 bg-white/70 px-2 py-2 text-[11px] text-slate-300" x-text="capabilityEmptyText('mcp_server')"></div>
+                      </template>
+                      <template x-for="item in enabledCapabilitiesForTask(task.key, 'mcp_server')" :key="`${task.key}:mcp:${item.id}`">
+                        <div class="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                          <div class="min-w-0">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name || item.id"></div>
+                            <div class="text-[10px] font-mono text-slate-400 truncate" x-text="item.id"></div>
                           </div>
-                        </label>
+                        </div>
                       </template>
                     </div>
                   </div>
                   <div>
+                    <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Skills</div>
                     <div class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                      <template x-for="item in capabilitiesForTask(task.key, capabilities.catalog).filter(i => i.kind === 'skill')" :key="`${task.key}:skill:${item.id}`">
-                        <label class="block rounded-lg border border-slate-200 bg-white px-2 py-1.5 hover:bg-slate-50 transition">
-                          <div class="flex items-start gap-2">
-                            <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="effectiveCapabilitySelected(task.key, 'skill', item.id)" @change="toggleUserCapability(task.key, 'skill', item.id, $event.target.checked)">
-                            <div class="min-w-0 flex-1">
-                              <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name"></div>
-                            </div>
+                      <template x-if="enabledCapabilitiesForTask(task.key, 'skill').length === 0">
+                        <div class="rounded-lg border border-dashed border-slate-200 bg-white/70 px-2 py-2 text-[11px] text-slate-300" x-text="capabilityEmptyText('skill')"></div>
+                      </template>
+                      <template x-for="item in enabledCapabilitiesForTask(task.key, 'skill')" :key="`${task.key}:skill:${item.id}`">
+                        <div class="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                          <div class="min-w-0">
+                            <div class="text-[11px] font-semibold text-slate-700 truncate" x-text="item.name || item.id"></div>
+                            <div class="text-[10px] font-mono text-slate-400 truncate" x-text="item.id"></div>
                           </div>
-                        </label>
+                        </div>
                       </template>
                     </div>
                   </div>

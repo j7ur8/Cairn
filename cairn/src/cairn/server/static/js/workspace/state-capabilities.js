@@ -69,25 +69,6 @@ export function createWorkspaceCapabilitiesState() {
       }
     },
 
-    async saveCapabilities() {
-      if (!this.selectedProjectId) return;
-      try {
-        if (!this.capabilities?.tasks) return;
-        const body = { capabilities: this.selectedCapabilitiesForPayload(this.capabilities.tasks) };
-        const data = await this.api('PUT', `/projects/${this.selectedProjectId}/capabilities`, body);
-        this.capabilities = {
-          ...this.capabilities,
-          catalog: data.catalog || [],
-          tasks: this.taskCapabilitiesFromServerTasks(data.tasks),
-          health: data.health || {},
-          unavailable: data.unavailable || { mcp_server_ids: [], skill_ids: [] },
-        };
-        this.showToast('Capabilities saved');
-      } catch (e) {
-        this.showToast(e.message, 'error');
-      }
-    },
-
     newProjectAiProfileItems() {
       return (this.aiProfiles || []).filter(item => item.available !== false);
     },
@@ -441,6 +422,29 @@ export function createWorkspaceCapabilitiesState() {
     capabilitiesForTask(task, items) {
       const catalog = items || this.capabilities?.catalog || [];
       return catalog.filter(item => Array.isArray(item.task_types) && item.task_types.includes(task));
+    },
+
+    enabledCapabilitiesForTask(task, kind) {
+      const field = kind === 'mcp_server' ? 'mcp_server_ids' : 'skill_ids';
+      const selectedIds = this.capabilities?.tasks?.[task]?.[field] || [];
+      const catalog = this.capabilities?.catalog || [];
+      return selectedIds.map(id => {
+        const item = catalog.find(entry => entry.kind === kind && entry.id === id);
+        return item || {
+          id,
+          kind,
+          name: id,
+          description: '',
+          available: false,
+          detail: 'missing from project snapshot catalog',
+        };
+      });
+    },
+
+    capabilityEmptyText(kind) {
+      return kind === 'mcp_server'
+        ? 'No MCP servers enabled for this task.'
+        : 'No skills enabled for this task.';
     },
 
     selectableCapabilitiesForTask(task, items) {

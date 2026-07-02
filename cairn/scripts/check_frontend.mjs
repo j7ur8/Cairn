@@ -261,6 +261,47 @@ function checkCapabilitySelectionHelpers() {
   `);
 }
 
+function checkReadOnlyProjectCapabilityHelpers() {
+  runModuleAssertion(`
+    import assert from 'node:assert/strict';
+    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
+
+    const state = createWorkspaceCapabilitiesState();
+    state.task_types = ['bootstrap'];
+    state.taskTypeLabel = value => value;
+    state.capabilities = {
+      catalog: [
+        { id: 'mcp-a', kind: 'mcp_server', name: 'Snapshot MCP', task_types: ['bootstrap'] },
+        { id: 'skill-a', kind: 'skill', name: 'Snapshot Skill', task_types: ['bootstrap'] },
+        { id: 'skill-extra', kind: 'skill', name: 'Unselected Skill', task_types: ['bootstrap'] },
+      ],
+      tasks: {
+        bootstrap: {
+          mcp_server_ids: ['mcp-a', 'mcp-missing'],
+          skill_ids: ['skill-a'],
+          user_mcp_server_ids: [],
+          user_skill_ids: [],
+        },
+      },
+      health: {},
+      unavailable: { mcp_server_ids: ['mcp-missing'], skill_ids: [] },
+    };
+
+    assert.deepEqual(
+      state.enabledCapabilitiesForTask('bootstrap', 'mcp_server').map(item => [item.id, item.name]),
+      [['mcp-a', 'Snapshot MCP'], ['mcp-missing', 'mcp-missing']],
+    );
+    assert.deepEqual(
+      state.enabledCapabilitiesForTask('bootstrap', 'skill').map(item => item.id),
+      ['skill-a'],
+    );
+    assert.equal(
+      state.enabledCapabilitiesForTask('bootstrap', 'skill').some(item => item.id === 'skill-extra'),
+      false,
+    );
+  `);
+}
+
 function checkFormHelpers() {
   runModuleAssertion(`
     import assert from 'node:assert/strict';
@@ -367,6 +408,7 @@ function main() {
   checkWorkspaceLogPaginationHelpers();
   checkExecutionLogUiNoLegacyHistoryMode();
   checkCapabilitySelectionHelpers();
+  checkReadOnlyProjectCapabilityHelpers();
   checkFormHelpers();
   checkPrefHelpers();
   checkApiClientHelpers();

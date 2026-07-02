@@ -78,10 +78,16 @@ class StaticCacheTests(unittest.TestCase):
             html,
         )
 
-    def test_capabilities_save_uses_per_task_payload_once(self) -> None:
+    def test_project_capabilities_detail_is_read_only_snapshot(self) -> None:
         html = _frontend_source()
-        self.assertEqual(html.count("async saveCapabilities()"), 1)
-        self.assertIn("const body = { capabilities: this.selectedCapabilitiesForPayload(this.capabilities.tasks) };", html)
+        self.assertNotIn("async saveCapabilities()", html)
+        self.assertNotIn("saveCapabilities()", html)
+        self.assertNotIn("this.api('PUT', `/projects/${this.selectedProjectId}/capabilities`", html)
+        self.assertIn("Read-only execution snapshot for this project", html)
+        self.assertIn("enabledCapabilitiesForTask(task.key, 'mcp_server')", html)
+        self.assertIn("enabledCapabilitiesForTask(task.key, 'skill')", html)
+        self.assertNotIn("@change=\"toggleUserCapability(task.key, 'mcp_server'", html)
+        self.assertNotIn("@change=\"toggleUserCapability(task.key, 'skill'", html)
         self.assertIn("tasks: this.taskCapabilitiesFromServerTasks(data.tasks)", html)
         self.assertNotIn("capabilities_per_task", html)
         self.assertNotIn("ai_profile_selections", html)

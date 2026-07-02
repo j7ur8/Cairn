@@ -232,6 +232,91 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(boot_snapshots[0].capability_id, "role-skill")
         self.assertEqual(boot_snapshots[0].source, "role_default")
 
+    def test_project_capabilities_query_uses_execution_config_catalog_snapshot(self) -> None:
+        from cairn.server.routers.capabilities import (
+            get_project_capabilities,
+            get_capability_catalog,
+            upsert_admin_capability,
+        )
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilityAdminRequest, CapabilitySelection, CreateProjectRequest
+
+        upsert_admin_capability("mcp_server", "snap-mcp", CapabilityAdminRequest(
+            id="snap-mcp",
+            name="Snapshot MCP",
+            task_types=["bootstrap"],
+            transport="stdio",
+            command="snap-mcp",
+        ))
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            capabilities={
+                "bootstrap": CapabilitySelection(mcp_server_ids=["snap-mcp"]),
+                "explore": CapabilitySelection(),
+                "reason": CapabilitySelection(),
+            },
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+        upsert_admin_capability("mcp_server", "snap-mcp", CapabilityAdminRequest(
+            id="snap-mcp",
+            name="Renamed MCP",
+            task_types=["bootstrap"],
+            transport="stdio",
+            command="snap-mcp",
+        ))
+
+        self.assertEqual(
+            next(item for item in get_capability_catalog() if item.id == "snap-mcp").name,
+            "Renamed MCP",
+        )
+        response = get_project_capabilities(project.project.id)
+        self.assertEqual(
+            next(item for item in response.catalog if item.id == "snap-mcp").name,
+            "Snapshot MCP",
+        )
+        self.assertEqual(response.unavailable, {"mcp_server_ids": [], "skill_ids": []})
+
+    def test_project_capabilities_query_falls_back_to_yaml_catalog_for_legacy_rows(self) -> None:
+        from cairn.server.repositories import sql
+        from cairn.server.routers.capabilities import get_project_capabilities, upsert_admin_capability
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilityAdminRequest, CapabilitySelection, CreateProjectRequest
+
+        upsert_admin_capability("skill", "legacy-skill", CapabilityAdminRequest(
+            id="legacy-skill",
+            name="Legacy Skill",
+            task_types=["bootstrap"],
+            source_path="/tmp/legacy-skill",
+        ))
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            capabilities={
+                "bootstrap": CapabilitySelection(skill_ids=["legacy-skill"]),
+                "explore": CapabilitySelection(),
+                "reason": CapabilitySelection(),
+            },
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+        with self.db.session_scope() as conn:
+            sql.execute(
+                conn,
+                "UPDATE project_execution_configs SET catalog_json = NULL WHERE project_id = :project_id",
+                {"project_id": project.project.id},
+            )
+
+        response = get_project_capabilities(project.project.id)
+        self.assertEqual(
+            next(item for item in response.catalog if item.id == "legacy-skill").name,
+            "Legacy Skill",
+        )
+        self.assertEqual(response.unavailable, {"mcp_server_ids": [], "skill_ids": []})
+
     def test_role_default_skills_update_writes_only_role_list(self) -> None:
         import yaml
 

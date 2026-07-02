@@ -12,6 +12,7 @@ from cairn.server.execution_config import execution_capabilities, load_project_e
 from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.schemas import (
     CapabilityHealthEntry,
+    CapabilityCatalogItem,
     ProjectCapabilitiesResponse,
     ProjectRole,
     ProjectRoleResponse,
@@ -22,7 +23,7 @@ from cairn.shared.task_types import builtin_task_type_names
 def get_project_capabilities(conn: Any, project_id: str) -> ProjectCapabilitiesResponse:
     require_project(ProjectRepository(conn).get(project_id))
     configs = load_project_execution_configs(conn, project_id)
-    catalog = list_yaml_capabilities()
+    catalog = _project_capability_catalog(configs)
     per_task = execution_capabilities(configs)
     health = {
         task: [
@@ -37,6 +38,20 @@ def get_project_capabilities(conn: Any, project_id: str) -> ProjectCapabilitiesR
         health=health,
         unavailable=unavailable_capabilities(catalog, per_task),
     )
+
+
+def _project_capability_catalog(configs: dict[str, dict[str, Any]]) -> list[CapabilityCatalogItem]:
+    for task in builtin_task_type_names():
+        raw_catalog = (configs.get(task) or {}).get("catalog")
+        if not isinstance(raw_catalog, list):
+            continue
+        catalog: list[CapabilityCatalogItem] = []
+        for raw_item in raw_catalog:
+            if not isinstance(raw_item, dict):
+                continue
+            catalog.append(CapabilityCatalogItem.model_validate(raw_item))
+        return catalog
+    return list_yaml_capabilities()
 
 
 def get_project_role(conn: Any, project_id: str) -> ProjectRoleResponse:
