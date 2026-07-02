@@ -152,6 +152,13 @@ class HealthCheckSnapshotTests(unittest.TestCase):
         auth = next(c for c in result.checks if c.name == "api_key_configured")
         self.assertIn("define ANTHROPIC_AUTH_TOKEN directly", auth.message)
 
+    def test_snapshot_secret_value_is_used_without_external_lookup(self) -> None:
+        from cairn.dispatcher.ai_health import probe_snapshot
+        cfg = _make_config(_codex())
+        snap = self._snap(snapshot_api_key_value="snapshot-secret")
+        result = probe_snapshot(snap, config=cfg)
+        self.assertTrue(result.ok, [c.message for c in result.checks])
+
     def test_auth_secret_empty_fails(self) -> None:
         from cairn.dispatcher.ai_health import probe_snapshot
         cfg = _make_config(_codex())
@@ -488,6 +495,76 @@ class DispatcherTaskAiSelectionTests(unittest.TestCase):
         self.assertEqual(resolver.project_ai_snapshots("proj", "explore")[0].profile_id, "intent")
         self.assertEqual(resolver.project_ai_snapshots("proj", "reason")[0].profile_id, "reason")
         self.assertEqual(resolver.project_ai_snapshots("proj", "unknown"), [])
+
+    def test_project_ai_selection_uses_snapshot_secret_not_server_lookup(self) -> None:
+        from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
+        from cairn.dispatcher.scheduler.project_cache import ProjectCaches
+        from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
+
+        client = MagicMock()
+        resolver = ProjectContextResolver(
+            config=MagicMock(),
+            client=client,
+            runtime=MagicMock(),
+            project_caches=ProjectCaches(),
+            ai_overlay_cache=AIOverlayCache(),
+            ai_worker_selector=MagicMock(),
+        )
+        execution_config = {
+            "ai_profiles": [
+                {
+                    "profile_id": "p1",
+                    "task_type": "bootstrap",
+                    "role": "primary",
+                    "position": 0,
+                    "snapshot_name": "p1",
+                    "snapshot_worker_type": "codex",
+                    "snapshot_model": "m",
+                    "snapshot_api_key_env": "OPENAI_API_KEY",
+                    "snapshot_api_key_value": "snapshot-secret",
+                }
+            ]
+        }
+
+        resolver.resolve_project_ai_selection("proj", "bootstrap", execution_config)
+
+        client.get_ai_profile_secret.assert_not_called()
+        self.assertEqual(resolver.project_caches.get_ai_secret("proj"), {"p1": "snapshot-secret"})
+
+    def test_default_worker_selection_uses_execution_config_workers(self) -> None:
+        from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
+        from cairn.dispatcher.scheduler.project_cache import ProjectCaches
+        from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
+
+        resolver = ProjectContextResolver(
+            config=_make_config(_codex(name="global", api_key="G")),
+            client=MagicMock(),
+            runtime=MagicMock(
+                worker_counts=MagicMock(return_value={}),
+                worker_unhealthy_until={},
+                worker_rejected_until={},
+            ),
+            project_caches=ProjectCaches(),
+            ai_overlay_cache=AIOverlayCache(),
+            ai_worker_selector=MagicMock(),
+        )
+        project = MagicMock()
+        project.project.id = "proj"
+        project.proxy = None
+        snapshot_worker = _codex(name="snapshot", api_key="S").model_dump()
+
+        selection = resolver.select_worker(
+            project,
+            "bootstrap",
+            {
+                "workers": [snapshot_worker],
+                "ai_profiles": [],
+                "proxy": None,
+            },
+        )
+
+        self.assertIsNotNone(selection.worker)
+        self.assertEqual(selection.worker.name, "snapshot")
 
 
 class ProfileWarningsTests(unittest.TestCase):

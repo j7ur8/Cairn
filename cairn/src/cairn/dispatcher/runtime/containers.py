@@ -81,6 +81,7 @@ class ContainerManager:
             proxy_environment=self._proxy_environment,
             inspect_state=self.inspect_state,
             log_mount_mismatches=self.log_mount_mismatches,
+            mount_mismatches=self.mount_mismatches,
         )
         self._cleanup = ContainerCleanup(
             config=self._config,
@@ -114,16 +115,23 @@ class ContainerManager:
     def container_name(self, project_id: str) -> str:
         return container_name(project_id)
 
-    def ensure_running(self, project_id: str) -> str:
-        return self._lifecycle.ensure_running(project_id)
+    def ensure_running(self, project_id: str, container_config: ContainerConfig | None = None) -> str:
+        if container_config is None:
+            return self._lifecycle.ensure_running(project_id)
+        return self._lifecycle.ensure_running_with_config(project_id, container_config)
 
     def create_startup_container(self) -> str:
         name = self._STARTUP_NAME
         return self._lifecycle.create_startup_container(name, self._STARTUP_PROJECT_ID)
 
-    def validate_bind_mounts(self, container_name: str, project_id: str) -> list[str]:
+    def validate_bind_mounts(
+        self,
+        container_name: str,
+        project_id: str,
+        container_config: ContainerConfig | None = None,
+    ) -> list[str]:
         return validate_config_bind_mounts(
-            config=self._config,
+            config=container_config or self._config,
             project_id=project_id,
             probe=lambda container_path, read_only: self._probe_bind_mount(container_name, container_path, read_only),
         )
@@ -133,8 +141,13 @@ class ContainerManager:
             project_id = name.removeprefix(self._PREFIX)
             self.log_mount_mismatches(name, project_id)
 
-    def log_mount_mismatches(self, container_name: str, project_id: str) -> None:
-        mismatches = self.mount_mismatches(container_name, project_id)
+    def log_mount_mismatches(
+        self,
+        container_name: str,
+        project_id: str,
+        container_config: ContainerConfig | None = None,
+    ) -> None:
+        mismatches = self.mount_mismatches(container_name, project_id, container_config)
         for mismatch in mismatches:
             log_key = (container_name, mismatch)
             if log_key in self._logged_mount_mismatches:
@@ -142,9 +155,14 @@ class ContainerManager:
             self._logged_mount_mismatches.add(log_key)
             LOG.warning("container bind mount mismatch container=%s project=%s %s", container_name, project_id, mismatch)
 
-    def mount_mismatches(self, container_name: str, project_id: str) -> list[str]:
+    def mount_mismatches(
+        self,
+        container_name: str,
+        project_id: str,
+        container_config: ContainerConfig | None = None,
+    ) -> list[str]:
         return inspect_mount_mismatches(
-            config=self._config,
+            config=container_config or self._config,
             project_id=project_id,
             container=self._get_container(container_name),
             docker_exception_type=DockerException,

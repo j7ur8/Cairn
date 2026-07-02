@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,25 @@ from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.shared.config import load_dispatch_config
 
 LOG = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class RuntimeGeneration:
+    client: Any
+    container_manager: Any
+    executor: ThreadPoolExecutor
+    cleanup_executor: ThreadPoolExecutor | None
+
+    def close(self) -> None:
+        try:
+            self.container_manager.close()
+        finally:
+            try:
+                self.client.close()
+            finally:
+                self.executor.shutdown(wait=False, cancel_futures=False)
+                if self.cleanup_executor is not None:
+                    self.cleanup_executor.shutdown(wait=False, cancel_futures=False)
 
 
 class DispatcherReloader:
@@ -41,6 +61,7 @@ class DispatcherReloader:
             old_container_manager = loop.container_manager
             old_client = loop.client
             old_executor = loop.executor
+            old_cleanup_futures = list(getattr(loop.cleanup, "futures", {}) or {})
             old_cleanup_executor = loop.cleanup.refresh(
                 next_container_manager,
                 max_workers=next_config.runtime.max_workers,
@@ -85,13 +106,44 @@ class DispatcherReloader:
                 ai_worker_selector=loop.ai_worker_selector,
             )
             loop._settings_checked = False
-            try:
-                old_container_manager.close()
-            finally:
-                try:
-                    old_client.close()
-                finally:
-                    old_executor.shutdown(wait=False, cancel_futures=False)
-                    old_cleanup_executor.shutdown(wait=False, cancel_futures=False)
+            self._retain_or_close_old_generation(
+                RuntimeGeneration(
+                    client=old_client,
+                    container_manager=old_container_manager,
+                    executor=old_executor,
+                    cleanup_executor=old_cleanup_executor,
+                ),
+                extra_futures=old_cleanup_futures,
+            )
         LOG.info("dispatcher config reloaded workers=%s", len(loop.config.workers))
         return {"ok": True, "workers": len(loop.config.workers)}
+
+    def _retain_or_close_old_generation(
+        self,
+        generation: RuntimeGeneration,
+        *,
+        extra_futures: list[Any] | None = None,
+    ) -> None:
+        runtime = self.loop.runtime
+        futures = list(getattr(runtime, "futures", {}) or [])
+        futures.extend(extra_futures or [])
+        if not futures:
+            generation.close()
+            return
+        pending = set(futures)
+        closed = False
+        lock = threading.Lock()
+
+        def maybe_close(_future: Any | None = None) -> None:
+            nonlocal closed
+            with lock:
+                if _future is not None:
+                    pending.discard(_future)
+                if pending or closed:
+                    return
+                closed = True
+            generation.close()
+
+        for future in list(pending):
+            future.add_done_callback(maybe_close)
+        maybe_close()

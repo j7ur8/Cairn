@@ -16,18 +16,28 @@ def mount_mismatches(
     docker_exception_type: type[Exception],
 ) -> list[str]:
     expected = render_bind_mounts(config, project_id)
-    if not expected or container is None:
+    if container is None:
         return []
     try:
         container.reload()
     except docker_exception_type as exc:
         return [f"failed to inspect mounts: {exc}"]
+    mismatches: list[str] = []
+    expected_image = str(config.image)
+    actual_image = str(
+        container.attrs.get("Config", {}).get("Image")
+        or container.attrs.get("Image")
+        or ""
+    )
+    if actual_image and actual_image != expected_image:
+        mismatches.append(f"image mismatch expected={expected_image} actual={actual_image}")
+    if not expected:
+        return mismatches
     actual_by_destination = {
         str(mount.get("Destination")): mount
         for mount in container.attrs.get("Mounts", [])
         if mount.get("Destination")
     }
-    mismatches: list[str] = []
     for mount in expected:
         actual = actual_by_destination.get(str(mount["container_path"]))
         if actual is None:

@@ -31,3 +31,6 @@ class SystemSettingsAdmin(BaseModel):
     task_timeouts: TaskTimeouts
     observability: ObservabilitySettings
     server_log_retention: ServerLogRetention
+    saved: bool = False
+    reload_applied: bool = False
+    reload_error: str | None = None

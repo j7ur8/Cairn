@@ -66,6 +66,7 @@ def ai_snapshots_from_selections(
                     snapshot_model=_selected_model(profile, selection),
                     snapshot_reasoning_type=selection.primary_reasoning_type or _selected_reasoning_type(profile),
                     snapshot_api_key_env=_normalized_api_key_env(profile.worker_type, profile.api_key_env),
+                    snapshot_api_key_value=profile.sk,
                 )
             )
         for position, profile_id in enumerate(selection.fallback_profile_ids):
@@ -85,6 +86,7 @@ def ai_snapshots_from_selections(
                     snapshot_model=profile.model,
                     snapshot_reasoning_type=_selected_reasoning_type(profile),
                     snapshot_api_key_env=_normalized_api_key_env(profile.worker_type, profile.api_key_env),
+                    snapshot_api_key_value=profile.sk,
                 )
             )
     return snapshots

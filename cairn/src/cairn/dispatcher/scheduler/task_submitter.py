@@ -15,7 +15,7 @@ from cairn.dispatcher.scheduler.submission_registry import TaskSubmissionRegistr
 from cairn.dispatcher.scheduler.task_claims import TaskClaimer
 from cairn.dispatcher.scheduler.worker_selection import WorkerSelection
 from cairn.dispatcher.tasks.context import TaskInvocation, TaskServices
-from cairn.shared.config import DispatchConfig, WorkerConfig
+from cairn.shared.config import ContainerConfig, DispatchConfig, WorkerConfig
 from cairn.shared.contracts import Intent, ProjectDetail
 
 LOG = logging.getLogger(__name__)
@@ -34,6 +34,24 @@ class SubmissionContext:
     @property
     def project_id(self) -> str:
         return self.project.project.id
+
+
+@dataclass(slots=True)
+class ProjectContainerRuntime:
+    base: ContainerManager
+    container_config: ContainerConfig | None
+
+    def ensure_running(self, project_id: str, container_config: ContainerConfig | None = None) -> str:
+        return self.base.ensure_running(project_id, container_config or self.container_config)
+
+    def build_exec_process(self, *args, **kwargs):
+        return self.base.build_exec_process(*args, **kwargs)
+
+    def write_text_file(self, *args, **kwargs):
+        return self.base.write_text_file(*args, **kwargs)
+
+    def write_directory(self, *args, **kwargs):
+        return self.base.write_directory(*args, **kwargs)
 
 
 class TaskSubmitter:
@@ -128,7 +146,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.reason_runner,
-                self._task_services(),
+                self._task_services(context.execution_config),
                 TaskInvocation(
                     project=project,
                     worker=context.worker,
@@ -188,7 +206,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.bootstrap_runner,
-                self._task_services(),
+                self._task_services(context.execution_config),
                 TaskInvocation(
                     project=project,
                     intent=intent,
@@ -240,7 +258,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.explore_runner,
-                self._task_services(),
+                self._task_services(context.execution_config),
                 TaskInvocation(
                     project=project,
                     intent=intent,
@@ -265,12 +283,25 @@ class TaskSubmitter:
             ),
         )
 
-    def _task_services(self) -> TaskServices:
+    def _task_services(self, execution_config: dict) -> TaskServices:
         return TaskServices(
             config=self.config,
             client=self.client,
-            container_runtime=self.container_manager,
+            container_runtime=ProjectContainerRuntime(
+                self.container_manager,
+                self._container_config_from_execution_config(execution_config),
+            ),
         )
+
+    def _container_config_from_execution_config(self, execution_config: dict) -> ContainerConfig | None:
+        raw = execution_config.get("container")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return ContainerConfig.model_validate(raw)
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("execution config container parse failed error=%s", exc)
+            return None
 
     def _prepare_submission(
         self,

@@ -444,6 +444,8 @@ class TaskSubmitterTests(unittest.TestCase):
         loop.executor = old_executor
         loop.cleanup.refresh.return_value = old_cleanup_executor
         loop.project_context.resolve_proxy_env = MagicMock()
+        loop.runtime.running_count.return_value = 0
+        loop.runtime.futures = {}
         loop.runtime.worker_unhealthy_until = {}
         loop.runtime.worker_rejected_until = {}
 
@@ -458,6 +460,61 @@ class TaskSubmitterTests(unittest.TestCase):
         client_ctor.assert_called_once_with("http://next", api_token="next-token")
         self.assertIs(loop.client, next_client)
         old_client.close.assert_called_once()
+
+    def test_dispatcher_reload_applies_while_tasks_running_and_defers_old_resource_close(self) -> None:
+        from pathlib import Path
+        from unittest import mock
+        from concurrent.futures import Future
+
+        import cairn.dispatcher.scheduler.reload as reload_mod
+
+        old_client = MagicMock(name="old_client")
+        old_container = MagicMock(name="old_container")
+        old_executor = MagicMock(name="old_executor")
+        old_cleanup_executor = MagicMock(name="old_cleanup_executor")
+        next_client = MagicMock(name="next_client")
+        next_config = MagicMock()
+        next_config.server_url = "http://next"
+        next_config.system.auth.dispatcher_api_token = "next-token"
+        next_config.container = object()
+        next_config.runtime.max_workers = 3
+        next_config.workers = [object(), object()]
+        running_future: Future[str] = Future()
+
+        loop = MagicMock()
+        loop.config.system.auth.dispatcher_api_token = "old-token"
+        loop.client = old_client
+        loop.container_manager = old_container
+        loop.executor = old_executor
+        loop.cleanup.refresh.return_value = old_cleanup_executor
+        loop.project_context.resolve_proxy_env = MagicMock()
+        loop.runtime.futures = {running_future: object()}
+        loop.runtime.worker_unhealthy_until = {}
+        loop.runtime.worker_rejected_until = {}
+
+        with mock.patch.object(reload_mod, "load_dispatch_config", return_value=next_config) as load_config, \
+             mock.patch.object(reload_mod, "validate_prompt_resources") as validate_prompts, \
+             mock.patch.object(reload_mod, "ContainerManager", return_value=MagicMock(name="next_container")) as container_ctor, \
+             mock.patch.object(reload_mod, "ThreadPoolExecutor", return_value=MagicMock(name="next_executor")) as executor_ctor, \
+             mock.patch.object(reload_mod, "CairnClient", return_value=next_client) as client_ctor:
+            result = reload_mod.DispatcherReloader(loop, Path("config.yaml")).reload_from_health_server("Bearer old-token")
+
+        self.assertEqual(result, {"ok": True, "workers": 2})
+        load_config.assert_called_once()
+        validate_prompts.assert_called_once()
+        container_ctor.assert_called_once()
+        executor_ctor.assert_called_once()
+        client_ctor.assert_called_once()
+        old_container.close.assert_not_called()
+        old_client.close.assert_not_called()
+        old_executor.shutdown.assert_not_called()
+        old_cleanup_executor.shutdown.assert_not_called()
+
+        running_future.set_result("success")
+        old_container.close.assert_called_once()
+        old_client.close.assert_called_once()
+        old_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=False)
+        old_cleanup_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=False)
 
     def test_execution_config_resolver_caches_until_cleared(self) -> None:
         from cairn.dispatcher.protocol.client import ApiResult
@@ -531,7 +588,7 @@ class TaskSubmitterTests(unittest.TestCase):
         def fake_run(services, invocation):
             self.assertIs(services.config, submitter.config)
             self.assertIs(services.client, client)
-            self.assertIs(services.container_runtime, submitter.container_manager)
+            self.assertIs(services.container_runtime.base, submitter.container_manager)
             self.assertIs(invocation.project, project)
             self.assertIs(invocation.intent, intent)
             self.assertIs(invocation.worker, worker)

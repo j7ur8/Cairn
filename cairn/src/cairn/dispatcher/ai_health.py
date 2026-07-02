@@ -133,13 +133,18 @@ def probe_snapshot(
     config: DispatchConfig,
     cached_secret: str | None = None,
     timeout: float | None = None,
+    workers: Iterable[WorkerConfig] | None = None,
 ) -> HealthCheckResult:
     """Run the full health check on a stored AI profile snapshot."""
     effective_timeout = timeout if timeout is not None else 1.0
+    effective_workers = workers if workers is not None else config.workers
+    secret = cached_secret
+    if secret is None and snapshot.snapshot_api_key_value:
+        secret = snapshot.snapshot_api_key_value
     checks = [
-        _check_auth_configured(snapshot.snapshot_api_key_env, cached_secret),
+        _check_auth_configured(snapshot.snapshot_api_key_env, secret),
         _check_base_url(snapshot.snapshot_base_url, effective_timeout),
-        _check_worker_type(snapshot.snapshot_worker_type, config.workers),
+        _check_worker_type(snapshot.snapshot_worker_type, effective_workers),
     ]
     ok = all(item.ok for item in checks)
     return HealthCheckResult(ok=ok, checks=checks)

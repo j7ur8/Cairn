@@ -63,16 +63,10 @@ def _assemble_task_payload(
     ai_by_task: dict[str, list[dict[str, Any]]],
     caps_by_task: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    settings = get_yaml_settings().model_dump()
-    catalog = [item.model_dump() for item in list_yaml_capabilities()]
+    settings = _json_or_fallback(header, "settings_json", lambda: get_yaml_settings().model_dump())
+    catalog = _json_or_fallback(header, "catalog_json", lambda: [item.model_dump() for item in list_yaml_capabilities()])
     role = json.loads(header["role_json"]) if header["role_json"] else None
-    proxy = None
-    if header["proxy_id"]:
-        try:
-            proxy = get_yaml_proxy(header["proxy_id"]).model_dump()
-        except DomainError as exc:
-            if exc.status_code != 404:
-                raise
+    proxy = _proxy_from_header(header)
     revision = {
         "dispatch_sha256": header["dispatch_sha256"],
         "resources_sha256": header["resources_sha256"],
@@ -90,6 +84,9 @@ def _assemble_task_payload(
         "capabilities": caps_by_task.get(task) or TaskCapabilities().model_dump(),
         "role": role,
         "proxy": proxy,
+        "container": _json_or_fallback(header, "container_json", lambda: None),
+        "workers": _json_or_fallback(header, "workers_json", lambda: []),
+        "proxies": _json_or_fallback(header, "proxies_json", lambda: []),
         "settings": settings,
         "task_timeouts": task_timeouts.model_dump(),
         "task_timeout": task_timeout,
@@ -99,6 +96,33 @@ def _assemble_task_payload(
         "config_version": int(header["version"]),
         "prompt_snapshot": prompt_snapshot,
     }
+
+
+def _json_or_fallback(header: Any, key: str, fallback) -> Any:
+    try:
+        value = header[key]
+    except Exception:  # noqa: BLE001 - sqlite Row/SQLAlchemy Row differ on missing keys
+        value = None
+    if value:
+        return json.loads(value)
+    return fallback()
+
+
+def _proxy_from_header(header: Any) -> dict[str, Any] | None:
+    proxies = _json_or_fallback(header, "proxies_json", lambda: None)
+    proxy_id = header["proxy_id"]
+    if isinstance(proxies, list) and proxy_id:
+        for proxy in proxies:
+            if isinstance(proxy, dict) and proxy.get("id") == proxy_id:
+                return proxy
+        return None
+    if proxy_id:
+        try:
+            return get_yaml_proxy(proxy_id).model_dump()
+        except DomainError as exc:
+            if exc.status_code != 404:
+                raise
+    return None
 
 
 def _task_timeouts_from_rows(rows_by_task: dict[str, Any]) -> TaskTimeouts:
@@ -130,9 +154,17 @@ def _ai_by_task(rows: list[Any]) -> dict[str, list[dict[str, Any]]]:
                 "snapshot_model": row["snapshot_model"],
                 "snapshot_reasoning_type": row["snapshot_reasoning_type"],
                 "snapshot_api_key_env": row["snapshot_api_key_env"],
+                "snapshot_api_key_value": _row_value(row, "snapshot_api_key_value") or "",
             }
         )
     return ai_by_task
+
+
+def _row_value(row: Any, key: str) -> Any:
+    try:
+        return row[key]
+    except Exception:  # noqa: BLE001 - missing column on legacy query rows
+        return None
 
 
 def _caps_by_task(rows: list[Any]) -> dict[str, dict[str, Any]]:

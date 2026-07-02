@@ -47,15 +47,22 @@ class AiWorkerSelector:
         project_id: str,
         task_type: str,
         snapshots: list[ProjectAiProfileSnapshot],
+        workers: list[WorkerConfig] | None = None,
     ) -> WorkerSelection:
         now = time.time()
         running_counts = self.worker_counts()
+        effective_workers = workers if workers is not None else self.config.workers
         last_unavailable_reasons: list[str] = []
         for snap in snapshots:
             secrets = self.secret_lookup(project_id)
             cached_secret = secrets.get(snap.profile_id) or None
             try:
-                health = probe_snapshot(snap, config=self.config, cached_secret=cached_secret)
+                health = probe_snapshot(
+                    snap,
+                    config=self.config,
+                    cached_secret=cached_secret,
+                    workers=effective_workers,
+                )
             except Exception as exc:  # noqa: BLE001
                 LOG.warning(
                     "ai profile probe raised project=%s profile=%s error=%s",
@@ -85,7 +92,7 @@ class AiWorkerSelector:
             if not overlay:
                 LOG.info("ai profile has no api_key_env project=%s profile=%s", project_id, snap.profile_id)
             matching_workers = [
-                worker for worker in self.config.workers
+                worker for worker in effective_workers
                 if worker.type == snap.snapshot_worker_type
             ]
             if not matching_workers:

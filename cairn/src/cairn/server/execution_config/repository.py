@@ -28,10 +28,12 @@ def insert_project_execution_config(
         """
         INSERT INTO project_execution_configs (
             project_id, version, role_id, role_json, proxy_id,
+            container_json, workers_json, proxies_json, settings_json, catalog_json,
             dispatch_sha256, resources_sha256, prompts_json,
             prompts_sha256, created_at, updated_at
         ) VALUES (
             :project_id, :version, :role_id, :role_json, :proxy_id,
+            :container_json, :workers_json, :proxies_json, :settings_json, :catalog_json,
             :dispatch_sha256, :resources_sha256, :prompts_json,
             :prompts_sha256, :created_at, :updated_at
         )
@@ -42,6 +44,11 @@ def insert_project_execution_config(
             "role_id": snapshot.role_id,
             "role_json": json.dumps(snapshot.role, ensure_ascii=False, sort_keys=True) if snapshot.role is not None else None,
             "proxy_id": snapshot.proxy_id,
+            "container_json": json.dumps(snapshot.container, ensure_ascii=False, sort_keys=True),
+            "workers_json": json.dumps(snapshot.workers, ensure_ascii=False, sort_keys=True),
+            "proxies_json": json.dumps(snapshot.proxies, ensure_ascii=False, sort_keys=True),
+            "settings_json": json.dumps(snapshot.settings, ensure_ascii=False, sort_keys=True),
+            "catalog_json": json.dumps(snapshot.catalog, ensure_ascii=False, sort_keys=True),
             "dispatch_sha256": snapshot.revision["dispatch_sha256"],
             "resources_sha256": snapshot.revision["resources_sha256"],
             "prompts_json": json.dumps(snapshot.prompt_snapshot, ensure_ascii=False, sort_keys=True),
@@ -92,12 +99,12 @@ def insert_project_execution_config(
                     project_id, task_type, role, position, profile_id,
                     snapshot_name, snapshot_worker_type, snapshot_provider,
                     snapshot_base_url, snapshot_model, snapshot_reasoning_type,
-                    snapshot_api_key_env
+                    snapshot_api_key_env, snapshot_api_key_value
                 ) VALUES (
                     :project_id, :task_type, :role, :position, :profile_id,
                     :snapshot_name, :snapshot_worker_type, :snapshot_provider,
                     :snapshot_base_url, :snapshot_model, :snapshot_reasoning_type,
-                    :snapshot_api_key_env
+                    :snapshot_api_key_env, :snapshot_api_key_value
                 )
                 """,
                 {"project_id": project_id, **snap.model_dump()},

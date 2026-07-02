@@ -122,6 +122,24 @@ class _ListedContainer:
         self.labels = labels or {}
 
 
+class _ExistingContainer:
+    def __init__(self, *, source: str, rw: bool, status: str = "running", image: str | None = None) -> None:
+        self.attrs = {
+            "Config": {"Image": image} if image is not None else {},
+            "State": {"Status": status},
+            "Mounts": [
+                {
+                    "Destination": "/home/kali/workspace",
+                    "Source": source,
+                    "RW": rw,
+                }
+            ],
+        }
+        self.reload = MagicMock()
+        self.remove = MagicMock()
+        self.start = MagicMock()
+
+
 class ContainerUserRuntimeTests(unittest.TestCase):
     def _make_manager(self, user, exec_user=None):
         from cairn.dispatcher.runtime.containers import ContainerManager
@@ -207,6 +225,100 @@ class ContainerUserRuntimeTests(unittest.TestCase):
 
         stale.remove.assert_called_once_with(force=True)
         self.assertEqual(dm.containers.run.call_count, 1)
+
+    def test_existing_running_container_with_mount_source_drift_is_recreated(self):
+        dm = _DockerMock()
+        stale = _ExistingContainer(source="/tmp/old-project-files/proj-1", rw=True, status="running")
+        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            name = mgr.ensure_running("proj-1")
+
+        self.assertEqual(name, "cairn-worker-proj-1")
+        stale.remove.assert_called_once_with(force=True)
+        self.assertEqual(dm.containers.run.call_count, 1)
+        self.assertIn("proj-1", next(iter(dm.containers.run.call_args.kwargs["volumes"])))
+
+    def test_existing_stopped_container_with_mount_mode_drift_is_recreated(self):
+        dm = _DockerMock()
+        expected_source = str((Path("./datas/project-files/proj-1")).expanduser().resolve(strict=False))
+        stale = _ExistingContainer(source=expected_source, rw=False, status="exited")
+        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            mgr.ensure_running("proj-1")
+
+        stale.remove.assert_called_once_with(force=True)
+        stale.start.assert_not_called()
+        self.assertEqual(dm.containers.run.call_count, 1)
+
+    def test_existing_running_container_without_mount_drift_is_reused(self):
+        dm = _DockerMock()
+        expected_source = str((Path("./datas/project-files/proj-1")).expanduser().resolve(strict=False))
+        existing = _ExistingContainer(source=expected_source, rw=True, status="running")
+        dm.containers.get.side_effect = [existing, existing]
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            name = mgr.ensure_running("proj-1")
+
+        self.assertEqual(name, "cairn-worker-proj-1")
+        existing.remove.assert_not_called()
+        existing.start.assert_not_called()
+        dm.containers.run.assert_not_called()
+
+    def test_existing_running_container_with_image_drift_is_recreated(self):
+        dm = _DockerMock()
+        expected_source = str((Path("./datas/project-files/proj-1")).expanduser().resolve(strict=False))
+        stale = _ExistingContainer(
+            source=expected_source,
+            rw=True,
+            status="running",
+            image="cairn/old:latest",
+        )
+        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        with dm.install():
+            mgr = self._make_manager(user="0:0")
+            mgr.ensure_running("proj-1")
+
+        stale.remove.assert_called_once_with(force=True)
+        self.assertEqual(dm.containers.run.call_count, 1)
+        self.assertEqual(dm.containers.run.call_args.args[0], "cairn/test:latest")
+
+    def test_existing_container_inspection_error_is_logged_without_recreate(self):
+        from cairn.dispatcher.runtime.container_lifecycle import ContainerLifecycle
+        from cairn.shared.config import BindMountConfig, ContainerConfig
+
+        lifecycle = ContainerLifecycle(
+            config=ContainerConfig(
+                image="cairn/test:latest",
+                user="0:0",
+                network_mode="cairn",
+                completed_action="stop",
+                bind_mounts=[
+                    BindMountConfig(
+                        name="project-files",
+                        host_path="./datas/project-files/{project_id}",
+                        container_path="/home/kali/workspace",
+                        read_only=False,
+                    ),
+                ],
+            ),
+            access=MagicMock(),
+            api_error_type=Exception,
+            docker_exception_type=Exception,
+            proxy_environment=lambda _project_id: {},
+            inspect_state=lambda _name: "running",
+            log_mount_mismatches=MagicMock(),
+            mount_mismatches=lambda _name, _project_id: ["failed to inspect mounts: unavailable"],
+        )
+        lifecycle.remove_container = MagicMock()
+        lifecycle._create_container = MagicMock(return_value="created")  # type: ignore[method-assign]
+
+        result = lifecycle.ensure_running("proj-1")
+
+        self.assertEqual(result, "cairn-worker-proj-1")
+        lifecycle.remove_container.assert_not_called()
+        lifecycle._create_container.assert_not_called()
 
     def test_startup_container_receives_owner_labels(self):
         dm = _DockerMock()

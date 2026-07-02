@@ -151,6 +151,74 @@ class CapabilityManifestTests(unittest.TestCase):
         self.assertEqual(skill["preferred_mcp_ids"], ["kali-server-mcp"])
         self.assertEqual(skill["activation_hint"], "Read SKILL.md first.")
 
+    def test_injection_prefers_execution_config_catalog_snapshot(self) -> None:
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.shared.config import McpServerCapabilityConfig, RemoteSupportConfig, SkillCapabilityConfig
+
+        config = SimpleNamespace(
+            remote_support=RemoteSupportConfig(),
+            capabilities=SimpleNamespace(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="snap-mcp",
+                        name="Current MCP",
+                        transport="stdio",
+                        command="current-mcp",
+                        task_types=["explore"],
+                    )
+                ],
+                skills=[
+                    SkillCapabilityConfig(
+                        id="snap-skill",
+                        name="Current Skill",
+                        source_path="/current/skill",
+                        task_types=["explore"],
+                    )
+                ],
+            ),
+        )
+        writer = mock.MagicMock()
+
+        result = inject_project_capabilities(
+            config,  # type: ignore[arg-type]
+            writer,
+            "container",
+            "proj",
+            "explore",
+            "intent",
+            {
+                "catalog": [
+                    {
+                        "kind": "mcp_server",
+                        "id": "snap-mcp",
+                        "name": "Snapshot MCP",
+                        "transport": "stdio",
+                        "command": "snapshot-mcp",
+                        "task_types": ["explore"],
+                    },
+                    {
+                        "kind": "skill",
+                        "id": "snap-skill",
+                        "name": "Snapshot Skill",
+                        "source_path": "/snapshot/skill",
+                        "task_types": ["explore"],
+                    },
+                ],
+                "tasks": {
+                    "explore": {
+                        "snapshots": [
+                            {"kind": "mcp_server", "capability_id": "snap-mcp"},
+                            {"kind": "skill", "capability_id": "snap-skill"},
+                        ],
+                    }
+                },
+            },
+        )
+
+        self.assertIn("snap-mcp", result.mcp_servers)
+        self.assertIn("snap-skill", result.skills)
+        writer.write_directory.assert_any_call("container", mock.ANY, Path("/snapshot/skill"))
+
 
 class DispatcherCatalogPayloadRequiredSkillIdsTests(unittest.TestCase):
     """catalog_payload carries required_skill_ids for MCP entries."""

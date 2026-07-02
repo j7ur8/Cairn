@@ -23,6 +23,7 @@ class ContainerLifecycle:
         proxy_environment: Callable[[str], dict[str, str]],
         inspect_state: Callable[[str], str | None],
         log_mount_mismatches: Callable[[str, str], None],
+        mount_mismatches: Callable[[str, str], list[str]],
     ) -> None:
         self.config = config
         self.access = access
@@ -31,41 +32,51 @@ class ContainerLifecycle:
         self.proxy_environment = proxy_environment
         self.inspect_state = inspect_state
         self.log_mount_mismatches = log_mount_mismatches
+        self.mount_mismatches = mount_mismatches
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
 
     def ensure_running(self, project_id: str) -> str:
+        return self.ensure_running_with_config(project_id, self.config)
+
+    def ensure_running_with_config(self, project_id: str, config: ContainerConfig) -> str:
         name = container_name(project_id)
         with self._ensure_running_lock(name):
-            return self._ensure_running_locked(project_id, name)
+            return self._ensure_running_locked(project_id, name, config)
 
-    def _ensure_running_locked(self, project_id: str, name: str) -> str:
+    def _ensure_running_locked(self, project_id: str, name: str, config: ContainerConfig) -> str:
         state = self.inspect_state(name)
         if state == "running":
-            self.log_mount_mismatches(name, project_id)
+            if self._recreate_if_config_mismatch(name, project_id, config):
+                return self._create_container(project_id, name, config)
             LOG.debug("container already running project=%s container=%s", project_id, name)
             return name
         if state is not None:
-            self.log_mount_mismatches(name, project_id)
+            if self._recreate_if_config_mismatch(name, project_id, config):
+                return self._create_container(project_id, name, config)
             LOG.info("starting existing container project=%s container=%s state=%s", project_id, name, state)
             self.start_existing(name)
             return name
-        LOG.info("creating container project=%s container=%s image=%s", project_id, name, self.config.image)
+        LOG.info("creating container project=%s container=%s image=%s", project_id, name, config.image)
+        return self._create_container(project_id, name, config)
+
+    def _create_container(self, project_id: str, name: str, config: ContainerConfig | None = None) -> str:
+        effective_config = config or self.config
         try:
             self.access.client.containers.run(
-                self.config.image,
+                effective_config.image,
                 ["sleep", "infinity"],
                 detach=True,
                 name=name,
-                network_mode=self.config.network_mode,
-                cap_add=self.config.cap_add or None,
-                volumes=docker_volumes(self.config, project_id) or None,
+                network_mode=effective_config.network_mode,
+                cap_add=effective_config.cap_add or None,
+                volumes=docker_volumes(effective_config, project_id) or None,
                 environment=self.proxy_environment(project_id) or None,
-                user=self.config.user,
+                user=effective_config.user,
                 labels=container_labels(project_id),
-                mem_limit=self.config.mem_limit,
-                pids_limit=self.config.pids_limit,
-                nano_cpus=self.config.nano_cpus,
+                mem_limit=effective_config.mem_limit,
+                pids_limit=effective_config.pids_limit,
+                nano_cpus=effective_config.nano_cpus,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
             return name
@@ -75,14 +86,44 @@ class ContainerLifecycle:
         LOG.info("container name conflict, reusing existing container project=%s container=%s", project_id, name)
         state = self.inspect_state(name)
         if state == "running":
-            self.log_mount_mismatches(name, project_id)
+            if self._recreate_if_config_mismatch(name, project_id, effective_config):
+                return self._create_container(project_id, name, effective_config)
             return name
         if state is not None:
-            self.log_mount_mismatches(name, project_id)
+            if self._recreate_if_config_mismatch(name, project_id, effective_config):
+                return self._create_container(project_id, name, effective_config)
             LOG.info("starting conflicted existing container project=%s container=%s state=%s", project_id, name, state)
             self.start_existing(name)
             return name
         raise RuntimeError(f"failed to create container {name}")
+
+    def _recreate_if_config_mismatch(self, name: str, project_id: str, config: ContainerConfig) -> bool:
+        mismatches = self._mount_mismatches(name, project_id, config)
+        if not mismatches:
+            return False
+        self._log_mount_mismatches(name, project_id, config)
+        if not any(_requires_container_recreate(mismatch) for mismatch in mismatches):
+            return False
+        LOG.info(
+            "removing container with stale config project=%s container=%s mismatches=%s",
+            project_id,
+            name,
+            len(mismatches),
+        )
+        self.remove_container(name, force=True)
+        return True
+
+    def _mount_mismatches(self, name: str, project_id: str, config: ContainerConfig) -> list[str]:
+        try:
+            return self.mount_mismatches(name, project_id, config)
+        except TypeError:
+            return self.mount_mismatches(name, project_id)  # type: ignore[misc]
+
+    def _log_mount_mismatches(self, name: str, project_id: str, config: ContainerConfig) -> None:
+        try:
+            self.log_mount_mismatches(name, project_id, config)
+        except TypeError:
+            self.log_mount_mismatches(name, project_id)  # type: ignore[misc]
 
     def create_startup_container(self, name: str, project_id: str) -> str:
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self.config.image)
@@ -153,3 +194,12 @@ class ContainerLifecycle:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         explanation = str(getattr(exc, "explanation", "") or exc)
         return status_code == 409 or "is already in use" in explanation
+
+
+def _requires_container_recreate(mismatch: str) -> bool:
+    return (
+        mismatch.startswith("image mismatch ")
+        or mismatch.startswith("missing ")
+        or " source mismatch " in mismatch
+        or " mode mismatch " in mismatch
+    )

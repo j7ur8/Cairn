@@ -32,8 +32,9 @@ def update_system_settings(body: SystemSettingsAdmin) -> SystemSettingsAdmin:
     _write_task_timeouts(data, body.task_timeouts)
     _write_observability(data, body.observability)
     _write_server_log_retention(data, body.server_log_retention)
-    save_dispatch_data(data)
-    return _system_settings_from_data(data)
+    reload_status = save_dispatch_data(data)
+    result = _system_settings_from_data(data)
+    return result.model_copy(update=reload_status)
 
 
 def _system_settings_from_data(data: dict[str, Any]) -> SystemSettingsAdmin:

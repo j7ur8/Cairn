@@ -8,12 +8,12 @@ from typing import Protocol
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.process import ManagedProcess
-from cairn.shared.config import DispatchConfig, WorkerConfig
+from cairn.shared.config import ContainerConfig, DispatchConfig, WorkerConfig
 from cairn.shared.contracts import Intent, ProjectDetail
 
 
 class ContainerRuntime(Protocol):
-    def ensure_running(self, project_id: str) -> str: ...
+    def ensure_running(self, project_id: str, container_config: ContainerConfig | None = None) -> str: ...
 
     def build_exec_process(
         self,

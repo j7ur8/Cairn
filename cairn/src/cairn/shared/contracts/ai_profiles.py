@@ -140,3 +140,4 @@ class ProjectAiProfileSnapshot(BaseModel):
     snapshot_model: str
     snapshot_reasoning_type: ReasoningType | None = None
     snapshot_api_key_env: str
+    snapshot_api_key_value: str = ""

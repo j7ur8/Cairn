@@ -156,7 +156,7 @@ sequenceDiagram
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
 | Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
 
-当前 Alembic head 为 `0009_drop_intent_metadata`，移除已废弃的 intent priority/branch metadata 字段；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+当前 Alembic head 为 `0010_project_runtime_snapshots`，为项目 execution config 增加运行时快照 JSON 与 AI profile 明文 secret snapshot；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
 前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_close.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
 
@@ -215,7 +215,7 @@ sequenceDiagram
 
 性能敏感查询仍收敛在 repository/query 层：project summaries 使用 facts/intents/hints 预聚合 join；execution list 先分页再聚合 events；event view 先计算 by-kind stats，再按可见 `event_kind` 拉取 primary events；retention 使用 DB join delete；replay route extraction 按 completion facts 可达子图加载。Router、application service 和 DTO contract 不暴露这些 SQL 形态。
 
-Execution config 是不可变项目快照：创建项目或 replay project 时插入一次，`project_id` 已存在会触发 `ServerInvariantError`，不会覆盖 header/timeouts/AI profiles/capabilities。Dispatcher 因此不做版本轮询或 TTL；`ExecutionConfigResolver` 仅在 process/reload、project log-state clear 或 404 时失效缓存，并对缓存读写返回 deep copy，避免任务下游修改 dict 污染后续 dispatch。
+Execution config 是不可变项目快照：创建项目或 replay project 时插入一次，`project_id` 已存在会触发 `ServerInvariantError`，不会覆盖 header/timeouts/AI profiles/capabilities/runtime snapshots。Dispatcher 因此不做版本轮询或 TTL；`ExecutionConfigResolver` 仅在 process/reload、project log-state clear 或 404 时失效缓存，并对缓存读写返回 deep copy，避免任务下游修改 dict 污染后续 dispatch。
 
 共享数据：
 

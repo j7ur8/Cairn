@@ -214,6 +214,11 @@ class ProjectExecutionConfigRow(Base):
     role_id: Mapped[str | None] = mapped_column(Text)
     role_json: Mapped[str | None] = mapped_column(Text)
     proxy_id: Mapped[str | None] = mapped_column(Text)
+    container_json: Mapped[str | None] = mapped_column(Text)
+    workers_json: Mapped[str | None] = mapped_column(Text)
+    proxies_json: Mapped[str | None] = mapped_column(Text)
+    settings_json: Mapped[str | None] = mapped_column(Text)
+    catalog_json: Mapped[str | None] = mapped_column(Text)
     dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     resources_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     prompts_json: Mapped[str | None] = mapped_column(Text)
@@ -247,6 +252,7 @@ class ProjectExecutionAiProfileRow(Base):
     snapshot_model: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot_reasoning_type: Mapped[str | None] = mapped_column(Text)
     snapshot_api_key_env: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    snapshot_api_key_value: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
 
 
 class ProjectExecutionCapabilityRow(Base):

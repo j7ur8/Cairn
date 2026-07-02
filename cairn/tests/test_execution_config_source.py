@@ -26,7 +26,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.db.reset_for_tests()
         self.yaml.__exit__(None, None, None)
 
-    def test_project_create_writes_structured_execution_config_without_secret(self) -> None:
+    def test_project_create_writes_structured_execution_config_with_runtime_snapshot(self) -> None:
         from cairn.server.routers.ai_profiles import create_ai_profile
         from cairn.server.routers.projects import create_project
         from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
@@ -81,7 +81,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             ai_rows = sql.fetchall(
                 conn,
                 """
-                SELECT task_type, profile_id, snapshot_model, snapshot_reasoning_type
+                SELECT task_type, profile_id, snapshot_model, snapshot_reasoning_type, snapshot_api_key_value
                 FROM project_execution_ai_profiles
                 WHERE project_id = :project_id
                 ORDER BY task_type
@@ -141,7 +141,13 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual(explore_config["prompt_snapshot"], prompt_snapshot)
         self.assertIn("task_timeouts", explore_config)
         self.assertNotIn("sk", explore_config["ai_profiles"][0])
-        self.assertNotIn("test-key", str(explore_config))
+        self.assertEqual(explore_config["ai_profiles"][0]["snapshot_api_key_value"], "test-key")
+        self.assertEqual(ai_rows[0]["snapshot_api_key_value"], "test-key")
+        self.assertIn("container", explore_config)
+        self.assertIn("workers", explore_config)
+        self.assertIn("proxies", explore_config)
+        self.assertIn("settings", explore_config)
+        self.assertIn("catalog", explore_config)
 
     def test_execution_config_patch_route_is_not_available(self) -> None:
         import time
@@ -295,6 +301,62 @@ class ExecutionConfigSourceTests(unittest.TestCase):
             self.assertEqual(replay_config["task_timeout"], {"timeout": 33, "conclude_timeout": 34})
             self.assertEqual(replay_config["config_version"], 1)
             self.assertEqual(source_config["task_timeout"], {"timeout": 11, "conclude_timeout": 12})
+
+    def test_project_execution_config_assembly_uses_snapshot_not_current_yaml(self) -> None:
+        import yaml
+
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
+            AiProfileCreate,
+            AiProfileSelection,
+            TaskAiProfileSelections,
+        )
+
+        profile = create_ai_profile(AiProfileCreate(
+            name="snap-profile",
+            worker_type="codex",
+            model="gpt-original",
+            api_key_env="OPENAI_API_KEY",
+            sk="original-secret",
+        ))
+        selection = AiProfileSelection(
+            primary_profile_id=profile.id,
+            primary_model="gpt-original",
+            primary_reasoning_type="medium",
+        )
+        project = create_project(CreateProjectRequest(
+            title="snapshot isolation",
+            origin="origin",
+            goal="goal",
+            task_timeouts=test_task_timeouts(explore_timeout=11),
+            capabilities={
+                "bootstrap": CapabilitySelection(),
+                "explore": CapabilitySelection(),
+                "reason": CapabilitySelection(),
+            },
+            ai_profiles=TaskAiProfileSelections(
+                bootstrap=selection,
+                explore=selection,
+                reason=selection,
+            ),
+        ))
+
+        data = yaml.safe_load(self.yaml.dispatch_path.read_text(encoding="utf-8"))
+        data["worker_runtime"]["container"]["image"] = "cairn/changed:latest"
+        data["server"]["settings"]["intent_timeout"] = 99
+        data["worker_pool"]["workers"][0]["env"]["OPENAI_API_KEY"] = "changed-secret"
+        self.yaml.dispatch_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config
+
+            config = load_project_execution_config(conn, project.project.id, "explore")
+
+        self.assertEqual(config["container"]["image"], "cairn/test:latest")
+        self.assertEqual(config["settings"]["intent_timeout"], 5)
+        self.assertEqual(config["ai_profiles"][0]["snapshot_api_key_value"], "original-secret")
 
     def test_create_project_request_requires_task_timeouts(self) -> None:
         from pydantic import ValidationError

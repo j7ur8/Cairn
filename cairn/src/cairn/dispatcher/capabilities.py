@@ -104,8 +104,7 @@ def inject_project_capabilities(
     ]
     selected_mcp = [item for item in selected_mcp if item]
     selected_skills = [item for item in selected_skills if item]
-    mcp_by_id = {item.id: item for item in config.capabilities.mcp_servers}
-    skill_by_id = {item.id: item for item in config.capabilities.skills}
+    mcp_by_id, skill_by_id = _capability_catalog_from_selection(config, selection_data)
     errors: list[str] = list(files_errors)
 
     mcp_servers: list[McpServerCapabilityConfig] = []
@@ -232,3 +231,57 @@ def _safe_path_segment(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     text = text.strip("._")
     return text or "unknown"
+
+
+def _capability_catalog_from_selection(
+    config: DispatchConfig,
+    selection_data: dict[str, Any],
+) -> tuple[dict[str, McpServerCapabilityConfig], dict[str, SkillCapabilityConfig]]:
+    catalog_raw = selection_data.get("catalog")
+    if not isinstance(catalog_raw, list):
+        return (
+            {item.id: item for item in config.capabilities.mcp_servers},
+            {item.id: item for item in config.capabilities.skills},
+        )
+    mcp_by_id: dict[str, McpServerCapabilityConfig] = {}
+    skill_by_id: dict[str, SkillCapabilityConfig] = {}
+    for item in catalog_raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            if item.get("kind") == "mcp_server":
+                mcp_by_id[str(item.get("id") or "")] = McpServerCapabilityConfig.model_validate(_mcp_config_payload(item))
+            elif item.get("kind") == "skill":
+                skill_by_id[str(item.get("id") or "")] = SkillCapabilityConfig.model_validate(_skill_config_payload(item))
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("execution config capability catalog item ignored id=%s error=%s", item.get("id"), exc)
+    return mcp_by_id, skill_by_id
+
+
+def _mcp_config_payload(item: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(item)
+    payload.pop("kind", None)
+    payload.pop("source", None)
+    payload.pop("requires_ids", None)
+    payload.pop("preferred_mcp_ids", None)
+    payload["transport"] = payload.get("transport") or "stdio"
+    payload["name"] = payload.get("name") or payload.get("id") or ""
+    if payload.get("transport") == "stdio":
+        payload["command"] = payload.get("command") or "true"
+    return payload
+
+
+def _skill_config_payload(item: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(item)
+    payload.pop("kind", None)
+    payload.pop("source", None)
+    payload.pop("transport", None)
+    payload.pop("command", None)
+    payload.pop("args", None)
+    payload.pop("env", None)
+    payload.pop("url", None)
+    payload.pop("headers", None)
+    payload.pop("required_skill_ids", None)
+    payload["name"] = payload.get("name") or payload.get("id") or ""
+    payload["source_path"] = payload.get("source_path") or "."
+    return payload

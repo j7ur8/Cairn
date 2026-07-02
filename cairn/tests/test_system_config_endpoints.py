@@ -175,6 +175,9 @@ class SystemSettingsEndpointTests(unittest.TestCase):
         reread = self.read()
 
         self.assertEqual(result.settings.intent_timeout, 15)
+        self.assertTrue(result.saved)
+        self.assertFalse(result.reload_applied)
+        self.assertIsNone(result.reload_error)
         self.assertEqual(reread.runtime_limits.max_workers, 16)
         self.assertEqual(reread.task_timeouts.bootstrap.conclude_timeout, 120)
         self.assertEqual(reread.task_timeouts.explore.timeout, 650)
@@ -237,6 +240,54 @@ class SystemSettingsEndpointTests(unittest.TestCase):
 
         defaults = self.read_task_timeout_defaults()
         self.assertEqual(defaults.reason.max_intents, 2)
+
+
+class DispatcherReloadStatusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from helpers import TempYamlConfig
+
+        dispatch = SystemSettingsEndpointTests()._dispatch()
+        dispatch["dispatcher"]["reload"] = {
+            "url": "http://127.0.0.1:9100/reload",
+            "enabled": True,
+        }
+        self.yaml = TempYamlConfig(dispatch=dispatch)
+        self.yaml.__enter__()
+
+    def tearDown(self) -> None:
+        self.yaml.__exit__(None, None, None)
+
+    def test_trigger_dispatcher_reload_reports_ok_body(self) -> None:
+        from unittest import mock
+
+        from cairn.server.config.files import trigger_dispatcher_reload
+
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"ok":true,"workers":2}'
+        response.__enter__.return_value = response
+
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            result = trigger_dispatcher_reload()
+
+        self.assertEqual(result, {"saved": True, "reload_applied": True, "reload_error": None})
+
+    def test_trigger_dispatcher_reload_reports_ok_false_body(self) -> None:
+        from unittest import mock
+
+        from cairn.server.config.files import trigger_dispatcher_reload
+
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"ok":false,"error":"bad config"}'
+        response.__enter__.return_value = response
+
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            result = trigger_dispatcher_reload()
+
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["reload_applied"])
+        self.assertEqual(result["reload_error"], "bad config")
 
 
 class ValidationPathResolutionTests(unittest.TestCase):

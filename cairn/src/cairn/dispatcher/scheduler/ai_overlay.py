@@ -40,6 +40,8 @@ def compute_ai_overlay(
         token: str | None = None
         if cached_secret:
             token = cached_secret
+        elif snapshot.snapshot_api_key_value:
+            token = snapshot.snapshot_api_key_value
         if token:
             overlay[snapshot.snapshot_api_key_env] = token
     if snapshot.snapshot_reasoning_type:
@@ -73,10 +75,10 @@ class AIOverlayCache:
     """
 
     ttl_seconds: float = OVERLAY_TTL_SECONDS
-    _store: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = field(default_factory=dict)
+    _store: dict[tuple[str, str, str, str, str], tuple[float, dict[str, str]]] = field(default_factory=dict)
 
     def get(self, project_id: str, snapshot: ProjectAiProfileSnapshot) -> dict[str, str] | None:
-        key = (project_id, snapshot.profile_id, snapshot.snapshot_api_key_env)
+        key = self._key(project_id, snapshot)
         entry = self._store.get(key)
         if entry is None:
             return None
@@ -92,7 +94,7 @@ class AIOverlayCache:
         snapshot: ProjectAiProfileSnapshot,
         overlay: dict[str, str],
     ) -> None:
-        key = (project_id, snapshot.profile_id, snapshot.snapshot_api_key_env)
+        key = self._key(project_id, snapshot)
         self._store[key] = (time.time() + self.ttl_seconds, dict(overlay))
 
     def invalidate(self, project_id: str | None = None) -> None:
@@ -112,3 +114,13 @@ class AIOverlayCache:
 
     def __len__(self) -> int:
         return len(self._store)
+
+    @staticmethod
+    def _key(project_id: str, snapshot: ProjectAiProfileSnapshot) -> tuple[str, str, str, str, str]:
+        return (
+            project_id,
+            snapshot.profile_id,
+            snapshot.snapshot_api_key_env,
+            snapshot.snapshot_api_key_value,
+            snapshot.snapshot_model,
+        )

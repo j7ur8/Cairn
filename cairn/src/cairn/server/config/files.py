@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,28 +64,32 @@ def load_resources_data() -> dict[str, Any]:
     return config_store().load_resources()
 
 
-def save_dispatch_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> None:
+def save_dispatch_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> dict[str, Any]:
     workers = (data.get("worker_pool") or {}).get("workers") if isinstance(data.get("worker_pool"), dict) else []
     if not (workers or []):
         _atomic_write_yaml(config_yaml_path(), data)
         _reset_runtime_config()
-        return
+        return _save_status(reload_applied=False, reload_error=None)
     _validate_dispatch_data(data)
     config_store().save_dispatch(data)
+    reload_status = _save_status(reload_applied=False, reload_error=None)
     if reload_dispatcher:
-        trigger_dispatcher_reload()
+        reload_status = trigger_dispatcher_reload()
     _reset_runtime_config()
+    return reload_status
 
 
-def save_resources_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> None:
+def save_resources_data(data: dict[str, Any], *, reload_dispatcher: bool = True) -> dict[str, Any]:
     merged = deepcopy(load_dispatch_data())
     merged["resources"] = data
     if ((merged.get("worker_pool") or {}).get("workers") or []):
         _validate_dispatch_data(merged)
     config_store().save_resources(data)
+    reload_status = _save_status(reload_applied=False, reload_error=None)
     if reload_dispatcher:
-        trigger_dispatcher_reload()
+        reload_status = trigger_dispatcher_reload()
     _reset_runtime_config()
+    return reload_status
 
 
 def _reset_runtime_config() -> None:
@@ -93,24 +98,41 @@ def _reset_runtime_config() -> None:
     reset_runtime_config_cache()
 
 
-def trigger_dispatcher_reload() -> None:
+def trigger_dispatcher_reload() -> dict[str, Any]:
     from cairn.server.runtime_config import system_config
     runtime = system_config()
     if not runtime.dispatcher.reload_enabled:
-        return
+        return _save_status(reload_applied=False, reload_error=None)
     token = runtime.auth.dispatcher_api_token
     req = urllib.request.Request(runtime.dispatcher.reload_url, method="POST")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
+            raw = response.read().decode("utf-8", errors="replace")
             if response.status >= 400:
-                raise HTTPException(503, f"dispatcher reload failed: HTTP {response.status}")
+                return _save_status(reload_applied=False, reload_error=f"dispatcher reload failed: HTTP {response.status}: {raw[:1000]}")
+            try:
+                payload = json.loads(raw or "{}")
+            except json.JSONDecodeError as exc:
+                return _save_status(reload_applied=False, reload_error=f"dispatcher reload invalid response: {exc}")
+            if isinstance(payload, dict) and payload.get("ok") is True:
+                return _save_status(reload_applied=True, reload_error=None)
+            error = payload.get("error") if isinstance(payload, dict) else None
+            return _save_status(reload_applied=False, reload_error=str(error or "dispatcher reload returned ok=false"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise HTTPException(503, f"dispatcher reload failed: HTTP {exc.code}: {detail}") from exc
+        return _save_status(reload_applied=False, reload_error=f"dispatcher reload failed: HTTP {exc.code}: {detail}")
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(503, f"dispatcher reload failed: {exc}") from exc
+        return _save_status(reload_applied=False, reload_error=f"dispatcher reload failed: {exc}")
+
+
+def _save_status(*, reload_applied: bool, reload_error: str | None) -> dict[str, Any]:
+    return {
+        "saved": True,
+        "reload_applied": reload_applied,
+        "reload_error": reload_error,
+    }
 
 
 def config_revision() -> dict[str, str]:
