@@ -19,6 +19,10 @@ def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dic
     }
 
 
+def _intent_key(row: Any) -> tuple[str, str]:
+    return (row["project_id"], row["id"])
+
+
 class IntentRepository:
     def __init__(self, conn: Any):
         self.conn = conn
@@ -338,23 +342,27 @@ def _hydrate_intent_sources_batch(
 ) -> dict[str, list[dict[str, Any]]]:
     """Same as :func:`_hydrate_intent_sources` but for intents spanning many
     projects. Returns ``{project_id: [intent, …]}``."""
-    intent_ids = {row["id"] for row in rows}
-    sources_by_intent: dict[str, list[str]] = {iid: [] for iid in intent_ids}
+    intent_keys = {_intent_key(row) for row in rows}
+    project_ids = {project_id for project_id, _intent_id in intent_keys}
+    intent_ids = {intent_id for _project_id, intent_id in intent_keys}
+    sources_by_intent: dict[tuple[str, str], list[str]] = {key: [] for key in intent_keys}
     for source in sql.fetchall(
         conn,
         """
-        SELECT intent_id, fact_id
+        SELECT project_id, intent_id, fact_id
         FROM intent_sources
-        WHERE intent_id = ANY(:intent_ids)
-        ORDER BY intent_id, position, fact_id
+        WHERE project_id = ANY(:project_ids)
+          AND intent_id = ANY(:intent_ids)
+        ORDER BY project_id, intent_id, position, fact_id
         """,
-        {"intent_ids": list(intent_ids)},
+        {"project_ids": list(project_ids), "intent_ids": list(intent_ids)},
     ):
-        bid = sources_by_intent.get(source["intent_id"])
+        bid = sources_by_intent.get((source["project_id"], source["intent_id"]))
         if bid is not None:
             bid.append(source["fact_id"])
     result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         pid = row["project_id"]
-        result.setdefault(pid, []).append(_intent_projection(row, sources_by_intent))
+        row_sources = {row["id"]: sources_by_intent.get(_intent_key(row), [])}
+        result.setdefault(pid, []).append(_intent_projection(row, row_sources))
     return result

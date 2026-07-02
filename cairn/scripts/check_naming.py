@@ -62,6 +62,19 @@ def _is_skipped(path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.parts)
 
 
+def _is_vendor_capability_asset(path: Path) -> bool:
+    try:
+        parts = path.relative_to(REPO_ROOT).parts
+    except ValueError:
+        return False
+    if not parts or parts[0] != "capabilities":
+        return False
+    return any(
+        part == "tools" and index + 1 < len(parts) and parts[index + 1] == "vendor"
+        for index, part in enumerate(parts[:-1])
+    )
+
+
 def _is_alembic_revision(path: Path) -> bool:
     return path.parent.name == "versions" and path.parent.parent.name == "migrations"
 
@@ -118,6 +131,8 @@ def _check_yaml_names(errors: list[str]) -> None:
         if _is_skipped(path) or not path.is_file():
             continue
         if path.suffix not in {".yaml", ".yml"}:
+            continue
+        if _is_vendor_capability_asset(path):
             continue
         if "_" in path.name:
             errors.append(f"YAML file name must not use underscores: {path.relative_to(REPO_ROOT)}")

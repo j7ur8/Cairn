@@ -80,6 +80,69 @@ class DedupePathTests(unittest.TestCase):
             result2 = _dedupe_path(project_dir, "report.txt")
             self.assertEqual(result2.name, "report-2.txt")
 
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlink support is required")
+    def test_dedupes_existing_symlink(self) -> None:
+        from cairn.server.application.project_io import _dedupe_path
+
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            (project_dir / "report.txt").symlink_to(project_dir / "target.txt")
+
+            result = _dedupe_path(project_dir, "report.txt")
+
+            self.assertEqual(result.name, "report-1.txt")
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlink support is required")
+    def test_dedupes_broken_symlink(self) -> None:
+        from cairn.server.application.project_io import _dedupe_path
+
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            (project_dir / "report.txt").symlink_to(project_dir / "missing.txt")
+
+            result = _dedupe_path(project_dir, "report.txt")
+
+            self.assertEqual(result.name, "report-1.txt")
+
+    def test_sibling_prefix_directory_does_not_count_as_inside(self) -> None:
+        from cairn.server.application.project_io import _dedupe_path
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            project_dir = root / "proj"
+            sibling = root / "proj-other"
+            project_dir.mkdir()
+            sibling.mkdir()
+
+            result = _dedupe_path(project_dir, "../proj-other/escape.txt")
+
+            self.assertEqual(result.parent, project_dir.resolve())
+            self.assertEqual(result.name, ".._proj-other_escape.txt")
+
+    def test_open_new_file_refuses_existing_symlink(self) -> None:
+        from cairn.server.application.project_io import _open_new_file
+
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            target = project_dir / "target.txt"
+            link = project_dir / "upload.txt"
+            target.write_text("original", encoding="utf-8")
+            link.symlink_to(target)
+
+            with self.assertRaises(FileExistsError):
+                _open_new_file(link)
+            self.assertEqual(target.read_text(encoding="utf-8"), "original")
+
+    def test_open_new_file_creates_regular_file(self) -> None:
+        from cairn.server.application.project_io import _open_new_file
+
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "upload.txt"
+            with _open_new_file(target) as out:
+                out.write(b"payload")
+
+            self.assertEqual(target.read_bytes(), b"payload")
+
 
 class CategoryTests(unittest.TestCase):
     def test_attachment_source_is_attachments(self) -> None:

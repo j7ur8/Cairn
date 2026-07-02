@@ -10,6 +10,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -322,6 +323,77 @@ class ReasonStateServiceTests(unittest.TestCase):
                     ),
                 )
         self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_finish_does_not_clear_replaced_reason_claim_or_bump_revision(self) -> None:
+        from cairn.server.application.reason_commands import claim_reason, finish_reason
+        from cairn.server.domain.reason import reason_trigger_hash
+        from cairn.server.repositories import sql
+        from cairn.server.repositories.reason import ReasonRepository
+        from cairn.server.schemas import ReasonClaimRequest, ReasonFinishRequest
+
+        project_id = self._create_project()
+        trigger = "facts:2->3"
+        trigger_hash = reason_trigger_hash(trigger)
+        with self.db.session_scope() as conn:
+            claim_reason(
+                conn,
+                project_id,
+                ReasonClaimRequest(
+                    worker="codex",
+                    trigger=trigger,
+                    run_id="old-run",
+                    trigger_hash=trigger_hash,
+                    fact_count=3,
+                    hint_count=0,
+                    open_intent_count=0,
+                ),
+            )
+            before = sql.fetchone(conn, "SELECT graph_revision FROM projects WHERE id = :id", {"id": project_id})
+            original_upsert = ReasonRepository.upsert_state
+
+            def replace_claim(repo, *args, **kwargs):
+                sql.execute(
+                    repo.conn,
+                    """
+                    UPDATE projects
+                    SET reason_run_id = 'new-run',
+                        reason_trigger = 'new-trigger'
+                    WHERE id = :id
+                    """,
+                    {"id": project_id},
+                )
+                return original_upsert(repo, *args, **kwargs)
+
+            with patch.object(ReasonRepository, "upsert_state", replace_claim):
+                finish_reason(
+                    conn,
+                    project_id,
+                    ReasonFinishRequest(
+                        worker="codex",
+                        trigger=trigger,
+                        run_id="old-run",
+                        trigger_hash=trigger_hash,
+                        fact_count=3,
+                        hint_count=0,
+                        open_intent_count=0,
+                        outcome="noop",
+                        error=None,
+                    ),
+                )
+            after = sql.fetchone(
+                conn,
+                """
+                SELECT graph_revision, reason_worker, reason_run_id, reason_trigger
+                FROM projects
+                WHERE id = :id
+                """,
+                {"id": project_id},
+            )
+
+        self.assertEqual(after["graph_revision"], before["graph_revision"])
+        self.assertEqual(after["reason_worker"], "codex")
+        self.assertEqual(after["reason_run_id"], "new-run")
+        self.assertEqual(after["reason_trigger"], "new-trigger")
 
     def test_unclaimed_reason_cannot_finish(self) -> None:
         from cairn.server.application.reason_commands import finish_reason

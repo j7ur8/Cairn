@@ -104,7 +104,8 @@ def finish_reason(conn: Any, project_id: str, body: ReasonFinishRequest) -> Proj
         now=now,
     )
     if should_clear_reason_after_finish(row, body.worker):
-        reason.clear_project_reason(project_id)
-        projects.bump_revisions(project_id, graph=True)
+        cleared = reason.clear_project_reason_if_owner(project_id, worker=body.worker, run_id=body.run_id)
+        if cleared:
+            projects.bump_revisions(project_id, graph=True)
     updated = require_project(projects.get(project_id))
     return project_meta_from_row(updated)

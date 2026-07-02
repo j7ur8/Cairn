@@ -90,6 +90,24 @@ class ReasonRepository:
             {"project_id": project_id},
         )
 
+    def clear_project_reason_if_owner(self, project_id: str, *, worker: str, run_id: str | None) -> int:
+        cursor = sql.execute(
+            self.conn,
+            """
+            UPDATE projects
+            SET reason_worker = NULL,
+                reason_run_id = NULL,
+                reason_trigger = NULL,
+                reason_started_at = NULL,
+                reason_last_heartbeat_at = NULL
+            WHERE id = :project_id
+              AND reason_worker = :worker
+              AND reason_run_id IS NOT DISTINCT FROM :run_id
+            """,
+            {"project_id": project_id, "worker": worker, "run_id": run_id},
+        )
+        return cursor.rowcount
+
     def upsert_state(
         self,
         project_id: str,

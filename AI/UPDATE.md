@@ -5,6 +5,14 @@
 
 # 更新日志
 
+## 2026-07-02 — AI 文档与命名检查同步
+
+- 同步 `CODEBASE_ANALYSIS.md` 当前快照：FastAPI route decorator 计数更新为 88，顶层 `test_*.py` 文件数更新为 58，并补充 `GET /projects/{project_id}/graph` 和 `GET /projects/{project_id}/role` API 覆盖。
+- 修正文档结构与注意事项：移除不存在的顶层 `cairn/src/cairn/observability/` 包描述，改为分别记录 server/dispatcher/shared observability 模块；同步当前 Alembic head 为 `0009_drop_intent_metadata`。
+- 同步 CI/guardrail 说明：`CODEBASE_ANALYSIS.md` 记录 `node scripts/check_frontend.mjs` 前端静态检查；`check_naming.py` 对 `capabilities/**/tools/vendor/**` 下 vendored YAML 文件名放行，`NAMING.md` 保留首方 YAML 禁止下划线规则并记录 vendor 例外。
+
+---
+
 ## 2026-06-23 — Intent metadata 文档残留清理
 
 - 同步当前 Alembic head：`0009_drop_intent_metadata`，记录已废弃的 intent metadata 字段 `priority_score`、`intent_kind`、`tags`、`score_reason`、`branch_key`、`branch_depth`、`expected_value` 已由该 migration 移除。

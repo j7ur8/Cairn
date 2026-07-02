@@ -41,6 +41,7 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 - Protocol/resource files keep their required names: `SKILL.md`, `ROLE.md`, and `FILE_OUTPUTS.md`.
 - Alembic migration files keep their revision-prefixed names.
 - Tool-specific config files may keep ecosystem names such as `tailwind.config.js`.
+- Vendored tool assets under `capabilities/**/tools/vendor/**` keep upstream filenames, including YAML files with underscores; first-party YAML files still must avoid underscores.
 - Compatibility shims may temporarily retain old import paths while callers migrate, but new code should use the canonical names.
 
 ## Current Canonical Renames
@@ -58,4 +59,3 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 3. Add or preserve tests for compatibility imports while shims exist.
 4. Do not rename externally visible API routes, JSON fields, database identifiers, YAML keys, or protocol files.
 5. Run `uv run python scripts/check_naming.py` before merging naming-sensitive changes.
-

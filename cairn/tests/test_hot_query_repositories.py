@@ -161,6 +161,23 @@ class HotQueryRepositoryTests(unittest.TestCase):
         self.assertEqual(work_rows["proj_a"]["working_intent_count"], 1)
         self.assertEqual(work_rows["proj_b"]["unclaimed_intent_count"], 0)
 
+    def test_batch_open_intent_sources_are_project_scoped(self) -> None:
+        from cairn.server.repositories.intents import IntentRepository
+
+        self._insert_project("proj_a")
+        self._insert_project("proj_b")
+        self._insert_fact("proj_a", "origin")
+        self._insert_fact("proj_a", "fact_a")
+        self._insert_fact("proj_b", "origin")
+        self._insert_fact("proj_b", "fact_b")
+        self._insert_intent("proj_a", "intent_001", to_fact_id=None, worker=None, concluded_at=None, sources=["fact_a"])
+        self._insert_intent("proj_b", "intent_001", to_fact_id=None, worker=None, concluded_at=None, sources=["fact_b"])
+
+        rows = IntentRepository(self.conn).list_open_intent_projections_batch(["proj_a", "proj_b"])
+
+        self.assertEqual(rows["proj_a"][0]["from"], ["fact_a"])
+        self.assertEqual(rows["proj_b"][0]["from"], ["fact_b"])
+
     def test_execution_list_aggregates_only_paged_execution_events(self) -> None:
         from cairn.server.observability.events_writer import append_event
         from cairn.server.observability.executions import create_execution, list_executions

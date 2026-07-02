@@ -166,6 +166,63 @@ class LeaseExpiryPostgresTests(unittest.TestCase):
         self.assertIsNone(project["reason_started_at"])
         self.assertIsNone(project["reason_last_heartbeat_at"])
 
+    def test_clear_project_reason_if_owner_matches_worker_and_nullable_run_id(self) -> None:
+        from cairn.server.repositories import sql
+        from cairn.server.repositories.reason import ReasonRepository
+
+        with self.db.session_scope() as conn:
+            self._seed_project(conn, "proj_reason")
+            reason = ReasonRepository(conn)
+            self.assertEqual(
+                reason.claim_project_reason(
+                    "proj_reason",
+                    worker="reason_worker",
+                    run_id="run_1",
+                    trigger="manual",
+                    now="2026-06-06T00:00:00Z",
+                ),
+                1,
+            )
+            self.assertEqual(
+                reason.clear_project_reason_if_owner("proj_reason", worker="reason_worker", run_id="run_2"),
+                0,
+            )
+            still_claimed = sql.fetchone(
+                conn,
+                "SELECT reason_worker, reason_run_id FROM projects WHERE id = 'proj_reason'",
+            )
+            self.assertEqual(still_claimed["reason_worker"], "reason_worker")
+            self.assertEqual(still_claimed["reason_run_id"], "run_1")
+            self.assertEqual(
+                reason.clear_project_reason_if_owner("proj_reason", worker="reason_worker", run_id="run_1"),
+                1,
+            )
+            cleared = sql.fetchone(
+                conn,
+                "SELECT reason_worker, reason_run_id FROM projects WHERE id = 'proj_reason'",
+            )
+            self.assertIsNone(cleared["reason_worker"])
+            self.assertIsNone(cleared["reason_run_id"])
+
+            self.assertEqual(
+                reason.claim_project_reason(
+                    "proj_reason",
+                    worker="reason_worker",
+                    run_id=None,
+                    trigger="manual",
+                    now="2026-06-06T00:00:01Z",
+                ),
+                1,
+            )
+            self.assertEqual(
+                reason.clear_project_reason_if_owner("proj_reason", worker="reason_worker", run_id="run_1"),
+                0,
+            )
+            self.assertEqual(
+                reason.clear_project_reason_if_owner("proj_reason", worker="reason_worker", run_id=None),
+                1,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

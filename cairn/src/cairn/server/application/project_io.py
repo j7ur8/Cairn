@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -134,13 +135,19 @@ def write_attachment_files(
     for idx, upload in enumerate(files):
         original_filename = upload.filename or "attachment"
         stored_filename = _safe_filename(original_filename)
-        target = _dedupe_path(project_dir, stored_filename)
-        written_paths.append(target)
         size = 0
-        with target.open("wb") as out:
-            while chunk := upload.file.read(1024 * 1024):
-                size += len(chunk)
-                out.write(chunk)
+        while True:
+            target = _dedupe_path(project_dir, stored_filename)
+            try:
+                with _open_new_file(target) as out:
+                    while chunk := upload.file.read(1024 * 1024):
+                        size += len(chunk)
+                        out.write(chunk)
+                break
+            except FileExistsError:
+                size = 0
+                continue
+        written_paths.append(target)
         worker_path = f"{worker_attachment_root()}/{project_id}/{target.name}"
         description = descriptions[idx] if descriptions and idx < len(descriptions) else ""
         hint = _attachment_hint(description, worker_path)
@@ -212,21 +219,31 @@ def _safe_filename(filename: str) -> str:
 
 
 def _dedupe_path(project_dir: Path, filename: str) -> Path:
-    # Refuse any path component that tries to escape the project directory.
     safe = filename.replace("/", "_").replace("\\", "_")
-    candidate = (project_dir / safe).resolve(strict=False)
-    if not str(candidate).startswith(str(project_dir.resolve(strict=False))):
+    project_root = project_dir.resolve(strict=False)
+    candidate = project_root / safe
+    if candidate.parent.resolve(strict=False) != project_root:
         raise HTTPException(400, "invalid filename")
-    if not candidate.exists():
+    if not candidate.exists() and not candidate.is_symlink():
         return candidate
     stem = candidate.stem or "attachment"
     suffix = candidate.suffix
     index = 1
     while True:
-        candidate = project_dir / f"{stem}-{index}{suffix}"
-        if not candidate.exists():
+        candidate = project_root / f"{stem}-{index}{suffix}"
+        if candidate.parent.resolve(strict=False) != project_root:
+            raise HTTPException(400, "invalid filename")
+        if not candidate.exists() and not candidate.is_symlink():
             return candidate
         index += 1
+
+
+def _open_new_file(path: Path) -> BinaryIO:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    return os.fdopen(fd, "wb")
 
 
 def _attachment_hint(description: str | None, worker_path: str) -> str:
