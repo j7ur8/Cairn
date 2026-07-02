@@ -62,19 +62,21 @@ class PromptSnapshotTests(unittest.TestCase):
                 self.assertIn("sibling", prompt)
                 self.assertIn("whole-family", prompt)
 
-    def test_default_bootstrap_task_is_role_only_plus_protocol_sections(self) -> None:
+    def test_default_bootstrap_task_sets_discovery_only_boundary(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
         task_section = bootstrap.split("## Output Requirements", 1)[0]
 
-        self.assertEqual(task_section.strip(), "# Task\n{role_instructions}")
+        self.assertTrue(task_section.strip().startswith("# Task\n{role_instructions}"))
         self.assertIn("{role_instructions}", bootstrap)
         self.assertIn("{capability_instructions}", bootstrap)
+        self.assertIn("target discovery only", task_section)
+        self.assertIn("Do not perform vulnerability probing or exploitation", task_section)
+        self.assertIn("SQLi, XSS, RCE", task_section)
+        self.assertIn("authentication-bypass", task_section)
+        self.assertIn("high-volume directory-enumeration", task_section)
         self.assertIn("## Output Requirements", bootstrap)
         self.assertIn("## Context", bootstrap)
-        self.assertNotIn("bounded initial reconnaissance", bootstrap)
-        self.assertNotIn("business purpose, application type", bootstrap)
-        self.assertNotIn("deep exploitation, brute force", bootstrap)
 
     def test_role_prompts_contain_bootstrap_guidance(self) -> None:
         roles_dir = _REPO / "capabilities" / "roles"
@@ -89,19 +91,25 @@ class PromptSnapshotTests(unittest.TestCase):
                 "information_leak.json",
                 "public entrypoints",
                 "If a flag or proof is directly exposed",
-                "Do not perform deep exploitation",
+                "deep exploitation",
+                "vulnerability verification, SQLi/XSS/RCE payloading",
+                "During bootstrap, include only static or publicly visible evidence",
             ],
             "cypher-pentest-operator/ROLE.md": [
                 "bounded, scope-aware reconnaissance",
                 "rules of engagement",
                 "authentication and authorization boundaries",
                 "minimally disruptive public-surface checks",
+                "Bootstrap is target discovery only",
+                "vulnerability verification, SQLi/XSS/RCE payloading",
             ],
             "cypher-vuln-researcher/ROLE.md": [
                 "bounded target-identification",
                 "component, version",
                 "reachable repro surface",
-                "Do not perform broad fuzzing",
+                "broad fuzzing",
+                "Bootstrap is target discovery only",
+                "vulnerability verification, SQLi/XSS/RCE payloading",
             ],
         }
 

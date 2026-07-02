@@ -24,6 +24,7 @@ class ContainerLifecycle:
         inspect_state: Callable[[str], str | None],
         log_mount_mismatches: Callable[[str, str], None],
         mount_mismatches: Callable[[str, str], list[str]],
+        workspace_preflight: Callable[[str, str, ContainerConfig], None] | None = None,
     ) -> None:
         self.config = config
         self.access = access
@@ -33,6 +34,7 @@ class ContainerLifecycle:
         self.inspect_state = inspect_state
         self.log_mount_mismatches = log_mount_mismatches
         self.mount_mismatches = mount_mismatches
+        self.workspace_preflight = workspace_preflight
         self._ensure_running_locks: dict[str, threading.Lock] = {}
         self._ensure_running_locks_guard = threading.Lock()
 
@@ -50,12 +52,14 @@ class ContainerLifecycle:
             if self._recreate_if_config_mismatch(name, project_id, config):
                 return self._create_container(project_id, name, config)
             LOG.debug("container already running project=%s container=%s", project_id, name)
+            self._workspace_preflight(name, project_id, config)
             return name
         if state is not None:
             if self._recreate_if_config_mismatch(name, project_id, config):
                 return self._create_container(project_id, name, config)
             LOG.info("starting existing container project=%s container=%s state=%s", project_id, name, state)
             self.start_existing(name)
+            self._workspace_preflight(name, project_id, config)
             return name
         LOG.info("creating container project=%s container=%s image=%s", project_id, name, config.image)
         return self._create_container(project_id, name, config)
@@ -79,6 +83,7 @@ class ContainerLifecycle:
                 nano_cpus=effective_config.nano_cpus,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
+            self._workspace_preflight(name, project_id, effective_config)
             return name
         except self.api_error_type as exc:
             if not self.is_name_conflict(exc):
@@ -88,12 +93,14 @@ class ContainerLifecycle:
         if state == "running":
             if self._recreate_if_config_mismatch(name, project_id, effective_config):
                 return self._create_container(project_id, name, effective_config)
+            self._workspace_preflight(name, project_id, effective_config)
             return name
         if state is not None:
             if self._recreate_if_config_mismatch(name, project_id, effective_config):
                 return self._create_container(project_id, name, effective_config)
             LOG.info("starting conflicted existing container project=%s container=%s state=%s", project_id, name, state)
             self.start_existing(name)
+            self._workspace_preflight(name, project_id, effective_config)
             return name
         raise RuntimeError(f"failed to create container {name}")
 
@@ -124,6 +131,11 @@ class ContainerLifecycle:
             self.log_mount_mismatches(name, project_id, config)
         except TypeError:
             self.log_mount_mismatches(name, project_id)  # type: ignore[misc]
+
+    def _workspace_preflight(self, name: str, project_id: str, config: ContainerConfig) -> None:
+        if self.workspace_preflight is None:
+            return
+        self.workspace_preflight(name, project_id, config)
 
     def create_startup_container(self, name: str, project_id: str) -> str:
         LOG.debug("creating startup healthcheck container container=%s image=%s", name, self.config.image)

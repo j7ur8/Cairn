@@ -46,6 +46,7 @@ from cairn.dispatcher.runtime.docker_labels import (
 )
 from cairn.dispatcher.runtime.mounts import docker_volumes, render_bind_mounts
 from cairn.dispatcher.runtime.process import ManagedProcess
+from cairn.dispatcher.runtime.workspace_preflight import WorkspacePreflight
 from cairn.shared.config import ContainerConfig
 
 LOG = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class ContainerManager:
             docker_exception_type=DockerException,
             not_found_type=NotFound,
         )
+        self._workspace_preflight = WorkspacePreflight(
+            access=self._access,
+            docker_exception_type=DockerException,
+        )
         self._lifecycle = ContainerLifecycle(
             config=self._config,
             access=self._access,
@@ -82,6 +87,7 @@ class ContainerManager:
             inspect_state=self.inspect_state,
             log_mount_mismatches=self.log_mount_mismatches,
             mount_mismatches=self.mount_mismatches,
+            workspace_preflight=self._workspace_preflight.run,
         )
         self._cleanup = ContainerCleanup(
             config=self._config,

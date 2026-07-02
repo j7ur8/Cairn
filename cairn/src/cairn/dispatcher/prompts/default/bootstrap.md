@@ -1,6 +1,10 @@
 # Task
 {role_instructions}
 
+Bootstrap boundary: target discovery only. Collect static and publicly observable facts about the Origin, target identity, technology fingerprints, public entrypoints, headers, source, linked static assets, and public linked resources.
+
+Do not perform vulnerability probing or exploitation during bootstrap. Do not send SQLi, XSS, RCE, SSRF, traversal, template-injection, deserialization, WAF-boundary, authentication-bypass, brute-force, password-guessing, high-volume directory-enumeration, fuzzing, or exploit-chain payloads. Verification and exploitation belong in later explore intents created by Reason.
+
 ## Output Requirements
 For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.
 

@@ -92,7 +92,7 @@ def _dispatch_config(root: Path) -> dict:
                     {
                         "name": "project-files",
                         "host_path": str(project_files / "{project_id}"),
-                        "container_path": "/workspace/project",
+                        "container_path": "/home/kali/workspace",
                         "read_only": False,
                     }
                 ],
@@ -225,6 +225,32 @@ class ConfigPreflightTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertTrue(any("config.resources.yaml" in error for error in result.errors))
+
+    def test_project_files_bind_mount_must_align_with_server_root(self) -> None:
+        from cairn.shared.config.preflight import check_dispatch_config
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            dispatch = _dispatch_config(root)
+            dispatch["worker_runtime"]["container"]["bind_mounts"][0]["host_path"] = str(
+                root / "other-project-files" / "{project_id}"
+            )
+            result = check_dispatch_config(self._write(root, dispatch))
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("project_files_root" in error for error in result.errors))
+
+    def test_project_files_bind_mount_must_use_worker_workspace_path(self) -> None:
+        from cairn.shared.config.preflight import check_dispatch_config
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            dispatch = _dispatch_config(root)
+            dispatch["worker_runtime"]["container"]["bind_mounts"][0]["container_path"] = "/workspace/project"
+            result = check_dispatch_config(self._write(root, dispatch))
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any("/home/kali/workspace" in error for error in result.errors))
 
     def test_cli_config_check_outputs_json_and_sets_exit_code(self) -> None:
         from cairn.cli import main

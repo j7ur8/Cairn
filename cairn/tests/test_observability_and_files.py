@@ -820,6 +820,25 @@ class ProjectFilesRouterTests(unittest.TestCase):
         )
         self.assertEqual(Path(response.path).name, "writeup.md")
 
+    def test_ctf_web_js_analysis_json_outputs_are_downloadable_reports(self) -> None:
+        target = self.project_root / "proj_files" / "reports" / "ctf-web-js-analysis" / "information_api.json"
+        target.parent.mkdir(parents=True)
+        target.write_text('{"apis":[],"notes":[]}', encoding="utf-8")
+        leak = target.with_name("information_leak.json")
+        leak.write_text('{"leaks":[],"notes":[]}', encoding="utf-8")
+
+        response = self.files_router.list_project_files("proj_files")
+        by_path = {item.path: item for item in response.files}
+        self.assertEqual(by_path["reports/ctf-web-js-analysis/information_api.json"].category, "reports")
+        self.assertEqual(by_path["reports/ctf-web-js-analysis/information_leak.json"].category, "reports")
+
+        download = self.files_router.download_project_file(
+            "proj_files",
+            source="project",
+            path="reports/ctf-web-js-analysis/information_api.json",
+        )
+        self.assertEqual(Path(download.path), target)
+
 
 if __name__ == "__main__":
     unittest.main()

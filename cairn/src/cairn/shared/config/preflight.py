@@ -12,6 +12,8 @@ from cairn.shared.config.root import DispatchConfig
 
 MIN_JWT_SECRET_LENGTH = 32
 PROJECT_ID_PLACEHOLDER = "preflight-project"
+PROJECT_FILES_MOUNT_NAME = "project-files"
+PROJECT_WORKSPACE_PATH = "/home/kali/workspace"
 
 
 @dataclass(slots=True)
@@ -48,6 +50,7 @@ def check_dispatch_config(path: Path, *, strict: bool = False) -> PreflightResul
     _check_auth(config, result)
     _check_paths(config, result)
     _check_bind_mounts(config, result)
+    _check_project_files_bind_mount_alignment(config, result)
     _check_container_security(config, result)
     _check_worker_image(config, result, strict=strict)
     return result
@@ -108,6 +111,36 @@ def _check_bind_mounts(config: DispatchConfig, result: PreflightResult) -> None:
             _check_host_path(label, path.parent, result, allow_missing=True)
         else:
             _check_host_path(label, path, result, allow_missing=True)
+
+
+def _check_project_files_bind_mount_alignment(config: DispatchConfig, result: PreflightResult) -> None:
+    result.checked.append("worker_runtime.container.bind_mounts[project-files].alignment")
+    mounts = [mount for mount in config.container.bind_mounts if mount.name == PROJECT_FILES_MOUNT_NAME]
+    if not mounts:
+        result.errors.append(
+            "worker_runtime.container.bind_mounts must include writable project-files mount "
+            f"at {PROJECT_WORKSPACE_PATH}"
+        )
+        return
+    mount = mounts[0]
+    if mount.read_only:
+        result.errors.append("worker_runtime.container.bind_mounts[project-files] must be read_write")
+    if mount.container_path != PROJECT_WORKSPACE_PATH:
+        result.errors.append(
+            "worker_runtime.container.bind_mounts[project-files].container_path must be "
+            f"{PROJECT_WORKSPACE_PATH}"
+        )
+
+    expected = Path(config.server.paths.resolved_project_files_root).expanduser() / PROJECT_ID_PLACEHOLDER
+    actual = Path(mount.host_path.replace("{project_id}", PROJECT_ID_PLACEHOLDER)).expanduser()
+    expected_resolved = expected.resolve(strict=False)
+    actual_resolved = actual.resolve(strict=False)
+    if actual_resolved != expected_resolved:
+        result.errors.append(
+            "worker_runtime.container.bind_mounts[project-files].host_path must align with "
+            "server.paths.project_files_root; "
+            f"expected {expected_resolved}, got {actual_resolved}"
+        )
 
 
 def _check_container_security(config: DispatchConfig, result: PreflightResult) -> None:

@@ -107,13 +107,26 @@ class _DockerMock:
         self.client = MagicMock()
         self.containers = MagicMock()
         self.client.containers = self.containers
-        self.containers.get.side_effect = NotFound("not found")
         container = MagicMock()
         container.exec_run.return_value = type("R", (), {"exit_code": 0, "output": b""})()
-        self.containers.run.return_value = container
+        self.created_container = container
+        self._created = False
+        self.containers.get.side_effect = self._get
+        self.containers.run.side_effect = self._run
 
     def install(self):
         return patch("docker.from_env", return_value=self.client)
+
+    def _get(self, _name):
+        from docker.errors import NotFound
+
+        if self._created:
+            return self.created_container
+        raise NotFound("not found")
+
+    def _run(self, *args, **kwargs):
+        self._created = True
+        return self.created_container
 
 
 class _ListedContainer:
@@ -203,6 +216,22 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         self.assertEqual(kwargs["labels"]["cairn.project_id"], "proj-1")
         self.assertEqual(kwargs["labels"]["cairn.startup_healthcheck"], "false")
 
+    def test_project_workspace_preflight_runs_root_setup_and_kali_probe(self):
+        dm = _DockerMock()
+        with dm.install():
+            mgr = self._make_manager(user="0:0", exec_user="kali")
+            mgr.ensure_running("proj-1")
+
+        exec_calls = dm.created_container.exec_run.call_args_list
+        self.assertEqual(len(exec_calls), 2)
+        self.assertEqual(exec_calls[0].kwargs.get("user"), "0:0")
+        self.assertEqual(exec_calls[1].kwargs.get("user"), "kali")
+        setup_argv = exec_calls[0].args[0]
+        probe_argv = exec_calls[1].args[0]
+        self.assertIn("/home/kali/workspace", setup_argv)
+        self.assertIn("/home/kali/workspace", probe_argv)
+        self.assertIn("reports/ctf-web-js-analysis", setup_argv[2])
+
     def test_startup_container_also_receives_user(self):
         dm = _DockerMock()
         with dm.install():
@@ -229,7 +258,7 @@ class ContainerUserRuntimeTests(unittest.TestCase):
     def test_existing_running_container_with_mount_source_drift_is_recreated(self):
         dm = _DockerMock()
         stale = _ExistingContainer(source="/tmp/old-project-files/proj-1", rw=True, status="running")
-        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        dm.containers.get.side_effect = [stale, stale, stale, stale, dm.created_container]
         with dm.install():
             mgr = self._make_manager(user="0:0")
             name = mgr.ensure_running("proj-1")
@@ -243,7 +272,7 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         dm = _DockerMock()
         expected_source = str((Path("./datas/project-files/proj-1")).expanduser().resolve(strict=False))
         stale = _ExistingContainer(source=expected_source, rw=False, status="exited")
-        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        dm.containers.get.side_effect = [stale, stale, stale, stale, dm.created_container]
         with dm.install():
             mgr = self._make_manager(user="0:0")
             mgr.ensure_running("proj-1")
@@ -256,7 +285,8 @@ class ContainerUserRuntimeTests(unittest.TestCase):
         dm = _DockerMock()
         expected_source = str((Path("./datas/project-files/proj-1")).expanduser().resolve(strict=False))
         existing = _ExistingContainer(source=expected_source, rw=True, status="running")
-        dm.containers.get.side_effect = [existing, existing]
+        dm.containers.get.side_effect = [existing, existing, existing]
+        existing.exec_run = MagicMock(return_value=type("R", (), {"exit_code": 0, "output": b""})())
         with dm.install():
             mgr = self._make_manager(user="0:0")
             name = mgr.ensure_running("proj-1")
@@ -275,7 +305,7 @@ class ContainerUserRuntimeTests(unittest.TestCase):
             status="running",
             image="cairn/old:latest",
         )
-        dm.containers.get.side_effect = [stale, stale, stale, stale]
+        dm.containers.get.side_effect = [stale, stale, stale, stale, dm.created_container]
         with dm.install():
             mgr = self._make_manager(user="0:0")
             mgr.ensure_running("proj-1")
