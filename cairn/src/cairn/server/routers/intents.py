@@ -10,11 +10,19 @@ from cairn.server.application.intent_commands import (
 from cairn.server.application.intent_commands import (
     create_intent as create_intent_command,
 )
+from cairn.server.application.intent_phase_checkpoints import (
+    clear_intent_phase_checkpoint,
+    mark_intent_phase_checkpoint_failed,
+    upsert_intent_phase_checkpoint,
+)
 from cairn.server.schemas import (
     ConcludeRequest,
     ConcludeResponse,
     CreateIntentRequest,
     HeartbeatRequest,
+    IntentPhaseCheckpointFailedRequest,
+    IntentPhaseCheckpointResponse,
+    IntentPhaseCheckpointUpsertRequest,
 )
 from cairn.shared.contracts import Intent
 
@@ -65,3 +73,30 @@ def release(project_id: str, intent_id: str, body: HeartbeatRequest):
 def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
     with db.session_scope() as conn:
         return conclude_intent(conn, project_id, intent_id, body)
+
+
+@router.put(
+    "/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}",
+    response_model=IntentPhaseCheckpointResponse,
+)
+def upsert_phase_checkpoint(project_id: str, intent_id: str, phase: str, body: IntentPhaseCheckpointUpsertRequest):
+    with db.session_scope() as conn:
+        return upsert_intent_phase_checkpoint(conn, project_id, intent_id, phase, body)
+
+
+@router.post(
+    "/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}/failed",
+    response_model=IntentPhaseCheckpointResponse,
+)
+def mark_phase_checkpoint_failed(project_id: str, intent_id: str, phase: str, body: IntentPhaseCheckpointFailedRequest):
+    with db.session_scope() as conn:
+        return mark_intent_phase_checkpoint_failed(conn, project_id, intent_id, phase, body)
+
+
+@router.delete(
+    "/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}",
+    response_model=IntentPhaseCheckpointResponse,
+)
+def clear_phase_checkpoint(project_id: str, intent_id: str, phase: str):
+    with db.session_scope() as conn:
+        return clear_intent_phase_checkpoint(conn, project_id, intent_id, phase)

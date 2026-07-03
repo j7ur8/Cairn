@@ -157,6 +157,22 @@ class ProjectContextResolver:
             return self.select_worker_for_ai_chain(project_id, task_type, snapshots, workers=workers)
         return self.select_worker_default(project_id, task_type, workers=workers)
 
+    def select_worker_by_name(
+        self,
+        project: ProjectDetail,
+        task_type: str,
+        execution_config: dict,
+        worker_name: str,
+    ) -> WorkerSelection:
+        project_id = project.project.id
+        self.resolve_project_proxy_from_execution_config(project_id, execution_config)
+        self.resolve_project_ai_selection(project_id, task_type, execution_config)
+        workers = [worker for worker in self._workers_from_execution_config(project_id, execution_config) if worker.name == worker_name]
+        snapshots = self.project_ai_snapshots(project_id, task_type)
+        if snapshots:
+            return self.select_worker_for_ai_chain(project_id, task_type, snapshots, workers=workers)
+        return self.select_worker_default(project_id, task_type, workers=workers)
+
     def select_worker_default(
         self,
         project_id: str,

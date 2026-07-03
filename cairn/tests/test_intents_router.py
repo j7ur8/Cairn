@@ -82,6 +82,60 @@ class IntentRouterTests(unittest.TestCase):
         self.assertEqual(response.intent.to, response.fact.id)
         self.assertEqual(response.intent.id, created.id)
 
+    def test_phase_checkpoint_upsert_hydrate_mark_failed_and_clear(self) -> None:
+        from cairn.server.routers import intents, projects
+        from cairn.server.schemas import (
+            CreateIntentRequest,
+            IntentPhaseCheckpointFailedRequest,
+            IntentPhaseCheckpointUpsertRequest,
+        )
+
+        self._create_project()
+        created = intents.create_intent(
+            "proj_t",
+            CreateIntentRequest(
+                **{
+                    "from": ["origin"],
+                    "description": "investigate origin",
+                    "creator": "worker_a",
+                    "worker": None,
+                }
+            ),
+        )
+
+        upserted = intents.upsert_phase_checkpoint(
+            "proj_t",
+            created.id,
+            "explore_conclude",
+            IntentPhaseCheckpointUpsertRequest(
+                worker_name="worker_a",
+                worker_type="mock",
+                session_id="session-1",
+            ),
+        )
+
+        assert upserted.checkpoint is not None
+        self.assertEqual(upserted.checkpoint.worker_name, "worker_a")
+        detail = projects.get_project("proj_t")
+        hydrated = next(intent for intent in detail.intents if intent.id == created.id)
+        assert hydrated.phase_checkpoint is not None
+        self.assertEqual(hydrated.phase_checkpoint.session_id, "session-1")
+
+        failed = intents.mark_phase_checkpoint_failed(
+            "proj_t",
+            created.id,
+            "explore_conclude",
+            IntentPhaseCheckpointFailedRequest(last_error="parse_error: bad sentinel"),
+        )
+        assert failed.checkpoint is not None
+        self.assertEqual(failed.checkpoint.last_error, "parse_error: bad sentinel")
+
+        cleared = intents.clear_phase_checkpoint("proj_t", created.id, "explore_conclude")
+        self.assertIsNone(cleared.checkpoint)
+        detail = projects.get_project("proj_t")
+        hydrated = next(intent for intent in detail.intents if intent.id == created.id)
+        self.assertIsNone(hydrated.phase_checkpoint)
+
     def test_claim_and_heartbeat_are_separate(self) -> None:
         from cairn.server.domain.errors import DomainError
         from cairn.server.routers import intents

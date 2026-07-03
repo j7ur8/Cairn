@@ -103,6 +103,47 @@ class TaskApiClient(HttpClientBase):
             json={"worker": worker, "description": description},
         )
 
+    def upsert_intent_phase_checkpoint(
+        self,
+        project_id: str,
+        intent_id: str,
+        phase: str,
+        *,
+        worker_name: str,
+        worker_type: str,
+        session_id: str,
+    ) -> ApiResult:
+        return self._request_json(
+            "PUT",
+            f"/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}",
+            json={
+                "worker_name": worker_name,
+                "worker_type": worker_type,
+                "session_id": session_id,
+            },
+        )
+
+    def mark_intent_phase_checkpoint_failed(
+        self,
+        project_id: str,
+        intent_id: str,
+        phase: str,
+        *,
+        last_error: str,
+    ) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}/failed",
+            json={"last_error": last_error},
+        )
+
+    def clear_intent_phase_checkpoint(self, project_id: str, intent_id: str, phase: str) -> ApiResult:
+        return self._request_json(
+            "DELETE",
+            f"/projects/{project_id}/intents/{intent_id}/phase-checkpoints/{phase}",
+            json={},
+        )
+
     def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:
         return self._request_json(
             "POST",

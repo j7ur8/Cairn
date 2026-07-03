@@ -55,6 +55,28 @@ def run_explore_conclude_fallback(
     preflight = fallback.preflight(supports_conclude=driver.supports_conclude(), has_session=bool(session))
     if preflight is not None:
         return preflight
+    assert session is not None
+
+    checkpoint = client.upsert_intent_phase_checkpoint(
+        project_id,
+        intent.id,
+        "explore_conclude",
+        worker_name=worker.name,
+        worker_type=worker.type,
+        session_id=session,
+    )
+    if not checkpoint.ok:
+        LOG.warning(
+            "explore conclude checkpoint upsert failed project=%s intent=%s worker=%s status=%s body=%s",
+            project_id,
+            intent.id,
+            worker.name,
+            checkpoint.status_code,
+            checkpoint.text,
+        )
+        best_effort_release(client, project_id, intent.id, worker.name)
+        reporter.emit_error("explore_conclude", "error", "checkpoint upsert failed")
+        return "failed"
 
     container_name = container_manager.ensure_running(project_id)
 
@@ -97,10 +119,18 @@ def run_explore_conclude_fallback(
             conclude_ms,
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        _mark_explore_conclude_failed(client, project_id, intent.id, "cancelled", cancelled)
         reporter.emit_error("explore_conclude", "cancelled", cancelled)
         return "cancelled"
     if lease.failure is not None:
         best_effort_release(client, project_id, intent.id, worker.name)
+        _mark_explore_conclude_failed(
+            client,
+            project_id,
+            intent.id,
+            "heartbeat_lost",
+            f"status={lease.failure.status_code}",
+        )
         reporter.emit_error("explore_conclude", "error", f"heartbeat lost status={lease.failure.status_code}")
         return "failed"
     if result.timed_out or result.returncode != 0:
@@ -116,7 +146,10 @@ def run_explore_conclude_fallback(
             preview(result.stderr),
         )
         best_effort_release(client, project_id, intent.id, worker.name)
-        reporter.emit_error("explore_conclude", "timeout" if result.timed_out else "error", result.stderr or result.stdout)
+        kind = "timeout" if result.timed_out else "error"
+        message = result.stderr or result.stdout or f"returncode={result.returncode}"
+        _mark_explore_conclude_failed(client, project_id, intent.id, kind, message)
+        reporter.emit_error("explore_conclude", kind, result.stderr or result.stdout)
         return "failed"
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
@@ -134,6 +167,7 @@ def run_explore_conclude_fallback(
             preview(result.stderr),
         )
         best_effort_release(client, project_id, intent.id, worker.name)
+        _mark_explore_conclude_failed(client, project_id, intent.id, "parse_error", str(exc))
         reporter.emit_error("explore_conclude", "parse_error", str(exc))
         return "failed"
     conclude = write_conclude_result_with_fact_id(
@@ -147,4 +181,41 @@ def run_explore_conclude_fallback(
     )
     if conclude.fact_id:
         reporter.emit_result("explore_write", description, produced_fact_id=conclude.fact_id)
+    if conclude.status == "success":
+        clear = client.clear_intent_phase_checkpoint(project_id, intent.id, "explore_conclude")
+        if not clear.ok and clear.status_code not in (403, 404):
+            LOG.warning(
+                "explore conclude checkpoint clear failed project=%s intent=%s worker=%s status=%s body=%s",
+                project_id,
+                intent.id,
+                worker.name,
+                clear.status_code,
+                clear.text,
+            )
+    else:
+        _mark_explore_conclude_failed(client, project_id, intent.id, "write_failed", "conclude write failed")
     return conclude.status
+
+
+def _mark_explore_conclude_failed(
+    client: CairnClient,
+    project_id: str,
+    intent_id: str,
+    kind: str,
+    message: str,
+) -> None:
+    text = f"{kind}: {message}".strip()
+    response = client.mark_intent_phase_checkpoint_failed(
+        project_id,
+        intent_id,
+        "explore_conclude",
+        last_error=text[:2000],
+    )
+    if not response.ok and response.status_code not in (403, 404):
+        LOG.warning(
+            "explore conclude checkpoint mark_failed failed project=%s intent=%s status=%s body=%s",
+            project_id,
+            intent_id,
+            response.status_code,
+            response.text,
+        )

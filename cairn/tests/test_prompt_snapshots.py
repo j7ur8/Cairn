@@ -62,6 +62,27 @@ class PromptSnapshotTests(unittest.TestCase):
                 self.assertIn("sibling", prompt)
                 self.assertIn("whole-family", prompt)
 
+    def test_default_explore_conclude_is_read_only_fact_conclusion(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        prompt = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+
+        for text in (
+            "read-only fact-conclusion phase",
+            "already confirmed facts from this session",
+            "Fact View",
+            "Full Graph",
+            "Do not use Bash",
+            "MCP tools",
+            "browser or network access",
+            "scanners",
+            "Do not create new payloads",
+            "continue exploration",
+            "wait for tasks",
+            "Use Read only",
+            "Do not scan for additional files or evidence",
+        ):
+            self.assertIn(text, prompt)
+
     def test_default_bootstrap_task_sets_discovery_only_boundary(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")

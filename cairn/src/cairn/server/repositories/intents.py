@@ -2,10 +2,31 @@ from __future__ import annotations
 
 from typing import Any
 
+from cairn.server.repositories.intent_phase_checkpoints import IntentPhaseCheckpointRepository
 from cairn.server.repositories import sql
 
 
-def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dict[str, Any]:
+def _checkpoint_projection(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "project_id": row["project_id"],
+        "intent_id": row["intent_id"],
+        "phase": row["phase"],
+        "worker_name": row["worker_name"],
+        "worker_type": row["worker_type"],
+        "session_id": row["session_id"],
+        "last_error": row["last_error"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _intent_projection(
+    row: Any,
+    sources_by_intent: dict[str, list[str]],
+    checkpoint_by_key: dict[tuple[str, str], Any] | None = None,
+) -> dict[str, Any]:
     return {
         "id": row["id"],
         "from": list(sources_by_intent.get(row["id"], [])),
@@ -16,6 +37,7 @@ def _intent_projection(row: Any, sources_by_intent: dict[str, list[str]]) -> dic
         "last_heartbeat_at": row["last_heartbeat_at"],
         "created_at": row["created_at"],
         "concluded_at": row["concluded_at"],
+        "phase_checkpoint": _checkpoint_projection((checkpoint_by_key or {}).get(_intent_key(row))),
     }
 
 
@@ -238,7 +260,12 @@ class IntentRepository:
         row = self.get_intent(project_id, intent_id)
         if row is None:
             return None
-        return _intent_projection(row, {intent_id: self.source_fact_ids(project_id, intent_id)})
+        checkpoint = IntentPhaseCheckpointRepository(self.conn).get(project_id, intent_id)
+        return _intent_projection(
+            row,
+            {intent_id: self.source_fact_ids(project_id, intent_id)},
+            {(project_id, intent_id): checkpoint} if checkpoint is not None else {},
+        )
 
     def list_intent_projections(self, project_id: str) -> list[dict[str, Any]]:
         rows = sql.fetchall(
@@ -261,7 +288,8 @@ class IntentRepository:
         sources_by_intent: dict[str, list[str]] = {}
         for source in source_rows:
             sources_by_intent.setdefault(source["intent_id"], []).append(source["fact_id"])
-        return [_intent_projection(row, sources_by_intent) for row in rows]
+        checkpoints = _checkpoints_for_rows(self.conn, rows)
+        return [_intent_projection(row, sources_by_intent, checkpoints) for row in rows]
 
     def list_open_intent_projections(self, project_id: str) -> list[dict[str, Any]]:
         rows = sql.fetchall(
@@ -334,7 +362,8 @@ def _hydrate_intent_sources(
         bid = sources_by_intent.get(source["intent_id"])
         if bid is not None:
             bid.append(source["fact_id"])
-    return [_intent_projection(row, sources_by_intent) for row in rows]
+    checkpoints = _checkpoints_for_rows(conn, rows)
+    return [_intent_projection(row, sources_by_intent, checkpoints) for row in rows]
 
 
 def _hydrate_intent_sources_batch(
@@ -361,8 +390,16 @@ def _hydrate_intent_sources_batch(
         if bid is not None:
             bid.append(source["fact_id"])
     result: dict[str, list[dict[str, Any]]] = {}
+    checkpoints = _checkpoints_for_rows(conn, rows)
     for row in rows:
         pid = row["project_id"]
         row_sources = {row["id"]: sources_by_intent.get(_intent_key(row), [])}
-        result.setdefault(pid, []).append(_intent_projection(row, row_sources))
+        result.setdefault(pid, []).append(_intent_projection(row, row_sources, checkpoints))
     return result
+
+
+def _checkpoints_for_rows(conn: Any, rows: list[Any]) -> dict[tuple[str, str], Any]:
+    project_ids = sorted({row["project_id"] for row in rows})
+    intent_ids = sorted({row["id"] for row in rows})
+    checkpoint_rows = IntentPhaseCheckpointRepository(conn).list_for_intents(project_ids, intent_ids)
+    return {(row["project_id"], row["intent_id"]): row for row in checkpoint_rows}

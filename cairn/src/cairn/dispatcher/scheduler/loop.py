@@ -135,6 +135,7 @@ class DispatcherLoop:
             log_state=self.log_state,
             execution_config_for=self._task_execution_config,
             select_worker=self.project_context.select_worker,
+            select_worker_by_name=self.project_context.select_worker_by_name,
             project_open_intent_count=self._project_open_intent_count,
             release_intent=self._best_effort_release,
             release_reason=self._best_effort_release_reason,

@@ -39,6 +39,9 @@ from cairn.server.schemas.intent_models import (
     ConcludeResponse,
     CreateIntentRequest,
     HeartbeatRequest,
+    IntentPhaseCheckpointFailedRequest,
+    IntentPhaseCheckpointResponse,
+    IntentPhaseCheckpointUpsertRequest,
 )
 from cairn.server.schemas.project_requests import (
     CompleteRequest,

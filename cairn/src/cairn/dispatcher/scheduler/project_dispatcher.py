@@ -117,6 +117,14 @@ class ProjectDispatcher:
                 summary.id,
                 sorted(running_intent_ids),
             )
+        checkpoint_intents = [
+            intent
+            for intent in unclaimed_intents
+            if intent.phase_checkpoint is not None and intent.phase_checkpoint.phase == "explore_conclude"
+        ]
+        if checkpoint_intents:
+            newest = max(checkpoint_intents, key=lambda i: i.created_at)
+            return services.dispatch_explore(project, newest)
         if unclaimed_intents:
             newest = max(unclaimed_intents, key=lambda i: i.created_at)
             return services.dispatch_explore(project, newest)

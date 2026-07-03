@@ -66,6 +66,7 @@ class TaskSubmitter:
         log_state: LogState,
         execution_config_for: Callable[[str, str], dict | None],
         select_worker: Callable[[ProjectDetail, str, dict], WorkerSelection],
+        select_worker_by_name: Callable[[ProjectDetail, str, dict, str], WorkerSelection],
         project_open_intent_count: Callable[[ProjectDetail], int],
         release_intent: Callable[[str, str, str], None],
         release_reason: Callable[[str, str, str | None], None],
@@ -81,6 +82,7 @@ class TaskSubmitter:
         self.log_state = log_state
         self.execution_config_for = execution_config_for
         self.select_worker = select_worker
+        self.select_worker_by_name = select_worker_by_name
         self.project_open_intent_count = project_open_intent_count
         self.claimer = TaskClaimer(
             client=client,
@@ -231,6 +233,8 @@ class TaskSubmitter:
         )
 
     def dispatch_explore(self, project: ProjectDetail, intent: Intent) -> bool:
+        if intent.phase_checkpoint is not None and intent.phase_checkpoint.phase == "explore_conclude":
+            return self._dispatch_explore_conclude_only(project, intent)
         context = self._prepare_submission(project, "explore", intent=intent, needs_export=True)
         if context is None:
             return False
@@ -283,6 +287,80 @@ class TaskSubmitter:
             ),
         )
 
+    def _dispatch_explore_conclude_only(self, project: ProjectDetail, intent: Intent) -> bool:
+        checkpoint = intent.phase_checkpoint
+        if checkpoint is None:
+            return False
+        context = self._prepare_submission(
+            project,
+            "explore",
+            intent=intent,
+            needs_export=True,
+            worker_name=checkpoint.worker_name,
+        )
+        if context is None:
+            return False
+        if context.worker.name != checkpoint.worker_name or context.worker.type != checkpoint.worker_type:
+            LOG.warning(
+                "skip conclude-only because checkpoint worker no longer matches project=%s intent=%s checkpoint_worker=%s/%s selected=%s/%s",
+                context.project_id,
+                intent.id,
+                checkpoint.worker_name,
+                checkpoint.worker_type,
+                context.worker.name,
+                context.worker.type,
+            )
+            return False
+        export_yaml = context.export_yaml
+        assert export_yaml is not None
+        if not self.claimer.claim_intent(
+            task_type=context.task_type,
+            project_id=context.project_id,
+            intent=intent,
+            worker_name=context.worker.name,
+        ):
+            return False
+
+        return self.submissions.submit_and_register(
+            task_type="explore",
+            project_id=context.project_id,
+            worker_name=context.worker.name,
+            intent_id=intent.id,
+            release=lambda: self.claimer.release_claim(
+                project_id=context.project_id,
+                intent_id=intent.id,
+                worker_name=context.worker.name,
+                run_id=None,
+            ),
+            submit=lambda cancellation: self.executor.submit(
+                self.explore_runner,
+                self._task_services(context.execution_config),
+                TaskInvocation(
+                    project=project,
+                    intent=intent,
+                    worker=context.worker,
+                    execution_config=context.execution_config,
+                    cancellation=cancellation,
+                    export_yaml=export_yaml,
+                    checkpoint_session_id=checkpoint.session_id,
+                ),
+            ),
+            running_task=lambda cancellation: RunningTask(
+                context.project_id,
+                "explore",
+                context.worker.name,
+                cancellation,
+                intent_id=intent.id,
+            ),
+            success_log=lambda: LOG.info(
+                "dispatched explore conclude-only project=%s intent=%s worker=%s session=%s",
+                context.project_id,
+                intent.id,
+                context.worker.name,
+                checkpoint.session_id,
+            ),
+        )
+
     def _task_services(self, execution_config: dict) -> TaskServices:
         return TaskServices(
             config=self.config,
@@ -310,12 +388,17 @@ class TaskSubmitter:
         *,
         intent: Intent | None = None,
         needs_export: bool = False,
+        worker_name: str | None = None,
     ) -> SubmissionContext | None:
         project_id = project.project.id
         execution_config = self.execution_config_for(project_id, task_type)
         if execution_config is None:
             return None
-        selection = self.select_worker(project, task_type, execution_config)
+        selection = (
+            self.select_worker_by_name(project, task_type, execution_config, worker_name)
+            if worker_name is not None
+            else self.select_worker(project, task_type, execution_config)
+        )
         worker = selection.worker
         if worker is None:
             self._log_no_worker(project_id, task_type, selection, intent)

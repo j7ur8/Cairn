@@ -66,10 +66,13 @@ class _FakeLifecycle:
 class _FakeDriver:
     def requires_tty(self) -> bool: return False
     def trace_format(self): return None
+    def supports_conclude(self): return True
     def build_healthcheck(self, worker): return ["hc"]
     def prepare_session(self): return "sess"
     def build_execute(self, worker, prompt, session, ctx):
         return mock.Mock(argv=["run"], session=session)
+    def build_conclude(self, worker, prompt, session, ctx):
+        return ["conclude", session, prompt]
     def extract_session(self, session, out, err): return session
     def extract_response_text(self, out, err): return out
 
@@ -556,6 +559,121 @@ class ExploreCharacterizationTests(unittest.TestCase):
             outcome = _run_explore(canc)
         self.assertEqual(outcome, "failed")
         release.assert_called_once()
+
+    def test_conclude_only_uses_checkpoint_session_without_execute(self) -> None:
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+
+        cancellation = TaskCancellation()
+        with mock.patch.object(explore_mod, "get_driver", return_value=_FakeDriver()), \
+             mock.patch.object(explore_mod, "TaskLifecycle", _FakeLifecycle), \
+             mock.patch.object(explore_mod, "run_intent_healthcheck_gate", return_value=None), \
+             mock.patch.object(explore_mod, "project_task_timeout", return_value={"conclude_timeout": 5}), \
+             mock.patch.object(explore_mod, "run_explore_conclude_fallback", return_value="success") as fallback, \
+             mock.patch.object(explore_mod, "run_intent_task") as full_runner:
+            outcome = explore_mod.run_explore_task(
+                _services(),
+                TaskInvocation(
+                    project=_project(),
+                    intent=_intent(),
+                    worker=_worker(),
+                    execution_config={"task_timeout": {"conclude_timeout": 5}},
+                    cancellation=cancellation,
+                    export_yaml="export_yaml",
+                    checkpoint_session_id="session-1",
+                ),
+            )
+
+        self.assertEqual(outcome, "success")
+        full_runner.assert_not_called()
+        self.assertEqual(fallback.call_args.kwargs["session"], "session-1")
+
+    def test_conclude_fallback_upserts_checkpoint_and_clears_on_success(self) -> None:
+        from cairn.dispatcher.protocol.client import ApiResult
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+        from cairn.dispatcher.tasks.explore_result import run_explore_conclude_fallback
+
+        client = mock.Mock()
+        client.upsert_intent_phase_checkpoint.return_value = ApiResult(200, {"checkpoint": {}})
+        client.clear_intent_phase_checkpoint.return_value = ApiResult(200, {"checkpoint": None})
+        client.mark_intent_phase_checkpoint_failed.return_value = ApiResult(200, {"checkpoint": {}})
+        container = mock.Mock()
+        container.ensure_running.return_value = "container"
+        reporter = _FakeReporter()
+        driver = _FakeDriver()
+
+        with mock.patch("cairn.dispatcher.tasks.explore_result.build_explore_conclude_prompt", return_value="PROMPT"), \
+             mock.patch("cairn.dispatcher.tasks.conclude_fallback.project_allows_conclude_fallback", return_value=True), \
+             mock.patch("cairn.dispatcher.tasks.explore_result.run_task_process", return_value=_result(returncode=0, stdout="MODEL")), \
+             mock.patch("cairn.dispatcher.tasks.explore_result.parse_sentinel_fact_output", return_value="fact text"), \
+             mock.patch(
+                 "cairn.dispatcher.tasks.explore_result.write_conclude_result_with_fact_id",
+                 return_value=mock.Mock(status="success", fact_id="fact_1"),
+             ):
+            outcome = run_explore_conclude_fallback(
+                config=mock.Mock(),
+                client=client,
+                container_manager=container,
+                worker=_worker(),
+                driver=driver,
+                project=_project(),
+                project_id="proj_1",
+                intent=_intent(),
+                export_yaml="graph: []",
+                session="session-1",
+                lease=_FakeLease(),
+                cancellation=TaskCancellation(),
+                reporter=reporter,
+                conclude_timeout=5,
+                execution_config={"task_timeout": {"conclude_timeout": 5}},
+            )
+
+        self.assertEqual(outcome, "success")
+        client.upsert_intent_phase_checkpoint.assert_called_once()
+        self.assertEqual(client.upsert_intent_phase_checkpoint.call_args.args[:3], ("proj_1", "intent_1", "explore_conclude"))
+        self.assertEqual(client.upsert_intent_phase_checkpoint.call_args.kwargs["session_id"], "session-1")
+        client.clear_intent_phase_checkpoint.assert_called_once_with("proj_1", "intent_1", "explore_conclude")
+        client.mark_intent_phase_checkpoint_failed.assert_not_called()
+
+    def test_conclude_fallback_marks_failed_and_releases_on_parse_error(self) -> None:
+        from cairn.dispatcher.protocol.client import ApiResult
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+        from cairn.dispatcher.tasks.explore_result import run_explore_conclude_fallback
+
+        client = mock.Mock()
+        client.upsert_intent_phase_checkpoint.return_value = ApiResult(200, {"checkpoint": {}})
+        client.mark_intent_phase_checkpoint_failed.return_value = ApiResult(200, {"checkpoint": {}})
+        client.release.return_value = ApiResult(200, {"ok": True})
+        container = mock.Mock()
+        container.ensure_running.return_value = "container"
+        reporter = _FakeReporter()
+        worker = _worker()
+
+        with mock.patch("cairn.dispatcher.tasks.explore_result.build_explore_conclude_prompt", return_value="PROMPT"), \
+             mock.patch("cairn.dispatcher.tasks.conclude_fallback.project_allows_conclude_fallback", return_value=True), \
+             mock.patch("cairn.dispatcher.tasks.explore_result.run_task_process", return_value=_result(returncode=0, stdout="BAD")), \
+             mock.patch("cairn.dispatcher.tasks.explore_result.parse_sentinel_fact_output", side_effect=ValueError("bad sentinel")):
+            outcome = run_explore_conclude_fallback(
+                config=mock.Mock(),
+                client=client,
+                container_manager=container,
+                worker=worker,
+                driver=_FakeDriver(),
+                project=_project(),
+                project_id="proj_1",
+                intent=_intent(),
+                export_yaml="graph: []",
+                session="session-1",
+                lease=_FakeLease(),
+                cancellation=TaskCancellation(),
+                reporter=reporter,
+                conclude_timeout=5,
+                execution_config={"task_timeout": {"conclude_timeout": 5}},
+            )
+
+        self.assertEqual(outcome, "failed")
+        client.mark_intent_phase_checkpoint_failed.assert_called_once()
+        self.assertIn("parse_error", client.mark_intent_phase_checkpoint_failed.call_args.kwargs["last_error"])
+        client.release.assert_called_once_with("proj_1", "intent_1", worker.name)
 
 
 class ReasonCharacterizationTests(unittest.TestCase):

@@ -89,6 +89,47 @@ class DbMigrationTests(unittest.TestCase):
         self.assertIn("''", defaults[("ai_profile_check_requests", "error_message")])
         self.assertIn("''", defaults[("project_execution_configs", "prompts_sha256")])
 
+    def test_intent_phase_checkpoint_table_exists(self) -> None:
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+
+            columns = sql.fetchall(
+                conn,
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'intent_phase_checkpoints'
+                """
+            )
+            constraints = sql.fetchall(
+                conn,
+                """
+                SELECT constraint_name
+                FROM information_schema.table_constraints
+                WHERE table_schema = 'public'
+                  AND table_name = 'intent_phase_checkpoints'
+                """
+            )
+        self.assertEqual(
+            {row["column_name"] for row in columns},
+            {
+                "project_id",
+                "intent_id",
+                "phase",
+                "worker_name",
+                "worker_type",
+                "session_id",
+                "last_error",
+                "created_at",
+                "updated_at",
+            },
+        )
+        self.assertIn(
+            "intent_phase_checkpoints_pkey",
+            {row["constraint_name"] for row in constraints},
+        )
+
     def test_prompt_snapshot_columns_exist(self) -> None:
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql

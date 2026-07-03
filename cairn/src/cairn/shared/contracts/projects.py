@@ -17,6 +17,18 @@ class Fact(BaseModel):
     description: str
 
 
+class IntentPhaseCheckpoint(BaseModel):
+    project_id: str
+    intent_id: str
+    phase: Literal["explore_conclude"]
+    worker_name: str
+    worker_type: str
+    session_id: str
+    last_error: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class Intent(BaseModel):
     id: str
     from_: list[str] = Field(alias="from")
@@ -27,6 +39,7 @@ class Intent(BaseModel):
     last_heartbeat_at: str | None = None
     created_at: str
     concluded_at: str | None = None
+    phase_checkpoint: IntentPhaseCheckpoint | None = None
 
     model_config = {"populate_by_name": True}
 

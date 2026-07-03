@@ -52,3 +52,4 @@ class TaskInvocation:
     fact_count: int = 0
     hint_count: int = 0
     open_intent_count: int = 0
+    checkpoint_session_id: str | None = None

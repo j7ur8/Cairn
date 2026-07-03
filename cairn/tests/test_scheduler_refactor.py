@@ -28,6 +28,7 @@ def _intent(
     worker: str | None = None,
     to: str | None = None,
     created_at: str | None = None,
+    phase_checkpoint=None,
 ):
     from cairn.shared.contracts import Intent
 
@@ -40,6 +41,7 @@ def _intent(
         worker=worker,
         created_at=created_at or _ts(int(intent_id[-1]) if intent_id[-1].isdigit() else 0),
         concluded_at=None,
+        phase_checkpoint=phase_checkpoint,
     )
 
 
@@ -202,6 +204,39 @@ class ProjectDispatcherDispatchTests(unittest.TestCase):
 
         self.assertTrue(dispatched)
         services.dispatch_explore.assert_called_once_with(project, recent)
+
+    def test_checkpointed_intent_blocks_new_full_explore_dispatch(self) -> None:
+        from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
+        from cairn.shared.contracts import Fact, IntentPhaseCheckpoint
+
+        checkpoint = IntentPhaseCheckpoint(
+            project_id="proj_001",
+            intent_id="i001",
+            phase="explore_conclude",
+            worker_name="mock",
+            worker_type="mock",
+            session_id="session-1",
+            created_at=_ts(),
+            updated_at=_ts(),
+        )
+        checkpointed = _intent("i001", phase_checkpoint=checkpoint, created_at=_ts(1))
+        newer_normal = _intent("i009", created_at=_ts(9))
+        project = _project(
+            intents=[newer_normal, checkpointed],
+            facts=[
+                Fact(id="origin", description="origin"),
+                Fact(id="goal", description="goal"),
+                Fact(id="f001", description="new"),
+            ],
+        )
+        services = self._services(project)
+
+        dispatched = ProjectDispatcher(services).try_dispatch_project(
+            _summary(intent_count=2, unclaimed_intent_count=2)
+        )
+
+        self.assertTrue(dispatched)
+        services.dispatch_explore.assert_called_once_with(project, checkpointed)
 
     def test_claimed_or_running_open_intents_block_reason(self) -> None:
         from cairn.dispatcher.scheduler.project_dispatcher import ProjectDispatcher
@@ -599,6 +634,7 @@ class TaskSubmitterTests(unittest.TestCase):
         try:
             execution_config_for = MagicMock(return_value={"task_type": "bootstrap", "config_version": 7})
             select_worker = MagicMock(return_value=selection)
+            select_worker_by_name = MagicMock()
             release_intent = MagicMock()
             submitter = TaskSubmitter(
                 config=object(),  # type: ignore[arg-type]
@@ -609,6 +645,7 @@ class TaskSubmitterTests(unittest.TestCase):
                 log_state=LogState(),
                 execution_config_for=execution_config_for,
                 select_worker=select_worker,
+                select_worker_by_name=select_worker_by_name,
                 project_open_intent_count=MagicMock(return_value=0),
                 release_intent=release_intent,
                 release_reason=MagicMock(),
@@ -624,7 +661,141 @@ class TaskSubmitterTests(unittest.TestCase):
             client.claim.assert_called_once_with("proj_001", "i001", "mock")
             execution_config_for.assert_called_once_with("proj_001", "bootstrap")
             select_worker.assert_called_once_with(project, "bootstrap", {"task_type": "bootstrap", "config_version": 7})
+            select_worker_by_name.assert_not_called()
             release_intent.assert_not_called()
+        finally:
+            executor.shutdown(wait=True)
+
+    def test_explore_checkpoint_dispatch_uses_original_worker_and_session(self) -> None:
+        from cairn.dispatcher.protocol.client import ApiResult
+        from cairn.dispatcher.runtime.cancellation import TaskCancellation
+        from cairn.dispatcher.scheduler.log_state import LogState
+        from cairn.dispatcher.scheduler.runtime_state import RuntimeTaskRegistry
+        from cairn.dispatcher.scheduler.task_submitter import TaskSubmitter
+        from cairn.dispatcher.scheduler.worker_selection import WorkerSelection
+        from cairn.shared.config import WorkerConfig
+        from cairn.shared.contracts import IntentPhaseCheckpoint
+
+        client = MagicMock()
+        client.claim.return_value = ApiResult(200, {"ok": True})
+        client.export_project.return_value = "graph: []"
+        executor = ThreadPoolExecutor(max_workers=1)
+        runtime = RuntimeTaskRegistry()
+        worker = WorkerConfig(
+            name="mock",
+            type="mock",
+            task_types=["explore"],
+            max_running=1,
+            priority=0,
+            env={},
+        )
+        selection = WorkerSelection(
+            worker=worker,
+            blocked_busy=[],
+            blocked_unhealthy=[],
+            blocked_rejected=[],
+            blocked_task_type=[],
+        )
+        checkpoint = IntentPhaseCheckpoint(
+            project_id="proj_001",
+            intent_id="i001",
+            phase="explore_conclude",
+            worker_name="mock",
+            worker_type="mock",
+            session_id="session-1",
+            created_at=_ts(),
+            updated_at=_ts(),
+        )
+        intent = _intent("i001", phase_checkpoint=checkpoint)
+        project = _project(intents=[intent])
+
+        def fake_run(_services, invocation):
+            self.assertIs(invocation.project, project)
+            self.assertIs(invocation.intent, intent)
+            self.assertIs(invocation.worker, worker)
+            self.assertEqual(invocation.export_yaml, "graph: []")
+            self.assertEqual(invocation.checkpoint_session_id, "session-1")
+            self.assertIsInstance(invocation.cancellation, TaskCancellation)
+            return "success"
+
+        try:
+            execution_config = {"task_type": "explore", "config_version": 3}
+            select_worker = MagicMock()
+            select_worker_by_name = MagicMock(return_value=selection)
+            submitter = TaskSubmitter(
+                config=object(),  # type: ignore[arg-type]
+                client=client,
+                container_manager=object(),  # type: ignore[arg-type]
+                executor=executor,
+                runtime=runtime,
+                log_state=LogState(),
+                execution_config_for=MagicMock(return_value=execution_config),
+                select_worker=select_worker,
+                select_worker_by_name=select_worker_by_name,
+                project_open_intent_count=MagicMock(return_value=1),
+                release_intent=MagicMock(),
+                release_reason=MagicMock(),
+                bootstrap_runner=MagicMock(),
+                explore_runner=fake_run,
+                reason_runner=MagicMock(),
+            )
+
+            dispatched = submitter.dispatch_explore(project, intent)
+            self.assertTrue(dispatched)
+            for future in runtime.futures:
+                future.result(timeout=5)
+            select_worker.assert_not_called()
+            select_worker_by_name.assert_called_once_with(project, "explore", execution_config, "mock")
+            client.claim.assert_called_once_with("proj_001", "i001", "mock")
+        finally:
+            executor.shutdown(wait=True)
+
+    def test_explore_checkpoint_waits_when_original_worker_unavailable(self) -> None:
+        from cairn.dispatcher.scheduler.log_state import LogState
+        from cairn.dispatcher.scheduler.runtime_state import RuntimeTaskRegistry
+        from cairn.dispatcher.scheduler.task_submitter import TaskSubmitter
+        from cairn.dispatcher.scheduler.worker_selection import WorkerSelection
+        from cairn.shared.contracts import IntentPhaseCheckpoint
+
+        client = MagicMock()
+        executor = ThreadPoolExecutor(max_workers=1)
+        runtime = RuntimeTaskRegistry()
+        checkpoint = IntentPhaseCheckpoint(
+            project_id="proj_001",
+            intent_id="i001",
+            phase="explore_conclude",
+            worker_name="mock",
+            worker_type="mock",
+            session_id="session-1",
+            created_at=_ts(),
+            updated_at=_ts(),
+        )
+        intent = _intent("i001", phase_checkpoint=checkpoint)
+        project = _project(intents=[intent])
+        try:
+            submitter = TaskSubmitter(
+                config=object(),  # type: ignore[arg-type]
+                client=client,
+                container_manager=object(),  # type: ignore[arg-type]
+                executor=executor,
+                runtime=runtime,
+                log_state=LogState(),
+                execution_config_for=MagicMock(return_value={"task_type": "explore"}),
+                select_worker=MagicMock(),
+                select_worker_by_name=MagicMock(return_value=WorkerSelection(None, ["mock(1/1)"], [], [], [])),
+                project_open_intent_count=MagicMock(return_value=1),
+                release_intent=MagicMock(),
+                release_reason=MagicMock(),
+                bootstrap_runner=MagicMock(),
+                explore_runner=MagicMock(),
+                reason_runner=MagicMock(),
+            )
+
+            dispatched = submitter.dispatch_explore(project, intent)
+            self.assertFalse(dispatched)
+            client.claim.assert_not_called()
+            client.export_project.assert_not_called()
+            self.assertEqual(runtime.running_count(), 0)
         finally:
             executor.shutdown(wait=True)
 

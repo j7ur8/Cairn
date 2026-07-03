@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
-from cairn.shared.contracts import Fact, Intent
+from cairn.shared.contracts import Fact, Intent, IntentPhaseCheckpoint
 
 
 class CreateIntentRequest(BaseModel):
@@ -66,3 +66,33 @@ class ConcludeRequest(BaseModel):
 class ConcludeResponse(BaseModel):
     fact: Fact
     intent: Intent
+
+
+class IntentPhaseCheckpointUpsertRequest(BaseModel):
+    worker_name: str
+    worker_type: str
+    session_id: str
+
+    @field_validator("worker_name", "worker_type", "session_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class IntentPhaseCheckpointFailedRequest(BaseModel):
+    last_error: str
+
+    @field_validator("last_error")
+    @classmethod
+    def validate_last_error(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class IntentPhaseCheckpointResponse(BaseModel):
+    checkpoint: IntentPhaseCheckpoint | None = None

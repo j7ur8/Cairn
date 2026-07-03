@@ -31,7 +31,7 @@ worker:
   exec_user: kali
   network: cairn
   completed_action: stop
-  stopped_action: remove
+  stopped_action: stop
   cap_add: []
   extra_mounts: []
   resources:
