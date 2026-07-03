@@ -187,12 +187,64 @@ def split_server_dispatch_config(dispatch: dict[str, Any]) -> tuple[dict[str, An
     dynamic_dispatcher_keys = ("runtime",)
     source_server = dispatch.get("server") if isinstance(dispatch.get("server"), dict) else {}
     source_dispatcher = dispatch.get("dispatcher") if isinstance(dispatch.get("dispatcher"), dict) else {}
-    server = {
-        "server": {key: source_server[key] for key in fixed_server_keys if key in source_server},
-        "dispatcher": {key: source_dispatcher[key] for key in fixed_dispatcher_keys if key in source_dispatcher},
+    worker_runtime = dispatch.get("worker_runtime") if isinstance(dispatch.get("worker_runtime"), dict) else {}
+    container = worker_runtime.get("container") if isinstance(worker_runtime.get("container"), dict) else {}
+    paths = source_server.get("paths") if isinstance(source_server.get("paths"), dict) else {}
+    reload_config = source_dispatcher.get("reload") if isinstance(source_dispatcher.get("reload"), dict) else {}
+    server_mount = paths.get("datas_root") or "/tmp/cairn-test"
+    host_root = paths.get("host_datas_root") or server_mount
+    workspace = "/home/kali/workspace"
+    bind_mounts = container.get("bind_mounts") if isinstance(container.get("bind_mounts"), list) else []
+    for mount in bind_mounts:
+        if isinstance(mount, dict) and mount.get("name") == "project-files" and mount.get("container_path"):
+            workspace = mount["container_path"]
+            break
+    worker_resources = {
+        key: container.get(key)
+        for key in ("mem_limit", "pids_limit", "nano_cpus")
+        if key in container
     }
-    if "worker_runtime" in dispatch:
-        server["worker_runtime"] = dispatch["worker_runtime"]
+    server = {
+        "app": {
+            "public_url": source_server.get("base_url", "http://localhost:8000"),
+            **({"log": source_server["log"]} if "log" in source_server else {}),
+            **({"retention": source_server["retention"]} if "retention" in source_server else {}),
+            **({"settings": source_server["settings"]} if "settings" in source_server else {}),
+        },
+        "database": source_server.get("database", {}),
+        "security": source_server.get("auth", {}),
+        "admin": source_server.get("initial_admin", {}),
+        "dispatcher": {
+            "health_addr": source_dispatcher.get("health_addr", "127.0.0.1:9100"),
+            "reload_url": reload_config.get("url", "http://cairn-dispatcher:9100/reload"),
+            "reload_enabled": reload_config.get("enabled", True),
+        },
+        "storage": {
+            "host_root": host_root,
+            "server_mount": server_mount,
+            "worker_workspace": workspace,
+        },
+        "worker": {
+            "image": container.get("image", "cairn/test:latest"),
+            "container_user": container.get("user"),
+            "exec_user": container.get("exec_user"),
+            "network": container.get("network_mode", "bridge"),
+            "completed_action": container.get("completed_action", "stop"),
+            "stopped_action": container.get("stopped_action", "stop"),
+            "cap_add": container.get("cap_add") or [],
+            "extra_mounts": [
+                mount
+                for mount in bind_mounts
+                if not (isinstance(mount, dict) and mount.get("name") in {"ctf-attachments", "project-files"})
+            ],
+            "resources": {
+                "mem_limit": worker_resources.get("mem_limit"),
+                "pids_limit": worker_resources.get("pids_limit"),
+                "nano_cpus": worker_resources.get("nano_cpus"),
+            },
+            "common_env": worker_runtime.get("common_env") or {},
+        },
+    }
     dynamic = dict(dispatch)
     dynamic.pop("worker_runtime", None)
     dynamic["server"] = {key: source_server[key] for key in dynamic_server_keys if key in source_server}

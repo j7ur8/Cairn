@@ -92,19 +92,21 @@ def _check_auth(config: DispatchConfig, result: PreflightResult) -> None:
 
 
 def _check_paths(config: DispatchConfig, result: PreflightResult) -> None:
-    result.checked.append("server.paths")
+    result.checked.append("storage")
     for label, raw in (
-        ("server.paths.datas_root", config.server.paths.datas_root),
-        ("server.paths.attachments_root", config.server.paths.resolved_attachments_root),
-        ("server.paths.project_files_root", config.server.paths.resolved_project_files_root),
+        ("storage.server_mount", config.server.paths.datas_root),
+        ("storage.host_root", config.server.paths.resolved_host_datas_root),
+        ("storage.server_mount/attachments", config.server.paths.resolved_attachments_root),
+        ("storage.server_mount/project-files", config.server.paths.resolved_project_files_root),
     ):
+        result.checked.append(label)
         _check_host_path(label, Path(raw).expanduser(), result, allow_missing=True)
 
 
 def _check_bind_mounts(config: DispatchConfig, result: PreflightResult) -> None:
-    result.checked.append("worker_runtime.container.bind_mounts")
+    result.checked.append("worker.extra_mounts")
     for mount in config.container.bind_mounts:
-        label = f"worker_runtime.container.bind_mounts[{mount.name or mount.container_path}].host_path"
+        label = f"worker.extra_mounts[{mount.name or mount.container_path}].host_path"
         rendered = mount.host_path.replace("{project_id}", PROJECT_ID_PLACEHOLDER)
         path = Path(rendered).expanduser()
         if "{project_id}" in mount.host_path:
@@ -114,61 +116,61 @@ def _check_bind_mounts(config: DispatchConfig, result: PreflightResult) -> None:
 
 
 def _check_project_files_bind_mount_alignment(config: DispatchConfig, result: PreflightResult) -> None:
-    result.checked.append("worker_runtime.container.bind_mounts[project-files].alignment")
+    result.checked.append("worker.workspace.alignment")
     mounts = [mount for mount in config.container.bind_mounts if mount.name == PROJECT_FILES_MOUNT_NAME]
     if not mounts:
         result.errors.append(
-            "worker_runtime.container.bind_mounts must include writable project-files mount "
+            "worker.workspace must include writable project-files mount "
             f"at {PROJECT_WORKSPACE_PATH}"
         )
         return
     mount = mounts[0]
     if mount.read_only:
-        result.errors.append("worker_runtime.container.bind_mounts[project-files] must be read_write")
+        result.errors.append("worker.workspace project-files mount must be read_write")
     if mount.container_path != PROJECT_WORKSPACE_PATH:
         result.errors.append(
-            "worker_runtime.container.bind_mounts[project-files].container_path must be "
+            "worker.workspace project-files mount container_path must be "
             f"{PROJECT_WORKSPACE_PATH}"
         )
 
-    expected = Path(config.server.paths.resolved_project_files_root).expanduser() / PROJECT_ID_PLACEHOLDER
+    expected = Path(config.server.paths.resolved_host_project_files_root).expanduser() / PROJECT_ID_PLACEHOLDER
     actual = Path(mount.host_path.replace("{project_id}", PROJECT_ID_PLACEHOLDER)).expanduser()
     expected_resolved = expected.resolve(strict=False)
     actual_resolved = actual.resolve(strict=False)
     if actual_resolved != expected_resolved:
         result.errors.append(
-            "worker_runtime.container.bind_mounts[project-files].host_path must align with "
-            "server.paths.project_files_root; "
+            "worker.workspace project-files host path must align with "
+            "storage.host_root project-files directory; "
             f"expected {expected_resolved}, got {actual_resolved}"
         )
 
 
 def _check_container_security(config: DispatchConfig, result: PreflightResult) -> None:
-    result.checked.append("worker_runtime.container.security")
+    result.checked.append("worker.container_user")
     user = (config.container.user or "").strip()
     if not user:
         result.warnings.append(
-            "worker_runtime.container.user is not set; worker containers will "
+            "worker.container_user is not set; worker containers will "
             "run as root (the image default). Recommend setting an explicit "
             "non-root user."
         )
     elif user == "root" or user == "0":
         result.warnings.append(
-            "worker_runtime.container.user is 'root'; worker containers will "
+            "worker.container_user is 'root'; worker containers will "
             "run with full root privileges. Recommend a non-root user."
         )
 
 
 def _check_worker_image(config: DispatchConfig, result: PreflightResult, *, strict: bool) -> None:
-    result.checked.append("worker_runtime.container.image")
+    result.checked.append("worker.image")
     image = config.container.image.strip()
     if not _looks_like_image_ref(image):
-        result.errors.append(f"worker_runtime.container.image is not a valid image reference: {image!r}")
+        result.errors.append(f"worker.image is not a valid image reference: {image!r}")
         return
     if _uses_latest_tag(image):
-        result.errors.append("worker_runtime.container.image must not use the mutable latest tag")
+        result.errors.append("worker.image must not use the mutable latest tag")
     if "@" not in image:
-        result.warnings.append("worker_runtime.container.image is not pinned by digest; production deployments should use image@sha256:...")
+        result.warnings.append("worker.image is not pinned by digest; production deployments should use image@sha256:...")
 
     try:
         import docker

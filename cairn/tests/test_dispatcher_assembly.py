@@ -28,7 +28,8 @@ class DispatcherAssemblyTests(unittest.TestCase):
         import cairn.dispatcher.scheduler.loop as loop_mod
 
         with mock.patch.object(loop_mod, "ContainerManager") as cm, \
-                mock.patch.object(loop_mod, "DispatcherHealthServer") as hs:
+                mock.patch.object(loop_mod, "DispatcherHealthServer") as hs, \
+                mock.patch.dict("os.environ", {"CAIRN_HOST_ROOT": str(_REPO)}):
             cm.return_value = mock.Mock(name="ContainerManager")
             hs.return_value = mock.Mock(name="DispatcherHealthServer")
             loop = loop_mod.DispatcherLoop(_CONFIG_TEST_YAML)

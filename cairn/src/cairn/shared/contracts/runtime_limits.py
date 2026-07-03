@@ -16,9 +16,9 @@ class RuntimeLimits(BaseModel):
 
 
 class ContainerLimits(BaseModel):
-    """worker_runtime.container limit-only subset — GET/PUT /container-limits.
+    """worker.resources limit-only subset - GET/PUT /container-limits.
 
-    ``nano_cpus`` is Docker's native unit (1 CPU = 1e9).  The UI exposes
+    ``nano_cpus`` is Docker's native unit (1 CPU = 1e9). The UI exposes
     ``cpus`` as a float; the service layer converts.
     """
 

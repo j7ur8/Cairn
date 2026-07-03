@@ -51,11 +51,18 @@ class SystemPathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     datas_root: str
+    host_datas_root: str | None = None
     attachments_root: str | None = None
     project_files_root: str | None = None
     worker_attachments_root: str = "/home/kali/workspace/attachments"
 
-    @field_validator("datas_root", "attachments_root", "project_files_root", "worker_attachments_root")
+    @field_validator(
+        "datas_root",
+        "host_datas_root",
+        "attachments_root",
+        "project_files_root",
+        "worker_attachments_root",
+    )
     @classmethod
     def validate_path_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -74,6 +81,21 @@ class SystemPathsConfig(BaseModel):
     @property
     def resolved_project_files_root(self) -> str:
         return self.project_files_root or str(Path(self.datas_root) / "project-files")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_host_datas_root(self) -> str:
+        return self.host_datas_root or self.datas_root
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_host_attachments_root(self) -> str:
+        return str(Path(self.resolved_host_datas_root) / "attachments")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_host_project_files_root(self) -> str:
+        return str(Path(self.resolved_host_datas_root) / "project-files")
 
 
 class ServerLogConfig(BaseModel):

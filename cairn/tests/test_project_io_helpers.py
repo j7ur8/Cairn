@@ -203,8 +203,9 @@ class PrepareProjectStorageTests(unittest.TestCase):
         from helpers import TempYamlConfig
 
         with TempYamlConfig() as cfg:
-            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
-            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+            storage_root = Path(cfg.written_server["storage"]["server_mount"])
+            project_root = storage_root / "project-files"
+            attachments_root = storage_root / "attachments"
             project_dir = project_root / "proj_clean"
             attachment_dir = attachments_root / "proj_clean"
             (project_dir / "reports").mkdir(parents=True)
@@ -222,8 +223,9 @@ class PrepareProjectStorageTests(unittest.TestCase):
         from helpers import TempYamlConfig
 
         with TempYamlConfig() as cfg:
-            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
-            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+            storage_root = Path(cfg.written_server["storage"]["server_mount"])
+            project_root = storage_root / "project-files"
+            attachments_root = storage_root / "attachments"
 
             prepare_project_storage("proj_missing")
 
@@ -237,8 +239,9 @@ class PrepareProjectStorageTests(unittest.TestCase):
         from helpers import TempYamlConfig
 
         with TempYamlConfig() as cfg:
-            project_root = Path(cfg.written_server["server"]["paths"]["project_files_root"])
-            attachments_root = Path(cfg.written_server["server"]["paths"]["attachments_root"])
+            storage_root = Path(cfg.written_server["storage"]["server_mount"])
+            project_root = storage_root / "project-files"
+            attachments_root = storage_root / "attachments"
             project_root.mkdir(parents=True)
             attachments_root.mkdir(parents=True)
             (project_root / "proj_replace").write_text("old", encoding="utf-8")

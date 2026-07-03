@@ -567,7 +567,7 @@ class BindMountHostPathConfigTests(unittest.TestCase):
         server_path = self.tmp / "server.yaml"
         data = yaml.safe_load(server_path.read_text(encoding="utf-8"))
         data["dispatcher"]["leader_ttl_seconds"] = 15
-        data["worker_runtime"]["container"]["dispatcher_id"] = "old"
+        data["worker"]["dispatcher_id"] = "old"
         server_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         with self.assertRaises(ConfigError):

@@ -6,18 +6,15 @@ import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
-import yaml
 from fastapi import HTTPException
 
 from cairn.server.config_store import ConfigStore
-from cairn.shared.config import load_dispatch_config
+from cairn.shared.config import DispatchConfig, merge_server_dispatch_data, validate_capability_resources, validate_role_resources
 from cairn.shared.config.capability_models import prepare_capability_data
 from cairn.shared.config.loader import load_server_data
 from cairn.shared.config.role_models import prepare_role_data
-from cairn.shared.config.worker_models import prepare_bind_mount_data
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 SERVER_YAML = Path("/cairn/server.yaml") if Path("/cairn/server.yaml").exists() else _REPO_ROOT / "server.yaml"
@@ -156,29 +153,17 @@ def _overwrite_yaml(path: Path, text: str) -> None:
 
 
 def _validate_dispatch_data(data: dict[str, Any]) -> None:
-    validation_data = _dispatch_validation_data(data)
-    # Pre-resolve relative source_path / bind_mount paths against the REAL
-    # config directories before writing the validation copy. Otherwise the
-    # loader resolves them against the throwaway temp dir below and rejects
-    # capabilities/roles/bind-mounts whose files live next to the real YAML.
-    server_payload = prepare_bind_mount_data(validation_data[0], server_yaml_path().parent)
-    dispatch_payload = validation_data[1]
-    resources_payload = prepare_capability_data(validation_data[2], resources_yaml_path().parent)
+    server_payload, dispatch_payload, resources_raw = _dispatch_validation_data(data)
+    resources_payload = prepare_capability_data(resources_raw, resources_yaml_path().parent)
     resources_payload = prepare_role_data(resources_payload, resources_yaml_path().parent)
-    with TemporaryDirectory(prefix="cairn-dispatch-validation-") as tmpdir:
-        validation_server_path = Path(tmpdir) / "server.yaml"
-        validation_path = Path(tmpdir) / "config.yaml"
-        validation_resources_path = Path(tmpdir) / "config.resources.yaml"
-        with validation_server_path.open("w", encoding="utf-8") as tmp:
-            yaml.safe_dump(server_payload, tmp, sort_keys=False, allow_unicode=True)
-        with validation_path.open("w", encoding="utf-8") as tmp:
-            yaml.safe_dump(dispatch_payload, tmp, sort_keys=False, allow_unicode=True)
-        with validation_resources_path.open("w", encoding="utf-8") as tmp:
-            yaml.safe_dump(resources_payload, tmp, sort_keys=False, allow_unicode=True)
-        try:
-            load_dispatch_config(validation_path)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(400, f"invalid dispatch config: {exc}") from exc
+    payload = merge_server_dispatch_data(server_payload, dispatch_payload)
+    payload["resources"] = resources_payload
+    try:
+        config = DispatchConfig.model_validate(payload)
+        validate_capability_resources(config)
+        validate_role_resources(config)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"invalid dispatch config: {exc}") from exc
 
 
 def _dispatch_validation_data(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:

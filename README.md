@@ -177,7 +177,7 @@ Back up PostgreSQL with `pg_dump` or your managed database snapshot mechanism be
 
 Configuration hot reload is intentionally limited. UI-managed dispatch settings, worker definitions, capabilities, roles, task timeouts, and prompt resources can reload the dispatcher. Database URL, JWT secret, server bind/logging, and most infrastructure paths should be treated as restart-required settings.
 
-Keep `server.yaml`, `config.yaml`, `config.resources.yaml`, and `.env` out of git. Example files contain placeholders only. Rotate `server.auth.jwt_secret` by issuing fresh user and dispatcher tokens, updating both server and dispatcher config, then restarting both processes. Rotate provider API keys in `config.yaml` and trigger dispatcher reload or restart workers.
+Keep `server.yaml`, `config.yaml`, `config.resources.yaml`, and `.env` out of git. Example files contain placeholders only. Rotate `security.jwt_secret` by issuing fresh user and dispatcher tokens, updating `security.dispatcher_api_token`, then restarting both processes. Rotate provider API keys in `config.yaml` and trigger dispatcher reload or restart workers.
 
 Monitor `/health`, dispatcher `/healthz`, and `/metrics`. Alert on server health `degraded`, dispatcher health `degraded`, missing dispatcher ticks, repeated dispatcher transient failures, high task failure rates, PostgreSQL errors, and observability retention/write failures.
 

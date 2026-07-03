@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -219,7 +221,17 @@ def prepare_bind_mount_data(data: Any, config_dir: Path) -> Any:
 
 
 def _resolve_bind_mount_host_path(config_dir: Path, host_path: str) -> str:
-    path = Path(host_path).expanduser()
+    expanded = os.path.expandvars(host_path)
+    unresolved = _UNRESOLVED_ENV_RE.search(expanded)
+    if unresolved:
+        raise ValueError(
+            "container bind_mount host_path contains unresolved environment variable "
+            f"{unresolved.group(0)!r}; set it before loading config"
+        )
+    path = Path(os.path.expandvars(expanded)).expanduser()
     if not path.is_absolute():
         path = config_dir / path
     return str(path.resolve(strict=False))
+
+
+_UNRESOLVED_ENV_RE = re.compile(r"\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)")

@@ -226,19 +226,51 @@ class ConfigPreflightTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(any("config.resources.yaml" in error for error in result.errors))
 
-    def test_project_files_bind_mount_must_align_with_server_root(self) -> None:
+    def test_preflight_output_uses_new_server_yaml_terms(self) -> None:
+        from cairn.shared.config.preflight import check_dispatch_config
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch("docker.from_env") as from_env:
+                from_env.return_value.images.get.side_effect = ImageNotFound("missing")
+                result = check_dispatch_config(self._write(root))
+
+        rendered = json.dumps(result.to_dict())
+        self.assertIn("storage.host_root", rendered)
+        self.assertIn("worker.image", rendered)
+        self.assertNotIn("server.paths", rendered)
+        self.assertNotIn("worker_runtime.container", rendered)
+
+    def test_new_server_schema_preflight_uses_host_root_for_mount_alignment(self) -> None:
         from cairn.shared.config.preflight import check_dispatch_config
 
         with TemporaryDirectory() as td:
             root = Path(td)
             dispatch = _dispatch_config(root)
-            dispatch["worker_runtime"]["container"]["bind_mounts"][0]["host_path"] = str(
-                root / "other-project-files" / "{project_id}"
+            server, dynamic = self._new_schema_server_and_dispatch(root, dispatch)
+            (root / "server.yaml").write_text(yaml.safe_dump(server, sort_keys=False), encoding="utf-8")
+            path = root / "config.yaml"
+            path.write_text(yaml.safe_dump(dynamic, sort_keys=False), encoding="utf-8")
+            (root / "config.resources.yaml").write_text(
+                yaml.safe_dump(_resources_config(), sort_keys=False),
+                encoding="utf-8",
             )
-            result = check_dispatch_config(self._write(root, dispatch))
+            with mock.patch("docker.from_env") as from_env:
+                from_env.return_value.images.get.side_effect = ImageNotFound("missing")
+                result = check_dispatch_config(path)
 
-        self.assertFalse(result.ok)
-        self.assertTrue(any("project_files_root" in error for error in result.errors))
+        self.assertTrue(result.ok, result.to_dict())
+
+    def _new_schema_server_and_dispatch(self, root: Path, dispatch: dict) -> tuple[dict, dict]:
+        from helpers import split_server_dispatch_config
+
+        server, dynamic = split_server_dispatch_config(dispatch)
+        server["storage"]["host_root"] = str(root / "datas")
+        server["storage"]["server_mount"] = "/cairn/datas"
+        return (
+            server,
+            dynamic,
+        )
 
     def test_project_files_bind_mount_must_use_worker_workspace_path(self) -> None:
         from cairn.shared.config.preflight import check_dispatch_config

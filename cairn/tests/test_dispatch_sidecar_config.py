@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -156,7 +157,8 @@ roles:
     def test_repo_capability_routing_metadata_loads_from_sidecar(self) -> None:
         from cairn.shared.config import DispatchConfig
 
-        cfg = DispatchConfig.load(_REPO / "config.yaml")
+        with mock.patch.dict("os.environ", {"CAIRN_HOST_ROOT": str(_REPO)}):
+            cfg = DispatchConfig.load(_REPO / "config.yaml")
 
         mcp_by_id = {item.id: item for item in cfg.capabilities.mcp_servers}
         skill_by_id = {item.id: item for item in cfg.capabilities.skills}

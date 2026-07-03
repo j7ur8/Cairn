@@ -1,35 +1,43 @@
-server:
-  base_url: http://127.0.0.1:8000
-  database:
-    url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
-    pool_size: 5
-    max_overflow: 10
-    pool_timeout: 30
-  auth:
-    jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
-    dispatcher_api_token: test-dispatcher-token
-  initial_admin:
-    email: ''
-    password: ''
-  paths:
-    datas_root: datas
-    attachments_root: datas/attachments
-    project_files_root: datas/project-files
-    worker_attachments_root: /home/kali/workspace/attachments
+app:
+  public_url: http://127.0.0.1:8000
+  log:
+    level: INFO
+    format: text
+  retention:
+    enabled: false
+    interval_seconds: 21600
+database:
+  url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30
+security:
+  jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+  dispatcher_api_token: test-dispatcher-token
+admin:
+  email: ''
+  password: ''
 dispatcher:
   health_addr: 127.0.0.1:9100
-  reload:
-    url: http://127.0.0.1:9100/reload
-    enabled: false
-worker_runtime:
-  container:
-    image: ghcr.io/oritera/cairn-worker-container:latest
-    network_mode: cairn
-    completed_action: stop
-    stopped_action: remove
-    cap_add:
-    - NET_RAW
-    - NET_ADMIN
+  reload_url: http://127.0.0.1:9100/reload
+  reload_enabled: false
+storage:
+  host_root: ${CAIRN_HOST_ROOT}/datas
+  server_mount: datas
+  worker_workspace: /home/kali/workspace
+worker:
+  image: ghcr.io/oritera/cairn-worker-container:latest
+  network: cairn
+  completed_action: stop
+  stopped_action: remove
+  cap_add:
+  - NET_RAW
+  - NET_ADMIN
+  extra_mounts: []
+  resources:
+    mem_limit: null
+    pids_limit: null
+    nano_cpus: null
   common_env:
     TSEC_BASE_URL: http://<SERVER_HOST>/api
     TSEC_AGENT_TOKEN: common-agent-token

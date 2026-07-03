@@ -1,43 +1,42 @@
 # Fixed deployment config. Contains startup-level, sensitive, and infrastructure settings.
 # The UI does not edit this file; changes usually require restarting server and dispatcher.
-server:
-  base_url: http://cairn-server:8000
-  database:
-    url: postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn
-    pool_size: 5
-    max_overflow: 10
-    pool_timeout: 30
-  auth:
-    jwt_secret: change-me-generate-with-python-secrets-token-urlsafe-48
-    dispatcher_api_token: change-me-service-jwt-signed-with-jwt-secret
-  initial_admin:
-    email: admin@example.com
-    password: change-me-on-first-login
-  paths:
-    datas_root: datas
-    attachments_root: datas/attachments
-    project_files_root: datas/project-files
-    worker_attachments_root: /home/kali/workspace/attachments
+app:
+  public_url: http://cairn-server:8000
+  log:
+    level: INFO
+    format: text
+  retention:
+    enabled: true
+    interval_seconds: 21600
+database:
+  url: postgresql+psycopg://cairn:cairn@cairn-postgres:5432/cairn
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30
+security:
+  jwt_secret: change-me-generate-with-python-secrets-token-urlsafe-48
+  dispatcher_api_token: change-me-service-jwt-signed-with-jwt-secret
+admin:
+  email: admin@example.com
+  password: change-me-on-first-login
 dispatcher:
   health_addr: 0.0.0.0:9100
-  reload:
-    url: http://cairn-dispatcher:9100/reload
-    enabled: true
-worker_runtime:
-  container:
-    image: cairn-worker-container:mcp-camoufox
-    user: 0:0
-    exec_user: kali
-    network_mode: cairn
-    completed_action: stop
-    stopped_action: remove
-    bind_mounts:
-    - name: ctf-attachments
-      host_path: datas/attachments
-      container_path: /home/kali/workspace/attachments
-      read_only: true
-    - name: project-files
-      host_path: datas/project-files/{project_id}
-      container_path: /home/kali/workspace
-      read_only: false
-  common_env: {}
+  reload_url: http://cairn-dispatcher:9100/reload
+  reload_enabled: true
+storage:
+  host_root: ${CAIRN_HOST_ROOT}/datas
+  server_mount: /cairn/datas
+  worker_workspace: /home/kali/workspace
+worker:
+  image: cairn-worker-container:mcp-camoufox
+  container_user: 0:0
+  exec_user: kali
+  network: cairn
+  completed_action: stop
+  stopped_action: remove
+  cap_add: []
+  extra_mounts: []
+  resources:
+    mem_limit: null
+    pids_limit: null
+    nano_cpus: null

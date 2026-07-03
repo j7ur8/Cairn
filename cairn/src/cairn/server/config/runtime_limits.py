@@ -43,16 +43,16 @@ def update_runtime_limits(body: RuntimeLimits) -> RuntimeLimits:
 
 def get_container_limits() -> ContainerLimits:
     data = load_server_config_data()
-    worker_runtime = data.get("worker_runtime")
-    if not isinstance(worker_runtime, dict):
-        raise HTTPException(500, "server.yaml worker_runtime section missing")
-    container = worker_runtime.get("container")
-    if not isinstance(container, dict):
-        raise HTTPException(500, "server.yaml worker_runtime.container section missing")
+    worker = data.get("worker")
+    if not isinstance(worker, dict):
+        raise HTTPException(500, "server.yaml worker section missing")
+    resources = worker.get("resources")
+    if not isinstance(resources, dict):
+        raise HTTPException(500, "server.yaml worker.resources section missing")
     return ContainerLimits(
-        mem_limit=container.get("mem_limit"),
-        pids_limit=container.get("pids_limit"),
-        nano_cpus=container.get("nano_cpus"),
+        mem_limit=resources.get("mem_limit"),
+        pids_limit=resources.get("pids_limit"),
+        nano_cpus=resources.get("nano_cpus"),
     )
 
 

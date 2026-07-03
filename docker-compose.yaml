@@ -38,6 +38,8 @@ services:
     container_name: cairn-server
     ports:
       - "8000:8000"
+    environment:
+      CAIRN_HOST_ROOT: ${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}
     volumes:
       - ${CAIRN_DATA_DIR:-./datas}:/cairn/datas
       - ./server.yaml:/cairn/server.yaml

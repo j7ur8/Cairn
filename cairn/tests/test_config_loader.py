@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -36,7 +37,44 @@ worker_pool:
       env: {}
 """
 
-SERVER_YAML = """
+NEW_SERVER_YAML = """
+app:
+  public_url: http://server
+  log:
+    level: INFO
+    format: text
+  retention:
+    enabled: true
+    interval_seconds: 21600
+database:
+  url: postgresql+psycopg://cairn:cairn@localhost:5432/cairn
+security:
+  jwt_secret: test-jwt-secret-do-not-use-in-prod-32bytes
+  dispatcher_api_token: test-dispatcher-token
+admin:
+  email: ''
+  password: ''
+dispatcher:
+  health_addr: 127.0.0.1:9100
+  reload_url: http://127.0.0.1:9100/reload
+  reload_enabled: false
+storage:
+  host_root: ${CAIRN_HOST_ROOT}/datas
+  server_mount: /cairn/datas
+  worker_workspace: /home/kali/workspace
+worker:
+  image: img
+  network: bridge
+  completed_action: stop
+  resources:
+    mem_limit: null
+    pids_limit: null
+    nano_cpus: null
+"""
+
+SERVER_YAML = NEW_SERVER_YAML.replace("${CAIRN_HOST_ROOT}/datas", "/tmp/cairn-test")
+
+LEGACY_SERVER_YAML = """
 server:
   base_url: http://server
   database:
@@ -218,7 +256,59 @@ roles:
             cfg = DispatchConfig.load(config_path)
         self.assertEqual(cfg.roles, [])
         self.assertEqual(cfg.capabilities.mcp_servers, [])
+
+    def test_new_server_yaml_schema_derives_internal_paths_and_mounts(self) -> None:
+        from cairn.shared.config import DispatchConfig
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            host_root = root / "host"
+            config_path = _write_base(root)
+            (root / "server.yaml").write_text(NEW_SERVER_YAML.strip(), encoding="utf-8")
+            with mock.patch.dict("os.environ", {"CAIRN_HOST_ROOT": str(host_root)}):
+                cfg = DispatchConfig.load(config_path)
+
         self.assertEqual(cfg.server.base_url, "http://server")
+        self.assertEqual(cfg.server.paths.resolved_project_files_root, "/cairn/datas/project-files")
+        self.assertEqual(str(Path(host_root / "datas").resolve()), cfg.server.paths.resolved_host_datas_root)
+        mounts = {mount.name: mount for mount in cfg.container.bind_mounts}
+        self.assertEqual(
+            mounts["project-files"].host_path,
+            str((host_root / "datas" / "project-files" / "{project_id}").resolve(strict=False)),
+        )
+        self.assertEqual(mounts["project-files"].container_path, "/home/kali/workspace")
+        self.assertEqual(
+            mounts["ctf-attachments"].host_path,
+            str((host_root / "datas" / "attachments").resolve(strict=False)),
+        )
+        self.assertTrue(mounts["ctf-attachments"].read_only)
+
+    def test_legacy_server_yaml_schema_is_rejected(self) -> None:
+        from cairn.shared.config import ConfigError, DispatchConfig
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            (root / "server.yaml").write_text(LEGACY_SERVER_YAML.strip(), encoding="utf-8")
+            with mock.patch.dict("os.environ", {}, clear=True):
+                with self.assertRaises(ConfigError) as ctx:
+                    DispatchConfig.load(config_path)
+        self.assertIn("removed legacy", str(ctx.exception))
+        self.assertIn("server", str(ctx.exception))
+        self.assertIn("worker_runtime", str(ctx.exception))
+
+    def test_new_server_yaml_unset_cairn_host_root_fails_fast(self) -> None:
+        from cairn.shared.config import ConfigError, DispatchConfig
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            (root / "server.yaml").write_text(NEW_SERVER_YAML.strip(), encoding="utf-8")
+            with mock.patch.dict("os.environ", {}, clear=True):
+                with self.assertRaises(ConfigError) as ctx:
+                    DispatchConfig.load(config_path)
+        self.assertIn("storage.host_root", str(ctx.exception))
+        self.assertIn("unresolved environment variable", str(ctx.exception))
 
     def test_mock_bootstrap_complete_outcome_keeps_legacy_config_compatible(self) -> None:
         from cairn.shared.config.mock_behavior import resolve_mock_behavior
