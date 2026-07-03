@@ -70,54 +70,125 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertTrue(task_section.strip().startswith("# Task\n{role_instructions}"))
         self.assertIn("{role_instructions}", bootstrap)
         self.assertIn("{capability_instructions}", bootstrap)
-        self.assertIn("target discovery only", task_section)
+        self.assertIn("target discovery and profiling only", task_section)
+        self.assertIn("Build a concise target profile", task_section)
+        self.assertIn("static, provided, and publicly observable facts", task_section)
+        self.assertIn("technology and runtime fingerprints", task_section)
+        self.assertIn("Allowed bootstrap activity is limited to non-intrusive target profiling", task_section)
         self.assertIn("Do not perform vulnerability probing or exploitation", task_section)
         self.assertIn("SQLi, XSS, RCE", task_section)
         self.assertIn("authentication-bypass", task_section)
         self.assertIn("high-volume directory-enumeration", task_section)
+        self.assertNotIn("CTF", task_section)
+        self.assertNotIn("flag", task_section)
+        self.assertNotIn("summarize", bootstrap)
+        self.assertNotIn("not continuing exploration", bootstrap)
+        self.assertNotIn("execute any command except read", bootstrap)
+        self.assertNotIn("page source", task_section)
+        self.assertNotIn("response headers", task_section)
+        self.assertNotIn("JavaScript", task_section)
+        self.assertNotIn("CSS", task_section)
+        self.assertNotIn("public paths", task_section)
+        self.assertNotIn("form behavior", task_section)
+        self.assertNotIn("information_api.json", task_section)
+        self.assertNotIn("information_leak.json", task_section)
+        output_requirements = bootstrap.split("## Output Requirements", 1)[1].split("## Rules", 1)[0]
+        self.assertIn("confirmed target profile facts", output_requirements)
+        self.assertNotIn("fact summary", output_requirements)
         self.assertIn("## Output Requirements", bootstrap)
         self.assertIn("## Context", bootstrap)
 
-    def test_role_prompts_contain_bootstrap_guidance(self) -> None:
+    def test_role_prompts_keep_project_semantics_without_bootstrap_protocol(self) -> None:
         roles_dir = _REPO / "capabilities" / "roles"
         cases = {
-            "cypher-ctf-operator/ROLE.md": [
-                "bounded initial challenge triage",
-                "do not force a single classification",
-                "mixed",
-                "combine multiple areas",
-                "frontend static analysis and JavaScript reverse engineering",
-                "information_api.json",
-                "information_leak.json",
-                "public entrypoints",
-                "If a flag or proof is directly exposed",
-                "deep exploitation",
-                "vulnerability verification, SQLi/XSS/RCE payloading",
-                "During bootstrap, include only static or publicly visible evidence",
-            ],
-            "cypher-pentest-operator/ROLE.md": [
-                "bounded, scope-aware reconnaissance",
-                "rules of engagement",
-                "authentication and authorization boundaries",
-                "minimally disruptive public-surface checks",
-                "Bootstrap is target discovery only",
-                "vulnerability verification, SQLi/XSS/RCE payloading",
-            ],
-            "cypher-vuln-researcher/ROLE.md": [
-                "bounded target-identification",
-                "component, version",
-                "reachable repro surface",
-                "broad fuzzing",
-                "Bootstrap is target discovery only",
-                "vulnerability verification, SQLi/XSS/RCE payloading",
-            ],
+            "cypher-ctf-operator/ROLE.md": {
+                "include": [
+                    "This is a CTF project.",
+                    "requested flag, proof, or challenge-specific success condition",
+                    "evidence that explains why the result satisfies the goal",
+                    "likely challenge categories",
+                    "do not force a single classification",
+                    "mixed",
+                    "combine multiple areas",
+                    "public entrypoints",
+                    "For web challenges",
+                    "page source",
+                    "linked JavaScript/CSS/assets",
+                    "API clients",
+                    "For pwn, reverse, crypto, forensics, or misc challenges",
+                    "binaries, protocols, artifacts, encodings, algorithms",
+                    "If a flag or proof is directly exposed",
+                ],
+                "exclude": [
+                    "Bootstrap is target discovery only",
+                    "Allowed bootstrap activity includes",
+                    "vulnerability verification, SQLi/XSS/RCE payloading",
+                    "information_api.json",
+                    "information_leak.json",
+                    "JavaScript reverse engineering",
+                    "deep exploitation",
+                ],
+            },
+            "cypher-pentest-operator/ROLE.md": {
+                "include": [
+                    "This is an authorized penetration testing project.",
+                    "rules of engagement",
+                    "confirmed impact",
+                    "public surface",
+                    "authentication and authorization boundaries",
+                    "tenant boundaries",
+                ],
+                "exclude": [
+                    "Bootstrap is target discovery only",
+                    "Allowed bootstrap activity includes",
+                    "minimally disruptive public-surface checks",
+                    "vulnerability verification, SQLi/XSS/RCE payloading",
+                    "deep exploitation",
+                ],
+            },
+            "cypher-vuln-researcher/ROLE.md": {
+                "include": [
+                    "This is a vulnerability research, PoC development, or root-cause analysis project.",
+                    "deterministic repro and root-cause evidence",
+                    "component, version",
+                    "reachable repro surface",
+                    "affected code path",
+                    "likely fix area",
+                ],
+                "exclude": [
+                    "Bootstrap is target discovery only",
+                    "Allowed bootstrap activity includes",
+                    "vulnerability verification, SQLi/XSS/RCE payloading",
+                    "broad fuzzing",
+                    "high-volume testing",
+                ],
+            },
         }
 
         for name, expected in cases.items():
             with self.subTest(name=name):
                 role = (roles_dir / name).read_text(encoding="utf-8")
-                for text in expected:
+                for text in expected["include"]:
                     self.assertIn(text, role)
+                for text in expected["exclude"]:
+                    self.assertNotIn(text, role)
+
+    def test_existing_skill_owns_ctf_web_js_output_contract(self) -> None:
+        skill_dir = _REPO / "capabilities" / "skills" / "ctf-web-js-analysis"
+        skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        output_contract = (skill_dir / "references" / "output-contract.md").read_text(encoding="utf-8")
+
+        self.assertIn("information_api.json", skill)
+        self.assertIn("information_leak.json", skill)
+        self.assertIn("Every finding must include `source`, `evidence`, and `value`", skill)
+        for text in [
+            "information_api.json",
+            "information_leak.json",
+            "`apis`: array of API finding objects",
+            "`leaks`: array of leak finding objects",
+            "`value` is not evidence confidence",
+        ]:
+            self.assertIn(text, output_contract)
 
     def test_default_reason_uses_marker_gated_output(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"

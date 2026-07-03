@@ -73,6 +73,7 @@ services:
     container_name: cairn-dispatcher
     working_dir: ${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}
     environment:
+      CAIRN_HOST_ROOT: ${CAIRN_HOST_ROOT:?set CAIRN_HOST_ROOT or use ./start.sh}
       UV_CACHE_DIR: /tmp/uv-cache
       XDG_CACHE_HOME: /tmp/.cache
     # SECURITY: the dispatcher still needs the Docker socket to launch
