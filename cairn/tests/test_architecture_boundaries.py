@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -234,29 +235,61 @@ def test_known_small_import_cycles_do_not_reappear() -> None:
 
 def test_dto_boundary_docs_stay_visible() -> None:
     server_models = (SRC / "server" / "schemas" / "__init__.py").read_text(encoding="utf-8")
-    compatibility_models = (SRC / "server" / "models_pkg" / "__init__.py").read_text(encoding="utf-8")
     shared_contracts = (SRC / "shared" / "contracts" / "__init__.py").read_text(encoding="utf-8")
     assert "Server-private HTTP request/response" in server_models
     assert "shared with the dispatcher" in server_models
-    assert "Compatibility re-export" in compatibility_models
     assert "Wire contracts shared across Cairn processes" in shared_contracts
     assert "Server-only" in shared_contracts
 
 
-def test_renamed_import_compatibility_shims_stay_available() -> None:
+def test_removed_compatibility_import_shims_stay_removed() -> None:
     from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver as CanonicalClaudeCodeDriver
-    from cairn.dispatcher.workers.adapters.claudecode import ClaudeCodeDriver as LegacyClaudeCodeDriver
     from cairn.server.application.project_queries import _decode_cursor as canonical_decode_cursor
-    from cairn.server.application.project_read import _decode_cursor as legacy_decode_cursor
-    from cairn.server.models_pkg import CreateProjectRequest as LegacyCreateProjectRequest
-    from cairn.server.models_pkg.ai_profiles import AiProfileCreate as LegacyAiProfileCreate
     from cairn.server.schemas import CreateProjectRequest
     from cairn.server.schemas.ai_profiles import AiProfileCreate
 
-    assert LegacyClaudeCodeDriver is CanonicalClaudeCodeDriver
-    assert legacy_decode_cursor is canonical_decode_cursor
-    assert LegacyCreateProjectRequest is CreateProjectRequest
-    assert LegacyAiProfileCreate is AiProfileCreate
+    assert CanonicalClaudeCodeDriver.__name__ == "ClaudeCodeDriver"
+    assert callable(canonical_decode_cursor)
+    assert CreateProjectRequest.__name__ == "CreateProjectRequest"
+    assert AiProfileCreate.__name__ == "AiProfileCreate"
+
+    removed_modules = (
+        "cairn.dispatcher.workers.adapters.claudecode",
+        "cairn.server.application.project_read",
+        "cairn.server.models_pkg",
+        "cairn.server.models_pkg.ai_profiles",
+    )
+    available: list[str] = []
+    for module in removed_modules:
+        try:
+            spec = importlib.util.find_spec(module)
+        except ModuleNotFoundError:
+            spec = None
+        if spec is not None:
+            available.append(module)
+    assert available == []
+
+    removed_paths = (
+        SRC / "dispatcher" / "workers" / "adapters" / "claudecode.py",
+        SRC / "server" / "application" / "project_read.py",
+        SRC / "server" / "models_pkg",
+    )
+    assert [str(path.relative_to(ROOT)) for path in removed_paths if path.exists()] == []
+
+
+def test_internal_imports_use_canonical_paths_not_removed_shims() -> None:
+    forbidden = (
+        "cairn.dispatcher.workers.adapters.claudecode",
+        "cairn.server.application.project_read",
+        "cairn.server.models_pkg",
+    )
+    offenders: list[str] = []
+    for path in _py_files(SRC):
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in source:
+                offenders.append(f"{path.relative_to(ROOT)} contains {token}")
+    assert offenders == []
 
 
 def test_alembic_revision_ids_fit_default_version_column() -> None:
