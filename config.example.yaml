@@ -15,18 +15,18 @@ dispatcher:
     interval: 3
     max_workers: 8
     max_running_projects: 3
-    max_project_workers: 4
+    max_project_workers: 2
     healthcheck_timeout: 20
 tasks:
   bootstrap:
     timeout: 300
-    conclude_timeout: 90
+    conclude_timeout: 120
   reason:
     timeout: 300
     max_intents: 2
   explore:
-    timeout: 300
-    conclude_timeout: 90
+    timeout: 900
+    conclude_timeout: 180
 observability:
   enabled: true
   record:
@@ -41,7 +41,6 @@ observability:
   retention_days: 14
   redaction_patterns: []
 worker_pool:
-  proxies: []
   workers:
   - name: claudecode_deepseek-v4-pro
     type: claudecode

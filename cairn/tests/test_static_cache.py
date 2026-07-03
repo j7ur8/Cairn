@@ -327,10 +327,12 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("async navigateSettings(section = 'system')", settings)
         self.assertIn("await this.loadSettingsSection(section);", settings)
         self.assertIn("system: () => this.loadSystemSettings()", settings)
-        self.assertIn("prompts: async () => {", settings)
+        self.assertIn("prompts: () => this.loadPrompts()", settings)
         self.assertIn("ai: () => this.loadAiProfiles()", settings)
         self.assertIn("capabilities: () => this.loadCapabilityAdmin()", settings)
-        self.assertIn("proxies: () => this.loadProxies()", settings)
+        self.assertIn("servers: () => this.loadServersSettings()", settings)
+        self.assertIn("proxy: () => this.loadProxySettings()", settings)
+        self.assertNotIn("resources: () => this.loadResourceSettings()", settings)
         self.assertNotIn("server: () => this.loadSettings()", settings)
         self.assertNotIn("runtime: () => this.loadRuntimeLimits()", settings)
         self.assertNotIn("tasks: () => this.loadTaskTimeouts()", settings)
@@ -340,6 +342,24 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("await this.loadSettings();", core)
         self.assertNotIn("await this.loadRuntimeLimits();", core)
         self.assertNotIn("await this.loadCapabilityAdmin();", core)
+
+    def test_proxy_settings_uses_local_project_selection(self) -> None:
+        proxies = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-proxies.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("proxyProjects: []", proxies)
+        self.assertIn("proxySelectedProjectId: ''", proxies)
+        self.assertIn("proxySelectedProject: null", proxies)
+        self.assertIn("proxyProjectSearch: ''", proxies)
+        self.assertIn("async loadProxyProjects()", proxies)
+        self.assertIn("async selectProxyProject(project)", proxies)
+        self.assertIn("backToProxyProjects()", proxies)
+        self.assertIn("async loadProjectProxyEndpoints(projectId = this.proxySelectedProjectId)", proxies)
+        self.assertIn("const base = `/projects/${encodeURIComponent(this.proxySelectedProjectId)}/proxy-endpoints`;", proxies)
+        self.assertIn("`/projects/${encodeURIComponent(this.proxySelectedProjectId)}/proxy-endpoints/${encodeURIComponent(endpointId)}`", proxies)
+        self.assertIn("`/projects/${encodeURIComponent(this.proxySelectedProjectId)}/proxy-endpoints/${encodeURIComponent(endpointId)}/resolve-chain`", proxies)
+        self.assertNotIn("selectedProjectId", proxies)
+        self.assertNotIn("loadResourceSettings", proxies)
 
     def test_capabilities_slice_excludes_non_capability_admin_endpoints(self) -> None:
         capabilities = (

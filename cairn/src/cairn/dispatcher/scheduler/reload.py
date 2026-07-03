@@ -55,7 +55,6 @@ class DispatcherReloader:
             next_client = CairnClient(next_config.server_url, api_token=next_config.system.auth.dispatcher_api_token)
             next_container_manager = ContainerManager(
                 next_config.container,
-                proxy_resolver=loop.project_context.resolve_proxy_env,
             )
             next_executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
             old_container_manager = loop.container_manager

@@ -40,7 +40,7 @@ def run_healthcheck(
 ) -> HealthcheckRun:
     process = container_manager.build_exec_process(
         container_name,
-        dict(worker.env),
+        _worker_exec_env(worker),
         command,
         timeout_seconds=timeout_seconds,
         tty=tty,
@@ -105,7 +105,7 @@ def run_worker_process(
 
     process = container_manager.build_exec_process(
         container_name,
-        dict(worker.env),
+        _worker_exec_env(worker),
         argv,
         timeout_seconds=timeout_seconds,
         tty=tty,
@@ -135,3 +135,7 @@ def run_worker_process(
             lease.attach_process(None)
         if cancellation is not None:
             cancellation.attach_process(None)
+
+
+def _worker_exec_env(worker: WorkerConfig) -> dict[str, str]:
+    return dict(worker.env)

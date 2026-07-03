@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -172,7 +171,6 @@ class WorkerRuntimeConfig(BaseModel):
 class WorkerPoolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    proxies: list[dict[str, Any]] = Field(default_factory=list)
     workers: list[WorkerConfig]
 
     @model_validator(mode="after")

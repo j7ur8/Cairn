@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+SERVER_URL = os.environ.get("CAIRN_SERVER_URL", "http://cairn-server:8000").rstrip("/")
+API_TOKEN = os.environ.get("CAIRN_API_TOKEN", "")
+
+
+def respond(request_id, result=None, error=None):
+    payload = {"jsonrpc": "2.0", "id": request_id}
+    if error is not None:
+        payload["error"] = error
+    else:
+        payload["result"] = result or {}
+    sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def api(method, path, body=None):
+    data = None
+    headers = {"Accept": "application/json"}
+    if API_TOKEN:
+        headers["Authorization"] = f"Bearer {API_TOKEN}"
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(f"{SERVER_URL}{path}", data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code}: {raw[:1000]}") from exc
+
+
+def text_result(value):
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, indent=2)
+    return {"content": [{"type": "text", "text": text}]}
+
+
+def tools():
+    def tool(name, description, schema):
+        return {"name": name, "description": description, "inputSchema": schema}
+
+    obj = {"type": "object", "properties": {}, "additionalProperties": False}
+    project_id = {"type": "string", "description": "Cairn project id"}
+    endpoint_id = {"type": "string", "description": "Project proxy endpoint id"}
+    server_id = {"type": "string", "description": "Server resource id"}
+    return [
+        tool("servers.list", "List global AI-accessible remote server capabilities.", obj),
+        tool("servers.test_ssh", "Run an SSH smoke test for a configured server.", {"type": "object", "properties": {"server_id": server_id, "command": {"type": "string", "default": "true"}, "timeout_seconds": {"type": "integer", "default": 12}}, "required": ["server_id"], "additionalProperties": False}),
+        tool("servers.run_command", "Run a command on a configured server over SSH.", {"type": "object", "properties": {"server_id": server_id, "command": {"type": "string"}, "timeout_seconds": {"type": "integer", "default": 30}}, "required": ["server_id", "command"], "additionalProperties": False}),
+        tool("servers.inspect_listening_ports", "Inspect listening TCP ports on a configured server.", {"type": "object", "properties": {"server_id": server_id}, "required": ["server_id"], "additionalProperties": False}),
+        tool("project_proxy.list_endpoints", "List Project Proxy endpoints for a project.", {"type": "object", "properties": {"project_id": project_id}, "required": ["project_id"], "additionalProperties": False}),
+        tool("project_proxy.register_endpoint", "Register a Project Proxy endpoint discovered or created during work.", {"type": "object", "properties": {"project_id": project_id, "endpoint": {"type": "object"}}, "required": ["project_id", "endpoint"], "additionalProperties": False}),
+        tool("project_proxy.update_endpoint", "Update a Project Proxy endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "endpoint": {"type": "object"}}, "required": ["project_id", "endpoint_id", "endpoint"], "additionalProperties": False}),
+        tool("project_proxy.delete_endpoint", "Delete a Project Proxy endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+        tool("project_proxy.resolve_chain", "Resolve prerequisite proxy chain for an endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+        tool("project_proxy.test_endpoint", "Record/test a Project Proxy endpoint health state.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "target_url": {"type": "string"}, "timeout_seconds": {"type": "integer", "default": 10}}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+        tool("project_proxy.explain_endpoint", "Explain endpoint connection details, chain, reachability, usage mode, and health.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+        tool("project_proxy.record_usage_result", "Record whether a Project Proxy endpoint worked for a concrete use.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "ok": {"type": "boolean"}, "message": {"type": "string"}}, "required": ["project_id", "endpoint_id", "ok"], "additionalProperties": False}),
+    ]
+
+
+def call_tool(name, args):
+    args = args or {}
+    if name == "servers.list":
+        return api("GET", "/servers")
+    if name == "servers.test_ssh":
+        sid = urllib.parse.quote(args["server_id"])
+        return api("POST", f"/servers/{sid}/test", {"command": args.get("command") or "true", "timeout_seconds": args.get("timeout_seconds") or 12})
+    if name == "servers.run_command":
+        sid = urllib.parse.quote(args["server_id"])
+        return api("POST", f"/servers/{sid}/run-command", {"command": args["command"], "timeout_seconds": args.get("timeout_seconds") or 30})
+    if name == "servers.inspect_listening_ports":
+        sid = urllib.parse.quote(args["server_id"])
+        return api("POST", f"/servers/{sid}/inspect-listening-ports")
+    if name == "project_proxy.list_endpoints":
+        pid = urllib.parse.quote(args["project_id"])
+        return api("GET", f"/projects/{pid}/proxy-endpoints")
+    if name == "project_proxy.register_endpoint":
+        pid = urllib.parse.quote(args["project_id"])
+        return api("POST", f"/projects/{pid}/proxy-endpoints", args["endpoint"])
+    if name == "project_proxy.update_endpoint":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        return api("PUT", f"/projects/{pid}/proxy-endpoints/{eid}", args["endpoint"])
+    if name == "project_proxy.delete_endpoint":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        return api("DELETE", f"/projects/{pid}/proxy-endpoints/{eid}") or {"deleted": True}
+    if name == "project_proxy.resolve_chain":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        return api("GET", f"/projects/{pid}/proxy-endpoints/{eid}/resolve-chain")
+    if name == "project_proxy.test_endpoint":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        return api("POST", f"/projects/{pid}/proxy-endpoints/{eid}/test", {"target_url": args.get("target_url"), "timeout_seconds": args.get("timeout_seconds") or 10})
+    if name == "project_proxy.explain_endpoint":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        chain = api("GET", f"/projects/{pid}/proxy-endpoints/{eid}/resolve-chain")
+        return chain
+    if name == "project_proxy.record_usage_result":
+        pid = urllib.parse.quote(args["project_id"])
+        eid = urllib.parse.quote(args["endpoint_id"])
+        return api("POST", f"/projects/{pid}/proxy-endpoints/{eid}/usage", {"ok": bool(args["ok"]), "message": args.get("message") or ""})
+    raise RuntimeError(f"unknown tool: {name}")
+
+
+def main():
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            request = json.loads(line)
+            method = request.get("method")
+            request_id = request.get("id")
+            if method == "initialize":
+                respond(request_id, {"protocolVersion": "2024-11-05", "serverInfo": {"name": "cairn-resources", "version": "0.1.0"}, "capabilities": {"tools": {}}})
+            elif method == "tools/list":
+                respond(request_id, {"tools": tools()})
+            elif method == "tools/call":
+                params = request.get("params") or {}
+                result = call_tool(params.get("name"), params.get("arguments") or {})
+                respond(request_id, text_result(result))
+            elif method and method.startswith("notifications/"):
+                continue
+            else:
+                respond(request_id, error={"code": -32601, "message": f"method not found: {method}"})
+        except Exception as exc:
+            respond(request.get("id") if isinstance(request, dict) else None, error={"code": -32000, "message": str(exc)})
+
+
+if __name__ == "__main__":
+    main()

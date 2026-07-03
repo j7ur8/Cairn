@@ -43,7 +43,6 @@ class ProjectRow(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     graph_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     timeline_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
-    proxy_id: Mapped[str | None] = mapped_column(Text)
     llm_hidden_event_kinds: Mapped[str] = mapped_column(Text, nullable=False, default='["usage"]', server_default='["usage"]')
     reason_worker: Mapped[str | None] = mapped_column(Text)
     reason_run_id: Mapped[str | None] = mapped_column(Text)
@@ -173,17 +172,40 @@ class ReplayStepRow(Base):
     concluded_at: Mapped[str | None] = mapped_column(Text)
 
 
-class ProxyRow(Base):
-    __tablename__ = "proxies"
-    __table_args__ = (CheckConstraint("type IN ('socks5','http','https')", name="ck_proxies_type"),)
+class ProjectProxyEndpointRow(Base):
+    __tablename__ = "project_proxy_endpoints"
+    __table_args__ = (
+        CheckConstraint("protocol IN ('socks5','socks5h','http','https')", name="ck_project_proxy_protocol"),
+        CheckConstraint("auth_type IN ('none','password')", name="ck_project_proxy_auth_type"),
+        CheckConstraint("lifecycle IN ('persistent','run','task')", name="ck_project_proxy_lifecycle"),
+        Index("idx_project_proxy_endpoints_project", "project_id"),
+    )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)
+    protocol: Mapped[str] = mapped_column(Text, nullable=False)
     host: Mapped[str] = mapped_column(Text, nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
+    auth_type: Mapped[str] = mapped_column(Text, nullable=False, default="none", server_default="none")
     username: Mapped[str | None] = mapped_column(Text)
     password: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    lifecycle: Mapped[str] = mapped_column(Text, nullable=False, default="persistent", server_default="persistent")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    scope: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    prerequisite_proxy_id: Mapped[str | None] = mapped_column(Text)
+    reachable_from: Mapped[str] = mapped_column(Text, nullable=False, default="worker", server_default="worker")
+    usage_mode: Mapped[str] = mapped_column(Text, nullable=False, default="tool_native_proxy", server_default="tool_native_proxy")
+    health_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown", server_default="unknown")
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean)
+    last_test_at: Mapped[str | None] = mapped_column(Text)
+    last_test_message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    last_used_at: Mapped[str | None] = mapped_column(Text)
+    last_usage_ok: Mapped[bool | None] = mapped_column(Boolean)
+    last_usage_message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    run_id: Mapped[str | None] = mapped_column(Text)
+    task_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -213,10 +235,8 @@ class ProjectExecutionConfigRow(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     role_id: Mapped[str | None] = mapped_column(Text)
     role_json: Mapped[str | None] = mapped_column(Text)
-    proxy_id: Mapped[str | None] = mapped_column(Text)
     container_json: Mapped[str | None] = mapped_column(Text)
     workers_json: Mapped[str | None] = mapped_column(Text)
-    proxies_json: Mapped[str | None] = mapped_column(Text)
     settings_json: Mapped[str | None] = mapped_column(Text)
     catalog_json: Mapped[str | None] = mapped_column(Text)
     dispatch_sha256: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")

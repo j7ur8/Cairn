@@ -153,10 +153,10 @@ class CapabilityManifestTests(unittest.TestCase):
 
     def test_injection_prefers_execution_config_catalog_snapshot(self) -> None:
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.config import McpServerCapabilityConfig, RemoteSupportConfig, SkillCapabilityConfig
+        from cairn.shared.config import McpServerCapabilityConfig, SkillCapabilityConfig
 
         config = SimpleNamespace(
-            remote_support=RemoteSupportConfig(),
+            servers=[],
             capabilities=SimpleNamespace(
                 mcp_servers=[
                     McpServerCapabilityConfig(
@@ -181,6 +181,7 @@ class CapabilityManifestTests(unittest.TestCase):
 
         result = inject_project_capabilities(
             config,  # type: ignore[arg-type]
+            None,
             writer,
             "container",
             "proj",
@@ -317,7 +318,7 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         self.assertIn("reports/ stores summaries.", text)
         self.assertLess(text.index("## Files"), text.index("Use these capabilities only for the current Cairn project/challenge."))
 
-    def test_execute_instructions_render_remote_support_as_subsection(self) -> None:
+    def test_execute_instructions_render_resources_as_subsection(self) -> None:
         from cairn.dispatcher.capability_instructions import instructions
 
         text = instructions(
@@ -325,15 +326,15 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
             "/tmp/cap/skills",
             [],
             [],
-            remote_support_appendix="Authorized Remote Support may be available.\n\n- CAIRN_DNSLOG_URL:",
+            resources_appendix="Servers are global AI-accessible remote server capabilities.\n\n- srv1: ops@host:22",
         )
 
         self.assertIn("# Project Capabilities", text)
-        self.assertIn("## Remote Support", text)
-        self.assertIn("CAIRN_DNSLOG_URL", text)
-        self.assertNotIn("# Remote Support", text.splitlines())
+        self.assertIn("## Servers And Project Proxy", text)
+        self.assertIn("srv1: ops@host:22", text)
+        self.assertNotIn("# Servers And Project Proxy", text.splitlines())
         self.assertLess(
-            text.index("## Remote Support"),
+            text.index("## Servers And Project Proxy"),
             text.index("Use these capabilities only for the current Cairn project/challenge."),
         )
 

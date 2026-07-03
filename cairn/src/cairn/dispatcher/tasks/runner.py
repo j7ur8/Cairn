@@ -40,6 +40,7 @@ def prepare_task_execution(
         return None
     capabilities = inject_project_capabilities(
         config,
+        client,
         container_manager,
         container_name,
         project_id,

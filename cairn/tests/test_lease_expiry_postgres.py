@@ -31,7 +31,6 @@ class LeaseExpiryPostgresTests(unittest.TestCase):
             created_at="2026-06-06T00:00:00Z",
             graph_revision=graph_revision,
             timeline_revision=1,
-            proxy_id=None,
             llm_hidden_event_kinds='["usage"]',
         )
 

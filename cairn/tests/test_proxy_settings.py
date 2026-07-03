@@ -1,29 +1,12 @@
-"""Tests for the project-level proxy pool (server CRUD, dispatcher resolver,
-and observability redaction).
-
-Covers:
-- ``ProxyConfig`` / ``ProxyCreate`` schema validation
-- ``proxy_config_to_env`` for socks5 / http / https with and without auth
-- ``BUILTIN_PATTERNS`` redaction of HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / SOCKS5_PROXY
-- ``ProjectContextResolver.resolve_project_proxy`` populates the cache and tolerates
-  ``LookupError`` / ``RequestException``
-- ``ProjectContextResolver.resolve_proxy_env`` returns ``None`` for the
-  startup-healthcheck project id
-- ``ContainerManager`` accepts the ``proxy_resolver`` callable and merges its
-  result into the worker container ``environment=``
-- Server: ``POST /proxies`` writes a row, ``DELETE /proxies/{id}`` cascades
-  to ``projects.proxy_id`` (``ON DELETE SET NULL``)
-"""
 from __future__ import annotations
 
 import sys
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest import mock
 
-from cairn.dispatcher.scheduler.project_cache import ProjectCaches
+from pydantic import ValidationError
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
@@ -33,352 +16,347 @@ def _ts() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _make_proxy(**overrides: Any):
-    """Factory for a fully-populated :class:`ProxyConfig`."""
-    from cairn.shared.contracts import ProxyConfig
+class ServerResourceConfigTests(unittest.TestCase):
+    def test_rejects_remote_support_in_resources_schema(self) -> None:
+        from cairn.shared.config import ResourceConfig
 
-    ts = _ts()
-    base = {
-        "id": "proxy_abc",
-        "name": "corp-socks",
-        "type": "socks5",
-        "host": "10.0.0.1",
-        "port": 1080,
-        "has_auth": True,
-        "username": "alice",
-        "password": "hunter2",
-        "created_at": ts,
-        "updated_at": ts,
-    }
-    base.update(overrides)
-    return ProxyConfig(**base)
+        with self.assertRaises(ValidationError):
+            ResourceConfig.model_validate({"remote_support": {"enabled": True}})
+
+    def test_certificate_cert_path_is_confined(self) -> None:
+        from cairn.shared.config import ServerResourceConfig
+
+        base = {
+            "id": "srv1",
+            "name": "Server",
+            "host": "host",
+            "username": "root",
+        }
+        ServerResourceConfig.model_validate({**base, "cert_path": "team/client.pem"})
+        for bad in ("/tmp/key.pem", "../key.pem", "team/../key.pem", "bad\x00key.pem"):
+            with self.assertRaises(ValidationError):
+                ServerResourceConfig.model_validate({**base, "cert_path": bad})
+
+    def test_server_rejects_legacy_auth_type_and_requires_auth_material(self) -> None:
+        from cairn.shared.config import ServerResourceConfig
+
+        base = {
+            "id": "srv1",
+            "name": "Server",
+            "host": "host",
+            "username": "root",
+        }
+        with self.assertRaises(ValidationError):
+            ServerResourceConfig.model_validate({**base, "auth_type": "password", "password": "secret"})
+        with self.assertRaises(ValidationError):
+            ServerResourceConfig.model_validate(base)
+
+    def test_yaml_servers_redact_secrets_and_record_missing_sshpass_test(self) -> None:
+        import yaml
+
+        from cairn.server.config.servers import create_yaml_server, list_yaml_servers, test_yaml_server
+        from cairn.server.schemas.servers import ServerCreate
+        from helpers import TempYamlConfig
+
+        with TempYamlConfig(resources={"servers": [], "capabilities": {"mcp_servers": [], "skills": []}, "roles": []}) as cfg:
+            created = create_yaml_server(
+                ServerCreate(
+                    id="srv1",
+                    name="Build host",
+                    host="build.internal",
+                    username="ops",
+                    password="secret",
+                )
+            )
+            self.assertTrue(created.has_password)
+            self.assertFalse(created.has_private_key)
+            self.assertEqual(created.auth_order, ["password"])
+
+            listed = list_yaml_servers()
+            self.assertEqual(len(listed), 1)
+            self.assertNotIn("password", listed[0].model_dump())
+            self.assertEqual(listed[0].auth_order, ["password"])
+
+            with mock.patch("cairn.server.config.servers.shutil.which", return_value=None):
+                result = test_yaml_server("srv1", command="true", timeout_seconds=1)
+                self.assertFalse(result.ok)
+                self.assertIn("password auth testing requires sshpass", result.message)
+
+            data = yaml.safe_load(cfg.resources_path.read_text(encoding="utf-8"))
+            self.assertFalse(data["servers"][0]["last_test_ok"])
+            self.assertIn("password auth testing requires sshpass", data["servers"][0]["last_test_message"])
+
+    def test_password_server_uses_sshpass_password_file(self) -> None:
+        from cairn.server.config.servers import create_yaml_server, run_yaml_server_command
+        from cairn.server.schemas.servers import ServerCommandRequest, ServerCreate
+        from helpers import TempYamlConfig
+
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            password_path = Path(argv[2])
+            captured["password_path"] = password_path
+            captured["password_text"] = password_path.read_text(encoding="utf-8")
+            mock_completed = mock.Mock()
+            mock_completed.returncode = 0
+            mock_completed.stdout = ""
+            mock_completed.stderr = ""
+            return mock_completed
+
+        with TempYamlConfig(resources={"servers": [], "capabilities": {"mcp_servers": [], "skills": []}, "roles": []}):
+            create_yaml_server(
+                ServerCreate(
+                    id="srv1",
+                    name="Build host",
+                    host="build.internal",
+                    username="ops",
+                    password="secret",
+                )
+            )
+            with mock.patch("cairn.server.config.servers.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
+                "cairn.server.config.servers.subprocess.run",
+                side_effect=fake_run,
+            ):
+                result = run_yaml_server_command("srv1", ServerCommandRequest(command="true", timeout_seconds=1))
+
+        self.assertTrue(result.ok)
+        self.assertEqual(captured["argv"][:3], ["sshpass", "-f", str(captured["password_path"])])
+        self.assertNotIn("secret", captured["argv"])
+        self.assertEqual(captured["password_text"], "secret\n")
+        self.assertFalse(captured["password_path"].exists())
+
+    def test_server_command_tries_auth_order_until_success(self) -> None:
+        from cairn.server.config.servers import create_yaml_server, run_yaml_server_command
+        from cairn.server.schemas.servers import ServerCommandRequest, ServerCreate
+        from helpers import TempYamlConfig
+
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            mock_completed = mock.Mock()
+            mock_completed.stdout = ""
+            mock_completed.stderr = ""
+            mock_completed.returncode = 1 if len(calls) == 1 else 0
+            return mock_completed
+
+        with TempYamlConfig(resources={"servers": [], "capabilities": {"mcp_servers": [], "skills": []}, "roles": []}):
+            create_yaml_server(
+                ServerCreate(
+                    id="srv1",
+                    name="Build host",
+                    host="build.internal",
+                    username="ops",
+                    password="secret",
+                    private_key="-----BEGIN KEY-----\nkey\n-----END KEY-----",
+                )
+            )
+            with mock.patch("cairn.server.config.servers.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
+                "cairn.server.config.servers.subprocess.run",
+                side_effect=fake_run,
+            ):
+                result = run_yaml_server_command("srv1", ServerCommandRequest(command="true", timeout_seconds=1))
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.message, "ok via password")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0], "ssh")
+        self.assertEqual(calls[1][:2], ["sshpass", "-f"])
+
+    def test_servers_multipart_create_and_update_certificate_uploads(self) -> None:
+        import yaml
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from cairn.server.routers import servers as servers_router
+        from cairn.server.security.deps import current_active_superuser
+        from helpers import TempYamlConfig
+
+        app = FastAPI()
+        app.dependency_overrides[current_active_superuser] = lambda: object()
+        app.include_router(servers_router.router)
+
+        with TempYamlConfig(resources={"servers": [], "capabilities": {"mcp_servers": [], "skills": []}, "roles": []}) as cfg:
+            with TestClient(app) as client:
+                create = client.post(
+                    "/servers/add",
+                    data={
+                        "payload": (
+                            '{"id":"srv1","name":"Server","host":"host","username":"ops",'
+                            '"password":"secret","auth_order":["password","certificate"]}'
+                        )
+                    },
+                    files={"certificate": ("client.pem", b"cert-one", "application/x-pem-file")},
+                )
+                self.assertEqual(create.status_code, 201, create.text)
+                created = create.json()
+                self.assertEqual(created["auth_order"], ["certificate", "password"])
+                first_rel = created["cert_path"]
+                first_path = cfg.root / "capabilities" / "ssh_certs" / first_rel
+                self.assertTrue(first_path.exists())
+                self.assertEqual(first_path.read_bytes(), b"cert-one")
+
+                update = client.put(
+                    "/servers/srv1",
+                    data={"payload": '{"name":"Server 2"}'},
+                    files={"certificate": ("client two.pem", b"cert-two", "application/x-pem-file")},
+                )
+                self.assertEqual(update.status_code, 200, update.text)
+                updated = update.json()
+                self.assertEqual(updated["name"], "Server 2")
+                second_rel = updated["cert_path"]
+                second_path = cfg.root / "capabilities" / "ssh_certs" / second_rel
+                self.assertNotEqual(second_rel, first_rel)
+                self.assertTrue(first_path.exists())
+                self.assertTrue(second_path.exists())
+                self.assertEqual(second_path.read_bytes(), b"cert-two")
+
+            data = yaml.safe_load(cfg.resources_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["servers"][0]["cert_path"], second_rel)
+            self.assertNotIn("auth_type", data["servers"][0])
+            self.assertEqual(data["servers"][0]["auth_order"], ["certificate", "password"])
 
 
-class ProxyConfigSchemaTests(unittest.TestCase):
-    """``ProxyConfig`` / ``ProxyCreate`` / ``ProxyUpdate`` schema basics."""
+class ProjectProxySchemaTests(unittest.TestCase):
+    def test_endpoint_defaults_and_validation(self) -> None:
+        from cairn.server.schemas.project_proxy import ProjectProxyEndpointCreate
 
-    def test_create_requires_name(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
+        endpoint = ProjectProxyEndpointCreate(name="  corp  ", host=" proxy.internal ", port=1080)
+        self.assertEqual(endpoint.name, "corp")
+        self.assertEqual(endpoint.host, "proxy.internal")
+        self.assertEqual(endpoint.protocol, "socks5h")
+        self.assertIsNone(endpoint.prerequisite_proxy_id)
+        self.assertEqual(endpoint.reachable_from, "worker")
+        self.assertEqual(endpoint.usage_mode, "tool_native_proxy")
 
-        with self.assertRaises(Exception):
-            ProxyCreate(type="socks5", host="h", port=1080)
+        with self.assertRaises(ValidationError):
+            ProjectProxyEndpointCreate(name="bad", host="h", port=0)
+        with self.assertRaises(ValidationError):
+            ProjectProxyEndpointCreate(name="bad", host="h", port=1080, protocol="ftp")  # type: ignore[arg-type]
 
-    def test_create_port_must_be_in_range(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
+    def test_create_project_rejects_legacy_proxy_fields(self) -> None:
+        from cairn.server.schemas import CreateProjectRequest
+        from helpers import test_task_timeouts
 
-        with self.assertRaises(Exception):
-            ProxyCreate(name="x", type="socks5", host="h", port=0)
-        with self.assertRaises(Exception):
-            ProxyCreate(name="x", type="socks5", host="h", port=70000)
-
-    def test_create_type_must_be_known(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
-
-        with self.assertRaises(Exception):
-            ProxyCreate(name="x", type="ftp", host="h", port=21)
-
-    def test_summary_strips_credentials(self) -> None:
-        from cairn.shared.contracts import ProxySummary
-
-        ts = _ts()
-        s = ProxySummary(
-            id="p1", name="n", type="socks5", host="h", port=1,
-            has_auth=True, created_at=ts, updated_at=ts,
-        )
-        # Summary must not expose username/password fields at all
-        with self.assertRaises(ValueError):
-            s.username = "x"  # type: ignore[attr-defined]
-        self.assertTrue(s.has_auth)
+        for field in ("proxy_id", "tool_proxy_id"):
+            with self.assertRaises(ValidationError):
+                CreateProjectRequest(
+                    title="t",
+                    origin="o",
+                    goal="g",
+                    task_timeouts=test_task_timeouts(),
+                    **{field: "proxy_001"},
+                )
 
 
-class ProxyConfigToEnvTests(unittest.TestCase):
-    """``proxy_config_to_env`` translates a :class:`ProxyConfig` into env vars."""
-
+class ProjectProxyRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
-        from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
-        self.proxy_config_to_env = proxy_config_to_env
+        from helpers import reset_postgres_db
 
-    def test_socks5_with_auth(self) -> None:
-        env = self.proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username="u", password="p"))
-        self.assertEqual(env["ALL_PROXY"], "socks5://u:p@1.2.3.4:1080")
-        self.assertNotIn("HTTP_PROXY", env)
-        self.assertNotIn("HTTPS_PROXY", env)
-        self.assertIn("cairn-server", env["NO_PROXY"])
-
-    def test_socks5_without_auth(self) -> None:
-        env = self.proxy_config_to_env(_make_proxy(type="socks5", host="1.2.3.4", port=1080, username=None, password=None, has_auth=False))
-        self.assertEqual(env["ALL_PROXY"], "socks5://1.2.3.4:1080")
-        self.assertNotIn("user@", env["ALL_PROXY"])
-
-    def test_http_with_auth_uses_user_pass(self) -> None:
-        env = self.proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password="p"))
-        self.assertEqual(env["HTTP_PROXY"], "http://u:p@h:80")
-        self.assertEqual(env["HTTPS_PROXY"], "http://u:p@h:80")
-
-    def test_https_proxy_env_uses_http_scheme(self) -> None:
-        env = self.proxy_config_to_env(_make_proxy(type="https", host="h", port=443, username=None, password=None, has_auth=False))
-        self.assertEqual(env["HTTP_PROXY"], "http://h:443")
-        self.assertEqual(env["HTTPS_PROXY"], "http://h:443")
-
-    def test_username_only_keeps_at_sign(self) -> None:
-        env = self.proxy_config_to_env(_make_proxy(type="http", host="h", port=80, username="u", password=None, has_auth=True))
-        self.assertEqual(env["HTTP_PROXY"], "http://u@h:80")
-
-
-class ProxyRedactionTests(unittest.TestCase):
-    """BUILTIN_PATTERNS cover HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / SOCKS5_PROXY."""
-
-    def _redact(self, source_module: str, line: str) -> str:
-        import importlib
-        mod = importlib.import_module(source_module)
-        return mod.redact_content(line, [])[0]
-
-    def test_http_proxy_redacted(self) -> None:
-        line = "got env HTTP_PROXY=http://alice:hunter2@proxy.corp:3128"
-        out = self._redact("cairn.dispatcher.observability.redaction", line)
-        self.assertNotIn("hunter2", out)
-        self.assertIn("HTTP_PROXY=[REDACTED]", out)
-
-    def test_https_proxy_redacted(self) -> None:
-        line = "env HTTPS_PROXY=https://u:p@h:443"
-        out = self._redact("cairn.server.observability.redaction", line)
-        self.assertNotIn("u:p", out)
-        self.assertIn("HTTPS_PROXY=[REDACTED]", out)
-
-    def test_socks5_proxy_redacted(self) -> None:
-        line = "SOCKS5_PROXY=socks5://u:p@1.2.3.4:1080"
-        out = self._redact("cairn.dispatcher.observability.redaction", line)
-        self.assertNotIn("u:p", out)
-
-    def test_all_proxy_redacted(self) -> None:
-        line = "ALL_PROXY=socks5://u:p@1.2.3.4:1080"
-        out = self._redact("cairn.server.observability.redaction", line)
-        self.assertNotIn("u:p", out)
-
-
-class ResolverCacheTests(unittest.TestCase):
-    """``ProjectContextResolver`` populates cache and tolerates proxy lookup errors."""
-
-    def _make_project(self, project_id: str = "p1", proxy=None):
-        from cairn.shared.contracts import ProjectDetail, ProjectMeta
-
-        project = ProjectMeta(
-            id=project_id, title="t", origin="o", goal="g",
-            status="active", created_at=_ts(), updated_at=_ts(),
-        )
-        return ProjectDetail(project=project, facts=[], intents=[], hints=[], proxy=proxy)
-
-    def _make_proxy_summary(self, proxy_id: str = "px1"):
-        from cairn.shared.contracts import ProxySummary
-
-        ts = _ts()
-        return ProxySummary(
-            id=proxy_id, name="n", type="socks5", host="h", port=1,
-            has_auth=False, created_at=ts, updated_at=ts,
-        )
-
-    def _resolver(self, *, client=None):
-        from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
-        from cairn.dispatcher.scheduler.project_context import ProjectContextResolver
-
-        return ProjectContextResolver(
-            config=MagicMock(),
-            client=client or MagicMock(),
-            runtime=MagicMock(),
-            project_caches=ProjectCaches(),
-            ai_overlay_cache=AIOverlayCache(),
-            ai_worker_selector=MagicMock(),
-        )
-
-    def test_resolve_no_proxy_populates_none(self) -> None:
-        resolver = self._resolver()
-        project = self._make_project()
-        resolver.resolve_project_proxy(project)
-        self.assertIn("p1", resolver.project_caches.proxy)
-        self.assertIsNone(resolver.project_caches.proxy["p1"])
-
-    def test_resolve_fetches_proxy_when_proxy_summary_present(self) -> None:
-        client = MagicMock()
-        client.get_proxy.return_value = _make_proxy()
-        resolver = self._resolver(client=client)
-        project = self._make_project(proxy=self._make_proxy_summary("px1"))
-        resolver.resolve_project_proxy(project)
-        self.assertEqual(resolver.project_caches.proxy["p1"].id, "proxy_abc")
-        client.get_proxy.assert_called_once_with("px1")
-
-    def test_resolve_lookup_error_falls_back_to_none(self) -> None:
-        client = MagicMock()
-        client.get_proxy.side_effect = LookupError("not found")
-        resolver = self._resolver(client=client)
-        project = self._make_project(proxy=self._make_proxy_summary("px_missing"))
-        resolver.resolve_project_proxy(project)
-        self.assertIsNone(resolver.project_caches.proxy["p1"])
-
-    def test_resolve_request_exception_falls_back_to_none(self) -> None:
-        import requests
-
-        client = MagicMock()
-        client.get_proxy.side_effect = requests.RequestException("boom")
-        resolver = self._resolver(client=client)
-        project = self._make_project(proxy=self._make_proxy_summary("px_err"))
-        resolver.resolve_project_proxy(project)
-        self.assertIsNone(resolver.project_caches.proxy["p1"])
-
-    def test_resolve_refetches_on_every_call(self) -> None:
-        client = MagicMock()
-        client.get_proxy.return_value = _make_proxy()
-        resolver = self._resolver(client=client)
-        project = self._make_project(proxy=self._make_proxy_summary("px1"))
-        resolver.resolve_project_proxy(project)
-        resolver.resolve_project_proxy(project)
-        self.assertEqual(len(client.get_proxy.call_args_list), 2)
-
-    def test_resolve_proxy_env_returns_none_for_startup_healthcheck(self) -> None:
-        from cairn.dispatcher.runtime.containers import ContainerManager
-
-        resolver = self._resolver()
-        resolver.project_caches.proxy = {"p1": _make_proxy()}
-        result = resolver.resolve_proxy_env(ContainerManager._STARTUP_PROJECT_ID)
-        self.assertIsNone(result)
-
-    def test_resolve_proxy_env_returns_env_for_cached_project(self) -> None:
-        resolver = self._resolver()
-        resolver.project_caches.proxy = {"p1": _make_proxy()}
-        result = resolver.resolve_proxy_env("p1")
-        self.assertIsNotNone(result)
-        self.assertIn("ALL_PROXY", result)
-
-
-class ContainerManagerProxyWiringTests(unittest.TestCase):
-    """``ContainerManager`` accepts the ``proxy_resolver`` callable and merges."""
-
-    def test_proxy_resolver_none_returns_empty_env(self) -> None:
-        from cairn.dispatcher.runtime.containers import ContainerManager
-        from cairn.shared.config import ContainerConfig
-
-        cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
-        with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
-            mgr = ContainerManager(cfg, proxy_resolver=None)
-        self.assertEqual(mgr._proxy_environment("p1"), {})
-
-    def test_proxy_resolver_returning_dict_is_merged(self) -> None:
-        from cairn.dispatcher.runtime.containers import ContainerManager
-        from cairn.shared.config import ContainerConfig
-
-        cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
-        with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
-            mgr = ContainerManager(cfg, proxy_resolver=lambda pid: {"HTTP_PROXY": "http://h:80"})
-        self.assertEqual(mgr._proxy_environment("p1"), {"HTTP_PROXY": "http://h:80"})
-
-    def test_proxy_resolver_returning_none_yields_empty(self) -> None:
-        from cairn.dispatcher.runtime.containers import ContainerManager
-        from cairn.shared.config import ContainerConfig
-
-        cfg = ContainerConfig(image="img", network_mode="net", completed_action="stop")
-        with patch("cairn.dispatcher.runtime.containers.docker.from_env", return_value=MagicMock()):
-            mgr = ContainerManager(cfg, proxy_resolver=lambda pid: None)
-        self.assertEqual(mgr._proxy_environment("p1"), {})
-
-
-class ProxyDatabaseTests(unittest.TestCase):
-    """Server proxy CRUD persists in config.yaml."""
-
-    def setUp(self) -> None:
-        from helpers import TempYamlConfig, reset_postgres_db
-
-        self.yaml = TempYamlConfig()
-        self.yaml.__enter__()
         self.db = reset_postgres_db()
-        from cairn.server.routers import proxies as proxies_router
-        self.proxies_router = proxies_router
 
     def tearDown(self) -> None:
         self.db.reset_for_tests()
-        self.yaml.__exit__(None, None, None)
 
-    def test_create_and_get_proxy(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
+    def _seed_project(self, conn, project_id: str = "proj_1") -> None:
+        from cairn.server.repositories.projects import ProjectRepository
 
-        body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
-        created = self.proxies_router.create_proxy(body)
-        self.assertTrue(created.id.startswith("proxy_"))
-        fetched = self.proxies_router.get_proxy(created.id)
-        self.assertEqual(fetched.username, "u")
-        self.assertEqual(fetched.password, "p")
-
-    def test_list_proxies_returns_summaries_without_credentials(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
-
-        body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080, username="u", password="p")
-        self.proxies_router.create_proxy(body)
-        summaries = self.proxies_router.list_proxies()
-        self.assertEqual(len(summaries), 1)
-        self.assertTrue(summaries[0].has_auth)
-        # summary model does not expose credentials
-        self.assertNotIn("password", summaries[0].model_dump())
-
-    def test_delete_proxy_removes_yaml_entry(self) -> None:
-        from cairn.server.schemas.proxies import ProxyCreate
-
-        body = ProxyCreate(name="n1", type="socks5", host="h1", port=1080)
-        created = self.proxies_router.create_proxy(body)
-        self.proxies_router.delete_proxy(created.id)
-        self.assertEqual(self.proxies_router.list_proxies(), [])
-
-    def test_create_project_with_invalid_proxy_id_returns_400(self) -> None:
-        from cairn.server.domain.errors import DomainError
-        from cairn.server.routers import projects as projects_router
-        from cairn.server.routers.ai_profiles import create_ai_profile
-        from cairn.server.schemas import CreateProjectRequest
-        from cairn.server.schemas.ai_profiles import (
-            AiProfileCreate,
-            AiProfileSelection,
-            TaskAiProfileSelections,
-        )
-        from helpers import test_task_timeouts
-
-        profile = create_ai_profile(AiProfileCreate(
-            name="p",
-            worker_type="codex",
-            model="m",
-            api_key_env="OPENAI_API_KEY",
-            sk="test-key",
-        ))
-        selection = AiProfileSelection(
-            primary_profile_id=profile.id,
-            primary_model="m",
-            primary_reasoning_type="medium",
+        ProjectRepository(conn).insert_project(
+            project_id=project_id,
+            title="Project",
+            status="active",
+            created_at="2026-06-06T00:00:00Z",
+            graph_revision=1,
+            timeline_revision=1,
+            llm_hidden_event_kinds='["usage"]',
         )
 
-        body = CreateProjectRequest(
-            title="t",
-            origin="o",
-            goal="g",
-            proxy_id="proxy_does_not_exist",
-            task_timeouts=test_task_timeouts(),
-            ai_profiles=TaskAiProfileSelections(
-                bootstrap=selection,
-                explore=selection,
-                reason=selection,
-            ),
-        )
-        with self.assertRaises(DomainError) as cm:
-            projects_router.create_project(body)
-        self.assertEqual(cm.exception.status_code, 400)
+    def test_crud_chain_cycle_and_audit_fields(self) -> None:
+        from cairn.server.domain.errors import BadRequestError
+        from cairn.server.repositories import sql
+        from cairn.server.repositories.project_proxy import ProjectProxyRepository
+        from cairn.server.schemas.project_proxy import ProjectProxyEndpointCreate, ProjectProxyEndpointUpdate
+
+        with self.db.session_scope() as conn:
+            self._seed_project(conn)
+            repo = ProjectProxyRepository(conn)
+            entry = repo.create(
+                "proj_1",
+                ProjectProxyEndpointCreate(
+                    id="px_entry",
+                    name="Entry",
+                    host="entry.internal",
+                    port=1080,
+                    password="entry-secret",
+                    reachable_from="worker",
+                    usage_mode="tool_native_proxy",
+                ),
+            )
+            target = repo.create(
+                "proj_1",
+                ProjectProxyEndpointCreate(
+                    id="px_target",
+                    name="Target",
+                    host="target.internal",
+                    port=8080,
+                    protocol="http",
+                    prerequisite_proxy_id=entry.id,
+                    reachable_from="through_prerequisite",
+                    usage_mode="proxychains",
+                ),
+            )
+
+            chain = repo.resolve_chain("proj_1", target.id)
+            self.assertTrue(chain.ok)
+            self.assertEqual([item.id for item in chain.chain], ["px_entry", "px_target"])
+
+            repo.update("proj_1", entry.id, ProjectProxyEndpointUpdate(description="keep password"))
+            row = sql.fetchone(
+                conn,
+                "SELECT password, description FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",
+                {"project_id": "proj_1", "id": entry.id},
+            )
+            self.assertEqual(row["password"], "entry-secret")
+            self.assertEqual(row["description"], "keep password")
+
+            with self.assertRaises(BadRequestError):
+                repo.update("proj_1", entry.id, ProjectProxyEndpointUpdate(prerequisite_proxy_id=target.id))
+            self.assertIsNone(repo.get("proj_1", entry.id).prerequisite_proxy_id)
+
+            tested = repo.record_test("proj_1", target.id, ok=False, message="connect failed")
+            self.assertEqual(tested.health_status, "error")
+            self.assertFalse(tested.last_test_ok)
+
+            used = repo.record_usage("proj_1", target.id, ok=True, message="curl succeeded")
+            self.assertTrue(used.last_usage_ok)
+            self.assertEqual(used.last_usage_message, "curl succeeded")
+
+            repo.delete("proj_1", entry.id)
+            remaining = repo.get("proj_1", target.id)
+            self.assertIsNone(remaining.prerequisite_proxy_id)
 
 
-class ProjectDetailProxySummaryTests(unittest.TestCase):
-    """``ProjectDetail.proxy`` is ``ProxySummary | None`` (no creds leak)."""
+class ProxyRedactionTests(unittest.TestCase):
+    def _redact(self, source_module: str, line: str) -> str:
+        import importlib
 
-    def test_proxy_field_default_none(self) -> None:
-        from cairn.shared.contracts import ProjectDetail, ProjectMeta
+        mod = importlib.import_module(source_module)
+        return mod.redact_content(line, [])[0]
 
-        project = ProjectMeta(
-            id="p1", title="t", origin="o", goal="g", status="active",
-            created_at=_ts(), updated_at=_ts(),
-        )
-        detail = ProjectDetail(project=project, facts=[], intents=[], hints=[])
-        self.assertIsNone(detail.proxy)
+    def test_proxy_urls_are_redacted_in_logs(self) -> None:
+        samples = [
+            ("cairn.dispatcher.observability.redaction", "HTTP_PROXY=http://alice:hunter2@proxy.corp:3128"),
+            ("cairn.server.observability.redaction", "HTTPS_PROXY=https://u:p@h:443"),
+            ("cairn.dispatcher.observability.redaction", "SOCKS5_PROXY=socks5://u:p@1.2.3.4:1080"),
+            ("cairn.server.observability.redaction", "ALL_PROXY=socks5://u:p@1.2.3.4:1080"),
+        ]
+        for module, line in samples:
+            with self.subTest(line=line):
+                out = self._redact(module, line)
+                self.assertNotIn("hunter2", out)
+                self.assertNotIn("u:p", out)
 
 
 if __name__ == "__main__":

@@ -37,7 +37,6 @@ from cairn.shared.contracts.projects import (
     ProjectWorkSummary,
     ProjectWorkSummaryPage,
 )
-from cairn.shared.contracts.proxies import ProxyConfig, ProxySummary
 from cairn.shared.contracts.reason import ReasonState
 from cairn.shared.contracts.runtime_limits import ContainerLimits, RuntimeLimits
 from cairn.shared.contracts.settings import Settings
@@ -71,8 +70,6 @@ __all__ = [
     "ProjectSummaryPage",
     "ProjectWorkSummary",
     "ProjectWorkSummaryPage",
-    "ProxyConfig",
-    "ProxySummary",
     "ReasonState",
     "ReasonTaskTimeouts",
     "ReasoningType",

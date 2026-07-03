@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import logging
 
-import requests
-
-from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache, compute_ai_overlay
 from cairn.dispatcher.scheduler.ai_worker_selector import AiWorkerSelector
 from cairn.dispatcher.scheduler.project_cache import ProjectCaches
-from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
 from cairn.dispatcher.scheduler.worker_selection import WorkerSelection, select_worker_default
 from cairn.shared.config import DispatchConfig, WorkerConfig
 from cairn.shared.contracts import ProjectAiProfileSnapshot, ProjectDetail
-from cairn.shared.contracts import ProxyConfig
 
 LOG = logging.getLogger(__name__)
 
@@ -40,47 +35,6 @@ class ProjectContextResolver:
         self.client = client
         self.runtime = runtime
         self.ai_worker_selector = ai_worker_selector
-
-    def resolve_project_proxy(self, project: ProjectDetail) -> None:
-        project_id = project.project.id
-        proxy_id = project.proxy.id if project.proxy else None
-        if not proxy_id:
-            self.project_caches.set_proxy(project_id, None)
-            self.ai_overlay_cache.invalidate(project_id)
-            return
-        try:
-            self.project_caches.set_proxy(project_id, self.client.get_proxy(proxy_id))
-            self.ai_overlay_cache.invalidate(project_id)
-            LOG.info("resolved proxy for project=%s proxy_id=%s", project_id, proxy_id)
-        except LookupError:
-            LOG.warning(
-                "project=%s references missing proxy_id=%s; worker will run direct",
-                project_id,
-                proxy_id,
-            )
-            self.project_caches.set_proxy(project_id, None)
-            self.ai_overlay_cache.invalidate(project_id)
-        except requests.RequestException as exc:
-            LOG.warning(
-                "project=%s proxy lookup failed proxy_id=%s error=%s; worker will run direct",
-                project_id,
-                proxy_id,
-                exc,
-            )
-            self.project_caches.set_proxy(project_id, None)
-
-    def resolve_project_proxy_from_execution_config(self, project_id: str, execution_config: dict) -> None:
-        raw_proxy = execution_config.get("proxy")
-        if not isinstance(raw_proxy, dict):
-            self.project_caches.set_proxy(project_id, None)
-            self.ai_overlay_cache.invalidate(project_id)
-            return
-        try:
-            self.project_caches.set_proxy(project_id, ProxyConfig.model_validate(raw_proxy))
-            self.ai_overlay_cache.invalidate(project_id)
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("project=%s execution config proxy parse failed error=%s", project_id, exc)
-            self.project_caches.set_proxy(project_id, None)
 
     def resolve_project_ai_selection(self, project_id: str, task_type: str, execution_config: dict) -> None:
         try:
@@ -130,26 +84,15 @@ class ProjectContextResolver:
             return cached
         secrets = self.project_caches.get_ai_secret(project_id)
         cached_secret = secrets.get(snapshot.profile_id) or None
-        proxy_cfg = self.project_caches.get_proxy(project_id)
         overlay = compute_ai_overlay(
             snapshot,
             cached_secret=cached_secret,
-            proxy_config=proxy_cfg,
         )
         self.ai_overlay_cache.put(project_id, snapshot, overlay)
         return overlay
 
-    def resolve_proxy_env(self, project_id: str) -> dict[str, str] | None:
-        if project_id == ContainerManager._STARTUP_PROJECT_ID:
-            return None
-        cfg = self.project_caches.get_proxy(project_id)
-        if cfg is None:
-            return None
-        return proxy_config_to_env(cfg)
-
     def select_worker(self, project: ProjectDetail, task_type: str, execution_config: dict) -> WorkerSelection:
         project_id = project.project.id
-        self.resolve_project_proxy_from_execution_config(project_id, execution_config)
         self.resolve_project_ai_selection(project_id, task_type, execution_config)
         workers = self._workers_from_execution_config(project_id, execution_config)
         snapshots = self.project_ai_snapshots(project_id, task_type)
@@ -165,7 +108,6 @@ class ProjectContextResolver:
         worker_name: str,
     ) -> WorkerSelection:
         project_id = project.project.id
-        self.resolve_project_proxy_from_execution_config(project_id, execution_config)
         self.resolve_project_ai_selection(project_id, task_type, execution_config)
         workers = [worker for worker in self._workers_from_execution_config(project_id, execution_config) if worker.name == worker_name]
         snapshots = self.project_ai_snapshots(project_id, task_type)
@@ -202,9 +144,13 @@ class ProjectContextResolver:
     def _workers_from_execution_config(self, project_id: str, execution_config: dict) -> list[WorkerConfig]:
         raw_workers = execution_config.get("workers")
         if not isinstance(raw_workers, list):
-            return list(self.config.workers)
+            return []
         try:
-            workers = [WorkerConfig.model_validate(item) for item in raw_workers if isinstance(item, dict)]
+            workers = [
+                WorkerConfig.model_validate(item)
+                for item in raw_workers
+                if isinstance(item, dict)
+            ]
         except Exception as exc:  # noqa: BLE001
             LOG.warning("project=%s execution config workers parse failed error=%s", project_id, exc)
             return []

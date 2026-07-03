@@ -46,7 +46,6 @@ def _dispatch_config_payload(mcp_servers: list[dict]) -> dict:
                     "env": {},
                 }
             ],
-            "proxies": [],
         },
         "resources": {
             "capabilities": {

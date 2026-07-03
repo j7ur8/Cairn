@@ -96,7 +96,6 @@ def create_project(body: CreateProjectRequest):
                 ai_profiles=body.ai_profiles,
                 task_timeouts=body.task_timeouts,
                 role_id=body.role_id,
-                proxy_id=body.proxy_id,
                 llm_visible_event_kinds=body.llm_visible_event_kinds,
                 status="active",
             ),

@@ -56,7 +56,7 @@ def _make_config(*workers):
         dispatcher=dispatcher,
         tasks=tasks,
         worker_runtime=WorkerRuntimeConfig(container=container, common_env={}),
-        worker_pool=WorkerPoolConfig(proxies=[], workers=list(workers)),
+        worker_pool=WorkerPoolConfig(workers=list(workers)),
     )
 
 
@@ -550,7 +550,6 @@ class DispatcherTaskAiSelectionTests(unittest.TestCase):
         )
         project = MagicMock()
         project.project.id = "proj"
-        project.proxy = None
         snapshot_worker = _codex(name="snapshot", api_key="S").model_dump()
 
         selection = resolver.select_worker(
@@ -559,7 +558,6 @@ class DispatcherTaskAiSelectionTests(unittest.TestCase):
             {
                 "workers": [snapshot_worker],
                 "ai_profiles": [],
-                "proxy": None,
             },
         )
 

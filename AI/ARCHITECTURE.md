@@ -156,7 +156,7 @@ sequenceDiagram
 | Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
 | Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
 
-当前 Alembic head 为 `0011_intent_phase_checkpoints`，为 intent 增加 `explore_conclude` 阶段 checkpoint，用于 explore execute 已到可恢复边界后的 conclude-only 续跑；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
+当前 Alembic head 为 `0013_project_proxy_servers`，删除旧项目代理字段并新增项目级 `project_proxy_endpoints`；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
 前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_close.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
 

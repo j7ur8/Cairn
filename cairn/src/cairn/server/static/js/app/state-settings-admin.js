@@ -1,10 +1,10 @@
 export function createSettingsAdminState() {
   return {
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
-    runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 4, interval: 3, healthcheck_timeout: 20 },
+    runtimeLimitsForm: { max_workers: 8, max_running_projects: 3, max_project_workers: 2, interval: 3, healthcheck_timeout: 20 },
     taskTimeoutsForm: {
-      bootstrap_timeout: 300, bootstrap_conclude_timeout: 90,
-      explore_timeout: 300, explore_conclude_timeout: 90,
+      bootstrap_timeout: 300, bootstrap_conclude_timeout: 120,
+      explore_timeout: 900, explore_conclude_timeout: 180,
       reason_timeout: 300, reason_max_intents: 2,
     },
     observabilityForm: {

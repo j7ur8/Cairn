@@ -827,32 +827,59 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertNotIn("capabilityAdminPanel", view)
         self.assertNotIn("capabilityTaskTypes()", view)
 
-    def test_settings_proxies_matches_capabilities_management_layout(self) -> None:
+    def test_settings_servers_and_proxy_match_ai_profile_management_layout(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
             encoding="utf-8"
         )
-        proxy_view = view.split("<section x-show=\"settingsSection === 'proxies'\"", 1)[1].split(
+        servers_view = view.split("<section x-show=\"settingsSection === 'servers'\"", 1)[1].split(
+            "<section x-show=\"settingsSection === 'proxy'\"",
+            1,
+        )[0]
+        proxy_view = view.split("<section x-show=\"settingsSection === 'proxy'\"", 1)[1].split(
             "<section x-show=\"settingsSection === 'capabilities'\"",
             1,
         )[0]
 
         self.assertIn(
-            'settingsSection === \'proxies\'" class="h-full min-h-0 flex flex-col gap-3',
+            'settingsSection === \'servers\'" class="h-full min-h-0 flex flex-col gap-3',
             view,
         )
+        self.assertIn(
+            'settingsSection === \'proxy\'" class="h-full min-h-0 flex flex-col gap-3',
+            view,
+        )
+        self.assertNotIn("settingsSection === 'resources'", view)
+        self.assertIn('data-testid="settings-server-refresh"', servers_view)
+        self.assertIn('data-testid="settings-server-add"', servers_view)
+        self.assertIn('x-show="!serverFormOpen"', servers_view)
+        self.assertIn('x-show="serverFormOpen"', servers_view)
+        self.assertIn('data-testid="server-save"', servers_view)
+        self.assertNotIn('x-model="serverForm.auth_type"', servers_view)
+        self.assertNotIn("<select x-model=\"serverForm.auth_type\"", servers_view)
+        self.assertNotIn('x-model="serverForm.cert_path"', servers_view)
+        self.assertIn('x-model="serverForm.password"', servers_view)
+        self.assertIn('x-model="serverForm.private_key"', servers_view)
+        self.assertIn('type="file"', servers_view)
+        self.assertIn("serverForm.certificateFile", servers_view)
+        self.assertIn("openEditServer(s)", servers_view)
+        self.assertIn("deleteServerResource(s.id, s.name)", servers_view)
+        self.assertIn("testServerResource(s.id)", servers_view)
+        self.assertIn("Servers", servers_view)
+
+        self.assertIn('data-testid="settings-proxy-refresh"', proxy_view)
+        self.assertIn('data-testid="settings-proxy-back"', proxy_view)
         self.assertIn('data-testid="settings-proxy-add"', proxy_view)
         self.assertIn('data-testid="proxy-save"', proxy_view)
-        self.assertIn('x-show="proxyForm.id || proxyFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3"', proxy_view)
-        self.assertIn('x-show="!proxyFormOpen && !proxyForm.id" x-cloak class="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm flex flex-1 min-h-0 flex-col"', proxy_view)
-        self.assertIn("Identity", proxy_view)
-        self.assertIn("Connection", proxy_view)
-        self.assertIn("Authentication", proxy_view)
-        self.assertIn("Proxy Pool", proxy_view)
-        self.assertIn("h-32 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm", proxy_view)
-        self.assertIn("h-full min-h-[14rem] rounded-lg border border-dashed border-slate-200 bg-white/90 px-4 py-6 flex items-center justify-center text-center", proxy_view)
-        self.assertIn("openEditProxy(p.id)", proxy_view)
-        self.assertIn("deleteProxy(p.id, p.name)", proxy_view)
-        self.assertNotIn("max-h-[calc(100vh-260px)]", proxy_view)
+        self.assertIn("filteredProxyProjects()", proxy_view)
+        self.assertIn("selectProxyProject(p)", proxy_view)
+        self.assertIn("backToProxyProjects()", proxy_view)
+        self.assertIn("proxySelectedProjectId && projectProxyFormOpen", proxy_view)
+        self.assertIn("proxySelectedProjectId && !projectProxyFormOpen", proxy_view)
+        self.assertIn("openEditProjectProxy(p)", proxy_view)
+        self.assertIn("deleteProjectProxy(p.id, p.name)", proxy_view)
+        self.assertIn("resolveProjectProxyChain(p.id)", proxy_view)
+        self.assertNotIn("selectedProjectId", proxy_view)
+        self.assertNotIn("openEditProxy(p.id)", proxy_view)
 
     def test_settings_primary_save_buttons_are_in_headers(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(

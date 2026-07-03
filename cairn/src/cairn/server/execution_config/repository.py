@@ -27,13 +27,13 @@ def insert_project_execution_config(
         conn,
         """
         INSERT INTO project_execution_configs (
-            project_id, version, role_id, role_json, proxy_id,
-            container_json, workers_json, proxies_json, settings_json, catalog_json,
+            project_id, version, role_id, role_json,
+            container_json, workers_json, settings_json, catalog_json,
             dispatch_sha256, resources_sha256, prompts_json,
             prompts_sha256, created_at, updated_at
         ) VALUES (
-            :project_id, :version, :role_id, :role_json, :proxy_id,
-            :container_json, :workers_json, :proxies_json, :settings_json, :catalog_json,
+            :project_id, :version, :role_id, :role_json,
+            :container_json, :workers_json, :settings_json, :catalog_json,
             :dispatch_sha256, :resources_sha256, :prompts_json,
             :prompts_sha256, :created_at, :updated_at
         )
@@ -43,10 +43,8 @@ def insert_project_execution_config(
             "version": 1,
             "role_id": snapshot.role_id,
             "role_json": json.dumps(snapshot.role, ensure_ascii=False, sort_keys=True) if snapshot.role is not None else None,
-            "proxy_id": snapshot.proxy_id,
             "container_json": json.dumps(snapshot.container, ensure_ascii=False, sort_keys=True),
             "workers_json": json.dumps(snapshot.workers, ensure_ascii=False, sort_keys=True),
-            "proxies_json": json.dumps(snapshot.proxies, ensure_ascii=False, sort_keys=True),
             "settings_json": json.dumps(snapshot.settings, ensure_ascii=False, sort_keys=True),
             "catalog_json": json.dumps(snapshot.catalog, ensure_ascii=False, sort_keys=True),
             "dispatch_sha256": snapshot.revision["dispatch_sha256"],

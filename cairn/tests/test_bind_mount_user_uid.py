@@ -336,7 +336,6 @@ class ContainerUserRuntimeTests(unittest.TestCase):
             access=MagicMock(),
             api_error_type=Exception,
             docker_exception_type=Exception,
-            proxy_environment=lambda _project_id: {},
             inspect_state=lambda _name: "running",
             log_mount_mismatches=MagicMock(),
             mount_mismatches=lambda _name, _project_id: ["failed to inspect mounts: unavailable"],
@@ -474,7 +473,6 @@ worker_runtime:
         read_only: false
 
 worker_pool:
-  proxies: []
   workers:
     - name: "mock-w"
       type: "mock"

@@ -109,7 +109,6 @@ def _project():
         ],
         intents=[],
         hints=[],
-        proxy=None,
     )
 
 
@@ -252,8 +251,8 @@ class BootstrapCharacterizationTests(unittest.TestCase):
 
         self.assertIsNotNone(prepared)
         inject_caps.assert_called_once()
-        self.assertEqual(inject_caps.call_args.args[1], mock.ANY)
-        self.assertEqual(inject_caps.call_args.args[2], "worker")
+        self.assertIs(inject_caps.call_args.args[1], client)
+        self.assertEqual(inject_caps.call_args.args[3], "worker")
 
     def test_role_instructions_render_inside_task_section(self) -> None:
         template = (_REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default" / "bootstrap.md").read_text(

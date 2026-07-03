@@ -57,7 +57,6 @@ def _project(*, intents=None, facts=None, hints=None):
         ],
         intents=intents or [],
         hints=hints or [],
-        proxy=None,
     )
 
 

@@ -9,7 +9,8 @@ export function createSettingsState() {
         { section: 'prompts', label: 'Prompts', icon: 'PR' },
         { section: 'ai', label: 'AI Profiles', icon: 'AI' },
         { section: 'capabilities', label: 'Capabilities', icon: 'CA' },
-        { section: 'proxies', label: 'Proxies', icon: 'PX' },
+        { section: 'servers', label: 'Servers', icon: 'SV' },
+        { section: 'proxy', label: 'Proxy', icon: 'PX' },
       ];
     },
 
@@ -36,7 +37,8 @@ export function createSettingsState() {
         prompts: () => this.loadPrompts(),
         ai: () => this.loadAiProfiles(),
         capabilities: () => this.loadCapabilityAdmin(),
-        proxies: () => this.loadProxies(),
+        servers: () => this.loadServersSettings(),
+        proxy: () => this.loadProxySettings(),
       };
       const loader = loaders[section] || loaders.system;
       await loader();

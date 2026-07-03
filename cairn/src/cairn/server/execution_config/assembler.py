@@ -4,9 +4,8 @@ import json
 from typing import Any
 
 from cairn.server.config.capabilities import list_yaml_capabilities
-from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.config.settings import get_yaml_settings
-from cairn.server.domain.errors import DomainError, NotFoundError
+from cairn.server.domain.errors import NotFoundError
 from cairn.server.execution_config import repository
 from cairn.server.execution_config.models import TASK_TYPES
 from cairn.server.schemas import TaskCapabilities
@@ -66,7 +65,6 @@ def _assemble_task_payload(
     settings = _json_or_fallback(header, "settings_json", lambda: get_yaml_settings().model_dump())
     catalog = _json_or_fallback(header, "catalog_json", lambda: [item.model_dump() for item in list_yaml_capabilities()])
     role = json.loads(header["role_json"]) if header["role_json"] else None
-    proxy = _proxy_from_header(header)
     revision = {
         "dispatch_sha256": header["dispatch_sha256"],
         "resources_sha256": header["resources_sha256"],
@@ -83,10 +81,8 @@ def _assemble_task_payload(
         "ai_profiles": ai_by_task.get(task) or [],
         "capabilities": caps_by_task.get(task) or TaskCapabilities().model_dump(),
         "role": role,
-        "proxy": proxy,
         "container": _json_or_fallback(header, "container_json", lambda: None),
         "workers": _json_or_fallback(header, "workers_json", lambda: []),
-        "proxies": _json_or_fallback(header, "proxies_json", lambda: []),
         "settings": settings,
         "task_timeouts": task_timeouts.model_dump(),
         "task_timeout": task_timeout,
@@ -106,23 +102,6 @@ def _json_or_fallback(header: Any, key: str, fallback) -> Any:
     if value:
         return json.loads(value)
     return fallback()
-
-
-def _proxy_from_header(header: Any) -> dict[str, Any] | None:
-    proxies = _json_or_fallback(header, "proxies_json", lambda: None)
-    proxy_id = header["proxy_id"]
-    if isinstance(proxies, list) and proxy_id:
-        for proxy in proxies:
-            if isinstance(proxy, dict) and proxy.get("id") == proxy_id:
-                return proxy
-        return None
-    if proxy_id:
-        try:
-            return get_yaml_proxy(proxy_id).model_dump()
-        except DomainError as exc:
-            if exc.status_code != 404:
-                raise
-    return None
 
 
 def _task_timeouts_from_rows(rows_by_task: dict[str, Any]) -> TaskTimeouts:

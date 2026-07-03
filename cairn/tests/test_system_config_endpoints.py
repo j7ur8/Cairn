@@ -124,7 +124,7 @@ class SystemSettingsEndpointTests(unittest.TestCase):
                 },
                 "common_env": {},
             },
-            "worker_pool": {"proxies": [], "workers": []},
+            "worker_pool": {"workers": []},
         }
 
     def test_get_returns_aggregate_config(self) -> None:
@@ -326,7 +326,6 @@ class ValidationPathResolutionTests(unittest.TestCase):
                 "common_env": {},
             },
             "worker_pool": {
-                "proxies": [],
                 "workers": [
                     {
                         "name": "mock",

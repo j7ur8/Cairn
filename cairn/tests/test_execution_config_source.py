@@ -145,7 +145,11 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual(ai_rows[0]["snapshot_api_key_value"], "test-key")
         self.assertIn("container", explore_config)
         self.assertIn("workers", explore_config)
-        self.assertIn("proxies", explore_config)
+        self.assertNotIn("proxies", explore_config)
+        self.assertNotIn("tool_proxy", explore_config)
+        self.assertNotIn("tool_proxy_id", explore_config)
+        self.assertNotIn("proxy", explore_config)
+        self.assertNotIn("proxy_id", explore_config)
         self.assertIn("settings", explore_config)
         self.assertIn("catalog", explore_config)
 
@@ -268,7 +272,6 @@ class ExecutionConfigSourceTests(unittest.TestCase):
                 persist_project_execution_configs(
                     conn,
                     project.project.id,
-                    proxy_id=None,
                     capabilities=capabilities,
                     ai_profiles=ai_profiles,
                     role_id=None,

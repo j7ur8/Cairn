@@ -20,7 +20,6 @@ class ContainerLifecycle:
         access: DockerAccess,
         api_error_type: type[Exception],
         docker_exception_type: type[Exception],
-        proxy_environment: Callable[[str], dict[str, str]],
         inspect_state: Callable[[str], str | None],
         log_mount_mismatches: Callable[[str, str], None],
         mount_mismatches: Callable[[str, str], list[str]],
@@ -30,7 +29,6 @@ class ContainerLifecycle:
         self.access = access
         self.api_error_type = api_error_type
         self.docker_exception_type = docker_exception_type
-        self.proxy_environment = proxy_environment
         self.inspect_state = inspect_state
         self.log_mount_mismatches = log_mount_mismatches
         self.mount_mismatches = mount_mismatches
@@ -75,7 +73,6 @@ class ContainerLifecycle:
                 network_mode=effective_config.network_mode,
                 cap_add=effective_config.cap_add or None,
                 volumes=docker_volumes(effective_config, project_id) or None,
-                environment=self.proxy_environment(project_id) or None,
                 user=effective_config.user,
                 labels=container_labels(project_id),
                 mem_limit=effective_config.mem_limit,
@@ -149,7 +146,6 @@ class ContainerLifecycle:
                 network_mode=self.config.network_mode,
                 cap_add=self.config.cap_add or None,
                 volumes=docker_volumes(self.config, project_id) or None,
-                environment=self.proxy_environment(project_id) or None,
                 user=self.config.user,
                 labels=container_labels(project_id, startup=True),
                 mem_limit=self.config.mem_limit,

@@ -10,7 +10,7 @@ export function createCoreState() {
     view: 'list',
     polling: true,
     pollTimer: null,
-    proxies: [],
+    servers: [],
     showLogin: false,
     currentUser: null,
     loginForm: { email: '', password: '', error: '', busy: false },
@@ -210,15 +210,6 @@ export function createCoreState() {
         }
       } finally {
         document.body.removeChild(textarea);
-      }
-    },
-
-    async loadProxies() {
-      try {
-        this.proxies = await this.api('GET', '/proxies') || [];
-      } catch (e) {
-        console.error(e);
-        this.proxies = [];
       }
     },
 

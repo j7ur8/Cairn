@@ -23,7 +23,6 @@ def build_project_execution_config_snapshot(
     capabilities: TaskCapabilitySelectionMap | None,
     ai_profiles: TaskAiProfileSelections,
     role_id: str | None,
-    proxy_id: str | None,
     task_timeouts: TaskTimeouts,
 ) -> ProjectExecutionConfigSnapshot:
     revision = config_revision()
@@ -51,10 +50,8 @@ def build_project_execution_config_snapshot(
     return ProjectExecutionConfigSnapshot(
         role_id=role_id,
         role=role,
-        proxy_id=proxy_id,
         container=dispatch_config.container.model_dump(),
         workers=[worker.model_dump() for worker in dispatch_config.workers],
-        proxies=[dict(item) for item in dispatch_config.proxies],
         settings=dispatch_config.server.settings.model_dump(),
         catalog=[item.model_dump() for item in catalog],
         task_timeouts=task_timeouts,

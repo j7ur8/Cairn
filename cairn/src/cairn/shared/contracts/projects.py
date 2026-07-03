@@ -9,7 +9,6 @@ from cairn.shared.contracts.llm_events import (
     normalize_llm_event_kinds,
     visible_kinds_from_hidden,
 )
-from cairn.shared.contracts.proxies import ProxySummary
 
 
 class Fact(BaseModel):
@@ -106,7 +105,6 @@ class ProjectDetail(BaseModel):
     facts: list[Fact]
     intents: list[Intent]
     hints: list[Hint]
-    proxy: ProxySummary | None = None
 
 
 class ProjectGraphDelta(BaseModel):

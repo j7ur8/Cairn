@@ -122,7 +122,6 @@ worker_runtime:
     network_mode: "cairn"
     completed_action: "stop"
 worker_pool:
-  proxies: []
   workers:
     - name: "m"
       type: "mock"
@@ -317,6 +316,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
+            None,
             manager,
             "worker",
             "proj",
@@ -383,6 +383,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
+            None,
             manager,
             "worker",
             "proj",
@@ -411,6 +412,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore", "reason"]),
+            None,
             manager,
             "worker",
             "proj",
@@ -436,6 +438,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["explore"]),
+            None,
             manager,
             "worker",
             "proj",
@@ -456,6 +459,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             self._config(["reason"]),
+            None,
             manager,
             "worker",
             "proj",
@@ -471,24 +475,46 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
 
-    def test_explore_injection_includes_remote_support_without_selected_capabilities(self):
+    def test_explore_injection_includes_servers_and_project_proxy_without_selected_capabilities(self):
         from types import SimpleNamespace
 
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.config import RemoteDnslogConfig, RemoteSshConfig, RemoteSupportConfig
+        from cairn.shared.config import ServerResourceConfig
+
+        client = SimpleNamespace(
+            list_project_proxy_endpoints=lambda project_id: [
+                {
+                    "id": "px1",
+                    "protocol": "socks5h",
+                    "host": "proxy.internal",
+                    "port": 1080,
+                    "reachable_from": "worker",
+                    "usage_mode": "tool_native_proxy",
+                    "prerequisite_proxy_id": None,
+                    "health_status": "unknown",
+                }
+            ]
+        )
 
         config = SimpleNamespace(
             capabilities=self._config(["reason"]).capabilities,
-            remote_support=RemoteSupportConfig(
-                enabled=True,
-                dnslog=RemoteDnslogConfig(url="https://dnslog.example"),
-                ssh=RemoteSshConfig(host="helper.example", port=2222, username="operator", password="secret"),
-            ),
+            servers=[
+                ServerResourceConfig(
+                    id="srv1",
+                    name="Build host",
+                    host="helper.example",
+                    port=2222,
+                    username="operator",
+                    auth_order=["password"],
+                    password="secret",
+                )
+            ],
         )
 
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
+            client,
             manager,
             "worker",
             "proj",
@@ -501,31 +527,30 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.skills, [])
         self.assertIn("# Project Capabilities", result.instructions)
         self.assertIn("## Files", result.instructions)
-        self.assertIn("## Remote Support", result.instructions)
-        self.assertIn("CAIRN_DNSLOG_URL", result.instructions)
-        self.assertIn("CAIRN_REMOTE_SSH_HOST", result.instructions)
-        self.assertIn("CAIRN_REMOTE_SSH_PASSWORD", result.instructions)
-        self.assertNotIn("# Remote Support", result.instructions.splitlines())
+        self.assertIn("## Servers And Project Proxy", result.instructions)
+        self.assertIn("Servers are global AI-accessible remote server capabilities", result.instructions)
+        self.assertIn("srv1: Build host", result.instructions)
+        self.assertIn("auth_order=password", result.instructions)
+        self.assertIn("px1: socks5h://proxy.internal:1080", result.instructions)
+        self.assertNotIn("secret", result.instructions)
+        self.assertNotIn("# Servers And Project Proxy", result.instructions.splitlines())
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
 
-    def test_explore_injection_excludes_remote_support_when_disabled(self):
+    def test_explore_injection_excludes_resources_when_none_available(self):
         from types import SimpleNamespace
 
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.config import RemoteDnslogConfig, RemoteSupportConfig
 
         config = SimpleNamespace(
             capabilities=self._config(["reason"]).capabilities,
-            remote_support=RemoteSupportConfig(
-                enabled=False,
-                dnslog=RemoteDnslogConfig(url="https://dnslog.example"),
-            ),
+            servers=[],
         )
 
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
+            SimpleNamespace(list_project_proxy_endpoints=lambda _project_id: []),
             manager,
             "worker",
             "proj",
@@ -535,8 +560,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         )
 
         self.assertIn("## Files", result.instructions)
-        self.assertNotIn("## Remote Support", result.instructions)
-        self.assertNotIn("CAIRN_DNSLOG_URL", result.instructions)
+        self.assertNotIn("## Servers And Project Proxy", result.instructions)
 
     def test_explore_injection_reports_missing_files_appendix_without_blocking(self):
         from unittest.mock import patch
@@ -550,6 +574,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
+                None,
                 manager,
                 "worker",
                 "proj",
@@ -576,6 +601,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
+                None,
                 manager,
                 "worker",
                 "proj",

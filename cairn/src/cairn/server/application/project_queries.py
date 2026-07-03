@@ -4,7 +4,6 @@ import base64
 import json
 from typing import Any
 
-from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.domain.errors import DomainError
 from cairn.server.domain.projects import require_project
 from cairn.server.mappers.intents import build_intents, intent_to_model
@@ -21,7 +20,6 @@ from cairn.shared.contracts import (
     ProjectSummaryPage,
     ProjectWorkSummary,
     ProjectWorkSummaryPage,
-    ProxySummary,
     parse_llm_hidden_event_kinds,
 )
 
@@ -73,7 +71,6 @@ def get_project_detail(conn: Any, project_id: str) -> ProjectDetail:
         facts=[Fact(**dict(fact)) for fact in facts],
         intents=build_intents(IntentRepository(conn).list_intent_projections(project_id)),
         hints=[Hint(**dict(hint)) for hint in hints],
-        proxy=project_proxy_summary(row),
     )
 
 
@@ -174,22 +171,3 @@ def project_work_summary_from_row(
         ),
     )
 
-
-def project_proxy_summary(row: Any) -> ProxySummary | None:
-    proxy_id = row["proxy_id"] if "proxy_id" in row.keys() else None
-    if not proxy_id:
-        return None
-    try:
-        proxy = get_yaml_proxy(proxy_id)
-    except DomainError:
-        return None
-    return ProxySummary(
-        id=proxy.id,
-        name=proxy.name,
-        type=proxy.type,
-        host=proxy.host,
-        port=proxy.port,
-        has_auth=proxy.has_auth,
-        created_at=proxy.created_at,
-        updated_at=proxy.updated_at,
-    )

@@ -6,19 +6,16 @@ answer is a function of:
 
   * the snapshot itself (model, base_url, api_key_env, reasoning)
   * the cached secret from the AI selection sync
-  * the project's proxy (if any)
 
-The proxy is project-stable and the secret cache changes only when the
-server refreshes project execution config, so the result is cacheable
-for a short window.
+The secret cache changes only when the server refreshes project execution
+config, so the result is cacheable for a short window.
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
 
-from cairn.dispatcher.scheduler.proxy_env import proxy_config_to_env
-from cairn.shared.contracts import ProjectAiProfileSnapshot, ProxyConfig
+from cairn.shared.contracts import ProjectAiProfileSnapshot
 
 OVERLAY_TTL_SECONDS = 60.0
 
@@ -27,7 +24,6 @@ def compute_ai_overlay(
     snapshot: ProjectAiProfileSnapshot,
     *,
     cached_secret: str | None = None,
-    proxy_config: ProxyConfig | None = None,
 ) -> dict[str, str]:
     """Translate a snapshot into the env-var overlay for the worker.
 
@@ -58,8 +54,6 @@ def compute_ai_overlay(
             overlay["ANTHROPIC_BASE_URL"] = snapshot.snapshot_base_url
         if snapshot.snapshot_provider:
             overlay["ANTHROPIC_PROVIDER"] = snapshot.snapshot_provider
-    if proxy_config is not None:
-        overlay.update(proxy_config_to_env(proxy_config))
     return overlay
 
 

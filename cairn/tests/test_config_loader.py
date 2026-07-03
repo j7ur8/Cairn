@@ -27,7 +27,6 @@ tasks:
   reason: {timeout: 1, max_intents: 1}
   explore: {timeout: 1, conclude_timeout: 1}
 worker_pool:
-  proxies: []
   workers:
     - name: mock
       type: mock

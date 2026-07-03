@@ -165,16 +165,15 @@ class ProjectRepository:
         created_at: str,
         graph_revision: int,
         timeline_revision: int,
-        proxy_id: str | None,
         llm_hidden_event_kinds: str,
     ) -> None:
         sql.execute(
             self.conn,
             """
             INSERT INTO projects (
-                id, title, status, created_at, graph_revision, timeline_revision, proxy_id, llm_hidden_event_kinds
+                id, title, status, created_at, graph_revision, timeline_revision, llm_hidden_event_kinds
             ) VALUES (
-                :id, :title, :status, :created_at, :graph_revision, :timeline_revision, :proxy_id, :llm_hidden_event_kinds
+                :id, :title, :status, :created_at, :graph_revision, :timeline_revision, :llm_hidden_event_kinds
             )
             """,
             {
@@ -184,7 +183,6 @@ class ProjectRepository:
                 "created_at": created_at,
                 "graph_revision": graph_revision,
                 "timeline_revision": timeline_revision,
-                "proxy_id": proxy_id,
                 "llm_hidden_event_kinds": llm_hidden_event_kinds,
             },
         )
@@ -225,20 +223,6 @@ class ProjectRepository:
             {"title": title, "project_id": project_id},
         )
         return self.get(project_id)
-
-    def update_proxy_id(self, project_id: str, proxy_id: str | None) -> None:
-        sql.execute(
-            self.conn,
-            "UPDATE projects SET proxy_id = :proxy_id WHERE id = :project_id",
-            {"project_id": project_id, "proxy_id": proxy_id},
-        )
-
-    def clear_proxy(self, proxy_id: str) -> None:
-        sql.execute(
-            self.conn,
-            "UPDATE projects SET proxy_id = NULL WHERE proxy_id = :proxy_id",
-            {"proxy_id": proxy_id},
-        )
 
     def update_status(self, project_id: str, status: str) -> Any:
         sql.execute(

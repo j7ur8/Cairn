@@ -1,15 +1,14 @@
 """Per-project caches used by the scheduler loop.
 
-Three pieces of dispatcher state used to live as raw ``dict`` fields
+Two pieces of dispatcher state used to live as raw ``dict`` fields
 on the main dispatcher loop object:
 
-* ``_project_proxy_cache`` — resolved :class:`ProxyConfig` per project.
 * ``_project_ai_cache`` — ordered AI profile chains per project / task.
 * ``_project_ai_secret_cache`` — fetched ``sk`` values per profile.
 
 They share a lifecycle (refreshed on every dispatch pass, invalidated
-on proxy / AI selection changes) and are read by both the dispatch
-pass and the per-task overlay builder. Pulling them into a small
+on AI selection changes) and are read by the dispatch pass and the
+per-task overlay builder. Pulling them into a small
 class:
 
 * makes the invalidation contract explicit (single ``invalidate`` /
@@ -20,12 +19,12 @@ class:
 
 The cache stores plain dicts so the existing call sites
 (``self._project_ai_cache.get(project_id) or {}``) keep working -
-:meth:`proxy`, :meth:`ai_chains`, :meth:`ai_secret` return the
+:meth:`ai_chains`, :meth:`ai_secret` return the
 underlying dicts directly.
 """
 from __future__ import annotations
 
-from cairn.shared.contracts import ProjectAiProfileSnapshot, ProxyConfig
+from cairn.shared.contracts import ProjectAiProfileSnapshot
 
 
 class ProjectCaches:
@@ -34,16 +33,13 @@ class ProjectCaches:
     Each cache is a ``dict`` keyed by ``project_id`` (or
     ``(project_id, profile_id)`` for the secret cache) holding the
     last value seen during a dispatch pass. Missing keys fall back to
-    a per-method default (``None`` for the proxy cache, empty dict
-    for the AI chain cache) so callers can use ``or {}`` / ``or None``
-    without explicit ``if key in cache`` checks.
+    a per-method default so callers can use ``or {}`` without explicit
+    ``if key in cache`` checks.
     """
 
-    __slots__ = ("proxy", "ai_chains", "ai_secret")
+    __slots__ = ("ai_chains", "ai_secret")
 
     def __init__(self) -> None:
-        # project_id -> ProxyConfig | None
-        self.proxy: dict[str, ProxyConfig | None] = {}
         # project_id -> dict[task_type, list[ProjectAiProfileSnapshot]] | None
         self.ai_chains: dict[str, dict[str, list[ProjectAiProfileSnapshot]] | None] = {}
         # project_id -> dict[profile_id, str | None]
@@ -51,13 +47,11 @@ class ProjectCaches:
 
     def invalidate(self, project_id: str) -> None:
         """Drop every cached value for ``project_id``."""
-        self.proxy.pop(project_id, None)
         self.ai_chains.pop(project_id, None)
         self.ai_secret.pop(project_id, None)
 
     def clear_all(self) -> None:
         """Drop every cached value."""
-        self.proxy.clear()
         self.ai_chains.clear()
         self.ai_secret.clear()
 
@@ -65,12 +59,6 @@ class ProjectCaches:
     # These are convenience helpers that keep callers off the raw
     # dicts. The ``get`` variants never raise ``KeyError``; they
     # return the documented empty default.
-
-    def get_proxy(self, project_id: str) -> ProxyConfig | None:
-        return self.proxy.get(project_id)
-
-    def set_proxy(self, project_id: str, value: ProxyConfig | None) -> None:
-        self.proxy[project_id] = value
 
     def get_ai_chains(
         self, project_id: str

@@ -8,7 +8,6 @@ from cairn.server.ai_profile_service import (
     require_complete_ai_profile_selections,
 )
 from cairn.server.application.project_io import prepare_project_storage
-from cairn.server.config.proxies import get_yaml_proxy
 from cairn.server.domain.errors import BadRequestError, DomainError
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import persist_project_execution_configs
@@ -25,7 +24,6 @@ from cairn.shared.contracts import (
     Hint,
     ProjectDetail,
     ProjectMeta,
-    ProxySummary,
     TaskTimeouts,
     hidden_kinds_from_visible,
 )
@@ -42,7 +40,6 @@ class ProjectCreationDraft:
     ai_profiles: TaskAiProfileSelections | None = None
     task_timeouts: TaskTimeouts | None = None
     role_id: str | None = None
-    proxy_id: str | None = None
     llm_visible_event_kinds: list[str] | None = None
     llm_hidden_event_kinds: list[str] | None = None
     status: Literal["active", "stopped"] = "active"
@@ -63,25 +60,6 @@ def create_project_from_draft(
         else hidden_kinds_from_visible(draft.llm_visible_event_kinds)
     )
 
-    proxy_summary: ProxySummary | None = None
-    if draft.proxy_id:
-        try:
-            proxy = get_yaml_proxy(draft.proxy_id)
-        except DomainError as exc:
-            if exc.status_code == 404:
-                raise BadRequestError(f"proxy_id not found: {draft.proxy_id}") from exc
-            raise
-        proxy_summary = ProxySummary(
-            id=proxy.id,
-            name=proxy.name,
-            type=proxy.type,
-            host=proxy.host,
-            port=proxy.port,
-            has_auth=proxy.has_auth,
-            created_at=proxy.created_at,
-            updated_at=proxy.updated_at,
-        )
-
     ai_profiles = require_complete_ai_profile_selections(draft.ai_profiles)
     if draft.task_timeouts is None:
         raise DomainError("task_timeouts is required", status_code=422)
@@ -95,7 +73,6 @@ def create_project_from_draft(
             created_at=now,
             graph_revision=1,
             timeline_revision=1,
-            proxy_id=draft.proxy_id,
             llm_hidden_event_kinds=json.dumps(hidden_event_kinds, ensure_ascii=False),
         )
     except Exception as exc:
@@ -113,7 +90,6 @@ def create_project_from_draft(
     persist_project_execution_configs(
         conn,
         pid,
-        proxy_id=draft.proxy_id,
         capabilities=draft.capabilities,
         ai_profiles=ai_profiles,
         role_id=draft.role_id,
@@ -136,5 +112,4 @@ def create_project_from_draft(
         ],
         intents=[],
         hints=hints,
-        proxy=proxy_summary,
     )

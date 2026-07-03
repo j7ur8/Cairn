@@ -19,7 +19,6 @@ class CreateProjectRequest(BaseModel):
     hints: list[CreateHintInline] | None = None
     capabilities: TaskCapabilitySelectionMap | None = None
     role_id: str | None = None
-    proxy_id: str | None = None
     ai_profiles: TaskAiProfileSelections | None = None
     task_timeouts: TaskTimeouts
     llm_visible_event_kinds: list[str] | None = None

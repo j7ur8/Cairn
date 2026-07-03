@@ -22,7 +22,6 @@ def persist_project_execution_configs(
     conn: Any,
     project_id: str,
     *,
-    proxy_id: str | None,
     capabilities: TaskCapabilitySelectionMap | None,
     ai_profiles: TaskAiProfileSelections,
     role_id: str | None,
@@ -33,7 +32,6 @@ def persist_project_execution_configs(
         capabilities=capabilities,
         ai_profiles=ai_profiles,
         role_id=role_id,
-        proxy_id=proxy_id,
         task_timeouts=task_timeouts,
     )
     insert_project_execution_config(conn, project_id, snapshot, now=now)

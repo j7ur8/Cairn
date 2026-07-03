@@ -6,9 +6,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from cairn.shared.config.capability_models import CapabilitiesConfig
-from cairn.shared.config.remote_support_models import RemoteSupportConfig
 from cairn.shared.config.resource_root import ResourceConfig
 from cairn.shared.config.role_models import RoleConfig
+from cairn.shared.config.server_models import ServerResourceConfig
 from cairn.shared.config.system_models import DispatcherConfig, RuntimeConfig, ServerConfig, SystemConfig
 from cairn.shared.config.task_models import ObservabilityConfig, TasksConfig
 from cairn.shared.config.worker_models import ContainerConfig, WorkerConfig, WorkerPoolConfig, WorkerRuntimeConfig
@@ -32,7 +32,6 @@ class DispatchConfig(BaseModel):
             return data
         worker_runtime = data.get("worker_runtime")
         worker_pool = data.get("worker_pool")
-        resources = data.get("resources")
         if not isinstance(worker_runtime, dict) or not isinstance(worker_pool, dict):
             return data
         common_env = worker_runtime.get("common_env") or {}
@@ -40,10 +39,11 @@ class DispatchConfig(BaseModel):
         if not isinstance(common_env, dict) or not isinstance(workers, list):
             return data
 
-        remote_env = _remote_support_env_from_raw(
-            resources.get("remote_support") if isinstance(resources, dict) else None
-        )
-        merged_common_env = {**common_env, **remote_env}
+        merged_common_env = {
+            **common_env,
+            "CAIRN_SERVER_URL": str((data.get("server") or {}).get("base_url") or ""),
+            "CAIRN_API_TOKEN": str(((data.get("server") or {}).get("auth") or {}).get("dispatcher_api_token") or ""),
+        }
         pool_copy = dict(worker_pool)
         merged_workers: list[Any] = []
         for worker in workers:
@@ -116,16 +116,6 @@ class DispatchConfig(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def proxies(self) -> list[dict[str, Any]]:
-        return self.worker_pool.proxies
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def remote_support(self) -> RemoteSupportConfig:
-        return self.resources.remote_support
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
     def capabilities(self) -> CapabilitiesConfig:
         return self.resources.capabilities
 
@@ -134,18 +124,7 @@ class DispatchConfig(BaseModel):
     def roles(self) -> list[RoleConfig]:
         return self.resources.roles
 
-
-def _remote_support_env_from_raw(raw: Any) -> dict[str, str]:
-    # Derives worker env vars from the remote_support section during the
-    # before-validator merge. A malformed section is intentionally tolerated
-    # here (no env injected): the same data is authoritatively validated as
-    # ResourceConfig.remote_support in the main pass, which surfaces the real
-    # error. Narrow to ValidationError so genuine bugs are not swallowed.
-    if not isinstance(raw, dict):
-        return {}
-    from pydantic import ValidationError
-
-    try:
-        return RemoteSupportConfig.model_validate(raw).environment()
-    except ValidationError:
-        return {}
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def servers(self) -> list[ServerResourceConfig]:
+        return self.resources.servers

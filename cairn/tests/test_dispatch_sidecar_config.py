@@ -45,7 +45,6 @@ worker_runtime:
     network_mode: bridge
     completed_action: stop
 worker_pool:
-  proxies: []
   workers:
     - name: mock
       type: mock
@@ -90,8 +89,13 @@ roles:
     description: desc
     prompt: prompt
     task_types: [reason]
-remote_support:
-  enabled: true
+servers:
+  - id: srv1
+    name: Server
+    host: helper.example
+    username: operator
+    auth_order: [password]
+    password: secret
 """.strip(),
                 encoding="utf-8",
             )
@@ -99,7 +103,8 @@ remote_support:
         self.assertEqual(len(cfg.capabilities.mcp_servers), 1)
         self.assertEqual(cfg.capabilities.mcp_servers[0].id, "mcp1")
         self.assertEqual(len(cfg.roles), 1)
-        self.assertTrue(cfg.remote_support.enabled)
+        self.assertEqual(len(cfg.servers), 1)
+        self.assertEqual(cfg.servers[0].id, "srv1")
 
     def test_role_default_skill_ids_resolve(self) -> None:
         from cairn.shared.config import DispatchConfig

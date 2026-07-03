@@ -18,10 +18,9 @@ from cairn.dispatcher.capability_mcp import (
     mcp_json,
 )
 from cairn.dispatcher.capability_probe import validate_selected_mcp
-from cairn.dispatcher.prompting import format_remote_support_appendix
 from cairn.dispatcher.prompt_resources import load_prompt_files_appendix
 from cairn.dispatcher.workers.base import WorkerExecutionContext
-from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, RemoteSupportConfig, SkillCapabilityConfig, TaskType
+from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, ServerResourceConfig, SkillCapabilityConfig, TaskType
 
 LOG = logging.getLogger(__name__)
 
@@ -44,6 +43,7 @@ class CapabilityWriter(Protocol):
 
 def inject_project_capabilities(
     config: DispatchConfig,
+    client: Any | None,
     container_manager: CapabilityWriter,
     container_name: str,
     project_id: str,
@@ -59,11 +59,10 @@ def inject_project_capabilities(
     files_appendix = ""
     if include_files_appendix:
         files_appendix, files_errors = load_prompt_files_appendix()
-    remote_support = getattr(config, "remote_support", RemoteSupportConfig())
-    remote_support_appendix = format_remote_support_appendix(remote_support)
+    resources_appendix = _resources_appendix(getattr(config, "servers", []), _project_proxy_summary(client, project_id))
 
     def render_files_only_instructions() -> str:
-        if not files_appendix.strip() and not remote_support_appendix.strip():
+        if not files_appendix.strip() and not resources_appendix.strip():
             return ""
         return instructions(
             "",
@@ -71,7 +70,7 @@ def inject_project_capabilities(
             [],
             [],
             files_appendix=files_appendix,
-            remote_support_appendix=remote_support_appendix,
+            resources_appendix=resources_appendix,
         )
 
     if not selection_data:
@@ -208,7 +207,7 @@ def inject_project_capabilities(
         injected_mcp_servers,
         injected_skills,
         files_appendix=files_appendix,
-        remote_support_appendix=remote_support_appendix,
+        resources_appendix=resources_appendix,
     )
     return CapabilityInjection(
         instructions=rendered_instructions,
@@ -231,6 +230,59 @@ def _safe_path_segment(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     text = text.strip("._")
     return text or "unknown"
+
+
+def _resources_appendix(servers: list[ServerResourceConfig], project_proxies: str) -> str:
+    lines: list[str] = []
+    enabled = [server for server in servers if server.enabled]
+    if enabled:
+        lines.append("Servers are global AI-accessible remote server capabilities. They are not automatically proxies or relays.")
+        for server in enabled:
+            parts = [
+                f"- {server.id}: {server.name}",
+                f"{server.username}@{server.host}:{server.port}",
+                f"auth_order={','.join(server.auth_order)}",
+            ]
+            if server.description:
+                parts.append(server.description)
+            if server.last_test_ok is not None:
+                parts.append(f"last_test={'ok' if server.last_test_ok else 'failed'}")
+            lines.append(" | ".join(parts))
+        lines.append("Use servers through the Cairn MCP server tools when they match the task.")
+    if project_proxies.strip():
+        if lines:
+            lines.append("")
+        lines.append("Project Proxy endpoints are project-scoped access hints. Use them only when the endpoint scope and usage_mode match the current action.")
+        lines.append(project_proxies.strip())
+    return "\n".join(lines)
+
+
+def _project_proxy_summary(client: Any, project_id: str) -> str:
+    if client is None:
+        return ""
+    try:
+        endpoints = client.list_project_proxy_endpoints(project_id)
+    except Exception as exc:  # noqa: BLE001
+        return f"- unavailable: failed to load project proxy endpoints: {exc}"
+    if not endpoints:
+        return ""
+    lines = []
+    for endpoint in endpoints:
+        if not isinstance(endpoint, dict):
+            continue
+        lines.append(
+            "- {id}: {protocol}://{host}:{port} reachable_from={reachable_from} usage_mode={usage_mode} prerequisite={prereq} health={health}".format(
+                id=endpoint.get("id") or "",
+                protocol=endpoint.get("protocol") or "",
+                host=endpoint.get("host") or "",
+                port=endpoint.get("port") or "",
+                reachable_from=endpoint.get("reachable_from") or "",
+                usage_mode=endpoint.get("usage_mode") or "",
+                prereq=endpoint.get("prerequisite_proxy_id") or "none",
+                health=endpoint.get("health_status") or "unknown",
+            )
+        )
+    return "\n".join(lines)
 
 
 def _capability_catalog_from_selection(

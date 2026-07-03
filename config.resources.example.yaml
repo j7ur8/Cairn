@@ -1,14 +1,20 @@
-remote_support:
-  enabled: true
-  dnslog:
-    url: ''
-  ssh:
-    host: ''
-    port: 22
-    username: ''
-    password: ''
+servers: []
 capabilities:
   mcp_servers:
+  - id: cairn-resources
+    name: Cairn Resources MCP
+    transport: stdio
+    description: Lists global Servers and project-scoped Proxy endpoints, runs authorized server commands, and records proxy usage results.
+    command: /usr/local/bin/cairn-resources-mcp-stdio
+    args: []
+    env: {}
+    use_when:
+    - You need to inspect or use configured remote Servers.
+    - You need to register, explain, resolve, test, or record usage for Project Proxy endpoints.
+    activation_hint: Use these tools to query Servers and Project Proxy resources. Do not assume a Server is a proxy or relay.
+    task_types:
+    - bootstrap
+    - explore
   - id: kali-server-mcp
     name: Kali Server MCP
     transport: stdio

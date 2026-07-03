@@ -39,7 +39,6 @@ observability:
   retention_days: 14
   redaction_patterns: []
 worker_pool:
-  proxies: []
   workers:
   - name: mock-observer-1
     type: mock

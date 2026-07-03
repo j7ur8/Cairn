@@ -283,7 +283,6 @@ class TempYamlConfig:
                 "common_env": {},
             },
             "worker_pool": {
-                "proxies": [],
                 "workers": [],
             },
         }

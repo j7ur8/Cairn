@@ -19,8 +19,8 @@ export const defaultAiProfileSelection = () => ({
 export const defaultTaskAiProfileSelections = () => ({});
 
 export const defaultTaskTimeouts = () => ({
-  bootstrap: { timeout: 300, conclude_timeout: 90 },
-  explore: { timeout: 300, conclude_timeout: 90 },
+  bootstrap: { timeout: 300, conclude_timeout: 120 },
+  explore: { timeout: 900, conclude_timeout: 180 },
   reason: { timeout: 300 },
 });
 

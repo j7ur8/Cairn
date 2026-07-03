@@ -113,7 +113,6 @@ class DispatcherLoop:
     def _init_containers(self) -> None:
         self.container_manager = ContainerManager(
             self.config.container,
-            proxy_resolver=self.project_context.resolve_proxy_env,
         )
         self.health = DispatcherHealthCoordinator(
             config=self.config,

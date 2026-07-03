@@ -27,7 +27,6 @@ def _project(*, facts=None, intents=None, hints=None):
         ],
         intents=intents or [],
         hints=hints or [Hint(id="h001", content="use hint", creator="user", created_at=_ts())],
-        proxy=None,
     )
 
 

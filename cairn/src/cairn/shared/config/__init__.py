@@ -29,14 +29,10 @@ from cairn.shared.config.mock_behavior import (
     resolve_mock_behavior,
 )
 from cairn.shared.config.preflight import PreflightResult, check_dispatch_config
-from cairn.shared.config.remote_support_models import (
-    RemoteDnslogConfig,
-    RemoteSshConfig,
-    RemoteSupportConfig,
-)
 from cairn.shared.config.resource_root import ResourceConfig
 from cairn.shared.config.role_models import RoleConfig
 from cairn.shared.config.root import DispatchConfig
+from cairn.shared.config.server_models import SERVER_AUTH_ORDER, ServerAuthMethod, ServerAuthType, ServerResourceConfig, ServerResourcePublic
 from cairn.shared.config.system_models import (
     DispatcherConfig,
     DispatcherReloadConfig,
@@ -88,10 +84,12 @@ __all__ = [
     "ObservabilityConfig",
     "ReasonTaskConfig",
     "ReasoningEffort",
-    "RemoteDnslogConfig",
-    "RemoteSshConfig",
-    "RemoteSupportConfig",
     "ResourceConfig",
+    "ServerAuthType",
+    "ServerAuthMethod",
+    "SERVER_AUTH_ORDER",
+    "ServerResourceConfig",
+    "ServerResourcePublic",
     "PreflightResult",
     "RoleConfig",
     "RuntimeConfig",

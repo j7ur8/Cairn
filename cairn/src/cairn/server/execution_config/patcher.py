@@ -21,9 +21,7 @@ def update_project_execution_config(
     capabilities: TaskCapabilitySelectionMap | None = None,
     ai_profiles: TaskAiProfileSelections | None = None,
     role_id: str | None = None,
-    proxy_id: str | None = None,
     role_id_set: bool = False,
-    proxy_id_set: bool = False,
     task_timeouts: TaskTimeouts | None = None,
     now: str,
 ) -> dict[str, dict[str, Any]]:
@@ -51,13 +49,9 @@ def update_project_execution_config(
     if role_id is None and not role_id_set:
         role = next((cfg.get("role") for cfg in current.values() if isinstance(cfg.get("role"), dict)), None)
         role_id = str(role.get("id")) if isinstance(role, dict) and role.get("id") else None
-    if proxy_id is None and not proxy_id_set:
-        proxy = next((cfg.get("proxy") for cfg in current.values() if isinstance(cfg.get("proxy"), dict)), None)
-        proxy_id = str(proxy.get("id")) if isinstance(proxy, dict) and proxy.get("id") else None
     persist_project_execution_configs(
         conn,
         project_id,
-        proxy_id=proxy_id,
         capabilities=next_capabilities,
         ai_profiles=next_ai_profiles,
         role_id=role_id,

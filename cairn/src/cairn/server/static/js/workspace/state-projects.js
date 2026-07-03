@@ -522,7 +522,6 @@ export function createWorkspaceProjectsState() {
         hints: [{ content: '' }],
         attachments: [],
         role_id: '',
-        proxy_id: '',
         capabilities: this.defaultTaskCapabilitiesMap(),
         ai_profiles: this.defaultTaskAiProfileSelections(),
         task_timeouts: this.defaultTaskTimeouts(),
@@ -572,7 +571,7 @@ export function createWorkspaceProjectsState() {
       this.view = 'newProject';
       this.showNewProject = false;
       this.mobileNavOpen = false;
-      await Promise.all([this.loadNewProjectCatalog(), this.loadProxies(), this.loadAiProfiles()]);
+      await Promise.all([this.loadNewProjectCatalog(), this.loadAiProfiles()]);
       this.ensureAllTaskAiProfilesSelected(this.newProject, this.newProjectAiProfileItems());
     },
 
@@ -919,9 +918,6 @@ export function createWorkspaceProjectsState() {
         body.capabilities = this.capabilitiesForNewProject();
         if (this.newProject.role_id) {
           body.role_id = this.newProject.role_id;
-        }
-        if (this.newProject.proxy_id) {
-          body.proxy_id = this.newProject.proxy_id;
         }
         const aiSelections = this.ensureTaskAiProfileSelections(this.newProject);
         body.ai_profiles = this.compactTaskAiProfileSelections(aiSelections);

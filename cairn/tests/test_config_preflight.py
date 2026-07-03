@@ -99,7 +99,6 @@ def _dispatch_config(root: Path) -> dict:
             },
         },
         "worker_pool": {
-            "proxies": [],
             "workers": [
                 {
                     "name": "mock",

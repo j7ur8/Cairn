@@ -32,7 +32,6 @@ from cairn.dispatcher.runtime.bind_mount_validation import (
 )
 from cairn.dispatcher.runtime.container_access import DockerAccess
 from cairn.dispatcher.runtime.container_cleanup import ContainerCleanup
-from cairn.dispatcher.runtime.container_env import proxy_environment
 from cairn.dispatcher.runtime.container_exec import ContainerExec
 from cairn.dispatcher.runtime.container_files import ContainerFiles
 from cairn.dispatcher.runtime.container_lifecycle import ContainerLifecycle
@@ -61,10 +60,8 @@ class ContainerManager:
     def __init__(
         self,
         config: ContainerConfig,
-        proxy_resolver: Callable[[str], dict[str, str] | None] | None = None,
     ):
         self._config = config
-        self._proxy_resolver = proxy_resolver
         if docker is None:
             raise RuntimeError("Docker SDK is required for container runtime operations")
         self._client = docker.from_env()
@@ -83,7 +80,6 @@ class ContainerManager:
             access=self._access,
             api_error_type=APIError,
             docker_exception_type=DockerException,
-            proxy_environment=self._proxy_environment,
             inspect_state=self.inspect_state,
             log_mount_mismatches=self.log_mount_mismatches,
             mount_mismatches=self.mount_mismatches,
@@ -104,16 +100,6 @@ class ContainerManager:
             access=self._access,
             require_container=lambda name: self._require_container(name),
         )
-
-    def _proxy_environment(self, project_id: str) -> dict[str, str]:
-        """Resolve the per-project proxy at container-launch time.
-
-        Returns an empty dict when no proxy is configured. The resolver is a
-        callable (not a value) so each container start picks up the latest
-        proxy config from the Server without a long-lived cache in
-        ``ContainerManager``.
-        """
-        return proxy_environment(self._proxy_resolver, project_id)
 
     def close(self) -> None:
         self._client.close()

@@ -26,7 +26,8 @@ RUN npm install -g chrome-devtools-mcp@1.1.1
 USER kali
 COPY ./bin/kali-mcp-stdio /usr/local/bin/kali-mcp-stdio
 COPY ./bin/metasploit-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
-RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
+COPY ./bin/cairn-resources-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio
+RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio
 
 
 

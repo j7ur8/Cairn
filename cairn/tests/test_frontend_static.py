@@ -12,3 +12,16 @@ def test_frontend_js_guardrails() -> None:
         cwd=ROOT,
         check=True,
     )
+
+
+def test_server_form_uses_multipart_endpoints() -> None:
+    source = (ROOT / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-proxies.js").read_text(
+        encoding="utf-8"
+    )
+    save = source.split("async saveServerResource()", 1)[1].split("async testServerResource", 1)[0]
+    assert "new FormData()" in save
+    assert "this.authFetch('/servers/add'" in save
+    assert "method: 'POST'" in save
+    assert "method: 'PUT'" in save
+    assert "this.api('POST', '/servers'" not in save
+    assert "auth_type" not in save

@@ -190,93 +190,229 @@
       </div>
     </section>
 
-    <section x-show="settingsSection === 'proxies'" class="h-full min-h-0 flex flex-col gap-3">
+    <section x-show="settingsSection === 'servers'" class="h-full min-h-0 flex flex-col gap-3">
       <div class="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <h4 class="text-sm font-semibold text-slate-700">Proxies</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">Workers route outbound traffic through the proxy assigned to their project. Pick a proxy at project creation; new projects default to no proxy.</p>
+          <h4 class="text-sm font-semibold text-slate-700">Servers</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Global server resources available to AI workers and resource-aware tooling.</p>
         </div>
-        <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-          <button x-show="!proxyFormOpen && !proxyForm.id" x-cloak data-testid="settings-proxy-add" @click="openCreateProxy()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">+ Add</button>
-          <div x-show="proxyFormOpen || proxyForm.id" x-cloak class="flex items-center gap-2">
-            <button @click="cancelProxyEdit()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
-            <button data-testid="proxy-save" @click="saveProxy()" :disabled="!proxyForm.name.trim() || !proxyForm.host.trim() || !proxyForm.port" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="proxyForm.id ? 'Save' : 'Create'"></button>
+        <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+          <div x-show="!serverFormOpen" x-cloak class="flex flex-wrap items-center justify-end gap-2">
+            <button data-testid="settings-server-refresh" @click="loadServersSettings()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Refresh</button>
+            <button data-testid="settings-server-add" @click="openCreateServer()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">+ Add</button>
+          </div>
+          <div x-show="serverFormOpen" x-cloak class="flex items-center gap-3">
+            <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">
+              <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="serverForm.enabled">
+              enabled
+            </label>
+            <div class="flex items-center gap-2">
+              <button @click="cancelServerEdit()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
+              <button data-testid="server-save" @click="saveServerResource()" :disabled="!serverForm.id.trim() || !serverForm.name.trim() || !serverForm.host.trim() || !serverForm.username.trim()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="serverFormEditId ? 'Save' : 'Create'"></button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div x-show="proxyForm.id || proxyFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-        <div class="flex min-h-full flex-col gap-3">
-          <div class="shrink-0 space-y-1.5">
-            <div class="text-xs font-semibold text-slate-700" x-text="proxyForm.id ? 'Edit Proxy' : 'Create Proxy'"></div>
-            <div class="text-[11px] text-slate-400">Identity, connection details, and optional credentials are grouped below.</div>
+      <div x-show="serverFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="text-xs font-semibold text-slate-700" x-text="serverFormEditId ? 'Edit Server' : 'Create Server'"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-[140px_minmax(0,1fr)] gap-2">
+          <input x-model="serverForm.id" :disabled="!!serverFormEditId" placeholder="id" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300 disabled:opacity-60 disabled:cursor-not-allowed">
+          <input x-model="serverForm.name" placeholder="name" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_110px_minmax(0,1fr)] gap-2">
+          <input x-model="serverForm.host" placeholder="host" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model.number="serverForm.port" type="number" min="1" max="65535" placeholder="port" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="serverForm.username" placeholder="username" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="space-y-2">
+          <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+            <div class="text-[11px] font-semibold text-slate-600">Password</div>
+            <input x-model="serverForm.password" type="password" autocomplete="new-password" placeholder="password (leave blank to keep saved secret)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
           </div>
-
-          <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Identity</div>
-            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
-              <input data-testid="proxy-name" x-model="proxyForm.name" placeholder="Name (e.g. corp-socks)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-              <select data-testid="proxy-type" x-model="proxyForm.type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-                <option value="socks5">SOCKS5</option>
-                <option value="http">HTTP</option>
-                <option value="https">HTTPS</option>
-              </select>
+          <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+            <div class="text-[11px] font-semibold text-slate-600">Private Key</div>
+            <textarea x-model="serverForm.private_key" rows="5" placeholder="private key (leave blank to keep saved secret)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="text-[11px] font-semibold text-slate-600">Certificate</div>
+              <div class="text-[10px] text-slate-400 font-mono truncate max-w-full" x-show="serverForm.cert_path" x-text="serverForm.cert_path"></div>
             </div>
-          </section>
+            <input type="file" @change="serverForm.certificateFile = $event.target.files[0] || null" class="block w-full text-xs text-slate-500 file:mr-3 file:rounded-md file:border file:border-slate-200 file:bg-white file:px-2.5 file:py-1 file:text-xs file:text-slate-600 hover:file:bg-slate-50">
+            <div class="text-[10px] text-slate-500 truncate" x-show="serverForm.certificateFile" x-text="`Selected: ${serverForm.certificateFile?.name || ''}`"></div>
+          </div>
+        </div>
+        <textarea x-model="serverForm.description" rows="3" placeholder="description" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      </div>
 
-          <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Connection</div>
-            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
-              <input data-testid="proxy-host" x-model="proxyForm.host" placeholder="host" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-              <input data-testid="proxy-port" x-model.number="proxyForm.port" type="number" min="1" max="65535" placeholder="port" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+      <template x-if="!serverFormOpen && resourceServers.length === 0">
+        <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No servers configured.</p>
+      </template>
+      <div x-show="!serverFormOpen" x-cloak class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+        <template x-for="s in resourceServers" :key="s.id">
+          <article class="rounded-xl border border-slate-200 bg-white px-3 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="inline-block h-2 w-2 rounded-full" :class="s.enabled ? 'bg-emerald-400' : 'bg-slate-300'"></span>
+                  <div class="text-xs font-semibold text-slate-700 truncate" x-text="s.name"></div>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="s.id"></span>
+                  <span x-show="!s.enabled" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">disabled</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-mono truncate" x-text="`${s.username}@${s.host}:${s.port}`"></div>
+                <div class="text-[10px] text-slate-500 truncate" x-text="`${(s.auth_order || []).join(' -> ')}${s.last_test_ok === null ? '' : (s.last_test_ok ? ' · test ok' : ' · test failed')}${s.last_test_at ? ' @ ' + s.last_test_at : ''}`"></div>
+                <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="s.description || 'No description'"></p>
+              </div>
+              <div class="flex gap-1 shrink-0">
+                <button @click="testServerResource(s.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Test</button>
+                <button @click="openEditServer(s)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                <button @click="deleteServerResource(s.id, s.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+              </div>
             </div>
-          </section>
+          </article>
+        </template>
+      </div>
+    </section>
 
-          <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Authentication</div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input x-model="proxyForm.username" placeholder="username (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-              <input x-model="proxyForm.password" type="password" placeholder="password (optional)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-            </div>
-          </section>
+    <section x-show="settingsSection === 'proxy'" class="h-full min-h-0 flex flex-col gap-3">
+      <div class="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h4 class="text-sm font-semibold text-slate-700">Proxy</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Project-scoped proxy endpoints. Pick a project here without changing the active project workspace.</p>
+        </div>
+        <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+          <div x-show="!proxySelectedProjectId" x-cloak class="flex flex-wrap items-center justify-end gap-2">
+            <button data-testid="settings-proxy-refresh" @click="loadProxySettings()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Refresh</button>
+          </div>
+          <div x-show="proxySelectedProjectId && !projectProxyFormOpen" x-cloak class="flex flex-wrap items-center justify-end gap-2">
+            <button data-testid="settings-proxy-back" @click="backToProxyProjects()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Back</button>
+            <button data-testid="settings-proxy-refresh" @click="loadProjectProxyEndpoints(proxySelectedProjectId)" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Refresh</button>
+            <button data-testid="settings-proxy-add" @click="openCreateProjectProxy()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">+ Add</button>
+          </div>
+          <div x-show="proxySelectedProjectId && projectProxyFormOpen" x-cloak class="flex items-center gap-2">
+            <button @click="cancelProjectProxyEdit()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
+            <button data-testid="proxy-save" @click="saveProjectProxy()" :disabled="!proxySelectedProjectId || !projectProxyForm.name.trim() || !projectProxyForm.host.trim() || !projectProxyForm.port" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="projectProxyForm.id ? 'Save' : 'Create'"></button>
+          </div>
         </div>
       </div>
 
-      <div x-show="!proxyFormOpen && !proxyForm.id" x-cloak class="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm flex flex-1 min-h-0 flex-col">
-        <div class="flex items-center justify-between gap-3 shrink-0">
-          <div>
-            <div class="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Proxy Pool</div>
-            <div class="text-[11px] text-slate-500 mt-1" x-text="`${proxies.length} items`"></div>
-          </div>
-        </div>
-
-        <div class="flex-1 min-h-0 overflow-y-auto pr-1 pt-3">
-          <template x-if="proxies.length === 0">
-            <div class="h-full min-h-[14rem] rounded-lg border border-dashed border-slate-200 bg-white/90 px-4 py-6 flex items-center justify-center text-center">
-              <p class="text-xs text-slate-400">No proxies configured.</p>
-            </div>
-          </template>
-          <div x-show="proxies.length > 0" class="grid grid-cols-1 gap-2">
-            <template x-for="p in proxies" :key="p.id">
-              <article class="h-32 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
-                <div class="flex h-full items-start justify-between gap-3 overflow-hidden">
-                  <div class="min-w-0 space-y-1.5">
-                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.name"></div>
-                    <div class="text-[10px] text-slate-400 font-mono truncate" x-text="p.id"></div>
-                    <div class="text-[10px] text-slate-500 truncate" x-text="`${p.type}://${p.host}:${p.port}`"></div>
-                    <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="p.has_auth ? 'auth: required' : 'auth: none'"></p>
+      <div x-show="!proxySelectedProjectId" x-cloak class="flex-1 min-h-0 flex flex-col gap-3">
+        <input x-model="proxyProjectSearch" placeholder="Search projects" class="shrink-0 w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        <template x-if="filteredProxyProjects().length === 0">
+          <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No projects found.</p>
+        </template>
+        <div class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+          <template x-for="p in filteredProxyProjects()" :key="p.id">
+            <button type="button" @click="selectProxyProject(p)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:bg-slate-50">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.title || p.id"></div>
+                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="p.status"></span>
                   </div>
-                  <div class="flex gap-1 shrink-0 self-start">
-                    <button @click="openEditProxy(p.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
-                    <button @click="deleteProxy(p.id, p.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+                  <div class="text-[10px] text-slate-400 font-mono truncate" x-text="p.id"></div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 shrink-0 text-center">
+                  <div>
+                    <div class="text-xs font-semibold text-slate-700" x-text="p.fact_count"></div>
+                    <div class="text-[10px] text-slate-400">facts</div>
+                  </div>
+                  <div>
+                    <div class="text-xs font-semibold text-slate-700" x-text="p.intent_count"></div>
+                    <div class="text-[10px] text-slate-400">intents</div>
+                  </div>
+                  <div>
+                    <div class="text-xs font-semibold text-slate-700" x-text="p.hint_count"></div>
+                    <div class="text-[10px] text-slate-400">hints</div>
                   </div>
                 </div>
-              </article>
-            </template>
-          </div>
+              </div>
+            </button>
+          </template>
         </div>
       </div>
 
+      <div x-show="proxySelectedProjectId && projectProxyFormOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div class="text-xs font-semibold text-slate-700" x-text="projectProxyForm.id ? 'Edit Project Proxy' : 'Register Project Proxy'"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px] gap-2">
+          <input x-model="projectProxyForm.name" placeholder="name" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <select x-model="projectProxyForm.protocol" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="socks5">SOCKS5</option>
+            <option value="socks5h">SOCKS5H</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)] gap-2">
+          <input x-model="projectProxyForm.host" placeholder="host" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model.number="projectProxyForm.port" type="number" min="1" max="65535" placeholder="port" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="projectProxyForm.reachable_from" placeholder="reachable_from" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <select x-model="projectProxyForm.auth_type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="none">none</option>
+            <option value="password">password</option>
+          </select>
+          <input x-model="projectProxyForm.username" placeholder="username" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="projectProxyForm.password" type="password" placeholder="password (not echoed)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <select x-model="projectProxyForm.lifecycle" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="persistent">persistent</option>
+            <option value="run">run</option>
+            <option value="task">task</option>
+          </select>
+          <input x-model="projectProxyForm.usage_mode" placeholder="usage_mode" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <select x-model="projectProxyForm.prerequisite_proxy_id" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="">no prerequisite</option>
+            <template x-for="p in projectProxyEndpoints.filter(item => item.id !== projectProxyForm.id)" :key="`pre:${p.id}`">
+              <option :value="p.id" x-text="p.name"></option>
+            </template>
+          </select>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input x-model="projectProxyForm.source" placeholder="source" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+          <input x-model="projectProxyForm.scope" placeholder="scope" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
+        </div>
+        <textarea x-model="projectProxyForm.description" rows="3" placeholder="description and usage notes" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      </div>
+
+      <div x-show="proxySelectedProjectId && !projectProxyFormOpen" x-cloak class="flex-1 min-h-0 flex flex-col gap-3">
+        <div class="shrink-0 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+          <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Selected Project</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold text-slate-700" x-text="proxySelectedProject?.title || proxySelectedProjectId"></span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white text-slate-500" x-text="proxySelectedProjectId"></span>
+          </div>
+        </div>
+        <template x-if="projectProxyEndpoints.length === 0">
+          <p class="text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3">No project proxy endpoints registered.</p>
+        </template>
+        <div class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+          <template x-for="p in projectProxyEndpoints" :key="p.id">
+            <article class="rounded-xl border border-slate-200 bg-white px-3 py-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1 space-y-1.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="p.name"></div>
+                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" x-text="p.id"></span>
+                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700" x-text="p.lifecycle"></span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 truncate" x-text="`${p.protocol}://${p.host}:${p.port} · ${p.reachable_from} · ${p.usage_mode}`"></div>
+                  <div class="text-[10px] text-slate-400 truncate" x-text="`${p.auth_type}${p.prerequisite_proxy_id ? ' · after ' + p.prerequisite_proxy_id : ''}`"></div>
+                  <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="p.description || p.scope || 'No description'"></p>
+                </div>
+                <div class="flex gap-1 shrink-0">
+                  <button @click="resolveProjectProxyChain(p.id)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Chain</button>
+                  <button @click="openEditProjectProxy(p)" class="px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 transition">Edit</button>
+                  <button @click="deleteProjectProxy(p.id, p.name)" class="px-2 py-1 rounded-md border border-rose-200 text-[10px] text-rose-500 hover:bg-rose-50 transition">Delete</button>
+                </div>
+              </div>
+            </article>
+          </template>
+        </div>
+      </div>
     </section>
 
     <section x-show="settingsSection === 'capabilities'" class="h-full min-h-0 flex flex-col gap-3">
