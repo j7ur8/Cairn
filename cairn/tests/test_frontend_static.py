@@ -25,3 +25,13 @@ def test_server_form_uses_multipart_endpoints() -> None:
     assert "method: 'PUT'" in save
     assert "this.api('POST', '/servers'" not in save
     assert "auth_type" not in save
+    assert "auth_order" not in save
+
+
+def test_project_proxy_edit_does_not_submit_empty_password() -> None:
+    source = (ROOT / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-proxies.js").read_text(
+        encoding="utf-8"
+    )
+    save = source.split("async saveProjectProxy()", 1)[1].split("async deleteProjectProxy", 1)[0]
+    assert "password: this.projectProxyForm.password || null" not in save
+    assert "if (this.projectProxyForm.password?.trim())" in save

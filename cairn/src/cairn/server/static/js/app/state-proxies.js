@@ -117,16 +117,6 @@ export function createProxiesState() {
     },
 
     async saveServerResource() {
-      const existingAuth = this.serverFormEditId
-        ? (this.resourceServers.find(server => server.id === this.serverFormEditId) || {})
-        : {};
-      const hasPassword = !!this.serverForm.password?.trim() || !!existingAuth.has_password;
-      const hasPrivateKey = !!this.serverForm.private_key?.trim() || !!existingAuth.has_private_key;
-      const hasCertificate = !!this.serverForm.certificateFile || !!existingAuth.cert_path;
-      const auth_order = [];
-      if (hasPrivateKey) auth_order.push('private_key');
-      if (hasCertificate) auth_order.push('certificate');
-      if (hasPassword) auth_order.push('password');
       const body = {
         id: this.serverForm.id.trim(),
         name: this.serverForm.name.trim(),
@@ -134,7 +124,6 @@ export function createProxiesState() {
         host: this.serverForm.host.trim(),
         port: Number(this.serverForm.port),
         username: this.serverForm.username.trim(),
-        auth_order,
         description: this.serverForm.description?.trim() || '',
       };
       for (const key of ['password', 'private_key']) {
@@ -227,7 +216,6 @@ export function createProxiesState() {
         port: Number(this.projectProxyForm.port),
         auth_type: this.projectProxyForm.auth_type,
         username: this.projectProxyForm.username || null,
-        password: this.projectProxyForm.password || null,
         source: this.projectProxyForm.source || 'operator',
         lifecycle: this.projectProxyForm.lifecycle,
         description: this.projectProxyForm.description || '',
@@ -236,6 +224,9 @@ export function createProxiesState() {
         reachable_from: this.projectProxyForm.reachable_from || 'worker',
         usage_mode: this.projectProxyForm.usage_mode || 'tool_native_proxy',
       };
+      if (this.projectProxyForm.password?.trim()) {
+        body.password = this.projectProxyForm.password.trim();
+      }
       const base = `/projects/${encodeURIComponent(this.proxySelectedProjectId)}/proxy-endpoints`;
       try {
         if (this.projectProxyForm.id) {

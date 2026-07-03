@@ -51,6 +51,21 @@ class ServerResourceConfigTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ServerResourceConfig.model_validate(base)
 
+    def test_server_write_schema_does_not_accept_client_auth_order(self) -> None:
+        from cairn.server.schemas.servers import ServerCreate, ServerUpdate
+
+        with self.assertRaises(ValidationError):
+            ServerCreate(
+                id="srv1",
+                name="Server",
+                host="host",
+                username="ops",
+                password="secret",
+                auth_order=["password"],  # type: ignore[call-arg]
+            )
+        with self.assertRaises(ValidationError):
+            ServerUpdate(auth_order=["password"])  # type: ignore[call-arg]
+
     def test_yaml_servers_redact_secrets_and_record_missing_sshpass_test(self) -> None:
         import yaml
 
@@ -77,7 +92,7 @@ class ServerResourceConfigTests(unittest.TestCase):
             self.assertNotIn("password", listed[0].model_dump())
             self.assertEqual(listed[0].auth_order, ["password"])
 
-            with mock.patch("cairn.server.config.servers.shutil.which", return_value=None):
+            with mock.patch("cairn.server.config.server_ssh.shutil.which", return_value=None):
                 result = test_yaml_server("srv1", command="true", timeout_seconds=1)
                 self.assertFalse(result.ok)
                 self.assertIn("password auth testing requires sshpass", result.message)
@@ -115,8 +130,8 @@ class ServerResourceConfigTests(unittest.TestCase):
                     password="secret",
                 )
             )
-            with mock.patch("cairn.server.config.servers.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
-                "cairn.server.config.servers.subprocess.run",
+            with mock.patch("cairn.server.config.server_ssh.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
+                "cairn.server.config.server_ssh.subprocess.run",
                 side_effect=fake_run,
             ):
                 result = run_yaml_server_command("srv1", ServerCommandRequest(command="true", timeout_seconds=1))
@@ -128,8 +143,8 @@ class ServerResourceConfigTests(unittest.TestCase):
         self.assertFalse(captured["password_path"].exists())
 
     def test_server_command_tries_auth_order_until_success(self) -> None:
-        from cairn.server.config.servers import create_yaml_server, run_yaml_server_command
-        from cairn.server.schemas.servers import ServerCommandRequest, ServerCreate
+        from cairn.server.config.servers import run_yaml_server_command
+        from cairn.server.schemas.servers import ServerCommandRequest
         from helpers import TempYamlConfig
 
         calls = []
@@ -139,31 +154,38 @@ class ServerResourceConfigTests(unittest.TestCase):
             mock_completed = mock.Mock()
             mock_completed.stdout = ""
             mock_completed.stderr = ""
-            mock_completed.returncode = 1 if len(calls) == 1 else 0
+            mock_completed.returncode = 1 if len(calls) < 3 else 0
             return mock_completed
 
-        with TempYamlConfig(resources={"servers": [], "capabilities": {"mcp_servers": [], "skills": []}, "roles": []}):
-            create_yaml_server(
-                ServerCreate(
-                    id="srv1",
-                    name="Build host",
-                    host="build.internal",
-                    username="ops",
-                    password="secret",
-                    private_key="-----BEGIN KEY-----\nkey\n-----END KEY-----",
-                )
-            )
-            with mock.patch("cairn.server.config.servers.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
-                "cairn.server.config.servers.subprocess.run",
+        resources = {
+            "servers": [
+                {
+                    "id": "srv1",
+                    "name": "Build host",
+                    "host": "build.internal",
+                    "username": "ops",
+                    "password": "secret",
+                    "private_key": "-----BEGIN KEY-----\nkey\n-----END KEY-----",
+                    "cert_path": "servers/srv1/client.pem",
+                }
+            ],
+            "capabilities": {"mcp_servers": [], "skills": []},
+            "roles": [],
+        }
+        with TempYamlConfig(resources=resources):
+            with mock.patch("cairn.server.config.server_ssh.shutil.which", return_value="/usr/bin/sshpass"), mock.patch(
+                "cairn.server.config.server_ssh.subprocess.run",
                 side_effect=fake_run,
             ):
                 result = run_yaml_server_command("srv1", ServerCommandRequest(command="true", timeout_seconds=1))
 
         self.assertTrue(result.ok)
         self.assertEqual(result.message, "ok via password")
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][0], "ssh")
-        self.assertEqual(calls[1][:2], ["sshpass", "-f"])
+        self.assertEqual(calls[1][0], "ssh")
+        self.assertIn("servers/srv1/client.pem", " ".join(calls[1]))
+        self.assertEqual(calls[2][:2], ["sshpass", "-f"])
 
     def test_servers_multipart_create_and_update_certificate_uploads(self) -> None:
         import yaml
@@ -184,8 +206,7 @@ class ServerResourceConfigTests(unittest.TestCase):
                     "/servers/add",
                     data={
                         "payload": (
-                            '{"id":"srv1","name":"Server","host":"host","username":"ops",'
-                            '"password":"secret","auth_order":["password","certificate"]}'
+                            '{"id":"srv1","name":"Server","host":"host","username":"ops","password":"secret"}'
                         )
                     },
                     files={"certificate": ("client.pem", b"cert-one", "application/x-pem-file")},
@@ -209,14 +230,17 @@ class ServerResourceConfigTests(unittest.TestCase):
                 second_rel = updated["cert_path"]
                 second_path = cfg.root / "capabilities" / "ssh_certs" / second_rel
                 self.assertNotEqual(second_rel, first_rel)
-                self.assertTrue(first_path.exists())
+                self.assertFalse(first_path.exists())
                 self.assertTrue(second_path.exists())
                 self.assertEqual(second_path.read_bytes(), b"cert-two")
 
+                delete = client.delete("/servers/srv1")
+                self.assertEqual(delete.status_code, 204, delete.text)
+                self.assertFalse(second_path.exists())
+                self.assertFalse(second_path.parent.exists())
+
             data = yaml.safe_load(cfg.resources_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["servers"][0]["cert_path"], second_rel)
-            self.assertNotIn("auth_type", data["servers"][0])
-            self.assertEqual(data["servers"][0]["auth_order"], ["certificate", "password"])
+            self.assertEqual(data["servers"], [])
 
 
 class ProjectProxySchemaTests(unittest.TestCase):

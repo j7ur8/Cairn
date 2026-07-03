@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from cairn.shared.config import ServerAuthMethod, ServerResourcePublic
+from cairn.shared.config import ServerResourcePublic
 
 
 class ServerCreate(BaseModel):
@@ -14,7 +14,6 @@ class ServerCreate(BaseModel):
     host: str
     port: int = Field(default=22, gt=0, le=65535)
     username: str
-    auth_order: list[ServerAuthMethod] = Field(default_factory=list)
     password: str | None = None
     private_key: str | None = None
     description: str = ""
@@ -41,7 +40,6 @@ class ServerUpdate(BaseModel):
     host: str | None = None
     port: int | None = Field(default=None, gt=0, le=65535)
     username: str | None = None
-    auth_order: list[ServerAuthMethod] | None = None
     password: str | None = None
     private_key: str | None = None
     description: str | None = None
