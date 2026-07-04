@@ -8,6 +8,9 @@ import {
   textToKeyValueObject,
 } from '../shared/form.js';
 
+const CAIRN_RESOURCES_MCP_ID = 'cairn-resources';
+const CAIRN_RESOURCES_DEFAULT_TASKS = new Set(['bootstrap', 'explore']);
+
 export function createWorkspaceCapabilitiesState() {
   return {
     capabilities: {
@@ -37,6 +40,7 @@ export function createWorkspaceCapabilitiesState() {
         .map(item => item && typeof item.name === 'string' ? item.name.trim() : '')
         .filter(Boolean);
       this.newProject.capabilities = this.defaultTaskCapabilitiesMap();
+      this.applyDefaultNewProjectCapabilities();
       this.newProject.ai_profiles = this.defaultTaskAiProfileSelections();
       if (this.capabilityForm && (!Array.isArray(this.capabilityForm.task_types) || this.capabilityForm.task_types.length === 0)) {
         this.capabilityForm.task_types = [...this.task_types];
@@ -381,6 +385,37 @@ export function createWorkspaceCapabilitiesState() {
         out[task.key] = this.defaultTaskCapabilities();
       }
       return out;
+    },
+
+    cairnResourcesDefaultAvailableForTask(task) {
+      if (!CAIRN_RESOURCES_DEFAULT_TASKS.has(task)) return false;
+      const catalog = this.newProjectCatalog?.capabilities || [];
+      return catalog.some(item => item
+        && item.kind === 'mcp_server'
+        && item.id === CAIRN_RESOURCES_MCP_ID
+        && item.available !== false
+        && Array.isArray(item.task_types)
+        && item.task_types.includes(task));
+    },
+
+    applyDefaultNewProjectCapabilities() {
+      if (!this.newProject) return;
+      if (!this.newProject.capabilities) {
+        this.newProject.capabilities = this.defaultTaskCapabilitiesMap();
+      }
+      const perTask = this.ensureTaskCapabilitiesMap(this.newProject);
+      for (const task of this.capabilityTaskTypes()) {
+        if (!this.cairnResourcesDefaultAvailableForTask(task.key)) continue;
+        const entry = perTask[task.key];
+        for (const field of ['mcp_server_ids', 'user_mcp_server_ids']) {
+          const values = Array.isArray(entry[field]) ? entry[field] : [];
+          if (!values.includes(CAIRN_RESOURCES_MCP_ID)) {
+            entry[field] = [...values, CAIRN_RESOURCES_MCP_ID];
+          } else {
+            entry[field] = values;
+          }
+        }
+      }
     },
 
     ensureTaskCapabilitiesMap(target) {

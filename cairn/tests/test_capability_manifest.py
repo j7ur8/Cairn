@@ -17,6 +17,49 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class CapabilityManifestTests(unittest.TestCase):
+    def test_default_project_capability_selections_adds_cairn_resources_when_available(self) -> None:
+        from cairn.server.capability_expansion import default_project_capability_selections
+        from cairn.server.schemas import CapabilityCatalogItem, CapabilitySelection
+
+        catalog = [
+            CapabilityCatalogItem(
+                id="cairn-resources",
+                name="Cairn Resources MCP",
+                kind="mcp_server",
+                transport="stdio",
+                command="/usr/local/bin/cairn-resources-mcp-stdio",
+                task_types=["bootstrap", "explore"],
+                available=True,
+            ),
+            CapabilityCatalogItem(
+                id="other-mcp",
+                name="Other MCP",
+                kind="mcp_server",
+                transport="stdio",
+                command="/usr/local/bin/other-mcp",
+                task_types=["bootstrap"],
+                available=True,
+            ),
+        ]
+
+        result = default_project_capability_selections(
+            {
+                "bootstrap": CapabilitySelection(mcp_server_ids=["other-mcp"]),
+                "explore": CapabilitySelection(),
+                "reason": CapabilitySelection(),
+            },
+            catalog,
+        )
+
+        self.assertEqual(result["bootstrap"].mcp_server_ids, ["other-mcp", "cairn-resources"])
+        self.assertEqual(result["explore"].mcp_server_ids, ["cairn-resources"])
+        self.assertEqual(result["reason"].mcp_server_ids, [])
+
+        unavailable = catalog[0].model_copy(update={"available": False})
+        result = default_project_capability_selections(None, [unavailable])
+        self.assertEqual(result["bootstrap"].mcp_server_ids, [])
+        self.assertEqual(result["explore"].mcp_server_ids, [])
+
     def test_manifest_lists_selected_mcp_and_skills_without_secrets(self) -> None:
         from cairn.shared.capability_projection import capability_manifest_payload
 

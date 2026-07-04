@@ -8,6 +8,8 @@ from cairn.server.ai_profile_service import (
     require_complete_ai_profile_selections,
 )
 from cairn.server.application.project_io import prepare_project_storage
+from cairn.server.capability_expansion import default_project_capability_selections
+from cairn.server.config.capabilities import list_yaml_capabilities
 from cairn.server.domain.errors import BadRequestError, DomainError
 from cairn.server.domain.time import utcnow
 from cairn.server.execution_config import persist_project_execution_configs
@@ -44,6 +46,7 @@ class ProjectCreationDraft:
     llm_hidden_event_kinds: list[str] | None = None
     status: Literal["active", "stopped"] = "active"
     project_id: str | None = None
+    apply_default_capabilities: bool = True
 
 
 def create_project_from_draft(
@@ -87,10 +90,17 @@ def create_project_from_draft(
         projects.insert_hint(pid, hid, hint.content, hint.creator, now)
         hints.append(Hint(id=hid, content=hint.content, creator=hint.creator, created_at=now))
 
+    capabilities = draft.capabilities
+    if draft.apply_default_capabilities:
+        capabilities = default_project_capability_selections(
+            draft.capabilities,
+            list_yaml_capabilities(),
+        )
+
     persist_project_execution_configs(
         conn,
         pid,
-        capabilities=draft.capabilities,
+        capabilities=capabilities,
         ai_profiles=ai_profiles,
         role_id=draft.role_id,
         task_timeouts=draft.task_timeouts,

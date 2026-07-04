@@ -92,6 +92,7 @@ def create_replay_run_in_transaction(
             role_id=body.role_id,
             llm_hidden_event_kinds=llm_hidden_event_kinds,
             status="stopped",
+            apply_default_capabilities=False,
         ),
     )
     replay_repo.insert_run(

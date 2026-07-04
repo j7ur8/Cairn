@@ -527,6 +527,7 @@ export function createWorkspaceProjectsState() {
         task_timeouts: this.defaultTaskTimeouts(),
         llm_visible_event_kinds: this.defaultLlmVisibleEventKinds(),
       };
+      this.applyDefaultNewProjectCapabilities?.();
       this.newProjectCapabilityPanel = 'bootstrap';
     },
 
@@ -597,6 +598,7 @@ export function createWorkspaceProjectsState() {
           roles: roles || [],
           ai_profiles: this.aiProfiles,
         };
+        this.applyDefaultNewProjectCapabilities?.();
       } catch (e) {
         console.error(e);
         this.newProjectCatalog = { capabilities: [], roles: [], ai_profiles: [] };

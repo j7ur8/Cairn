@@ -475,29 +475,31 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(manager.files, [])
         self.assertEqual(manager.directories, [])
 
-    def test_explore_injection_includes_servers_and_project_proxy_without_selected_capabilities(self):
+    def test_explore_injection_uses_cairn_resources_hint_without_listing_resources(self):
         from types import SimpleNamespace
 
         from cairn.dispatcher.capabilities import inject_project_capabilities
-        from cairn.shared.config import ServerResourceConfig
+        from cairn.shared.config import McpServerCapabilityConfig, ServerResourceConfig
 
         client = SimpleNamespace(
-            list_project_proxy_endpoints=lambda project_id: [
-                {
-                    "id": "px1",
-                    "protocol": "socks5h",
-                    "host": "proxy.internal",
-                    "port": 1080,
-                    "reachable_from": "worker",
-                    "usage_mode": "tool_native_proxy",
-                    "prerequisite_proxy_id": None,
-                    "health_status": "unknown",
-                }
-            ]
+            list_project_proxy_endpoints=lambda _project_id: (_ for _ in ()).throw(
+                AssertionError("project proxy endpoints must be queried through cairn-resources MCP")
+            )
         )
 
         config = SimpleNamespace(
-            capabilities=self._config(["reason"]).capabilities,
+            capabilities=SimpleNamespace(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="cairn-resources",
+                        name="Cairn Resources MCP",
+                        transport="stdio",
+                        command="/usr/local/bin/cairn-resources-mcp-stdio",
+                        task_types=["bootstrap", "explore"],
+                    )
+                ],
+                skills=[],
+            ),
             servers=[
                 ServerResourceConfig(
                     id="srv1",
@@ -520,24 +522,37 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
             "proj",
             "explore",
             "task",
-            self._selection(),
+            {
+                "tasks": {
+                    "explore": {
+                        "selected": {"mcp_server_ids": ["cairn-resources"], "skill_ids": []},
+                        "snapshots": [
+                            {"kind": "mcp_server", "capability_id": "cairn-resources", "source": "selected"},
+                        ],
+                    }
+                }
+            },
         )
 
-        self.assertEqual(result.mcp_servers, [])
+        self.assertEqual(result.mcp_servers, ["cairn-resources"])
         self.assertEqual(result.skills, [])
         self.assertIn("# Project Capabilities", result.instructions)
         self.assertIn("## Files", result.instructions)
         self.assertIn("## Servers And Project Proxy", result.instructions)
-        self.assertIn("Servers are global AI-accessible remote server capabilities", result.instructions)
-        self.assertIn("srv1: Build host", result.instructions)
-        self.assertIn("auth_order=password", result.instructions)
-        self.assertIn("px1: socks5h://proxy.internal:1080", result.instructions)
+        self.assertIn("servers.list", result.instructions)
+        self.assertIn("servers.run_command", result.instructions)
+        self.assertIn("project_proxy.list_endpoints", result.instructions)
+        self.assertIn("project_proxy.resolve_chain", result.instructions)
+        self.assertIn("project_proxy.record_usage_result", result.instructions)
+        self.assertNotIn("srv1: Build host", result.instructions)
+        self.assertNotIn("auth_order=password", result.instructions)
+        self.assertNotIn("proxy.internal", result.instructions)
         self.assertNotIn("secret", result.instructions)
         self.assertNotIn("# Servers And Project Proxy", result.instructions.splitlines())
-        self.assertEqual(manager.files, [])
+        self.assertEqual(len(manager.files), 1)
         self.assertEqual(manager.directories, [])
 
-    def test_explore_injection_excludes_resources_when_none_available(self):
+    def test_explore_injection_excludes_resources_when_cairn_resources_not_selected(self):
         from types import SimpleNamespace
 
         from cairn.dispatcher.capabilities import inject_project_capabilities
@@ -550,7 +565,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         result = inject_project_capabilities(
             config,
-            SimpleNamespace(list_project_proxy_endpoints=lambda _project_id: []),
+            SimpleNamespace(list_project_proxy_endpoints=lambda _project_id: [{"id": "px1"}]),
             manager,
             "worker",
             "proj",

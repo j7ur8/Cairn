@@ -302,6 +302,39 @@ function checkReadOnlyProjectCapabilityHelpers() {
   `);
 }
 
+function checkNewProjectDefaultCairnResourcesSelection() {
+  runModuleAssertion(`
+    import assert from 'node:assert/strict';
+    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
+
+    const state = createWorkspaceCapabilitiesState();
+    state.task_types = ['bootstrap', 'explore', 'reason'];
+    state.taskTypeLabel = value => value;
+    state.roleDefaultTopLevelSkillIds = () => [];
+    state.newProjectCatalog = {
+      capabilities: [
+        { id: 'cairn-resources', kind: 'mcp_server', name: 'Cairn Resources MCP', task_types: ['bootstrap', 'explore'], available: true },
+      ],
+    };
+    state.newProject = { capabilities: state.defaultTaskCapabilitiesMap() };
+    state.applyDefaultNewProjectCapabilities();
+
+    assert.deepEqual(state.newProject.capabilities.bootstrap.user_mcp_server_ids, ['cairn-resources']);
+    assert.deepEqual(state.newProject.capabilities.explore.user_mcp_server_ids, ['cairn-resources']);
+    assert.deepEqual(state.newProject.capabilities.reason.user_mcp_server_ids, []);
+    assert.deepEqual(state.selectedCapabilitiesForPayload(state.newProject.capabilities), {
+      bootstrap: { mcp_server_ids: ['cairn-resources'], skill_ids: [] },
+      explore: { mcp_server_ids: ['cairn-resources'], skill_ids: [] },
+      reason: { mcp_server_ids: [], skill_ids: [] },
+    });
+
+    state.newProjectCatalog.capabilities[0].available = false;
+    state.newProject = { capabilities: state.defaultTaskCapabilitiesMap() };
+    state.applyDefaultNewProjectCapabilities();
+    assert.deepEqual(state.newProject.capabilities.bootstrap.user_mcp_server_ids, []);
+  `);
+}
+
 function checkFormHelpers() {
   runModuleAssertion(`
     import assert from 'node:assert/strict';
@@ -409,6 +442,7 @@ function main() {
   checkExecutionLogUiNoLegacyHistoryMode();
   checkCapabilitySelectionHelpers();
   checkReadOnlyProjectCapabilityHelpers();
+  checkNewProjectDefaultCairnResourcesSelection();
   checkFormHelpers();
   checkPrefHelpers();
   checkApiClientHelpers();

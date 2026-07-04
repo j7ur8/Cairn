@@ -49,6 +49,33 @@ class CapabilityAdminTests(unittest.TestCase):
         )
         return TaskAiProfileSelections(bootstrap=selection, explore=selection, reason=selection)
 
+    def _write_cairn_resources_capability(self, *, available: bool = True, include_other: bool = False) -> None:
+        import yaml
+
+        mcp_servers = [
+            {
+                "id": "cairn-resources",
+                "name": "Cairn Resources MCP",
+                "transport": "stdio",
+                "command": "/usr/local/bin/cairn-resources-mcp-stdio",
+                "task_types": ["bootstrap", "explore"],
+                "available": available,
+            }
+        ]
+        if include_other:
+            mcp_servers.append(
+                {
+                    "id": "other-mcp",
+                    "name": "Other MCP",
+                    "transport": "stdio",
+                    "command": "/usr/local/bin/other-mcp",
+                    "task_types": ["bootstrap"],
+                    "available": True,
+                }
+            )
+        data = {"capabilities": {"mcp_servers": mcp_servers, "skills": []}, "roles": []}
+        self.yaml.capabilities_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
     def test_admin_upsert_and_delete_uses_capabilities_yaml(self) -> None:
         from cairn.server.routers.capabilities import (
             delete_admin_capability,
@@ -231,6 +258,92 @@ class CapabilityAdminTests(unittest.TestCase):
         boot_snapshots = response.tasks["bootstrap"].snapshots
         self.assertEqual(boot_snapshots[0].capability_id, "role-skill")
         self.assertEqual(boot_snapshots[0].source, "role_default")
+
+    def test_project_create_defaults_cairn_resources_for_bootstrap_and_explore(self) -> None:
+        from cairn.server.routers.capabilities import get_project_capabilities
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+
+        self._write_cairn_resources_capability()
+
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config
+
+            bootstrap_config = load_project_execution_config(conn, project.project.id, "bootstrap")
+            explore_config = load_project_execution_config(conn, project.project.id, "explore")
+            reason_config = load_project_execution_config(conn, project.project.id, "reason")
+        self.assertEqual(bootstrap_config["capabilities"]["mcp_server_ids"], ["cairn-resources"])
+        self.assertEqual(bootstrap_config["capabilities"]["user_mcp_server_ids"], ["cairn-resources"])
+        self.assertEqual(explore_config["capabilities"]["mcp_server_ids"], ["cairn-resources"])
+        self.assertEqual(reason_config["capabilities"]["mcp_server_ids"], [])
+
+        response = get_project_capabilities(project.project.id)
+        self.assertEqual(
+            [item.capability_id for item in response.tasks["bootstrap"].snapshots],
+            ["cairn-resources"],
+        )
+        self.assertEqual(response.tasks["bootstrap"].snapshots[0].source, "selected")
+        self.assertEqual(response.tasks["reason"].snapshots, [])
+
+    def test_project_create_adds_cairn_resources_alongside_explicit_mcp_selection(self) -> None:
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+
+        self._write_cairn_resources_capability(include_other=True)
+
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            capabilities={
+                "bootstrap": CapabilitySelection(mcp_server_ids=["other-mcp"]),
+                "explore": CapabilitySelection(),
+                "reason": CapabilitySelection(),
+            },
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config
+
+            bootstrap_config = load_project_execution_config(conn, project.project.id, "bootstrap")
+            explore_config = load_project_execution_config(conn, project.project.id, "explore")
+            reason_config = load_project_execution_config(conn, project.project.id, "reason")
+        self.assertEqual(bootstrap_config["capabilities"]["mcp_server_ids"], ["other-mcp", "cairn-resources"])
+        self.assertEqual(bootstrap_config["capabilities"]["user_mcp_server_ids"], ["other-mcp", "cairn-resources"])
+        self.assertEqual(explore_config["capabilities"]["mcp_server_ids"], ["cairn-resources"])
+        self.assertEqual(reason_config["capabilities"]["mcp_server_ids"], [])
+
+    def test_project_create_does_not_default_unavailable_cairn_resources(self) -> None:
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+
+        self._write_cairn_resources_capability(available=False)
+
+        project = create_project(CreateProjectRequest(
+            title="p",
+            origin="o",
+            goal="g",
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config
+
+            bootstrap_config = load_project_execution_config(conn, project.project.id, "bootstrap")
+            explore_config = load_project_execution_config(conn, project.project.id, "explore")
+        self.assertEqual(bootstrap_config["capabilities"]["mcp_server_ids"], [])
+        self.assertEqual(explore_config["capabilities"]["mcp_server_ids"], [])
 
     def test_project_capabilities_query_uses_execution_config_catalog_snapshot(self) -> None:
         from cairn.server.routers.capabilities import (

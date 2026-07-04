@@ -11,11 +11,14 @@ from cairn.server.schemas import (
     TaskCapabilitiesMap,
     TaskCapabilitySelectionMap,
     task_capabilities_map,
+    task_capability_selection_map,
 )
 from cairn.shared.capability_projection import project_capability_tasks_payload
 from cairn.shared.task_types import builtin_task_type_names
 
 TASK_TYPES: tuple[str, ...] = builtin_task_type_names()
+CAIRN_RESOURCES_MCP_ID = "cairn-resources"
+CAIRN_RESOURCES_DEFAULT_TASKS = ("bootstrap", "explore")
 
 
 @dataclass
@@ -45,6 +48,38 @@ def selected_capabilities_to_internal(
             user_skill_ids=list(selection.skill_ids),
             role_default_skill_ids=[],
         )
+    return out
+
+
+def default_project_capability_selections(
+    selections: TaskCapabilitySelectionMap | None,
+    catalog: list[CapabilityCatalogItem],
+) -> TaskCapabilitySelectionMap:
+    """Apply new-project default MCP selections that are still catalog-valid."""
+    normalized = task_capability_selection_map(selections)
+    out = {
+        task: CapabilitySelection(
+            mcp_server_ids=list(selection.mcp_server_ids),
+            skill_ids=list(selection.skill_ids),
+        )
+        for task, selection in normalized.items()
+    }
+    cairn_resources = next(
+        (
+            item
+            for item in catalog
+            if item.kind == "mcp_server" and item.id == CAIRN_RESOURCES_MCP_ID
+        ),
+        None,
+    )
+    if cairn_resources is None or not cairn_resources.available:
+        return out
+    for task in CAIRN_RESOURCES_DEFAULT_TASKS:
+        if task not in TASK_TYPES or task not in cairn_resources.task_types:
+            continue
+        selected = out[task]
+        if CAIRN_RESOURCES_MCP_ID not in selected.mcp_server_ids:
+            selected.mcp_server_ids.append(CAIRN_RESOURCES_MCP_ID)
     return out
 
 
