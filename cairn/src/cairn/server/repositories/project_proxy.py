@@ -45,6 +45,7 @@ class ProjectProxyRepository:
             raise BadRequestError("prerequisite_proxy_id cannot reference itself")
         now = utcnow()
         payload = body.model_dump()
+        _normalize_auth_payload(payload)
         payload["id"] = endpoint_id
         payload["project_id"] = project_id
         payload["created_at"] = now
@@ -72,8 +73,12 @@ class ProjectProxyRepository:
     def update(self, project_id: str, endpoint_id: str, body: ProjectProxyEndpointUpdate) -> ProjectProxyEndpoint:
         current = self._get_row(project_id, endpoint_id)
         payload = dict(current)
-        for key, value in body.model_dump(exclude_unset=True).items():
+        changes = body.model_dump(exclude_unset=True)
+        for key, value in changes.items():
+            if key == "password" and value is None and payload.get("auth_type") == "password":
+                continue
             payload[key] = value
+        _normalize_auth_payload(payload)
         if payload.get("prerequisite_proxy_id") == endpoint_id:
             raise BadRequestError("prerequisite_proxy_id cannot reference itself")
         self._validate_prerequisite(project_id, payload.get("prerequisite_proxy_id"))
@@ -227,7 +232,14 @@ class ProjectProxyRepository:
         return row
 
 
+def _normalize_auth_payload(payload: dict[str, Any]) -> None:
+    if payload.get("auth_type") == "none":
+        payload["username"] = None
+        payload["password"] = None
+
+
 def _row_to_endpoint(row: Any) -> ProjectProxyEndpoint:
+    has_auth = row["auth_type"] == "password" and bool(row["username"] or row["password"])
     return ProjectProxyEndpoint(
         id=row["id"],
         project_id=row["project_id"],
@@ -238,7 +250,7 @@ def _row_to_endpoint(row: Any) -> ProjectProxyEndpoint:
         auth_type=row["auth_type"],
         username=row["username"],
         password=None,
-        has_auth=bool(row["username"] or row["password"]),
+        has_auth=has_auth,
         source=row["source"] or "",
         lifecycle=row["lifecycle"],
         description=row["description"] or "",

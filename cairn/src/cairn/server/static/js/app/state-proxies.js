@@ -207,6 +207,14 @@ export function createProxiesState() {
       this.projectProxyFormOpen = false;
     },
 
+    setProjectProxyAuthType(authType) {
+      this.projectProxyForm.auth_type = authType;
+      if (authType === 'none') {
+        this.projectProxyForm.username = '';
+        this.projectProxyForm.password = '';
+      }
+    },
+
     async saveProjectProxy() {
       if (!this.proxySelectedProjectId) return;
       const body = {

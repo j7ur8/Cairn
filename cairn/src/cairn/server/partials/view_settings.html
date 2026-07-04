@@ -350,7 +350,7 @@
           <input x-model="projectProxyForm.reachable_from" placeholder="reachable_from" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <select x-model="projectProxyForm.auth_type" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+          <select x-model="projectProxyForm.auth_type" @change="setProjectProxyAuthType($event.target.value)" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
             <option value="none">none</option>
             <option value="password">password</option>
           </select>

@@ -313,6 +313,7 @@ class ProjectProxyRepositoryTests(unittest.TestCase):
                     name="Entry",
                     host="entry.internal",
                     port=1080,
+                    auth_type="password",
                     password="entry-secret",
                     reachable_from="worker",
                     usage_mode="tool_native_proxy",
@@ -360,6 +361,88 @@ class ProjectProxyRepositoryTests(unittest.TestCase):
             repo.delete("proj_1", entry.id)
             remaining = repo.get("proj_1", target.id)
             self.assertIsNone(remaining.prerequisite_proxy_id)
+
+    def test_password_auth_secrets_are_cleared_when_auth_type_becomes_none(self) -> None:
+        from cairn.server.repositories import sql
+        from cairn.server.repositories.project_proxy import ProjectProxyRepository
+        from cairn.server.schemas.project_proxy import ProjectProxyEndpointCreate, ProjectProxyEndpointUpdate
+
+        with self.db.session_scope() as conn:
+            self._seed_project(conn)
+            repo = ProjectProxyRepository(conn)
+            endpoint = repo.create(
+                "proj_1",
+                ProjectProxyEndpointCreate(
+                    id="px_auth",
+                    name="Authenticated",
+                    host="proxy.internal",
+                    port=1080,
+                    auth_type="password",
+                    username="operator",
+                    password="entry-secret",
+                ),
+            )
+            self.assertTrue(endpoint.has_auth)
+
+            repo.update("proj_1", endpoint.id, ProjectProxyEndpointUpdate(description="keep password"))
+            row = sql.fetchone(
+                conn,
+                "SELECT username, password, description FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",
+                {"project_id": "proj_1", "id": endpoint.id},
+            )
+            self.assertEqual(row["username"], "operator")
+            self.assertEqual(row["password"], "entry-secret")
+            self.assertEqual(row["description"], "keep password")
+
+            disabled = repo.update("proj_1", endpoint.id, ProjectProxyEndpointUpdate(auth_type="none"))
+            self.assertFalse(disabled.has_auth)
+            row = sql.fetchone(
+                conn,
+                "SELECT username, password FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",
+                {"project_id": "proj_1", "id": endpoint.id},
+            )
+            self.assertIsNone(row["username"])
+            self.assertIsNone(row["password"])
+
+            reenabled = repo.update("proj_1", endpoint.id, ProjectProxyEndpointUpdate(auth_type="password"))
+            self.assertFalse(reenabled.has_auth)
+            row = sql.fetchone(
+                conn,
+                "SELECT username, password FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",
+                {"project_id": "proj_1", "id": endpoint.id},
+            )
+            self.assertIsNone(row["username"])
+            self.assertIsNone(row["password"])
+
+    def test_none_auth_discards_submitted_project_proxy_credentials(self) -> None:
+        from cairn.server.repositories import sql
+        from cairn.server.repositories.project_proxy import ProjectProxyRepository
+        from cairn.server.schemas.project_proxy import ProjectProxyEndpointCreate
+
+        with self.db.session_scope() as conn:
+            self._seed_project(conn)
+            repo = ProjectProxyRepository(conn)
+            endpoint = repo.create(
+                "proj_1",
+                ProjectProxyEndpointCreate(
+                    id="px_none",
+                    name="No auth",
+                    host="proxy.internal",
+                    port=1080,
+                    auth_type="none",
+                    username="operator",
+                    password="entry-secret",
+                ),
+            )
+
+            self.assertFalse(endpoint.has_auth)
+            row = sql.fetchone(
+                conn,
+                "SELECT username, password FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",
+                {"project_id": "proj_1", "id": endpoint.id},
+            )
+            self.assertIsNone(row["username"])
+            self.assertIsNone(row["password"])
 
 
 class ProxyRedactionTests(unittest.TestCase):
