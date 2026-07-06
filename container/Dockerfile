@@ -22,12 +22,14 @@ RUN rm /home/kali/workspace/*.md
 RUN npm install -g @openai/codex@0.141.0
 RUN npm install -g @anthropic-ai/claude-code@2.1.183
 RUN npm install -g chrome-devtools-mcp@1.1.1
+RUN npm install -g js-reverse-mcp@3.0.9
 
 USER kali
 COPY ./bin/kali-mcp-stdio /usr/local/bin/kali-mcp-stdio
 COPY ./bin/metasploit-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
 COPY ./bin/cairn-resources-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio
-RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio
+COPY ./bin/js-reverse-mcp-cairn /usr/local/bin/js-reverse-mcp-cairn
+RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio /usr/local/bin/js-reverse-mcp-cairn
 
 
 

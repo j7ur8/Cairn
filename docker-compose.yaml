@@ -30,6 +30,15 @@ services:
     command: ["true"]
     restart: "no"
     network_mode: "none"
+  cairn-cloak-image:
+    build:
+      context: ./capabilities/mcp/js-reverse-mcp/sidecar
+      dockerfile: Dockerfile
+    image: cairn-cloak-browser:js-reverse
+    container_name: cairn-cloak-image
+    command: ["true"]
+    restart: "no"
+    network_mode: "none"
   cairn-server:
     build:
       context: .
@@ -47,6 +56,7 @@ services:
       - ./config.resources.yaml:/cairn/config.resources.yaml
       - ./capabilities:/cairn/capabilities
       - ./cairn/src/cairn/dispatcher/prompts/default:/cairn/src/cairn/dispatcher/prompts/default
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       cairn-postgres:
         condition: service_healthy
@@ -93,6 +103,8 @@ services:
       cairn-server:
         condition: service_healthy
       cairn-worker-image:
+        condition: service_completed_successfully
+      cairn-cloak-image:
         condition: service_completed_successfully
     restart: unless-stopped
     mem_limit: 512m

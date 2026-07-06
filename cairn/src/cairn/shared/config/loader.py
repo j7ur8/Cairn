@@ -112,18 +112,34 @@ def normalize_server_config_data(data: dict[str, Any], config_dir: Path) -> dict
     for key in ("mem_limit", "pids_limit", "nano_cpus"):
         if key in resources:
             container[key] = resources[key]
+    cloak_sidecar_raw = worker.get("cloak_sidecar") if isinstance(worker.get("cloak_sidecar"), dict) else None
+    cloak_sidecar: dict[str, Any] | None = None
+    if cloak_sidecar_raw is not None:
+        profile_root = str(cloak_sidecar_raw.get("profile_root") or "")
+        if profile_root:
+            profile_root = _resolve_host_path(config_dir, profile_root)
+        cloak_sidecar = {
+            "image": _required_text(cloak_sidecar_raw, "image"),
+            "slots": cloak_sidecar_raw.get("slots", 2),
+            "novnc": cloak_sidecar_raw.get("novnc") or {},
+            "profile_root": profile_root,
+        }
 
     for key, value in list(container.items()):
         if value is None:
             container.pop(key)
 
+    worker_runtime: dict[str, Any] = {
+        "container": container,
+        "common_env": worker.get("common_env") or {},
+    }
+    if cloak_sidecar is not None:
+        worker_runtime["cloak_sidecar"] = cloak_sidecar
+
     return {
         "server": server_section,
         "dispatcher": dispatcher_section,
-        "worker_runtime": {
-            "container": container,
-            "common_env": worker.get("common_env") or {},
-        },
+        "worker_runtime": worker_runtime,
     }
 
 
@@ -200,11 +216,18 @@ def _validate_new_server_sections(
             "extra_mounts",
             "resources",
             "common_env",
+            "cloak_sidecar",
         },
     )
     resources = worker.get("resources")
     if isinstance(resources, dict):
         _reject_unknown_keys("worker.resources", resources, {"mem_limit", "pids_limit", "nano_cpus"})
+    cloak_sidecar = worker.get("cloak_sidecar")
+    if isinstance(cloak_sidecar, dict):
+        _reject_unknown_keys("worker.cloak_sidecar", cloak_sidecar, {"image", "slots", "novnc", "profile_root"})
+        novnc = cloak_sidecar.get("novnc")
+        if isinstance(novnc, dict):
+            _reject_unknown_keys("worker.cloak_sidecar.novnc", novnc, {"enabled", "host"})
 
 
 def _reject_unknown_keys(label: str, section: dict[str, Any], allowed: set[str]) -> None:

@@ -19,6 +19,7 @@ from cairn.dispatcher.capability_mcp import (
 )
 from cairn.dispatcher.capability_probe import validate_selected_mcp
 from cairn.dispatcher.prompt_resources import load_prompt_files_appendix
+from cairn.dispatcher.runtime.docker_labels import safe_project_id
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
 
@@ -155,6 +156,11 @@ def inject_project_capabilities(
         )
 
     capability_root = f"{CAPABILITY_ROOT}/{_safe_path_segment(project_id)}/{_safe_path_segment(task_instance_id)}"
+    runtime_replacements = {
+        "project_id": project_id,
+        "project_safe_id": safe_project_id(project_id),
+        "task_instance_id": task_instance_id,
+    }
     mcp_root = f"{capability_root}/mcp"
     mcp_path = f"{capability_root}/mcp.json"
     skill_root = f"{capability_root}/skills"
@@ -172,11 +178,15 @@ def inject_project_capabilities(
                 errors.append(f"mcp_server:{mcp.id}: failed to inject directory: {exc}")
                 injected_mcp_servers = [item for item in injected_mcp_servers if item.id != mcp.id]
         try:
-            container_manager.write_text_file(container_name, mcp_path, mcp_json(injected_mcp_servers, capability_root))
+            container_manager.write_text_file(
+                container_name,
+                mcp_path,
+                mcp_json(injected_mcp_servers, capability_root, runtime_replacements),
+            )
         except Exception as exc:
             errors.append(f"mcp_servers: failed to write config: {exc}")
             injected_mcp_servers = []
-        injected_mcp_details = [mcp_detail(item, capability_root) for item in injected_mcp_servers]
+        injected_mcp_details = [mcp_detail(item, capability_root, runtime_replacements) for item in injected_mcp_servers]
     for skill in skills:
         try:
             container_manager.write_directory(container_name, f"{skill_root}/{skill.id}", Path(skill.source_path))

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.cleanup import ContainerCleanupCoordinator
 from cairn.dispatcher.scheduler.log_state import LogState
@@ -23,6 +24,7 @@ class SchedulerServices:
     runtime: RuntimeTaskRegistry
     cleanup: ContainerCleanupCoordinator
     container_manager: ContainerManager
+    cloak_sidecar_manager: CloakSidecarManager | None
     replay: ReplayCoordinator
     submitter: TaskSubmitter
     runtime_maintenance: RuntimeMaintenance
@@ -46,10 +48,12 @@ class SchedulerServices:
         config: DispatchConfig,
         client: CairnClient,
         container_manager: ContainerManager,
+        cloak_sidecar_manager: CloakSidecarManager | None = None,
     ) -> None:
         self.config = config
         self.client = client
         self.container_manager = container_manager
+        self.cloak_sidecar_manager = cloak_sidecar_manager
 
     def clear_project_log_state(self, project_id: str) -> None:
         self.log_state.clear_project(project_id)

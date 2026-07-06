@@ -11,6 +11,7 @@ import { createWorkspaceGraphState } from '../workspace/state-graph.js';
 import { createWorkspaceLogState } from '../workspace/state-llm-log.js';
 import { createWorkspaceProjectsState } from '../workspace/state-projects.js';
 import { createWorkspaceCapabilitiesState } from '../workspace/state-capabilities.js';
+import { createWorkspaceCloakState } from '../workspace/state-cloak.js';
 
 window.ALL_LLM_EXECUTIONS_VALUE = ALL_LLM_EXECUTIONS_VALUE;
 window.cairnApp = function cairnApp() {
@@ -19,6 +20,7 @@ window.cairnApp = function cairnApp() {
     createWorkspaceGraphState(),
     createWorkspaceLogState(),
     createWorkspaceProjectsState(),
+    createWorkspaceCloakState(),
     createSettingsState(),
     createSettingsAdminState(),
     createPromptsState(),

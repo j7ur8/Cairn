@@ -101,6 +101,7 @@ function checkCairnAppStateHasNoDuplicateKeys() {
     import { createWorkspaceLogState } from './src/cairn/server/static/js/workspace/state-llm-log.js';
     import { createWorkspaceProjectsState } from './src/cairn/server/static/js/workspace/state-projects.js';
     import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
+    import { createWorkspaceCloakState } from './src/cairn/server/static/js/workspace/state-cloak.js';
 
     globalThis.CAIRN_FRONTEND_ENV = 'development';
     createAppState(
@@ -108,6 +109,7 @@ function checkCairnAppStateHasNoDuplicateKeys() {
       createWorkspaceGraphState(),
       createWorkspaceLogState(),
       createWorkspaceProjectsState(),
+      createWorkspaceCloakState(),
       createSettingsState(),
       createSettingsAdminState(),
       createPromptsState(),

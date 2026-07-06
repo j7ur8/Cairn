@@ -418,6 +418,7 @@ export function createWorkspaceProjectsState() {
           timeline_revision: this.currentProjectPollState?.project_id === nextProject.project.id ? this.currentProjectPollState.timeline_revision : 0,
         };
         if (this.sideTab === 'files' && this.selectedProjectId === id) await this.loadProjectFiles(true);
+        void this.loadCloakSidecar?.(id);
         return true;
       } catch(e) {
         this.project = null;
@@ -778,6 +779,7 @@ export function createWorkspaceProjectsState() {
       this.resetLlmState();
       this.selectedProjectId = id;
       this.currentProjectPollState = null;
+      this.cloakSidecar = null;
       this.selectedNode = null;
       this.selectedFacts = [];
       this.selectedTimelineEntryId = null;

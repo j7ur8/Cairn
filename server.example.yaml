@@ -40,3 +40,10 @@ worker:
     mem_limit: null
     pids_limit: null
     nano_cpus: null
+  cloak_sidecar:
+    image: cairn-cloak-browser:js-reverse
+    slots: 2
+    novnc:
+      enabled: true
+      host: 127.0.0.1
+    profile_root: ${CAIRN_HOST_ROOT}/datas/cloak-profiles

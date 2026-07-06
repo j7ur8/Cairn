@@ -17,6 +17,7 @@ Behavior is pinned by tests/test_task_runner_characterization.py.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -127,6 +128,7 @@ def run_intent_task(
     lease = lifecycle.lease
     lifecycle.start()
     try:
+        _emit_cloak_sidecar_event(reporter, spec.prepare_phase, execution_config)
         container_name = container_manager.ensure_running(project_id)
         cancelled = _cancelled_before_exec(cancellation, spec.task_type, project_id, intent.id, worker.name, spec.exec_phase, reporter)
         if cancelled is not None:
@@ -224,6 +226,20 @@ def run_intent_task(
         return outcome
     finally:
         lifecycle.finish(outcome)
+
+
+def _emit_cloak_sidecar_event(reporter: Any, phase: str, execution_config: dict) -> None:
+    sidecar = execution_config.get("cloak_sidecar")
+    if not isinstance(sidecar, dict):
+        return
+    payload = {
+        "running": bool(sidecar.get("running")),
+        "novnc_url": sidecar.get("novnc_url"),
+        "slots": sidecar.get("slots"),
+        "busy_slots": sidecar.get("busy_slots"),
+        "container_name": sidecar.get("container_name"),
+    }
+    reporter.emit_result(phase, json.dumps({"cloak_sidecar": payload}, ensure_ascii=False, indent=2))
 
 
 def _cancelled_before_exec(

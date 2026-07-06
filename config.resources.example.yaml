@@ -81,6 +81,32 @@ capabilities:
     task_types:
     - bootstrap
     - explore
+  - id: js-reverse-mcp-cloak
+    name: JS Reverse MCP Cloak
+    transport: stdio
+    description: Runs js-reverse-mcp against a project-scoped CloakBrowser sidecar slot.
+      The worker wrapper leases a sidecar CDP slot and releases it when the MCP exits.
+    command: /usr/local/bin/js-reverse-mcp-cairn
+    args: []
+    env:
+      CAIRN_PROJECT_ID: '{project_id}'
+      CAIRN_PROJECT_SAFE_ID: '{project_safe_id}'
+      CAIRN_TASK_INSTANCE_ID: '{task_instance_id}'
+      CAIRN_CLOAK_CONTROL_URL: http://cairn-cloak-{project_safe_id}:7310
+    source_path: ./capabilities/mcp/js-reverse-mcp
+    use_when:
+    - Browser-side JavaScript reverse engineering needs anti-detection browser runtime
+      inspection.
+    - sign, enc, token, or nonce generation must be traced in a real browser session.
+    - A reusable per-project browser profile or noVNC inspection is useful.
+    activation_hint: Use this MCP for JS reverse engineering with the project CloakBrowser
+      sidecar. It connects to a leased sidecar CDP slot; do not pass --cloak or
+      --browserUrl manually.
+    required_skill_ids:
+    - js-reverse-automation
+    task_types:
+    - bootstrap
+    - explore
   skills:
   - id: js-reverse-automation
     name: js-reverse-automation
@@ -92,6 +118,7 @@ capabilities:
     - Encrypted API requests need to be reproduced.
     - Runtime hook evidence or Webpack/module cache discovery is needed.
     preferred_mcp_ids:
+    - js-reverse-mcp-cloak
     - chrome-devtools-host
     activation_hint: When these conditions match, first read this skill's SKILL.md
       and follow its workflow before using the paired browser MCP.

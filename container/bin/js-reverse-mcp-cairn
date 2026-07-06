@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_safe_id="${CAIRN_PROJECT_SAFE_ID:-}"
+task_instance_id="${CAIRN_TASK_INSTANCE_ID:-unknown}"
+control_url="${CAIRN_CLOAK_CONTROL_URL:-}"
+
+if [[ -z "$control_url" ]]; then
+  if [[ -z "$project_safe_id" ]]; then
+    echo "js-reverse-mcp-cairn: CAIRN_PROJECT_SAFE_ID or CAIRN_CLOAK_CONTROL_URL is required" >&2
+    exit 64
+  fi
+  control_url="http://cairn-cloak-${project_safe_id}:7310"
+fi
+
+lease_id="${CAIRN_CLOAK_LEASE_ID:-${task_instance_id}-$$}"
+lease_file="$(mktemp)"
+
+release() {
+  curl -fsS -X POST "$control_url/release" \
+    -H 'content-type: application/json' \
+    --data "{\"lease_id\":\"$lease_id\"}" >/dev/null 2>&1 || true
+  rm -f "$lease_file"
+}
+trap release EXIT INT TERM
+
+if ! curl -fsS -X POST "$control_url/lease" \
+  -H 'content-type: application/json' \
+  --data "{\"lease_id\":\"$lease_id\"}" \
+  --max-time "${CAIRN_CLOAK_LEASE_TIMEOUT:-35}" > "$lease_file"; then
+  echo "js-reverse-mcp-cairn: failed to lease CloakBrowser slot from $control_url" >&2
+  exit 69
+fi
+
+browser_url="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); if (!data.browser_url) process.exit(2); process.stdout.write(data.browser_url);" "$lease_file")"
+
+set +e
+js-reverse-mcp --browserUrl "$browser_url" "$@"
+status=$?
+set -e
+exit "$status"

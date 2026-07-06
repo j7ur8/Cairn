@@ -42,6 +42,17 @@
         x-text="project.project.status"></span>
     </div>
     <div class="flex-1"></div>
+    <button x-show="cloakButtonVisible()"
+      @click="openCloakUi()"
+      :disabled="cloakButtonDisabled()"
+      class="px-2.5 py-1 rounded-lg border text-xs transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+      :class="cloakButtonDisabled()
+        ? 'border-slate-200 text-slate-400'
+        : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'"
+      :title="cloakButtonTitle()">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16h-11A2.5 2.5 0 0 1 4 13.5v-8Z"/><path d="M8 21h8"/><path d="M12 16v5"/></svg>
+      Cloak UI
+    </button>
     <div class="flex items-center gap-4 text-xs text-slate-400">
       <span x-text="`${projectFactCount()} facts`"></span>
       <span x-text="`${projectIntentCount()} intents`"></span>

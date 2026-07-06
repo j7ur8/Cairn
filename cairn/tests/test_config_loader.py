@@ -69,6 +69,13 @@ worker:
     mem_limit: null
     pids_limit: null
     nano_cpus: null
+  cloak_sidecar:
+    image: cairn-cloak-browser:js-reverse
+    slots: 2
+    novnc:
+      enabled: true
+      host: 127.0.0.1
+    profile_root: ${CAIRN_HOST_ROOT}/datas/cloak-profiles
 """
 
 SERVER_YAML = NEW_SERVER_YAML.replace("${CAIRN_HOST_ROOT}/datas", "/tmp/cairn-test")
@@ -281,6 +288,12 @@ roles:
             str((host_root / "datas" / "attachments").resolve(strict=False)),
         )
         self.assertTrue(mounts["ctf-attachments"].read_only)
+        self.assertEqual(cfg.worker_runtime.cloak_sidecar.image, "cairn-cloak-browser:js-reverse")
+        self.assertEqual(cfg.worker_runtime.cloak_sidecar.slots, 2)
+        self.assertEqual(
+            cfg.worker_runtime.cloak_sidecar.profile_root,
+            str((host_root / "datas" / "cloak-profiles").resolve(strict=False)),
+        )
 
     def test_legacy_server_yaml_schema_is_rejected(self) -> None:
         from cairn.shared.config import ConfigError, DispatchConfig

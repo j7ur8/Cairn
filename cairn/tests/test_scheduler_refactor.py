@@ -496,9 +496,9 @@ class TaskSubmitterTests(unittest.TestCase):
         old_client.close.assert_called_once()
 
     def test_dispatcher_reload_applies_while_tasks_running_and_defers_old_resource_close(self) -> None:
+        from concurrent.futures import Future
         from pathlib import Path
         from unittest import mock
-        from concurrent.futures import Future
 
         import cairn.dispatcher.scheduler.reload as reload_mod
 
@@ -639,6 +639,7 @@ class TaskSubmitterTests(unittest.TestCase):
                 config=object(),  # type: ignore[arg-type]
                 client=client,
                 container_manager=object(),  # type: ignore[arg-type]
+                cloak_sidecar_manager=None,
                 executor=executor,
                 runtime=runtime,
                 log_state=LogState(),
@@ -725,6 +726,7 @@ class TaskSubmitterTests(unittest.TestCase):
                 config=object(),  # type: ignore[arg-type]
                 client=client,
                 container_manager=object(),  # type: ignore[arg-type]
+                cloak_sidecar_manager=None,
                 executor=executor,
                 runtime=runtime,
                 log_state=LogState(),
@@ -776,6 +778,7 @@ class TaskSubmitterTests(unittest.TestCase):
                 config=object(),  # type: ignore[arg-type]
                 client=client,
                 container_manager=object(),  # type: ignore[arg-type]
+                cloak_sidecar_manager=None,
                 executor=executor,
                 runtime=runtime,
                 log_state=LogState(),

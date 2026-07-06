@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -161,11 +162,44 @@ class WorkerConfig(BaseModel):
         return self
 
 
+class CloakNoVncConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("novnc.host must not be empty")
+        return text
+
+
+class CloakSidecarConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image: str
+    slots: int = Field(default=2, gt=0, le=16)
+    novnc: CloakNoVncConfig = Field(default_factory=CloakNoVncConfig)
+    profile_root: str
+
+    @field_validator("image", "profile_root")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
 class WorkerRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     container: ContainerConfig
     common_env: dict[str, str] = Field(default_factory=dict)
+    cloak_sidecar: CloakSidecarConfig | None = None
 
 
 class WorkerPoolConfig(BaseModel):

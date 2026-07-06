@@ -32,7 +32,13 @@ from cairn.shared.config.preflight import PreflightResult, check_dispatch_config
 from cairn.shared.config.resource_root import ResourceConfig
 from cairn.shared.config.role_models import RoleConfig
 from cairn.shared.config.root import DispatchConfig
-from cairn.shared.config.server_models import SERVER_AUTH_ORDER, ServerAuthMethod, ServerAuthType, ServerResourceConfig, ServerResourcePublic
+from cairn.shared.config.server_models import (
+    SERVER_AUTH_ORDER,
+    ServerAuthMethod,
+    ServerAuthType,
+    ServerResourceConfig,
+    ServerResourcePublic,
+)
 from cairn.shared.config.system_models import (
     DispatcherConfig,
     DispatcherReloadConfig,
@@ -58,6 +64,8 @@ from cairn.shared.config.task_models import (
 )
 from cairn.shared.config.worker_models import (
     BindMountConfig,
+    CloakNoVncConfig,
+    CloakSidecarConfig,
     ContainerConfig,
     WorkerConfig,
     WorkerPoolConfig,
@@ -74,6 +82,8 @@ __all__ = [
     "BindMountConfig",
     "BootstrapTaskConfig",
     "CapabilitiesConfig",
+    "CloakNoVncConfig",
+    "CloakSidecarConfig",
     "ContainerConfig",
     "ContainerInactiveAction",
     "DispatchConfig",

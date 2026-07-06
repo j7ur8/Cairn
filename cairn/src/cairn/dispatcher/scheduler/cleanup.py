@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from cairn.shared.contracts import ProjectSummary
 
 if TYPE_CHECKING:
+    from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
     from cairn.dispatcher.runtime.containers import ContainerManager
 
 LOG = logging.getLogger(__name__)
@@ -20,16 +21,30 @@ class ContainerCleanupCoordinator:
     duplicate cleanup jobs for the same container.
     """
 
-    def __init__(self, container_manager: ContainerManager, *, max_workers: int) -> None:
+    def __init__(
+        self,
+        container_manager: ContainerManager,
+        *,
+        cloak_sidecar_manager: CloakSidecarManager | None = None,
+        max_workers: int,
+    ) -> None:
         self.container_manager = container_manager
+        self.cloak_sidecar_manager = cloak_sidecar_manager
         self.executor = _cleanup_executor(max_workers)
         self.futures: dict[Future[bool], tuple[str, str | None, str | None]] = {}
         self.pending: set[str] = set()
         self.inactive_done: dict[str, str] = {}
 
-    def refresh(self, container_manager: ContainerManager, *, max_workers: int) -> ThreadPoolExecutor:
+    def refresh(
+        self,
+        container_manager: ContainerManager,
+        *,
+        cloak_sidecar_manager: CloakSidecarManager | None = None,
+        max_workers: int,
+    ) -> ThreadPoolExecutor:
         old_executor = self.executor
         self.container_manager = container_manager
+        self.cloak_sidecar_manager = cloak_sidecar_manager
         self.executor = _cleanup_executor(max_workers)
         self.futures.clear()
         self.pending.clear()
@@ -81,10 +96,12 @@ class ContainerCleanupCoordinator:
                 continue
             if not self.container_manager.needs_completed_cleanup(summary.id):
                 self.inactive_done[summary.id] = summary.status
+                self._queue_cloak_sidecar(summary.id, target_status=summary.status, remove=False)
                 continue
             future = self.executor.submit(self.container_manager.cleanup_completed, summary.id)
             self.futures[future] = (container_name, summary.id, summary.status)
             self.pending.add(container_name)
+            self._queue_cloak_sidecar(summary.id, target_status=summary.status, remove=False)
 
     def _queue_stopped(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
@@ -97,13 +114,20 @@ class ContainerCleanupCoordinator:
                 continue
             if not self.container_manager.needs_stopped_cleanup(summary.id):
                 self.inactive_done[summary.id] = summary.status
+                self._queue_cloak_sidecar(summary.id, target_status=summary.status, remove=True)
                 continue
             future = self.executor.submit(self.container_manager.cleanup_stopped, summary.id)
             self.futures[future] = (container_name, summary.id, summary.status)
             self.pending.add(container_name)
+            self._queue_cloak_sidecar(summary.id, target_status=summary.status, remove=True)
 
     def _queue_orphans(self, summaries: list[ProjectSummary]) -> None:
         expected_container_names = {self.container_manager.container_name(summary.id) for summary in summaries}
+        expected_cloak_container_names: set[str] = set()
+        if self.cloak_sidecar_manager is not None:
+            from cairn.dispatcher.runtime.cloak_sidecar import cloak_container_name
+
+            expected_cloak_container_names = {cloak_container_name(summary.id) for summary in summaries}
         for container_name in self.container_manager.managed_container_names():
             if container_name in expected_container_names:
                 continue
@@ -114,6 +138,28 @@ class ContainerCleanupCoordinator:
             future = self.executor.submit(self.container_manager.cleanup_orphan, container_name)
             self.futures[future] = (container_name, None, None)
             self.pending.add(container_name)
+        if self.cloak_sidecar_manager is None:
+            return
+        for container_name in self.cloak_sidecar_manager.managed_container_names():
+            if container_name in expected_cloak_container_names:
+                continue
+            if container_name in self.pending:
+                continue
+            future = self.executor.submit(self.cloak_sidecar_manager.cleanup_orphan, container_name)
+            self.futures[future] = (container_name, None, None)
+            self.pending.add(container_name)
+
+    def _queue_cloak_sidecar(self, project_id: str, *, target_status: str, remove: bool) -> None:
+        if self.cloak_sidecar_manager is None:
+            return
+        from cairn.dispatcher.runtime.cloak_sidecar import cloak_container_name
+
+        name = cloak_container_name(project_id)
+        if name in self.pending:
+            return
+        future = self.executor.submit(self.cloak_sidecar_manager.cleanup_project, project_id, remove=remove)
+        self.futures[future] = (name, None, target_status)
+        self.pending.add(name)
 
 
 def _cleanup_executor(max_workers: int) -> ThreadPoolExecutor:

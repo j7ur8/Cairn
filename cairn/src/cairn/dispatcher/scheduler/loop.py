@@ -9,6 +9,7 @@ from cairn.dispatcher.health_server import DispatcherHealthServer, DispatcherHea
 from cairn.dispatcher.mcp_probe import run_mcp_probe_request
 from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
 from cairn.dispatcher.scheduler.ai_worker_selector import AiWorkerSelector
@@ -114,6 +115,9 @@ class DispatcherLoop:
         self.container_manager = ContainerManager(
             self.config.container,
         )
+        self.cloak_sidecar_manager = CloakSidecarManager(
+            self.config.worker_runtime.cloak_sidecar,
+        )
         self.health = DispatcherHealthCoordinator(
             config=self.config,
             client=self.client,
@@ -121,6 +125,7 @@ class DispatcherLoop:
         )
         self.cleanup = ContainerCleanupCoordinator(
             self.container_manager,
+            cloak_sidecar_manager=self.cloak_sidecar_manager,
             max_workers=self.config.runtime.max_workers,
         )
 
@@ -129,6 +134,7 @@ class DispatcherLoop:
             config=self.config,
             client=self.client,
             container_manager=self.container_manager,
+            cloak_sidecar_manager=self.cloak_sidecar_manager,
             executor=self.executor,
             runtime=self.runtime,
             log_state=self.log_state,
@@ -153,6 +159,7 @@ class DispatcherLoop:
             runtime=self.runtime,
             cleanup=self.cleanup,
             container_manager=self.container_manager,
+            cloak_sidecar_manager=self.cloak_sidecar_manager,
             replay=self.replay,
             submitter=self.submitter,
             runtime_maintenance=self.runtime_maintenance,
@@ -182,6 +189,7 @@ class DispatcherLoop:
         self.executor.shutdown(wait=True)
         self.cleanup.shutdown(wait=True)
         self.container_manager.close()
+        self.cloak_sidecar_manager.close()
         self.client.close()
         self.health_server.stop()
 

@@ -8,6 +8,11 @@ from dataclasses import dataclass
 
 from cairn.dispatcher.models import RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.cloak_sidecar import (
+    CloakSidecarManager,
+    project_uses_cloak_mcp,
+    render_cloak_templates,
+)
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.scheduler.log_state import LogState
 from cairn.dispatcher.scheduler.runtime_state import RuntimeTaskRegistry
@@ -61,6 +66,7 @@ class TaskSubmitter:
         config: DispatchConfig,
         client: CairnClient,
         container_manager: ContainerManager,
+        cloak_sidecar_manager: CloakSidecarManager | None,
         executor: ThreadPoolExecutor,
         runtime: RuntimeTaskRegistry,
         log_state: LogState,
@@ -77,6 +83,7 @@ class TaskSubmitter:
         self.config = config
         self.client = client
         self.container_manager = container_manager
+        self.cloak_sidecar_manager = cloak_sidecar_manager
         self.executor = executor
         self.runtime = runtime
         self.log_state = log_state
@@ -100,12 +107,14 @@ class TaskSubmitter:
         config: DispatchConfig,
         client: CairnClient,
         container_manager: ContainerManager,
+        cloak_sidecar_manager: CloakSidecarManager | None = None,
         executor: ThreadPoolExecutor,
         runtime: RuntimeTaskRegistry,
     ) -> None:
         self.config = config
         self.client = client
         self.container_manager = container_manager
+        self.cloak_sidecar_manager = cloak_sidecar_manager
         self.executor = executor
         self.runtime = runtime
         self.claimer.refresh(client=client)
@@ -394,6 +403,8 @@ class TaskSubmitter:
         execution_config = self.execution_config_for(project_id, task_type)
         if execution_config is None:
             return None
+        task_instance_id = intent.id if intent is not None else uuid.uuid4().hex
+        execution_config = render_cloak_templates(execution_config, project_id, task_instance_id)
         selection = (
             self.select_worker_by_name(project, task_type, execution_config, worker_name)
             if worker_name is not None
@@ -404,6 +415,19 @@ class TaskSubmitter:
             self._log_no_worker(project_id, task_type, selection, intent)
             return None
         self.log_state.clear(f"project:{project_id}:worker:{task_type}")
+        if project_uses_cloak_mcp(execution_config):
+            if self.cloak_sidecar_manager is None:
+                LOG.warning("cloak sidecar selected but manager is unavailable project=%s task_type=%s", project_id, task_type)
+                return None
+            try:
+                sidecar_status = self.cloak_sidecar_manager.ensure_running(
+                    project_id,
+                    network_mode=self.config.container.network_mode,
+                )
+                execution_config["cloak_sidecar"] = sidecar_status.model_dump()
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("cloak sidecar ensure failed project=%s task_type=%s error=%s", project_id, task_type, exc)
+                return None
         export_yaml = None
         if needs_export:
             try:

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 
+from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.server import db
 from cairn.server.application.project_commands import (
     complete_project as complete_project_command,
@@ -39,6 +40,7 @@ from cairn.server.application.reason_commands import (
     reason_state,
     release_reason,
 )
+from cairn.server.runtime_config import dispatch_config_path
 from cairn.server.schemas import (
     CompleteRequest,
     CreateProjectRequest,
@@ -52,6 +54,7 @@ from cairn.server.schemas import (
     UpdateProjectStatusRequest,
     UpdateProjectTitleRequest,
 )
+from cairn.shared.config import load_dispatch_config
 from cairn.shared.contracts import (
     Intent,
     ProjectDetail,
@@ -112,6 +115,28 @@ def get_project(project_id: str):
 def get_project_poll(project_id: str):
     with db.session_scope() as conn:
         return get_project_poll_state(conn, project_id)
+
+
+@router.get("/projects/{project_id}/cloak-sidecar")
+def get_project_cloak_sidecar(project_id: str):
+    try:
+        config = load_dispatch_config(dispatch_config_path()).worker_runtime.cloak_sidecar
+        manager = CloakSidecarManager(config)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "project_id": project_id,
+            "container_name": "",
+            "running": False,
+            "enabled": False,
+            "novnc_url": None,
+            "slots": 0,
+            "busy_slots": 0,
+            "error": str(exc),
+        }
+    try:
+        return manager.status(project_id).model_dump()
+    finally:
+        manager.close()
 
 
 @router.get("/projects/{project_id}/graph", response_model=ProjectGraphDelta)
