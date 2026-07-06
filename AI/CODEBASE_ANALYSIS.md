@@ -62,7 +62,7 @@ Cairn/
 ├── README/                           # 图片和架构可视化素材
 ├── server.yaml                       # 固定部署/敏感/基础设施配置
 ├── config.yaml                       # UI 可写的调度、worker、任务、观测配置
-├── config.resources.yaml             # remote_support、capabilities、roles 配置
+├── config.resources.yaml             # servers、project proxy discovery、capabilities、roles 配置
 ├── docker-compose.yaml               # 本地完整栈
 └── Dockerfile                        # app 镜像
 ```
@@ -96,8 +96,8 @@ Cairn/
 | `cairn/src/cairn/dispatcher/tasks/reason_result.py` | Reason 输出解析、complete/intents 写回和 finish outcome 映射 |
 | `cairn/src/cairn/dispatcher/protocol/` | Dispatcher 调 Server 的 HTTP client，按 project/task/AI profile/observability 子 API 拆分 |
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Worker 容器 facade；生命周期、cleanup、archive/file、exec/process 辅助拆到 runtime helper |
-| `cairn/src/cairn/shared/config/` | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 配置模型、加载、merge 和资源校验 |
-| `cairn/src/cairn/shared/contracts/` | Server 与 Dispatcher 共享 HTTP DTO；按 settings/timeouts/proxies/AI profiles/LLM events/projects/reason 拆分 |
+| `cairn/src/cairn/shared/config/` | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 配置模型、servers、加载、merge 和资源校验 |
+| `cairn/src/cairn/shared/contracts/` | Server 与 Dispatcher 共享 HTTP DTO；按 settings/timeouts/AI profiles/LLM events/projects/reason 拆分 |
 
 ## 3. 关键入口点
 
@@ -128,6 +128,7 @@ Cairn/
 | Graph intent to execution log sync | `server/static/js/workspace/state-graph.js`, `server/static/js/workspace/llm-log/events.js`, `server/partials/view_graph.html` | 点击 graph intent edge/node 后保持 detail selection，同时按 `llmExecutions[].intent_id` 选择对应 execution 并重载 latest preview/page cards；Execution Log header 的 refresh 按钮强制刷新当前 execution log | 前端状态内存查找 O(n) + 现有 log API reload | 未匹配 execution 时保留当前 log 选择；折叠面板不会被强制展开 |
 | Round-robin project ordering | `dispatcher/scheduler/dispatch_coordinator.py` | 在 active/running/idle 项目间轮转调度 | O(n log n) 排序 + O(n) 轮转 | 避免固定顺序饥饿 |
 | Intent scheduling | `dispatcher/scheduler/project_dispatcher.py`, `dispatcher/prompts/default/reason.md` | Reason 只产出 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent | 与 open intent 数线性相关 | claimed/running open intents 未结束时跳过 Reason，避免并发追加新分支 |
+| Intent phase checkpoint | `server/repositories/intent_phase_checkpoints.py`, `dispatcher/scheduler/project_dispatcher.py` | Explore conclude checkpoint 让失败的 conclude 可恢复，不重跑完整 explore | 与 checkpoint 数量线性相关 | 表为 `intent_phase_checkpoints`，phase 当前为 `explore_conclude` |
 | Worker selection | `dispatcher/scheduler/worker_select.py`, `worker_selection.py` | 根据 task type、AI profile、健康状态选择 worker | 与 worker 数量线性相关 | 支持 primary/fallback |
 | AI worker selection | `dispatcher/scheduler/ai_worker_selector.py`, `project_context.py` | 根据 execution config 的 AI profile chain、secret overlay、worker 健康选择 worker | 与 profile/worker 数量线性相关 | 独立于 loop 可测 |
 | Lease expiration | `server/domain/lease_cleanup.py`, `server/repositories/leases.py` | domain 计算过期策略，repository 执行 intent/reason lease 条件更新 | 批量 SQL update | Server lifespan 后台循环定期执行 |
@@ -135,6 +136,7 @@ Cairn/
 | Replay advance | `server/application/replay/`, `server/repositories/replay.py`, `dispatcher/scheduler/replay.py` | 从完成项目生成 replay run 并推进步骤 | route extraction 按 completion facts 反向加载可达子图 | 事务内创建/推进在 service，事务外附件复制、激活和失败补偿在 orchestration |
 | Observability query/write | `server/observability/*`, `server/observability/*_repository.py` | 写入 execution/event、增量查询、usage view、retention sweep | execution list 先分页再聚合 events；event view 先按 kind 统计再拉 primary events；retention 用 DB join delete | SQL 收敛在 execution/event/view/usage/retention repository/query 类，router/application 不感知 SQL 细节 |
 | MCP capability health probe | `server/capability_health.py`, `dispatcher/mcp_probe.py` | Server admin API 调 dispatcher `/mcp-probe`，Dispatcher 用 worker image 临时容器执行 MCP initialize + `tools/list` | 与 MCP 数量线性相关；每次 probe 创建并清理一个 startup container | 成功会写回 `last_probe_*` 并把 MCP `available` 设为 true，否则设为 false |
+| Cairn resource discovery MCP | `container/bin/cairn-resources-mcp-stdio`, `dispatcher/capability_mcp.py`, `dispatcher/capabilities.py` | 新项目默认在 bootstrap/explore 注入 `cairn-resources` MCP；workers 通过工具查询 servers 和 project proxy endpoints | prompt 不内联 server/proxy 明细 | 工具包含 `servers.list`、`project_proxy.list_endpoints`、`project_proxy.resolve_chain` |
 | Redaction | `server/observability/redaction.py`, `dispatcher/observability/redaction.py` | 对 token/key 等敏感文本脱敏 | 与事件文本长度和 pattern 数量相关 | 用于观测数据 |
 | Execution config snapshot immutability | `server/execution_config/repository.py`, `dispatcher/scheduler/execution_config_resolver.py` | 项目创建/replay 创建时只插入一次执行配置；Dispatcher 缓存返回 deep copy | 写入 O(task types + profiles)，读取按 `(project_id, task_type)` 缓存 | 已创建 project 的配置不 PATCH/覆盖，reload/project clear/404 负责缓存失效 |
 
@@ -302,7 +304,7 @@ erDiagram
 | `server.auth.jwt_secret` | YAML 配置 | JWT HS256 签名密钥 |
 | `server.auth.dispatcher_api_token` | YAML 配置 | Dispatcher reload/API service token |
 | AI profile `sk` | YAML/加密包装服务 | Server 提供读取 secret 的接口 |
-| proxy password | YAML-backed config | Dispatcher 启动任务时注入 worker env |
+| project proxy endpoint password | `project_proxy_endpoints.password` | Public DTO 不回显；当前仍依赖访问控制和输出脱敏 |
 | remote SSH password | YAML config | Worker remote support env |
 
 核心状态：
@@ -317,7 +319,7 @@ erDiagram
 
 ## 7. API 端点
 
-项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器 88 个。
+项目没有独立 OpenAPI 文件；`/docs`、`/redoc` 和 `/openapi.json` 当前在 `FastAPI(...)` 初始化中显式禁用，避免匿名暴露完整 schema。当前扫描到 `@router`/`@app` 装饰器 101 个。
 
 | 分组 | 主要端点 | 用途 | 认证 |
 |------|----------|------|------|
@@ -331,9 +333,10 @@ erDiagram
 | Hints | `POST /projects/{id}/hints` | 添加人工提示 | Bearer |
 | Attachments/Files | `POST /projects/{id}/attachments`, `GET /projects/{id}/files`, `/download` | 附件上传和文件浏览 | Bearer |
 | Export/Replay | `GET /projects/{id}/export`, `POST /projects/{id}/replay-runs` | 导出与复现 | Bearer |
-| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities`, `/projects/{id}/role` | 能力和角色管理；admin MCP probe 经 dispatcher `/mcp-probe` 执行真实 initialize/tools-list | Catalog/project snapshot Bearer；admin 写入/import/probe 需要 superuser |
+| Capabilities/Roles | `/capabilities/*`, `/roles/catalog`, `/projects/{id}/capabilities`, `/projects/{id}/capabilities/audit`, `/projects/{id}/role` | 能力和角色管理；admin MCP probe 经 dispatcher `/mcp-probe` 执行真实 initialize/tools-list；audit 只读诊断旧项目是否包含 `cairn-resources` | Catalog/project snapshot/audit Bearer；admin 写入/import/probe 需要 superuser |
 | AI Profiles | `/ai-profiles/*`, `/projects/{id}/ai-profiles` | AI profile catalog、secret、health check | Bearer |
-| Proxies/Settings | `/proxies/*`, `/task-timeouts/defaults` | 系统代理配置和任务超时默认值读取 | Bearer；proxy 写入需要 superuser |
+| Project Proxy/Settings | `/projects/{id}/proxy-endpoints*`, `/task-timeouts/defaults` | 项目级代理 endpoint 注册、chain resolve、测试/使用审计和任务超时默认值读取 | Bearer；项目 proxy endpoint 不回显 password |
+| Servers | `/servers/*` | `config.resources.yaml` 中的全局 server 资源 CRUD、命令测试和证书上传 | Bearer；server 写入需要 superuser，password/private_key 不回显 |
 | System Config | `GET/PUT /system-settings`, `GET /container-limits` | 聚合读写 `settings`、runtime limits、task timeouts、observability、server log/retention；container limits 从固定 `server.yaml` 只读 | GET Bearer；PUT superuser |
 | Observability | `/projects/{id}/llm-executions*`, `/llm-events*` | LLM execution/event 记录与查询 | Bearer |
 
@@ -365,7 +368,7 @@ erDiagram
 | Mutable dispatch config | 优先 `/cairn/config.yaml`，否则 repo 根 `config.yaml`；保存 UI 可写的 settings/runtime/tasks/observability/worker_pool |
 | Runtime system config | `runtime_config.system_config()` 读取 `server.yaml + config.yaml` 并 merge `server`、`dispatcher` sections |
 | Dispatcher full config | CLI 参数 `--config` 指定，并强制读取同目录 `server.yaml` 和 `config.resources.yaml` |
-| Resources config | `/cairn/config.resources.yaml` 或 repo 根 `config.resources.yaml`，包含 `remote_support`、`capabilities`、`roles` |
+| Resources config | `/cairn/config.resources.yaml` 或 repo 根 `config.resources.yaml`，包含 `servers`、`capabilities`、`roles`、MCP probe metadata；server/project proxy discovery 通过 `cairn-resources` MCP 查询，不再写入 prompt 摘要 |
 | Docker Compose startup | 推荐 `./start.sh`，导出 `CAIRN_HOST_ROOT` 后 `docker compose up -d --build`；dispatcher 在 host repo path 下运行，便于 Docker socket worker mount 使用 host-visible 路径 |
 
 核心命令：
@@ -391,10 +394,9 @@ uv run --project cairn cairn db migrate
 | `config.yaml: server.settings/log/retention` | UI 可写的业务超时、日志格式和 retention 开关 |
 | `config.yaml: dispatcher.runtime` | UI 可写的调度并发、tick interval、healthcheck timeout、prompt group |
 | `worker_pool.workers[]` | Worker 后端、优先级、env、模型 |
-| `worker_pool.proxies[]` | 系统代理配置 |
 | `tasks.bootstrap/reason/explore` | 超时和 reason max intents |
 | `observability.*` | 记录范围、事件大小、retention |
-| `config.resources.yaml` | remote support、MCP、skills、roles、probe metadata 和能力可用性 |
+| `config.resources.yaml` | servers、MCP、skills、roles、probe metadata 和能力可用性 |
 
 ## 10. 基础设施与横切关注点
 
@@ -435,7 +437,7 @@ uv run --project cairn cairn db migrate
 
 当前验证状态：
 
-- 仓库当前有 58 个顶层 `test_*.py` 测试文件。
+- 仓库当前有 59 个顶层 `test_*.py` 测试文件。
 - CI blocking checks 包括 `uv run ruff check src tests`、`uv run mypy src`、`node scripts/check_frontend.mjs` 和 pytest coverage。
 - 2026-06-15 当前环境使用 `uv run ruff check src tests`、`uv run mypy src`、`uv run python -m pytest -q -m 'not db'` 通过；`reset_postgres_db()` 用例自动标记为 `db`，快速集不触发 PostgreSQL。
 - 2026-06-17 新增/更新回归覆盖 aggregate `/system-settings`、旧 system-config route 移除、capability admin MCP probe、dispatcher `/mcp-probe` JSON 转发和 probe runner 容器清理。
@@ -461,7 +463,7 @@ uv run --project cairn cairn db migrate
 
 | 严重度 | 问题 | 位置 | 影响 |
 |--------|------|------|------|
-| 已修复 | 多个管理面接口只要求登录，未要求 superuser | `routers/settings.py`, `routers/proxies.py`, `routers/capabilities.py`, `routers/ai_profiles.py` | 管理写接口和敏感读接口已要求 superuser/service token |
+| 已修复 | 多个管理面接口只要求登录，未要求 superuser | `routers/settings.py`, `routers/capabilities.py`, `routers/ai_profiles.py`, server/proxy resource routers | 管理写接口和敏感读接口已要求 superuser/service token |
 | 已收敛 | AI Profile secret 通过 API 明文返回 | `server/routers/ai_profiles.py` | secret endpoint 仍供 dispatcher service token 注入 worker env，普通用户不可访问 |
 | 已修复 | AI profile check request claim 为 read-then-update，缺少状态条件保护 | `server/repositories/ai_profiles.py` | claim 改为单条 `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING`，router 不再直接持有 SQL |
 | 已修复 | 测试依赖未完整声明 | `pyproject.toml` dev group | 已加入 `pytest>=8.0`，并配置 `testpaths`、`pythonpath` 和 `db` marker |
@@ -489,11 +491,12 @@ uv run --project cairn cairn db migrate
 | 注意 | Dispatcher service token 被建模为 `role=service` 的 synthetic superuser。 |
 | 注意 | `server.yaml`、`config.yaml` 与 `config.resources.yaml` 是强绑定 sidecar；不再兼容旧 capabilities sidecar。 |
 | 注意 | `DispatchConfig.load(path)` 读取同目录 `server.yaml` 和 `config.resources.yaml`，旧 `cairn.shared.config.dispatch`、`shared.dispatch_config`、`shared.protocol_models`、`shared.contracts.models` 路径已删除。 |
-| 注意 | 当前 Alembic head 是 `0009_drop_intent_metadata`；revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
+| 注意 | 当前 Alembic head 是 `0013_project_proxy_servers`；该 migration 移除旧项目代理字段/表并新增项目级 `project_proxy_endpoints`。revision id 需要保持不超过 Alembic 默认版本表宽度 32 字符。 |
 | 注意 | `GET /projects/{id}/poll-state` 只返回轻量 summary/revision；完整项目详情仍来自 `GET /projects/{id}`，增量 graph/timeline 刷新可走 `GET /projects/{id}/graph`。 |
 | 注意 | Graph intent 选择只在当前 `llmExecutions` 列表中查找同 `intent_id` execution；若列表尚未包含该 execution，不改变当前 Execution Log 选择。 |
 | 注意 | Execution config 是项目创建时冻结的 snapshot，`version` 固定作为 metadata；需要修改配置时应创建 replay/new project，而不是覆盖原 project snapshot。 |
 | 注意 | MCP probe 成功或失败都会写回 `config.resources.yaml` 的 `last_probe_*` 字段；失败会把对应 MCP `available` 置为 false。 |
+| 注意 | 新项目默认把 `cairn-resources` MCP 选入 bootstrap/explore；旧项目 execution config 不自动迁移，能力页和 audit API 只诊断不修改 snapshot。 |
 | 性能敏感 | 项目详情会构建完整 facts/intents/hints 图，项目规模变大后仍可能成为 hot path；项目列表/调度 summaries 已用 repository 预聚合 counts 避免逐项目子查询。 |
 | 性能敏感 | LLM event 写入有批量接口和 event size limit；execution list 已先分页再聚合 events，event view 已按 kind 收敛 usage 查询，retention loop 通过 `DELETE ... USING` 交给 DB join delete。 |
 | 性能敏感 | Replay route extraction 不再加载完整项目 replay 图，而是从 completion facts 反向加载可达子图；仍需保持 missing producer、多 producer、cycle 错误语义。 |

@@ -345,6 +345,38 @@ class CapabilityAdminTests(unittest.TestCase):
         self.assertEqual(bootstrap_config["capabilities"]["mcp_server_ids"], [])
         self.assertEqual(explore_config["capabilities"]["mcp_server_ids"], [])
 
+    def test_project_capability_audit_reports_cairn_resources_snapshot_and_catalog(self) -> None:
+        import yaml
+
+        from cairn.server.routers.capabilities import get_project_capability_audit
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CreateProjectRequest
+
+        self.yaml.capabilities_path.write_text(
+            yaml.safe_dump({"capabilities": {"mcp_servers": [], "skills": []}, "roles": []}, sort_keys=False),
+            encoding="utf-8",
+        )
+        project = create_project(CreateProjectRequest(
+            title="legacy",
+            origin="o",
+            goal="g",
+            task_timeouts=test_task_timeouts(),
+            ai_profiles=self._create_profile_selection(),
+        ))
+
+        self._write_cairn_resources_capability()
+        audit = get_project_capability_audit(project.project.id)
+
+        self.assertEqual(audit.project_id, project.project.id)
+        self.assertEqual(audit.mcp_server_id, "cairn-resources")
+        self.assertTrue(audit.catalog.present)
+        self.assertTrue(audit.catalog.available)
+        self.assertTrue(audit.catalog.supports_bootstrap)
+        self.assertTrue(audit.catalog.supports_explore)
+        self.assertFalse(audit.tasks["bootstrap"].has_cairn_resources)
+        self.assertFalse(audit.tasks["explore"].has_cairn_resources)
+        self.assertFalse(audit.tasks["reason"].has_cairn_resources)
+
     def test_project_capabilities_query_uses_execution_config_catalog_snapshot(self) -> None:
         from cairn.server.routers.capabilities import (
             get_project_capabilities,

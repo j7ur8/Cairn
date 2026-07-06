@@ -124,6 +124,11 @@
           <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">Capabilities</div>
           <div class="h-px flex-1 bg-slate-200"></div>
         </div>
+          <div class="rounded-lg border px-3 py-2 text-xs"
+            :class="cairnResourcesDefaultStatus().ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'">
+            <div class="font-semibold" x-text="cairnResourcesDefaultStatus().label"></div>
+            <div class="mt-0.5 text-[11px]" x-text="cairnResourcesDefaultStatus().message"></div>
+          </div>
           <div class="grid grid-cols-3 gap-2 p-1 rounded-lg border border-slate-200 bg-white/80">
             <template x-for="task in capabilityTaskTypes()" :key="`new-cap-tab:${task.key}`">
               <button type="button" @click="newProjectCapabilityPanel = task.key"

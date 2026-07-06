@@ -102,6 +102,7 @@ class ProjectProxyEndpointUpdate(BaseModel):
 class ProjectProxyEndpoint(ProjectProxyEndpointBase):
     id: str
     project_id: str
+    password: str | None = Field(default=None, exclude=True)
     has_auth: bool = False
     health_status: str = "unknown"
     last_test_ok: bool | None = None

@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from cairn.server import db
 from cairn.server.application.capabilities import (
+    get_project_capability_audit as get_project_capability_audit_query,
+)
+from cairn.server.application.capabilities import (
     get_project_capabilities as get_project_capabilities_query,
 )
 from cairn.server.application.capabilities import (
@@ -26,6 +29,7 @@ from cairn.server.schemas import (
     McpImportRequest,
     McpImportResponse,
     ProjectCapabilitiesResponse,
+    ProjectCapabilityAuditResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectRoleResponse,
     RoleDefaultSkillsUpdateRequest,
@@ -115,6 +119,15 @@ def probe_admin_capability(kind: str, capability_id: str, _superuser=Depends(cur
 def get_project_capabilities(project_id: str):
     with db.session_scope() as conn:
         return get_project_capabilities_query(conn, project_id)
+
+
+@router.get(
+    "/projects/{project_id}/capabilities/audit",
+    response_model=ProjectCapabilityAuditResponse,
+)
+def get_project_capability_audit(project_id: str):
+    with db.session_scope() as conn:
+        return get_project_capability_audit_query(conn, project_id)
 
 
 @router.put(

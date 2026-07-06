@@ -42,7 +42,7 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 - Alembic migration files keep their revision-prefixed names.
 - Tool-specific config files may keep ecosystem names such as `tailwind.config.js`.
 - Vendored tool assets under `capabilities/**/tools/vendor/**` keep upstream filenames, including YAML files with underscores; first-party YAML files still must avoid underscores.
-- Compatibility shims may temporarily retain old import paths while callers migrate, but new code should use the canonical names.
+- Removed compatibility shims must stay removed; new code must use canonical paths.
 
 ## Current Canonical Renames
 
@@ -55,7 +55,7 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 ## Migration Policy
 
 1. Prefer updating internal source imports to canonical names immediately.
-2. Keep old Python import paths as explicit re-export shims for one CI-stable migration window.
-3. Add or preserve tests for compatibility imports while shims exist.
+2. If a future compatibility shim is unavoidable, keep it explicit, documented, and time-boxed to one CI-stable migration window.
+3. Add or preserve tests that prove removed shim paths do not reappear.
 4. Do not rename externally visible API routes, JSON fields, database identifiers, YAML keys, or protocol files.
 5. Run `uv run python scripts/check_naming.py` before merging naming-sensitive changes.

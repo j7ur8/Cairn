@@ -65,6 +65,28 @@ class ProjectCapabilitiesResponse(BaseModel):
     unavailable: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class ProjectCapabilityAuditTask(BaseModel):
+    task_type: str
+    has_cairn_resources: bool = False
+    mcp_server_ids: list[str] = Field(default_factory=list)
+
+
+class ProjectCapabilityAuditCatalog(BaseModel):
+    id: str
+    present: bool = False
+    available: bool = False
+    task_types: list[str] = Field(default_factory=list)
+    supports_bootstrap: bool = False
+    supports_explore: bool = False
+
+
+class ProjectCapabilityAuditResponse(BaseModel):
+    project_id: str
+    mcp_server_id: str
+    catalog: ProjectCapabilityAuditCatalog
+    tasks: dict[str, ProjectCapabilityAuditTask] = Field(default_factory=dict)
+
+
 class ProjectCapabilitiesUpdateRequest(BaseModel):
     model_config = {"extra": "forbid"}
 

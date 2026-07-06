@@ -436,6 +436,7 @@ class ProjectProxyRepositoryTests(unittest.TestCase):
             )
 
             self.assertFalse(endpoint.has_auth)
+            self.assertNotIn("password", endpoint.model_dump())
             row = sql.fetchone(
                 conn,
                 "SELECT username, password FROM project_proxy_endpoints WHERE project_id = :project_id AND id = :id",

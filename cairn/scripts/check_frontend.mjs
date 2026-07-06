@@ -327,11 +327,39 @@ function checkNewProjectDefaultCairnResourcesSelection() {
       explore: { mcp_server_ids: ['cairn-resources'], skill_ids: [] },
       reason: { mcp_server_ids: [], skill_ids: [] },
     });
+    assert.equal(state.cairnResourcesDefaultStatus().ok, true);
+    assert.match(state.cairnResourcesDefaultStatus().message, /Servers\\/Project Proxy discovery depends on Cairn Resources MCP/);
 
     state.newProjectCatalog.capabilities[0].available = false;
     state.newProject = { capabilities: state.defaultTaskCapabilitiesMap() };
     state.applyDefaultNewProjectCapabilities();
     assert.deepEqual(state.newProject.capabilities.bootstrap.user_mcp_server_ids, []);
+    assert.equal(state.cairnResourcesDefaultStatus().ok, false);
+
+    state.newProjectCatalog.capabilities = [];
+    assert.match(state.cairnResourcesDefaultStatus().label, /unavailable/);
+  `);
+}
+
+function checkProjectCairnResourcesAuditWarning() {
+  runModuleAssertion(`
+    import assert from 'node:assert/strict';
+    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
+
+    const state = createWorkspaceCapabilitiesState();
+    state.capabilities = {
+      audit: {
+        tasks: {
+          bootstrap: { has_cairn_resources: false },
+          explore: { has_cairn_resources: true },
+          reason: { has_cairn_resources: false },
+        },
+      },
+    };
+    assert.match(state.projectCairnResourcesAuditWarning(), /missing cairn-resources for bootstrap/);
+
+    state.capabilities.audit.tasks.bootstrap.has_cairn_resources = true;
+    assert.equal(state.projectCairnResourcesAuditWarning(), '');
   `);
 }
 
@@ -441,9 +469,10 @@ function main() {
   checkWorkspaceLogPaginationHelpers();
   checkExecutionLogUiNoLegacyHistoryMode();
   checkCapabilitySelectionHelpers();
-  checkReadOnlyProjectCapabilityHelpers();
-  checkNewProjectDefaultCairnResourcesSelection();
-  checkFormHelpers();
+checkReadOnlyProjectCapabilityHelpers();
+checkNewProjectDefaultCairnResourcesSelection();
+checkProjectCairnResourcesAuditWarning();
+checkFormHelpers();
   checkPrefHelpers();
   checkApiClientHelpers();
 }

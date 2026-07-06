@@ -39,7 +39,7 @@ Cairn/
 ├── start.sh                          # 推荐 compose 启动入口，导出 CAIRN_HOST_ROOT
 ├── server.yaml                       # 固定部署/敏感/基础设施配置
 ├── config.yaml                       # UI 可写的调度、worker、任务、观测配置
-├── config.resources.yaml             # remote support、能力、角色、MCP 配置
+├── config.resources.yaml             # servers、能力、角色、MCP 配置
 ├── cairn/
 │   ├── pyproject.toml                # Python 包、依赖和 CLI 入口
 │   ├── alembic.ini                   # Alembic 配置
@@ -71,6 +71,8 @@ docker network create cairn
 uv run --project cairn cairn serve
 uv run --project cairn cairn dispatch --config config.yaml
 ```
+
+资源发现当前通过 `cairn-resources` MCP 查询，而不是把 server 或 project proxy 明细内联进 prompt。新项目默认在 bootstrap/explore 启用该 MCP；旧项目 execution snapshot 保持不可变，可通过能力 audit 诊断后 clone/replay 选择当前默认。
 
 数据库维护：
 

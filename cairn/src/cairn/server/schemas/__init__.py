@@ -27,6 +27,9 @@ from cairn.server.schemas.capability_catalog import (
 )
 from cairn.server.schemas.capability_selection import (
     CapabilitySelection,
+    ProjectCapabilityAuditCatalog,
+    ProjectCapabilityAuditResponse,
+    ProjectCapabilityAuditTask,
     ProjectCapabilitiesResponse,
     ProjectCapabilitiesUpdateRequest,
     ProjectCapabilitySnapshotItem,

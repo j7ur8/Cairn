@@ -5,6 +5,15 @@
 
 # 更新日志
 
+## 2026-07-06 — 审计同步
+
+- 同步资源发现链路：`config.resources.yaml` 记录 servers/capabilities/roles；Server/Project Proxy discovery 通过 `cairn-resources` MCP 查询，prompt 不再内联 server/proxy 明细。
+- 同步当前 Alembic head：`0013_project_proxy_servers`；记录项目级 `project_proxy_endpoints`、`intent_phase_checkpoints` 和旧项目 proxy 契约移除后的文档 guard。
+- 同步能力治理：新增只读 `GET /projects/{project_id}/capabilities/audit` 用于诊断旧项目是否缺少 `cairn-resources`，不迁移 immutable execution snapshot。
+- 同步统计：当前扫描为 101 个 FastAPI route decorator、59 个顶层 `test_*.py` 文件。
+
+---
+
 ## 2026-07-02 — AI 文档与命名检查同步
 
 - 同步 `CODEBASE_ANALYSIS.md` 当前快照：FastAPI route decorator 计数更新为 88，顶层 `test_*.py` 文件数更新为 58，并补充 `GET /projects/{project_id}/graph` 和 `GET /projects/{project_id}/role` API 覆盖。

@@ -18,6 +18,7 @@ export function createWorkspaceCapabilitiesState() {
       tasks: defaultTaskCapabilitiesMap(),
       health: {},
       unavailable: { mcp_server_ids: [], skill_ids: [] },
+      audit: null,
       projectAiProfiles: { catalog: [], selections: defaultTaskAiProfileSelections(), snapshots: [], unavailable_profile_ids: [] },
     },
     capabilityAdmin: { catalog: [], health: {} },
@@ -54,11 +55,13 @@ export function createWorkspaceCapabilitiesState() {
           this.api('GET', `/projects/${this.selectedProjectId}/capabilities`),
           this.loadProjectAiProfiles(this.selectedProjectId).catch(() => null),
         ]);
+        const audit = await this.api('GET', `/projects/${this.selectedProjectId}/capabilities/audit`).catch(() => null);
         this.capabilities = {
           catalog: data.catalog || [],
           tasks: this.taskCapabilitiesFromServerTasks(data.tasks),
           health: data.health || {},
           unavailable: data.unavailable || { mcp_server_ids: [], skill_ids: [] },
+          audit,
           projectAiProfiles: aiData || { catalog: [], selections: this.defaultTaskAiProfileSelections(), snapshots: [], unavailable_profile_ids: [] },
         };
       } catch (e) {
@@ -68,6 +71,7 @@ export function createWorkspaceCapabilitiesState() {
           tasks: this.defaultTaskCapabilitiesMap(),
           health: {},
           unavailable: { mcp_server_ids: [], skill_ids: [] },
+          audit: null,
           projectAiProfiles: { catalog: [], selections: this.defaultTaskAiProfileSelections(), snapshots: [], unavailable_profile_ids: [] },
         };
       }
@@ -396,6 +400,42 @@ export function createWorkspaceCapabilitiesState() {
         && item.available !== false
         && Array.isArray(item.task_types)
         && item.task_types.includes(task));
+    },
+
+    cairnResourcesDefaultStatus() {
+      const catalog = this.newProjectCatalog?.capabilities || [];
+      const item = catalog.find(entry => entry
+        && entry.kind === 'mcp_server'
+        && entry.id === CAIRN_RESOURCES_MCP_ID);
+      if (!item) {
+        return {
+          ok: false,
+          label: 'Cairn Resources unavailable',
+          message: 'Servers/Project Proxy discovery depends on Cairn Resources MCP. Creating the project is allowed, but workers cannot query those resources unless the MCP is configured.',
+        };
+      }
+      const taskTypes = Array.isArray(item.task_types) ? item.task_types : [];
+      const supportsDefaults = ['bootstrap', 'explore'].every(task => taskTypes.includes(task));
+      if (item.available !== false && supportsDefaults) {
+        return {
+          ok: true,
+          label: 'Cairn Resources enabled',
+          message: 'Servers/Project Proxy discovery depends on Cairn Resources MCP and will be enabled for bootstrap and explore.',
+        };
+      }
+      return {
+        ok: false,
+        label: 'Cairn Resources warning',
+        message: 'Servers/Project Proxy discovery depends on Cairn Resources MCP. The catalog entry is unavailable or does not support bootstrap/explore, so creation will continue without default resource discovery.',
+      };
+    },
+
+    projectCairnResourcesAuditWarning() {
+      const audit = this.capabilities?.audit;
+      if (!audit || !audit.tasks) return '';
+      const missing = ['bootstrap', 'explore'].filter(task => !audit.tasks[task]?.has_cairn_resources);
+      if (missing.length === 0) return '';
+      return `This project snapshot is missing cairn-resources for ${missing.join(', ')}. Older projects may lack Servers/Project Proxy discovery; clone or replay with current defaults to opt in.`;
     },
 
     applyDefaultNewProjectCapabilities() {

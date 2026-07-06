@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "cairn"
 MIGRATIONS = ROOT / "migrations" / "versions"
 ARCHITECTURE_PATH = ROOT.parent / "AI" / "ARCHITECTURE.md"
+CODEBASE_ANALYSIS_PATH = ROOT.parent / "AI" / "CODEBASE_ANALYSIS.md"
 
 
 def _py_files(path: Path) -> list[Path]:
@@ -349,3 +350,22 @@ def test_architecture_doc_reflects_alembic_head() -> None:
         f"ARCHITECTURE.md must reference the current Alembic head {head!r}, "
         f"but it does not. Update the doc."
     )
+
+
+def test_codebase_analysis_tracks_current_resource_contracts() -> None:
+    doc = CODEBASE_ANALYSIS_PATH.read_text(encoding="utf-8")
+    required = (
+        "0013_project_proxy_servers",
+        "project_proxy_endpoints",
+        "cairn-resources",
+    )
+    forbidden = (
+        "0009_drop_intent_metadata",
+        "projects.proxy_id",
+        "worker_pool.proxies",
+        "/proxies",
+    )
+    missing = [token for token in required if token not in doc]
+    stale = [token for token in forbidden if token in doc]
+    assert missing == []
+    assert stale == []

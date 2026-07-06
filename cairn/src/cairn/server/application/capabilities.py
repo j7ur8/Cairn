@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from cairn.server.capability_expansion import (
+    CAIRN_RESOURCES_MCP_ID,
     project_capability_tasks,
     unavailable_capabilities,
 )
@@ -13,6 +14,9 @@ from cairn.server.repositories.projects import ProjectRepository
 from cairn.server.schemas import (
     CapabilityHealthEntry,
     CapabilityCatalogItem,
+    ProjectCapabilityAuditCatalog,
+    ProjectCapabilityAuditResponse,
+    ProjectCapabilityAuditTask,
     ProjectCapabilitiesResponse,
     ProjectRole,
     ProjectRoleResponse,
@@ -37,6 +41,44 @@ def get_project_capabilities(conn: Any, project_id: str) -> ProjectCapabilitiesR
         tasks=project_capability_tasks(per_task),
         health=health,
         unavailable=unavailable_capabilities(catalog, per_task),
+    )
+
+
+def get_project_capability_audit(conn: Any, project_id: str) -> ProjectCapabilityAuditResponse:
+    require_project(ProjectRepository(conn).get(project_id))
+    configs = load_project_execution_configs(conn, project_id)
+    per_task = execution_capabilities(configs)
+    catalog = list_yaml_capabilities()
+    entry = next(
+        (
+            item
+            for item in catalog
+            if item.kind == "mcp_server" and item.id == CAIRN_RESOURCES_MCP_ID
+        ),
+        None,
+    )
+    task_types = list(entry.task_types) if entry is not None else []
+    task_audit: dict[str, ProjectCapabilityAuditTask] = {}
+    for task in builtin_task_type_names():
+        capabilities = per_task.get(task)
+        mcp_server_ids = list(capabilities.mcp_server_ids) if capabilities else []
+        task_audit[task] = ProjectCapabilityAuditTask(
+            task_type=task,
+            has_cairn_resources=CAIRN_RESOURCES_MCP_ID in mcp_server_ids,
+            mcp_server_ids=mcp_server_ids,
+        )
+    return ProjectCapabilityAuditResponse(
+        project_id=project_id,
+        mcp_server_id=CAIRN_RESOURCES_MCP_ID,
+        catalog=ProjectCapabilityAuditCatalog(
+            id=CAIRN_RESOURCES_MCP_ID,
+            present=entry is not None,
+            available=bool(entry and entry.available),
+            task_types=task_types,
+            supports_bootstrap="bootstrap" in task_types,
+            supports_explore="explore" in task_types,
+        ),
+        tasks=task_audit,
     )
 
 

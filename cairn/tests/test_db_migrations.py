@@ -52,6 +52,7 @@ class DbMigrationTests(unittest.TestCase):
             "idx_facts_project",
             "idx_llm_executions_started",
             "idx_health_check_results_profile_checked",
+            "idx_project_proxy_endpoints_project",
         }
         with self.db.session_scope() as conn:
             from cairn.server.repositories import sql
@@ -167,6 +168,100 @@ class DbMigrationTests(unittest.TestCase):
                 """
             )
         self.assertEqual(rows, [])
+
+    def test_project_proxy_endpoint_schema_constraints_and_cascade(self) -> None:
+        from sqlalchemy.exc import IntegrityError
+
+        with self.db.session_scope() as conn:
+            from cairn.server.repositories import sql
+            from cairn.server.repositories.projects import ProjectRepository
+
+            columns = sql.fetchall(
+                conn,
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'project_proxy_endpoints'
+                """,
+            )
+            constraints = sql.fetchall(
+                conn,
+                """
+                SELECT constraint_name
+                FROM information_schema.table_constraints
+                WHERE table_schema = 'public'
+                  AND table_name = 'project_proxy_endpoints'
+                """,
+            )
+            ProjectRepository(conn).insert_project(
+                project_id="proj_proxy_schema",
+                title="Proxy Schema",
+                status="active",
+                created_at="2026-07-06T00:00:00Z",
+                graph_revision=1,
+                timeline_revision=1,
+                llm_hidden_event_kinds='["usage"]',
+            )
+            sql.execute(
+                conn,
+                """
+                INSERT INTO project_proxy_endpoints (
+                    id, project_id, name, protocol, host, port, created_at, updated_at
+                ) VALUES (
+                    'px_ok', 'proj_proxy_schema', 'OK', 'socks5h', '127.0.0.1', 1080,
+                    '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z'
+                )
+                """,
+            )
+            with self.assertRaises(IntegrityError):
+                sql.execute(
+                    conn,
+                    """
+                    INSERT INTO project_proxy_endpoints (
+                        id, project_id, name, protocol, host, port, created_at, updated_at
+                    ) VALUES (
+                        'px_bad_protocol', 'proj_proxy_schema', 'Bad', 'ftp', '127.0.0.1', 1080,
+                        '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z'
+                    )
+                    """,
+                )
+            conn.rollback()
+            ProjectRepository(conn).insert_project(
+                project_id="proj_proxy_schema",
+                title="Proxy Schema",
+                status="active",
+                created_at="2026-07-06T00:00:00Z",
+                graph_revision=1,
+                timeline_revision=1,
+                llm_hidden_event_kinds='["usage"]',
+            )
+            sql.execute(
+                conn,
+                """
+                INSERT INTO project_proxy_endpoints (
+                    id, project_id, name, protocol, host, port, auth_type, lifecycle, created_at, updated_at
+                ) VALUES (
+                    'px_ok', 'proj_proxy_schema', 'OK', 'socks5h', '127.0.0.1', 1080,
+                    'password', 'task', '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z'
+                )
+                """,
+            )
+            sql.execute(conn, "DELETE FROM projects WHERE id = 'proj_proxy_schema'")
+            remaining = sql.fetchone(
+                conn,
+                "SELECT id FROM project_proxy_endpoints WHERE project_id = 'proj_proxy_schema'",
+            )
+
+        self.assertIn("project_id", {row["column_name"] for row in columns})
+        self.assertTrue(
+            {
+                "ck_project_proxy_protocol",
+                "ck_project_proxy_auth_type",
+                "ck_project_proxy_lifecycle",
+            }.issubset({row["constraint_name"] for row in constraints})
+        )
+        self.assertIsNone(remaining)
 
 
 if __name__ == "__main__":
