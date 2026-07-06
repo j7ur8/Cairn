@@ -384,6 +384,98 @@ class ExecutionConfigSourceTests(unittest.TestCase):
                 ),
             )
 
+    def test_assembled_execution_config_includes_capability_snapshots(self) -> None:
+        import yaml
+
+        from cairn.server.routers.ai_profiles import create_ai_profile
+        from cairn.server.routers.projects import create_project
+        from cairn.server.schemas import CapabilitySelection, CreateProjectRequest
+        from cairn.server.schemas.ai_profiles import (
+            AiProfileCreate,
+            AiProfileSelection,
+            TaskAiProfileSelections,
+        )
+
+        skill_dir = self.yaml.root / "ctf-web-js-analysis"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# CTF Web JS Analysis\n", encoding="utf-8")
+        self.yaml.capabilities_path.write_text(
+            yaml.safe_dump(
+                {
+                    "capabilities": {
+                        "mcp_servers": [
+                            {
+                                "id": "js-reverse-mcp-cloak",
+                                "name": "JS Reverse Cloak",
+                                "transport": "stdio",
+                                "command": "js-reverse-mcp-cairn",
+                                "task_types": ["bootstrap", "explore"],
+                            }
+                        ],
+                        "skills": [
+                            {
+                                "id": "ctf-web-js-analysis",
+                                "name": "CTF Web JS Analysis",
+                                "source_path": str(skill_dir),
+                                "task_types": ["bootstrap", "explore"],
+                            }
+                        ],
+                    },
+                    "roles": [],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        profile = create_ai_profile(AiProfileCreate(
+            name="snapshot-profile",
+            worker_type="codex",
+            model="gpt-test",
+            api_key_env="OPENAI_API_KEY",
+            sk="test-key",
+        ))
+        selection = AiProfileSelection(
+            primary_profile_id=profile.id,
+            primary_model="gpt-test",
+            primary_reasoning_type="medium",
+        )
+        project = create_project(CreateProjectRequest(
+            title="capability snapshots",
+            origin="origin",
+            goal="goal",
+            task_timeouts=test_task_timeouts(),
+            capabilities={
+                "bootstrap": CapabilitySelection(
+                    mcp_server_ids=["js-reverse-mcp-cloak"],
+                    skill_ids=["ctf-web-js-analysis"],
+                ),
+                "explore": CapabilitySelection(
+                    mcp_server_ids=["js-reverse-mcp-cloak"],
+                    skill_ids=["ctf-web-js-analysis"],
+                ),
+                "reason": CapabilitySelection(),
+            },
+            ai_profiles=TaskAiProfileSelections(
+                bootstrap=selection,
+                explore=selection,
+                reason=selection,
+            ),
+        ))
+
+        with self.db.session_scope() as conn:
+            from cairn.server.execution_config import load_project_execution_config, load_project_execution_configs
+
+            bootstrap_config = load_project_execution_config(conn, project.project.id, "bootstrap")
+            configs = load_project_execution_configs(conn, project.project.id)
+
+        expected = [
+            {"kind": "mcp_server", "capability_id": "js-reverse-mcp-cloak", "source": "selected"},
+            {"kind": "skill", "capability_id": "ctf-web-js-analysis", "source": "selected"},
+        ]
+        self.assertEqual(bootstrap_config["capabilities"]["snapshots"], expected)
+        self.assertEqual(configs["explore"]["capabilities"]["snapshots"], expected)
+        self.assertEqual(configs["reason"]["capabilities"]["snapshots"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

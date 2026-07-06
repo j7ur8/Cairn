@@ -9,6 +9,7 @@ from cairn.server.domain.errors import NotFoundError
 from cairn.server.execution_config import repository
 from cairn.server.execution_config.models import TASK_TYPES
 from cairn.server.schemas import TaskCapabilities
+from cairn.shared.capability_projection import capability_snapshots
 from cairn.shared.contracts import TaskTimeouts
 
 
@@ -76,10 +77,11 @@ def _assemble_task_payload(
     task_timeout: dict[str, Any] = {"timeout": timeout["timeout"]}
     if timeout["conclude_timeout"] is not None:
         task_timeout["conclude_timeout"] = timeout["conclude_timeout"]
+    capabilities = _task_capabilities_payload(caps_by_task.get(task))
     return {
         "task_type": task,
         "ai_profiles": ai_by_task.get(task) or [],
-        "capabilities": caps_by_task.get(task) or TaskCapabilities().model_dump(),
+        "capabilities": capabilities,
         "role": role,
         "container": _json_or_fallback(header, "container_json", lambda: None),
         "workers": _json_or_fallback(header, "workers_json", lambda: []),
@@ -115,6 +117,12 @@ def _task_timeouts_from_rows(rows_by_task: dict[str, Any]) -> TaskTimeouts:
             item["conclude_timeout"] = row["conclude_timeout"]
         raw[task] = item
     return TaskTimeouts.model_validate(raw)
+
+
+def _task_capabilities_payload(capabilities: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(capabilities or TaskCapabilities().model_dump())
+    payload["snapshots"] = capability_snapshots(payload)
+    return payload
 
 
 def _ai_by_task(rows: list[Any]) -> dict[str, list[dict[str, Any]]]:

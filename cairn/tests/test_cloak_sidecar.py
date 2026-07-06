@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,59 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
 class CloakSidecarTests(unittest.TestCase):
+    def test_project_uses_cloak_mcp_with_server_assembled_execution_config(self) -> None:
+        from cairn.dispatcher.runtime.cloak_sidecar import project_uses_cloak_mcp
+        from cairn.server.execution_config import assembler
+
+        header = {
+            "settings_json": json.dumps({}),
+            "catalog_json": json.dumps([]),
+            "role_json": None,
+            "dispatch_sha256": "dispatch",
+            "resources_sha256": "resources",
+            "prompts_sha256": "prompts",
+            "prompts_json": None,
+            "container_json": json.dumps({}),
+            "workers_json": json.dumps([]),
+            "version": 1,
+        }
+        timeout_rows = [
+            {"task_type": "bootstrap", "timeout": 5, "conclude_timeout": 5},
+            {"task_type": "explore", "timeout": 5, "conclude_timeout": 5},
+            {"task_type": "reason", "timeout": 5, "conclude_timeout": None},
+        ]
+        capability_rows = [
+            {
+                "task_type": "explore",
+                "capabilities_json": json.dumps(
+                    {
+                        "mcp_server_ids": ["js-reverse-mcp-cloak"],
+                        "skill_ids": ["ctf-web-js-analysis"],
+                        "user_mcp_server_ids": ["js-reverse-mcp-cloak"],
+                        "user_skill_ids": ["ctf-web-js-analysis"],
+                        "role_default_skill_ids": [],
+                    }
+                ),
+            }
+        ]
+
+        with (
+            mock.patch.object(assembler.repository, "get_header", return_value=header),
+            mock.patch.object(assembler.repository, "get_timeout_rows", return_value=timeout_rows),
+            mock.patch.object(assembler.repository, "get_ai_rows", return_value=[]),
+            mock.patch.object(assembler.repository, "get_capability_rows", return_value=capability_rows),
+        ):
+            config = assembler.load_project_execution_config(None, "proj_001", "explore")
+
+        self.assertTrue(project_uses_cloak_mcp(config))
+        self.assertEqual(
+            config["capabilities"]["snapshots"][0],
+            {"kind": "mcp_server", "capability_id": "js-reverse-mcp-cloak", "source": "selected"},
+        )
+        self.assertFalse(project_uses_cloak_mcp({
+            "capabilities": {"mcp_server_ids": ["js-reverse-mcp-cloak"]},
+        }))
+
     def test_mcp_templates_render_project_values(self) -> None:
         from cairn.dispatcher.capability_mcp import mcp_config_detail
         from cairn.shared.config import McpServerCapabilityConfig
