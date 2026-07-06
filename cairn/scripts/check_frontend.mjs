@@ -343,6 +343,54 @@ function checkNewProjectDefaultCairnResourcesSelection() {
   `);
 }
 
+function checkCapabilityAdminTaskTypeFormState() {
+  runModuleAssertion(`
+    import assert from 'node:assert/strict';
+    import { createWorkspaceCapabilitiesState } from './src/cairn/server/static/js/workspace/state-capabilities.js';
+
+    const state = createWorkspaceCapabilitiesState();
+    state.task_types = ['bootstrap', 'explore', 'reason'];
+    state.taskTypeLabel = value => value;
+
+    assert.deepEqual(state.defaultCapabilityForm().task_types, []);
+
+    state.capabilityForm = { ...state.defaultCapabilityForm(), id: 'demo-mcp', name: 'Demo MCP' };
+    assert.equal(state.capabilityTaskTypesSelected(), false);
+
+    let toast = null;
+    state.showToast = (message, level) => {
+      toast = { message, level };
+    };
+    state.api = async () => {
+      throw new Error('save should not call API without a selected task type');
+    };
+    await state.saveCapability();
+    assert.deepEqual(toast, { message: 'Select at least one task type.', level: 'error' });
+
+    state.capabilityForm.task_types = ['explore'];
+    let request = null;
+    state.api = async (method, path, payload) => {
+      request = { method, path, payload };
+      return {};
+    };
+    state.cancelCapabilityEdit = () => {};
+    state.loadCapabilityAdmin = async () => {};
+    state.loadNewProjectCatalog = async () => {};
+    state.loadCapabilities = async () => {};
+
+    await state.saveCapability();
+    assert.equal(request.method, 'PUT');
+    assert.equal(request.path, '/capabilities/admin/mcp_server/demo-mcp');
+    assert.deepEqual(request.payload.task_types, ['explore']);
+
+    state.capabilityForm = { ...state.defaultCapabilityForm(), task_types: [] };
+    state.api = async () => [{ name: 'bootstrap' }, { name: 'explore' }];
+    state.newProject = {};
+    await state.loadTaskTypes();
+    assert.deepEqual(state.capabilityForm.task_types, []);
+  `);
+}
+
 function checkProjectCairnResourcesAuditWarning() {
   runModuleAssertion(`
     import assert from 'node:assert/strict';
@@ -473,6 +521,7 @@ function main() {
   checkCapabilitySelectionHelpers();
 checkReadOnlyProjectCapabilityHelpers();
 checkNewProjectDefaultCairnResourcesSelection();
+checkCapabilityAdminTaskTypeFormState();
 checkProjectCairnResourcesAuditWarning();
 checkFormHelpers();
   checkPrefHelpers();

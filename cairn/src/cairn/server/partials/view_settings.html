@@ -439,7 +439,7 @@
             </label>
             <div class="flex items-center gap-2">
               <button @click="cancelCapabilityEdit()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500 hover:bg-slate-50 transition">Cancel</button>
-              <button data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
+              <button data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim() || !capabilityTaskTypesSelected()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 transition disabled:opacity-30 disabled:cursor-not-allowed" x-text="capabilityEditId ? 'Save' : 'Create'"></button>
             </div>
           </div>
         </div>
@@ -474,6 +474,18 @@
             </div>
             <input x-model="capabilityForm.name" placeholder="Display name" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
             <textarea x-model="capabilityForm.description" rows="2" placeholder="Short description" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+          </section>
+
+          <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Task Types</div>
+            <div data-testid="capability-task-types" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <template x-for="task in capabilityTaskTypes()" :key="`capability-form-task:${task.key}`">
+                <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+                  <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" :checked="(capabilityForm.task_types || []).includes(task.key)" @change="toggleCapabilityListField('task_types', task.key, $event.target.checked)">
+                  <span class="truncate" x-text="task.label"></span>
+                </label>
+              </template>
+            </div>
           </section>
 
           <section class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -589,6 +601,7 @@
                       </div>
                       <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
                       <div class="text-[10px] text-slate-500 truncate" x-text="[item.transport, item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
+                      <div class="text-[10px] text-slate-400 truncate" x-text="capabilityTaskTypeSummary(item)"></div>
                       <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="item.description || item.detail || '-' "></p>
                       <p class="text-[10px] leading-4 text-slate-400 line-clamp-2 break-all" x-text="item.transport === 'stdio' ? (item.command || '-') : (item.url || '-')"></p>
                     </div>
@@ -629,6 +642,7 @@
                       </div>
                       <div class="text-[10px] text-slate-400 font-mono truncate" x-text="item.id"></div>
                       <div class="text-[10px] text-slate-500 truncate" x-text="[item.available === false ? 'unavailable' : 'available', item.source || 'builtin'].filter(Boolean).join(' · ')"></div>
+                      <div class="text-[10px] text-slate-400 truncate" x-text="capabilityTaskTypeSummary(item)"></div>
                       <p class="text-[10px] leading-4 text-slate-400 line-clamp-2" x-text="item.description || item.detail || '-' "></p>
                       <p class="text-[10px] leading-4 text-slate-400 line-clamp-2 break-all" x-text="item.source_path || '-' "></p>
                     </div>

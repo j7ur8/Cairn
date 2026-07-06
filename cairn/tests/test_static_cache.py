@@ -205,9 +205,12 @@ class StaticCacheTests(unittest.TestCase):
         html = _frontend_source()
         self.assertIn("const normalizeStringList = (value) => {", html)
         self.assertIn("args: normalizeStringList(this.capabilityForm.args),", html)
+        self.assertIn("task_types: normalizeStringList(this.capabilityForm.task_types),", html)
         self.assertIn("payload.env = this.textToKeyValueObject(this.capabilityForm.env_text || '');", html)
         self.assertIn("required_skill_ids: normalizeStringList(this.capabilityForm.required_skill_ids),", html)
         self.assertIn("preferred_mcp_ids: normalizeStringList(this.capabilityForm.preferred_mcp_ids),", html)
+        self.assertIn("capabilityTaskTypesSelected()", html)
+        self.assertIn("Select at least one task type.", html)
         self.assertNotIn("const payload = { ...this.capabilityForm };", html)
 
     def test_capability_admin_ui_uses_two_columns_and_import_action(self) -> None:
@@ -216,6 +219,10 @@ class StaticCacheTests(unittest.TestCase):
         self.assertIn("data-testid=\"settings-capability-add-skill\"", html)
         self.assertIn("data-testid=\"settings-capability-import\"", html)
         self.assertIn("data-testid=\"settings-capability-probe-all-mcp\"", html)
+        self.assertIn("data-testid=\"capability-task-types\"", html)
+        self.assertIn("capabilityTaskTypes()", html)
+        self.assertIn("capabilityTaskTypeSummary(item)", html)
+        self.assertIn("!capabilityTaskTypesSelected()", html)
         self.assertIn("/capabilities/admin/mcp/probe-all", html)
         self.assertIn("/capabilities/admin/mcp_server/", html)
         self.assertIn("async importMcpJson()", html)

@@ -825,7 +825,10 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn("No markdown prompt resources found.", view)
         self.assertNotIn("max-h-[calc(100vh-430px)]", view)
         self.assertNotIn("capabilityAdminPanel", view)
-        self.assertNotIn("capabilityTaskTypes()", view)
+        self.assertIn('data-testid="capability-task-types"', view)
+        self.assertIn("capabilityTaskTypes()", view)
+        self.assertIn("capabilityTaskTypesSelected()", view)
+        self.assertIn("capabilityTaskTypeSummary(item)", view)
 
     def test_settings_servers_and_proxy_match_ai_profile_management_layout(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
@@ -926,7 +929,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
             view,
         )
         self.assertIn(
-            'data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium',
+            'data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim() || !capabilityTaskTypesSelected()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium',
             view,
         )
         self.assertNotIn(

@@ -43,9 +43,6 @@ export function createWorkspaceCapabilitiesState() {
       this.newProject.capabilities = this.defaultTaskCapabilitiesMap();
       this.applyDefaultNewProjectCapabilities();
       this.newProject.ai_profiles = this.defaultTaskAiProfileSelections();
-      if (this.capabilityForm && (!Array.isArray(this.capabilityForm.task_types) || this.capabilityForm.task_types.length === 0)) {
-        this.capabilityForm.task_types = [...this.task_types];
-      }
     },
 
     async loadCapabilities() {
@@ -97,7 +94,7 @@ export function createWorkspaceCapabilitiesState() {
         id: '',
         name: '',
         description: '',
-        task_types: [...this.task_types],
+        task_types: [],
         requires_ids: [],
         required_skill_ids: [],
         use_when: [],
@@ -193,6 +190,10 @@ export function createWorkspaceCapabilitiesState() {
     async saveCapability() {
       if (!this.capabilityForm.id.trim() || !this.capabilityForm.name.trim()) {
         this.showToast('id and name are required', 'error');
+        return;
+      }
+      if (!this.capabilityTaskTypesSelected()) {
+        this.showToast('Select at least one task type.', 'error');
         return;
       }
       const basePayload = {
@@ -347,6 +348,11 @@ export function createWorkspaceCapabilitiesState() {
       return (this.capabilityAdmin.catalog || []).filter(item => item.kind === kind && item.id !== this.capabilityForm.id);
     },
 
+    capabilityTaskTypeSummary(item) {
+      const taskTypes = normalizeStringList(item?.task_types);
+      return `tasks: ${taskTypes.length > 0 ? taskTypes.join(', ') : '-'}`;
+    },
+
     toggleCapabilityListField(field, id, checked) {
       const current = Array.isArray(this.capabilityForm[field]) ? this.capabilityForm[field] : [];
       const set = new Set(current);
@@ -377,6 +383,11 @@ export function createWorkspaceCapabilitiesState() {
 
     capabilityTaskTypes() {
       return this.task_types.map(key => ({ key, label: this.taskTypeLabel(key) }));
+    },
+
+    capabilityTaskTypesSelected() {
+      const validTasks = new Set(this.capabilityTaskTypes().map(task => task.key));
+      return normalizeStringList(this.capabilityForm?.task_types).some(task => validTasks.has(task));
     },
 
     defaultTaskCapabilities() {
