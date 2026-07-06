@@ -62,6 +62,7 @@ def run_reason_task(
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
     lease = lifecycle.lease
+    prepared = None
     lifecycle.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
@@ -154,6 +155,7 @@ def run_reason_task(
             capability_scope=f"reason-{worker.name}-{reason_run_id[:12]}",
             reporter=reporter,
             phase="reason_execute",
+            cloak_sidecar_manager=services.cloak_sidecar_manager,
             preloaded_execution_config=execution_config,
         )
         if prepared is None:
@@ -281,6 +283,8 @@ def run_reason_task(
         reason_finish_error = step.finish_error
         return outcome
     finally:
+        if prepared is not None:
+            prepared.capabilities.release_runtime_leases()
         finish = client.finish_reason(
             project.project.id,
             worker.name,

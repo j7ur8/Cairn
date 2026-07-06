@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.browser_provider import CloakBrowserManager
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.process import ManagedProcess
 from cairn.shared.config import ContainerConfig, DispatchConfig, WorkerConfig
@@ -36,6 +37,7 @@ class TaskServices:
     config: DispatchConfig
     client: CairnClient
     container_runtime: ContainerRuntime
+    cloak_sidecar_manager: CloakBrowserManager | None = None
 
 
 @dataclass(slots=True)

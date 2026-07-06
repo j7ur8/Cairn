@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import shlex
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
 from cairn.dispatcher.capability_mcp import mcp_json
+from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeContext, BrowserRuntimeLease, remove_temp_lease_file
+from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.tasks.task_process import communicate_timeout
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig
@@ -225,6 +228,7 @@ def run_mcp_probe_request(
     config: DispatchConfig,
     container_manager: ContainerManager,
     server_ids: list[str],
+    cloak_sidecar_manager: CloakSidecarManager | None = None,
 ) -> dict[str, Any]:
     requested_ids = _dedupe_ids(server_ids) or [item.id for item in config.capabilities.mcp_servers]
     by_id = {item.id: item for item in config.capabilities.mcp_servers}
@@ -238,8 +242,29 @@ def run_mcp_probe_request(
         return {"results": [item.to_dict() for item in missing]}
 
     container_name = container_manager.create_startup_container()
+    provider_context = BrowserRuntimeContext(
+        project_id="probe",
+        task_instance_id=f"mcp-probe-{uuid.uuid4().hex}",
+        network_mode=config.container.network_mode,
+        cloak_sidecar_manager=cloak_sidecar_manager,
+        container_name=container_name,
+        lease_writer=container_manager,
+        lease_root=f"{MCP_PROBE_ROOT}/leases",
+    )
+    runtime_leases: dict[str, BrowserRuntimeLease] = {}
+    provider_errors: list[McpProbeResult] = []
+    probe_targets: list[McpServerCapabilityConfig] = []
     try:
         for target in targets:
+            try:
+                lease = provider_context.acquire(target)
+            except Exception as exc:  # noqa: BLE001
+                provider_errors.append(McpProbeResult(target.id, "error", f"runtime provider failed: {exc}"))
+                continue
+            if lease is not None:
+                runtime_leases[target.id] = lease
+            probe_targets.append(target)
+        for target in probe_targets:
             if target.source_path:
                 container_manager.write_directory(
                     container_name,
@@ -249,13 +274,16 @@ def run_mcp_probe_request(
         container_manager.write_text_file(
             container_name,
             MCP_PROBE_PATH,
-            mcp_json(targets, MCP_PROBE_ROOT),
+            mcp_json(probe_targets, MCP_PROBE_ROOT, runtime_leases=runtime_leases),
         )
         container_manager.write_text_file(container_name, MCP_PROBE_SCRIPT_PATH, MCP_PROBE_SCRIPT)
-        results = [_probe_one(container_manager, container_name, item) for item in targets]
+        results = [_probe_one(container_manager, container_name, item) for item in probe_targets]
     finally:
+        for lease in runtime_leases.values():
+            lease.release()
+            remove_temp_lease_file(lease)
         container_manager.remove_container(container_name, force=True)
-    return {"results": [item.to_dict() for item in [*missing, *results]]}
+    return {"results": [item.to_dict() for item in [*missing, *provider_errors, *results]]}
 
 
 def _probe_one(

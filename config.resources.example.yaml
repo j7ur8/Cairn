@@ -86,13 +86,18 @@ capabilities:
     transport: stdio
     description: Runs js-reverse-mcp against a project-scoped CloakBrowser sidecar slot.
       The worker wrapper leases a sidecar CDP slot and releases it when the MCP exits.
-    command: /usr/local/bin/js-reverse-mcp-cairn
-    args: []
-    env:
-      CAIRN_PROJECT_ID: '{project_id}'
-      CAIRN_PROJECT_SAFE_ID: '{project_safe_id}'
-      CAIRN_TASK_INSTANCE_ID: '{task_instance_id}'
-      CAIRN_CLOAK_CONTROL_URL: http://cairn-cloak-{project_safe_id}:7310
+    command: /usr/local/bin/cairn-browser-mcp
+    args:
+    - --lease-file
+    - '{capability_root}/leases/js-reverse-mcp-cloak.json'
+    - --
+    - js-reverse-mcp
+    - --browserUrl
+    - '{browser_url}'
+    env: {}
+    runtime_provider:
+      type: cloak_sidecar
+      resource: browser_url
     source_path: ./capabilities/mcp/js-reverse-mcp
     use_when:
     - Browser-side JavaScript reverse engineering needs anti-detection browser runtime

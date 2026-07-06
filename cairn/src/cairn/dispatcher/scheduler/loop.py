@@ -281,6 +281,7 @@ class DispatcherLoop:
             config=self.config,
             container_manager=self.container_manager,
             server_ids=server_ids,
+            cloak_sidecar_manager=self.cloak_sidecar_manager,
         )
 
     def _advance_replay_project(self, project_id: str) -> bool | None:

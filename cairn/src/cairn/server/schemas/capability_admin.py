@@ -16,6 +16,7 @@ class CapabilityAdminRequest(BaseModel):
     activation_hint: str = ""
     preferred_mcp_ids: list[str] = Field(default_factory=list)
     probe_config: dict = Field(default_factory=dict)
+    runtime_provider: dict | None = None
     detail: str = ""
     available: bool = True
     source_path: str | None = None

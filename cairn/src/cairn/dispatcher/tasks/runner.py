@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from cairn.dispatcher.capabilities import CapabilityInjection, inject_project_capabilities
 from cairn.dispatcher.observability.reporter import AnyReporter
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeContext, CloakBrowserManager
 from cairn.dispatcher.roles import RoleInjection, inject_project_role
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.shared.capability_projection import project_capability_data
@@ -30,6 +31,7 @@ def prepare_task_execution(
     capability_scope: str,
     reporter: AnyReporter,
     phase: str,
+    cloak_sidecar_manager: CloakBrowserManager | None = None,
     preloaded_execution_config: dict | None = None,
 ) -> PreparedTaskExecution | None:
     execution_config = preloaded_execution_config
@@ -47,6 +49,14 @@ def prepare_task_execution(
         task_type,
         capability_scope,
         project_capability_data(execution_config),
+        browser_runtime=BrowserRuntimeContext(
+            project_id=project_id,
+            task_instance_id=capability_scope,
+            network_mode=config.container.network_mode,
+            cloak_sidecar_manager=cloak_sidecar_manager,
+            container_name=container_name,
+            lease_writer=container_manager,
+        ),
     )
     if capabilities.summary:
         reporter.emit_result("capabilities", capabilities.summary)

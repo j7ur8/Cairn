@@ -125,6 +125,33 @@ class CapabilityAdminTests(unittest.TestCase):
         items = {(item.kind, item.id): item for item in get_capability_catalog()}
         self.assertEqual(items[("mcp_server", "env-mcp")].env, {"A": "1", "B": "two"})
 
+    def test_admin_upsert_persists_mcp_runtime_provider(self) -> None:
+        import yaml
+
+        from cairn.server.routers.capabilities import get_capability_catalog, upsert_admin_capability
+        from cairn.server.schemas import CapabilityAdminRequest
+
+        upsert_admin_capability("mcp_server", "browser-mcp", CapabilityAdminRequest(
+            id="browser-mcp",
+            name="Browser MCP",
+            task_types=["explore"],
+            transport="stdio",
+            command="/usr/local/bin/cairn-browser-mcp",
+            args=["js-reverse-mcp", "--browserUrl", "{browser_url}"],
+            runtime_provider={"type": "cloak_sidecar", "resource": "browser_url"},
+        ))
+
+        items = {(item.kind, item.id): item for item in get_capability_catalog()}
+        self.assertEqual(
+            items[("mcp_server", "browser-mcp")].runtime_provider,
+            {"type": "cloak_sidecar", "resource": "browser_url"},
+        )
+        data = yaml.safe_load(self.yaml.capabilities_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            data["capabilities"]["mcp_servers"][0]["runtime_provider"],
+            {"type": "cloak_sidecar", "resource": "browser_url"},
+        )
+
     def test_import_mcp_json_creates_user_items(self) -> None:
         from cairn.server.routers.capabilities import get_capability_catalog, import_admin_mcp_json
         from cairn.server.schemas import McpImportRequest

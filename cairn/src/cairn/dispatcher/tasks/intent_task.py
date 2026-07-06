@@ -126,6 +126,7 @@ def run_intent_task(
     outcome = "failed"
     task_started = time.perf_counter()
     lease = lifecycle.lease
+    prepared = None
     lifecycle.start()
     try:
         _emit_cloak_sidecar_event(reporter, spec.prepare_phase, execution_config)
@@ -173,6 +174,7 @@ def run_intent_task(
             capability_scope=spec.capability_scope(intent),
             reporter=reporter,
             phase=spec.prepare_phase,
+            cloak_sidecar_manager=services.cloak_sidecar_manager,
             preloaded_execution_config=execution_config,
         )
         if prepared is None:
@@ -225,6 +227,8 @@ def run_intent_task(
         reporter.emit_error(spec.exec_phase, "error", "task crashed")
         return outcome
     finally:
+        if prepared is not None:
+            prepared.capabilities.release_runtime_leases()
         lifecycle.finish(outcome)
 
 

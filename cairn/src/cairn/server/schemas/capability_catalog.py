@@ -71,6 +71,7 @@ class CapabilityCatalogItem(BaseModel):
     preferred_mcp_ids: list[str] = Field(default_factory=list)
     source: CapabilitySource = "builtin"
     probe_config: dict = Field(default_factory=dict)
+    runtime_provider: dict | None = None
     available: bool = True
     detail: str = ""
     source_path: str | None = None

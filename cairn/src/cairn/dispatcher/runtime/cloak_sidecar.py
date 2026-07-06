@@ -27,7 +27,6 @@ from cairn.shared.config import CloakSidecarConfig
 
 LOG = logging.getLogger(__name__)
 
-CLOAK_MCP_ID = "js-reverse-mcp-cloak"
 CLOAK_CONTAINER_PREFIX = "cairn-cloak-"
 LABEL_CLOAK_SIDECAR = "cairn.cloak_sidecar"
 CONTROL_PORT = 7310
@@ -61,48 +60,6 @@ class CloakSidecarStatus:
 
 def cloak_container_name(project_id: str) -> str:
     return f"{CLOAK_CONTAINER_PREFIX}{safe_project_id(project_id)}"
-
-
-def project_uses_cloak_mcp(execution_config: dict | None) -> bool:
-    if not isinstance(execution_config, dict):
-        return False
-    capabilities = execution_config.get("capabilities")
-    if not isinstance(capabilities, dict):
-        return False
-    snapshots = capabilities.get("snapshots")
-    if not isinstance(snapshots, list):
-        return False
-    return any(
-        isinstance(item, dict)
-        and item.get("kind") == "mcp_server"
-        and str(item.get("capability_id") or "").strip() == CLOAK_MCP_ID
-        for item in snapshots
-    )
-
-
-def render_cloak_templates(execution_config: dict, project_id: str, task_instance_id: str) -> dict:
-    project_safe_id = safe_project_id(project_id)
-    return _render_templates(
-        execution_config,
-        {
-            "project_id": project_id,
-            "project_safe_id": project_safe_id,
-            "task_instance_id": task_instance_id,
-        },
-    )
-
-
-def _render_templates(value: Any, replacements: dict[str, str]) -> Any:
-    if isinstance(value, str):
-        rendered = value
-        for key, replacement in replacements.items():
-            rendered = rendered.replace("{" + key + "}", replacement)
-        return rendered
-    if isinstance(value, list):
-        return [_render_templates(item, replacements) for item in value]
-    if isinstance(value, dict):
-        return {key: _render_templates(item, replacements) for key, item in value.items()}
-    return value
 
 
 class CloakSidecarManager:
@@ -164,6 +121,50 @@ class CloakSidecarManager:
         except DockerException as exc:
             raise RuntimeError(f"failed to create cloak sidecar {name}: {exc}") from exc
         return self.status(project_id)
+
+    def lease_browser(
+        self,
+        project_id: str,
+        *,
+        task_instance_id: str,
+        network_mode: str,
+    ) -> dict[str, Any]:
+        status = self.ensure_running(project_id, network_mode=network_mode)
+        if not status.running:
+            raise RuntimeError(status.error or f"cloak sidecar not running: {status.container_name}")
+        lease_id = f"{task_instance_id}-{project_id}"
+        control_url = f"http://{cloak_container_name(project_id)}:{CONTROL_PORT}"
+        try:
+            response = requests.post(
+                f"{control_url}/lease",
+                json={"lease_id": lease_id},
+                timeout=35.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"failed to lease CloakBrowser slot from {control_url}: {exc}") from exc
+        browser_url = str(data.get("browser_url") or "").strip() if isinstance(data, dict) else ""
+        if not browser_url:
+            raise RuntimeError(f"CloakBrowser lease from {control_url} did not return browser_url")
+        return {
+            "browser_url": browser_url,
+            "lease_id": str(data.get("lease_id") or lease_id),
+            "control_url": control_url,
+            "sidecar": status.model_dump(),
+        }
+
+    def release_browser(self, *, control_url: str, lease_id: str) -> None:
+        if not control_url or not lease_id:
+            return
+        try:
+            requests.post(
+                f"{control_url.rstrip('/')}/release",
+                json={"lease_id": lease_id},
+                timeout=2.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("failed to release cloak browser lease=%s control_url=%s error=%s", lease_id, control_url, exc)
 
     def status(self, project_id: str) -> CloakSidecarStatus:
         name = cloak_container_name(project_id)

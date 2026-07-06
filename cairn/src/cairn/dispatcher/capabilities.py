@@ -19,6 +19,7 @@ from cairn.dispatcher.capability_mcp import (
 )
 from cairn.dispatcher.capability_probe import validate_selected_mcp
 from cairn.dispatcher.prompt_resources import load_prompt_files_appendix
+from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeContext, BrowserRuntimeLease, remove_temp_lease_file
 from cairn.dispatcher.runtime.docker_labels import safe_project_id
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig, SkillCapabilityConfig, TaskType
@@ -34,6 +35,12 @@ class CapabilityInjection:
     skills: list[str]
     errors: list[str]
     context: WorkerExecutionContext
+    runtime_leases: list[BrowserRuntimeLease] | None = None
+
+    def release_runtime_leases(self) -> None:
+        for lease in self.runtime_leases or []:
+            lease.release()
+            remove_temp_lease_file(lease)
 
 
 class CapabilityWriter(Protocol):
@@ -51,6 +58,7 @@ def inject_project_capabilities(
     task_type: TaskType,
     task_instance_id: str,
     selection_data: dict[str, Any] | None,
+    browser_runtime: BrowserRuntimeContext | None = None,
 ) -> CapabilityInjection:
     if task_type == "reason":
         return CapabilityInjection("", "", [], [], [], WorkerExecutionContext())
@@ -168,6 +176,9 @@ def inject_project_capabilities(
     injected_mcp_servers = list(mcp_servers)
     injected_skills: list[SkillCapabilityConfig] = []
     injected_mcp_details: list[dict[str, Any]] = []
+    runtime_leases: dict[str, BrowserRuntimeLease] = {}
+    if browser_runtime is not None:
+        browser_runtime.lease_root = f"{capability_root}/leases"
     if mcp_servers:
         for mcp in mcp_servers:
             if not mcp.source_path:
@@ -177,16 +188,33 @@ def inject_project_capabilities(
             except Exception as exc:
                 errors.append(f"mcp_server:{mcp.id}: failed to inject directory: {exc}")
                 injected_mcp_servers = [item for item in injected_mcp_servers if item.id != mcp.id]
+        if browser_runtime is not None:
+            for mcp in list(injected_mcp_servers):
+                try:
+                    lease = browser_runtime.acquire(mcp)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"mcp_server:{mcp.id}: runtime provider failed: {exc}")
+                    injected_mcp_servers = [item for item in injected_mcp_servers if item.id != mcp.id]
+                    continue
+                if lease is not None:
+                    runtime_leases[mcp.id] = lease
         try:
             container_manager.write_text_file(
                 container_name,
                 mcp_path,
-                mcp_json(injected_mcp_servers, capability_root, runtime_replacements),
+                mcp_json(injected_mcp_servers, capability_root, runtime_replacements, runtime_leases),
             )
         except Exception as exc:
             errors.append(f"mcp_servers: failed to write config: {exc}")
+            for lease in runtime_leases.values():
+                lease.release()
+                remove_temp_lease_file(lease)
+            runtime_leases = {}
             injected_mcp_servers = []
-        injected_mcp_details = [mcp_detail(item, capability_root, runtime_replacements) for item in injected_mcp_servers]
+        injected_mcp_details = [
+            mcp_detail(item, capability_root, runtime_replacements, runtime_leases)
+            for item in injected_mcp_servers
+        ]
     for skill in skills:
         try:
             container_manager.write_directory(container_name, f"{skill_root}/{skill.id}", Path(skill.source_path))
@@ -234,6 +262,7 @@ def inject_project_capabilities(
             mcp_servers=injected_mcp_details,
             skills=[item.id for item in injected_skills],
         ),
+        runtime_leases=list(runtime_leases.values()),
     )
 
 

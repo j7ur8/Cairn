@@ -148,6 +148,117 @@ class McpProbeRunnerTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["status"], "error")
         self.assertIn("ECONNREFUSED", payload["results"][0]["message"])
 
+    def test_browser_backed_probe_renders_provider_browser_url(self) -> None:
+        from cairn.dispatcher.mcp_probe import MCP_PROBE_PATH, run_mcp_probe_request
+        from cairn.dispatcher.runtime.process import ProcessResult
+        from cairn.shared.config import DispatchConfig
+
+        cfg = DispatchConfig.model_validate(_dispatch_config_payload([
+            {
+                "id": "js",
+                "name": "JS",
+                "transport": "stdio",
+                "command": "/usr/local/bin/cairn-browser-mcp",
+                "args": ["--lease-file", "{capability_root}/leases/js.json", "--", "js-reverse-mcp", "--browserUrl", "{browser_url}"],
+                "runtime_provider": {"type": "cloak_sidecar", "resource": "browser_url"},
+            },
+        ]))
+
+        class _Process:
+            def start(self):
+                return None
+
+            def communicate(self, timeout):
+                return ProcessResult(returncode=0, stdout="initialize + tools/list ok\n", stderr="")
+
+        class _ContainerManager:
+            def __init__(self):
+                self.writes = {}
+
+            def create_startup_container(self):
+                return "probe-container"
+
+            def write_text_file(self, container_name, path, content):
+                self.writes[path] = content
+
+            def write_directory(self, *args):
+                return None
+
+            def build_exec_process(self, *args, **kwargs):
+                return _Process()
+
+            def remove_container(self, *args, **kwargs):
+                return None
+
+        class _Cloak:
+            def __init__(self):
+                self.released = []
+
+            def lease_browser(self, project_id, *, task_instance_id, network_mode):
+                return {
+                    "browser_url": "http://cairn-cloak-probe:9222",
+                    "control_url": "http://cairn-cloak-probe:7310",
+                    "lease_id": "lease-1",
+                }
+
+            def release_browser(self, *, control_url, lease_id):
+                self.released.append((control_url, lease_id))
+
+        manager = _ContainerManager()
+        cloak = _Cloak()
+        payload = run_mcp_probe_request(
+            config=cfg,
+            container_manager=manager,
+            server_ids=["js"],
+            cloak_sidecar_manager=cloak,
+        )
+
+        self.assertEqual(payload["results"][0]["status"], "ok")
+        written = json.loads(manager.writes[MCP_PROBE_PATH])
+        detail = written["mcpServers"]["js"]
+        self.assertEqual(detail["args"][-1], "http://cairn-cloak-probe:9222")
+        self.assertEqual(detail["env"]["CAIRN_BROWSER_LEASE_ID"], "lease-1")
+        self.assertEqual(cloak.released, [("http://cairn-cloak-probe:7310", "lease-1")])
+
+    def test_browser_backed_probe_reports_provider_failure_without_exec(self) -> None:
+        from cairn.dispatcher.mcp_probe import run_mcp_probe_request
+        from cairn.shared.config import DispatchConfig
+
+        cfg = DispatchConfig.model_validate(_dispatch_config_payload([
+            {
+                "id": "js",
+                "name": "JS",
+                "transport": "stdio",
+                "command": "/usr/local/bin/cairn-browser-mcp",
+                "args": ["js-reverse-mcp", "--browserUrl", "{browser_url}"],
+                "runtime_provider": {"type": "cloak_sidecar", "resource": "browser_url"},
+            },
+        ]))
+
+        class _ContainerManager:
+            def __init__(self):
+                self.commands = []
+
+            def create_startup_container(self):
+                return "probe-container"
+
+            def write_text_file(self, *args):
+                return None
+
+            def write_directory(self, *args):
+                return None
+
+            def build_exec_process(self, *args, **kwargs):
+                self.commands.append(args)
+                raise AssertionError("provider failure should skip MCP exec")
+
+            def remove_container(self, *args, **kwargs):
+                return None
+
+        payload = run_mcp_probe_request(config=cfg, container_manager=_ContainerManager(), server_ids=["js"])
+        self.assertEqual(payload["results"][0]["status"], "error")
+        self.assertIn("runtime provider failed", payload["results"][0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

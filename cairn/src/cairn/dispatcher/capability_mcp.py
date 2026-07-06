@@ -5,6 +5,7 @@ from typing import Any, overload
 
 from cairn.dispatcher.capability_constants import CLAUDE_SESSION_PLUGIN_NAME
 from cairn.dispatcher.capability_url import is_chrome_devtools_probe, resolve_host_alias_url
+from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeLease, render_browser_runtime
 from cairn.shared.config import McpServerCapabilityConfig
 
 
@@ -12,10 +13,11 @@ def mcp_json(
     mcp_servers: list[McpServerCapabilityConfig],
     capability_root: str,
     replacements: dict[str, str] | None = None,
+    runtime_leases: dict[str, BrowserRuntimeLease] | None = None,
 ) -> str:
     payload = {
         "mcpServers": {
-            item.id: mcp_config_detail(item, capability_root, replacements)
+            item.id: mcp_config_detail(item, capability_root, replacements, runtime_leases)
             for item in mcp_servers
         }
     }
@@ -35,8 +37,10 @@ def mcp_config_detail(
     item: McpServerCapabilityConfig,
     capability_root: str,
     replacements: dict[str, str] | None = None,
+    runtime_leases: dict[str, BrowserRuntimeLease] | None = None,
 ) -> dict[str, Any]:
     """Render the per-server entry in the mcp.json file."""
+    lease = (runtime_leases or {}).get(item.id)
     if item.transport == "http":
         detail: dict[str, Any] = {"type": "http", "url": render_capability_path(item.url, capability_root, replacements)}
         if item.headers:
@@ -44,20 +48,28 @@ def mcp_config_detail(
                 key: render_capability_path(value, capability_root, replacements)
                 for key, value in item.headers.items()
             }
+        if lease is not None:
+            detail = render_browser_runtime(detail, browser_url=lease.browser_url)
         return detail
-    return {
+    detail = {
         "command": render_capability_path(item.command, capability_root, replacements),
         "args": runtime_mcp_args(item, capability_root, replacements),
         "env": {key: render_capability_path(value, capability_root, replacements) for key, value in item.env.items()},
     }
+    if lease is not None:
+        detail = render_browser_runtime(detail, browser_url=lease.browser_url)
+        detail["env"] = {**detail.get("env", {}), **lease.release_env}
+    return detail
 
 
 def mcp_detail(
     item: McpServerCapabilityConfig,
     capability_root: str,
     replacements: dict[str, str] | None = None,
+    runtime_leases: dict[str, BrowserRuntimeLease] | None = None,
 ) -> dict[str, Any]:
     """Adapter-facing context detail."""
+    lease = (runtime_leases or {}).get(item.id)
     detail: dict[str, Any] = {
         "id": item.id,
         "transport": item.transport,
@@ -78,6 +90,10 @@ def mcp_detail(
                 key: render_capability_path(value, capability_root, replacements)
                 for key, value in item.env.items()
             }
+    if lease is not None:
+        detail = render_browser_runtime(detail, browser_url=lease.browser_url)
+        if item.transport == "stdio":
+            detail["env"] = {**detail.get("env", {}), **lease.release_env}
     return detail
 
 

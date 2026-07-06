@@ -9,6 +9,15 @@ from cairn.shared.config.constants import TaskType, _check_known_task_types
 from cairn.shared.task_types import builtin_task_type_names
 
 
+class RuntimeProviderConfig(BaseModel):
+    """Dynamic runtime resource provider for a capability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["cloak_sidecar"]
+    resource: Literal["browser_url"]
+
+
 class McpServerCapabilityConfig(BaseModel):
     """Capability config for one MCP server."""
 
@@ -25,6 +34,7 @@ class McpServerCapabilityConfig(BaseModel):
     healthcheck_timeout: float = Field(default=1.0, gt=0, le=30)
     source_path: str | None = None
     probe_config: dict[str, Any] = Field(default_factory=dict)
+    runtime_provider: RuntimeProviderConfig | None = None
     task_types: list[TaskType] = Field(default_factory=lambda: ["bootstrap", "explore"])
     description: str = ""
     detail: str = ""

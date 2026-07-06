@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+lease_file="${CAIRN_BROWSER_LEASE_FILE:-}"
+control_url="${CAIRN_BROWSER_LEASE_CONTROL_URL:-}"
+lease_id="${CAIRN_BROWSER_LEASE_ID:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lease-file)
+      lease_file="${2:-}"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ -n "$lease_file" && -f "$lease_file" ]]; then
+  control_url="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.control_url || '');" "$lease_file")"
+  lease_id="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.lease_id || '');" "$lease_file")"
+fi
+
+release() {
+  if [[ -n "$control_url" && -n "$lease_id" ]]; then
+    curl -fsS -X POST "${control_url%/}/release" \
+      -H 'content-type: application/json' \
+      --data "{\"lease_id\":\"$lease_id\"}" >/dev/null 2>&1 || true
+  fi
+}
+trap release EXIT INT TERM
+
+if [[ $# -eq 0 ]]; then
+  echo "cairn-browser-mcp: command is required" >&2
+  exit 64
+fi
+
+set +e
+"$@"
+status=$?
+set -e
+exit "$status"

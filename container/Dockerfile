@@ -28,8 +28,9 @@ USER kali
 COPY ./bin/kali-mcp-stdio /usr/local/bin/kali-mcp-stdio
 COPY ./bin/metasploit-mcp-stdio /usr/local/bin/metasploit-mcp-stdio
 COPY ./bin/cairn-resources-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio
+COPY ./bin/cairn-browser-mcp /usr/local/bin/cairn-browser-mcp
 COPY ./bin/js-reverse-mcp-cairn /usr/local/bin/js-reverse-mcp-cairn
-RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio /usr/local/bin/js-reverse-mcp-cairn
+RUN sudo chmod +x /usr/local/bin/kali-mcp-stdio /usr/local/bin/metasploit-mcp-stdio /usr/local/bin/cairn-resources-mcp-stdio /usr/local/bin/cairn-browser-mcp /usr/local/bin/js-reverse-mcp-cairn
 
 
 

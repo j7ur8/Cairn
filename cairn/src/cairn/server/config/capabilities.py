@@ -27,6 +27,7 @@ def list_yaml_capabilities() -> list[CapabilityCatalogItem]:
         payload.setdefault("headers", payload.get("headers") or {})
         payload.setdefault("required_skill_ids", payload.get("required_skill_ids") or [])
         payload.setdefault("preferred_mcp_ids", [])
+        payload.setdefault("runtime_provider", payload.get("runtime_provider"))
         result.append(CapabilityCatalogItem.model_validate(payload))
     for item in caps.get("skills") or []:
         payload = dict(item)
@@ -205,6 +206,7 @@ def _capability_body_to_yaml(
         "detail": body.detail,
         "available": body.available,
         "probe_config": body.probe_config or {},
+        "runtime_provider": body.runtime_provider,
     }
     if kind == "mcp_server":
         if body.transport not in ("stdio", "http"):
@@ -257,6 +259,7 @@ def _mcp_import_spec_to_body(capability_id: str, spec: dict[str, Any]) -> Capabi
     raw_args = source.get("args")
     raw_env = source.get("env")
     raw_headers = source.get("headers")
+    raw_runtime_provider = source.get("runtime_provider")
     args = raw_args if isinstance(raw_args, list) else []
     env = raw_env if isinstance(raw_env, dict) else {}
     headers = raw_headers if isinstance(raw_headers, dict) else {}
@@ -271,6 +274,7 @@ def _mcp_import_spec_to_body(capability_id: str, spec: dict[str, Any]) -> Capabi
         env={str(key): str(value) for key, value in env.items()},
         url=str(url or "") if url else None,
         headers={str(key): str(value) for key, value in headers.items()},
+        runtime_provider=raw_runtime_provider if isinstance(raw_runtime_provider, dict) else None,
         available=True,
     )
 

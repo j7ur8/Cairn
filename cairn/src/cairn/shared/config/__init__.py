@@ -1,6 +1,7 @@
 from cairn.shared.config.capability_models import (
     CapabilitiesConfig,
     McpServerCapabilityConfig,
+    RuntimeProviderConfig,
     SkillCapabilityConfig,
 )
 from cairn.shared.config.constants import (
@@ -95,6 +96,7 @@ __all__ = [
     "ReasonTaskConfig",
     "ReasoningEffort",
     "ResourceConfig",
+    "RuntimeProviderConfig",
     "ServerAuthType",
     "ServerAuthMethod",
     "SERVER_AUTH_ORDER",
