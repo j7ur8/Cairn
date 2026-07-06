@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-06-22
+生成日期：2026-07-06
 -->
 
 # Cairn 架构与设计文档
@@ -50,6 +50,10 @@ flowchart TB
         MCP["MCP / Skills / Roles"]
     end
 
+    subgraph Sidecars["Project-scoped Sidecars"]
+        Cloak["CloakBrowser sidecar\njs-reverse-mcp slots + noVNC"]
+    end
+
     SPA -->|"HTTP + Bearer"| Routers
     Routers --> Auth
     Routers --> Services
@@ -67,9 +71,11 @@ flowchart TB
     Scheduler --> Containers
     Client --> Routers
     Containers -->|"Docker socket"| Workers
+    Containers -->|"Docker socket\nproject sidecar"| Cloak
     Agent -->|"JSON execute output\nsentinel conclude text"| Dispatcher
     Dispatcher -->|"facts/intents/complete/events"| API
     Workers --> MCP
+    MCP -->|"CDP slot lease\nHTTP control"| Cloak
     Workers --> Files
 ```
 
@@ -143,10 +149,11 @@ sequenceDiagram
 | Server Application | `cairn/src/cairn/server/application/` | 跨 repository 的用例编排：项目创建/读取/命令、intent/reason 命令、hints/files/attachments、execution config、capabilities、export、replay | Router 调用、DB connection | DTO/domain result | domain, repositories, mappers |
 | Server Domain | `cairn/src/cairn/server/domain/` | intent/reason/project 业务规则、ID、时间、lease 清理、业务异常 | repository row/state、命令参数 | domain result 或 `DomainError` | 纯 Python，无 SQL/FastAPI/repository import |
 | Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、create-only 结构化持久化和 dispatcher payload 组装 | `config.yaml`, `config.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
-| Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器、回写结果，并暴露 reload/MCP probe 控制面 | Server API, YAML config, dispatcher control HTTP | HTTP writes, worker execution, probe results | requests, Docker SDK |
+| Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器和项目级 CloakBrowser sidecar、回写结果，并暴露 reload/MCP probe 控制面 | Server API, YAML config, dispatcher control HTTP | HTTP writes, worker execution, probe results | requests, Docker SDK |
 | Dispatcher Scheduler | `cairn/src/cairn/dispatcher/scheduler/` | tick、reload、planner、submitter、worker selection、runtime state、replay coordination | Project summaries/config/runtime state | submitted tasks, releases, metrics | protocol client, runtime, tasks |
 | Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
 | Dispatcher Control/Probe | `cairn/src/cairn/dispatcher/health_server.py`, `cairn/src/cairn/dispatcher/mcp_probe.py` | Dispatcher 本地 HTTP 控制面，处理 health/metrics/reload 和 MCP initialize/tools-list 探测 | `/healthz`, `/metrics`, `/reload`, `/mcp-probe` | JSON health/probe result, Prometheus metrics | ContainerManager, shared config |
+| Cloak Sidecar Runtime | `cairn/src/cairn/dispatcher/runtime/cloak_sidecar.py`, `capabilities/mcp/js-reverse-mcp/sidecar/`, `container/bin/js-reverse-mcp-cairn` | 当项目 execution config 选择 `js-reverse-mcp-cloak` 时，按项目启动 CloakBrowser sidecar，Worker wrapper 租用 CDP slot 并在退出时释放；noVNC 状态供项目 UI 打开 | execution config、Docker network、`worker.cloak_sidecar` | sidecar container、CDP browser URL、noVNC URL/status | Docker SDK, requests, js-reverse-mcp |
 | Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
 | Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；热点 SQL 仍只在 execution/event/view/usage/retention repository/query 模块，application/router 不感知 SQL 细节 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
 | Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由原生 ES modules 装配，按 `shared/`、`app/`、`workspace/` 分层；项目视图使用轻量 poll-state revision 判断是否刷新完整图 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind |
@@ -158,7 +165,7 @@ sequenceDiagram
 
 当前 Alembic head 为 `0013_project_proxy_servers`，删除旧项目代理字段并新增项目级 `project_proxy_endpoints`；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
 
-前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_close.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。
+前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_open.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。项目图工具栏现在通过 `workspace/state-cloak.js` 读取 `/projects/{id}/cloak-sidecar`，仅在 sidecar 已配置且运行并返回 noVNC URL 时打开 Cloak UI。
 
 Project graph 与 Execution Log 在前端状态层保持轻耦合联动：`workspace/state-graph.js` 的 intent 选择流程继续维护右侧 detail selection，同时调用 LLM log state 的 `syncLlmExecutionSelectionForIntent()`，按当前 `llmExecutions` 排序选择同 `intent_id` 的第一个 execution 并刷新 latest preview/page cards；找不到匹配时保留当前 log 选择。Execution Log header 还提供 `refreshCurrentLlmLog()` 手动刷新按钮，只强制刷新 execution list 与当前 execution 的事件视图，不改变 graph/detail/replay 状态，也不强制展开已折叠面板。
 
@@ -175,6 +182,8 @@ Project graph 与 Execution Log 在前端状态层保持轻耦合联动：`works
 | Server | PostgreSQL | SQLAlchemy session | 持久化 projects/facts/intents/users/events |
 | Server | YAML files | 原子写入/覆盖 | dispatch 和 resources 配置 |
 | Dispatcher | Docker daemon | Docker socket | 创建/启动/停止 Worker 容器 |
+| Dispatcher | CloakBrowser sidecar | Docker + HTTP control | 项目选择 `js-reverse-mcp-cloak` 时启动 sidecar、检查 health、清理 inactive/orphan sidecar |
+| Worker wrapper | CloakBrowser sidecar | HTTP control + CDP URL | `/usr/local/bin/js-reverse-mcp-cairn` 租用 slot，执行 `js-reverse-mcp --browserUrl ...`，退出时释放 slot |
 | Dispatcher | Worker process | subprocess / CLI adapter | 运行 Claude Code、Codex 或 mock |
 
 典型 Explore 请求链路：
@@ -195,6 +204,9 @@ sequenceDiagram
     D->>S: POST /projects/{id}/intents/{intent_id}/claim
     S->>DB: atomic-ish claim update
     D->>C: ensure_running(project_id)
+    opt execution config includes js-reverse-mcp-cloak
+        D->>C: ensure Cloak sidecar and render project/task env templates
+    end
     D->>W: run explore prompt
     W-->>D: JSON fact / rejection / error
     Note over D,W: conclude fallback returns sentinel-wrapped plain fact text
@@ -212,6 +224,7 @@ sequenceDiagram
 | LLM execution events | Server observability API | Dispatcher 批量上报 prompt/stdout/stderr/usage |
 | Retention loop | Server lifespan | 周期清理观测数据 |
 | MCP probe request | Server admin API -> Dispatcher `/mcp-probe` | 使用临时 startup container 写入 `mcp.json` 和 probe 脚本，执行 initialize + `tools/list` 后删除容器 |
+| Cloak slot lease | Worker `js-reverse-mcp-cairn` -> project sidecar | wrapper 调 `/lease` 获取 browser URL，进程退出 trap 调 `/release` |
 
 性能敏感查询仍收敛在 repository/query 层：project summaries 使用 facts/intents/hints 预聚合 join；execution list 先分页再聚合 events；event view 先计算 by-kind stats，再按可见 `event_kind` 拉取 primary events；retention 使用 DB join delete；replay route extraction 按 completion facts 可达子图加载。Router、application service 和 DTO contract 不暴露这些 SQL 形态。
 
@@ -227,6 +240,7 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 | server.yaml | operator | Server runtime、Dispatcher runtime merge、container limits read API |
 | config.yaml | Server system settings routers, operator | Server runtime、Dispatcher；UI 可写 settings/runtime/tasks/observability/log-retention |
 | config.resources.yaml | Server capability/role routers, operator | Dispatcher prompt/capability assembly、MCP probe metadata |
+| cloak sidecar profiles | Dispatcher CloakSidecarManager, sidecar container | project-scoped persistent browser profiles under `worker.cloak_sidecar.profile_root` |
 | attachments/project-files | upload route, Worker container | SPA download, Worker |
 
 ## 5. 关键设计模式与架构风格
@@ -242,8 +256,9 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 | Intent Scheduling | `dispatcher/scheduler/project_dispatcher.py`, default `reason.md` | Reason 只产出 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent，并在 claimed/running open intents 未结束时跳过 Reason |
 | Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用不可变 execution config snapshot、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
 | Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
+| Project-scoped Sidecar | `dispatcher/runtime/cloak_sidecar.py`, `scheduler/task_submitter.py`, `scheduler/cleanup.py` | `js-reverse-mcp-cloak` 不直接启动浏览器；Dispatcher 先确保每项目 CloakBrowser sidecar，worker MCP wrapper 再租用 slot 并连接 CDP |
 | Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
-| Config-as-data | `server.yaml`, `config.yaml`, `config.resources.yaml` | `server.yaml` 保存固定部署/敏感/基础设施配置；`config.yaml` 保存 UI 可调整的调度、worker、任务、观测配置；`config.resources.yaml` 保存 remote support、capabilities、roles |
+| Config-as-data | `server.yaml`, `config.yaml`, `config.resources.yaml` | `server.yaml` 保存固定部署/敏感/基础设施配置，实际 YAML 顶层为 `app/database/security/admin/dispatcher/storage/worker`；`config.yaml` 保存 UI 可调整的调度、worker、任务、观测配置；`config.resources.yaml` 保存 servers、capabilities、roles |
 | Lease/Heartbeat | intents, reason lock | 用心跳和超时释放运行中工作 |
 
 总体架构风格是“中心化 Server + 独立调度器 + 容器化执行环境”的分层单体架构，不是微服务系统。边界通过 HTTP、PostgreSQL 和 Docker socket 连接。
@@ -255,11 +270,11 @@ Execution config 是不可变项目快照：创建项目或 replay project 时�
 | 项 | 实现 |
 |----|------|
 | Token | JWT HS256 |
-| 签名密钥 | `server.yaml` 的 `server.auth.jwt_secret`，可被 `config.yaml` 同名字段覆盖但默认不通过 UI 编辑 |
+| 签名密钥 | `server.yaml` 的 `security.jwt_secret`，加载后映射到内部 auth model；默认不通过 UI 编辑 |
 | 默认有效期 | 1 小时 |
 | 密码 | bcrypt hash |
-| 服务账号 | `server.auth.dispatcher_api_token` 对应的 JWT claim `role=service`，映射为 synthetic superuser |
-| 初始管理员 | `server.initial_admin` 可在启动时 bootstrap |
+| 服务账号 | `server.yaml` 的 `security.dispatcher_api_token` 对应的 JWT claim `role=service`，映射为 synthetic superuser |
+| 初始管理员 | `server.yaml` 的 `admin.email/password` 可在启动时 bootstrap |
 
 鉴权入口：
 

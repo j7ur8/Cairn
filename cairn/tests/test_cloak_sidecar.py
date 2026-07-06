@@ -97,6 +97,12 @@ class CloakSidecarTests(unittest.TestCase):
 
     def test_sidecar_dockerfile_pins_versions_and_exposes_novnc(self) -> None:
         dockerfile = (_REPO / "capabilities/mcp/js-reverse-mcp/sidecar/Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("http://mirrors.ustc.edu.cn/debian", dockerfile)
+        self.assertIn("http://mirrors.ustc.edu.cn/debian-security", dockerfile)
+        self.assertIn("https://mirrors.ustc.edu.cn", dockerfile)
+        self.assertIn("sed -i 's|http://mirrors.ustc.edu.cn|https://mirrors.ustc.edu.cn|g'", dockerfile)
+        self.assertLess(dockerfile.index("mirrors.ustc.edu.cn/debian"), dockerfile.index("apt-get update"))
+        self.assertLess(dockerfile.index("ca-certificates"), dockerfile.index("sed -i"))
         self.assertIn("cloakbrowser@0.4.8", dockerfile)
         self.assertIn("npx cloakbrowser install", dockerfile)
         self.assertIn("EXPOSE 6080 7310 9222 9223", dockerfile)

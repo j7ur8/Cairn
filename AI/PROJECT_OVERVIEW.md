@@ -4,7 +4,7 @@
 
 @update: 本文件应在项目发生重大变更（如核心目标调整、技术栈升级、目录重构）时更新。
 
-生成日期：2026-06-20
+生成日期：2026-07-06
 -->
 
 # Cairn 项目概览
@@ -23,7 +23,7 @@ Cairn 采用 Blackboard Architecture。Server 维护事实、意图和提示构�
 | API 服务 | FastAPI, Uvicorn |
 | 数据库 | PostgreSQL 16, SQLAlchemy 2, Alembic |
 | 配置 | YAML, Pydantic v2 |
-| 调度与运行 | ThreadPoolExecutor, Docker SDK, requests |
+| 调度与运行 | ThreadPoolExecutor, Docker SDK, requests；可选项目级 CloakBrowser sidecar |
 | 认证 | JWT, bcrypt |
 | 观测 | Prometheus metrics, 结构化日志, LLM execution events |
 | 前端 | 无构建 SPA, FastAPI partials, Alpine.js ES modules under `static/js/app`, `static/js/workspace`, `static/js/shared`, Tailwind CDN/vendor |
@@ -53,13 +53,16 @@ Cairn/
 │   └── templates/                    # 报告模板
 ├── container/
 │   ├── Dockerfile                    # Worker 容器镜像
-│   └── bin/                          # MCP stdio wrapper
+│   └── bin/                          # MCP stdio wrapper，包括 js-reverse-mcp-cairn
+├── capabilities/mcp/
+│   └── js-reverse-mcp/               # CloakBrowser sidecar asset
 ```
 
 ## 4. 快速开始
 
 ```bash
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
+docker build ./capabilities/mcp/js-reverse-mcp/sidecar -t cairn-cloak-browser:js-reverse
 ./start.sh
 ```
 
@@ -67,12 +70,13 @@ docker pull ghcr.io/astral-sh/uv:python3.13-trixie
 
 ```bash
 docker build ./container -t cairn-worker-container:mcp-camoufox
+docker build ./capabilities/mcp/js-reverse-mcp/sidecar -t cairn-cloak-browser:js-reverse
 docker network create cairn
 uv run --project cairn cairn serve
 uv run --project cairn cairn dispatch --config config.yaml
 ```
 
-资源发现当前通过 `cairn-resources` MCP 查询，而不是把 server 或 project proxy 明细内联进 prompt。新项目默认在 bootstrap/explore 启用该 MCP；旧项目 execution snapshot 保持不可变，可通过能力 audit 诊断后 clone/replay 选择当前默认。
+资源发现当前通过 `cairn-resources` MCP 查询，而不是把 server 或 project proxy 明细内联进 prompt。新项目默认在 bootstrap/explore 启用该 MCP；旧项目 execution snapshot 保持不可变，可通过能力 audit 诊断后 clone/replay 选择当前默认。JS reverse runtime 可选 `js-reverse-mcp-cloak` MCP：Dispatcher 为选择该能力的项目启动 CloakBrowser sidecar，Worker wrapper 租用 CDP slot，项目图工具栏可打开 noVNC 检查浏览器状态。
 
 数据库维护：
 
@@ -100,5 +104,6 @@ uv run --project cairn python -m pytest -m db
 | `README/current-architecture.html` | 当前架构可视化材料 |
 | `container/README.md` | Worker 容器说明 |
 | `capabilities/README.md` | 能力目录说明 |
+| `capabilities/mcp/js-reverse-mcp/README.md` | Cloak sidecar/js-reverse MCP 说明 |
 | `AI/ARCHITECTURE.md` | 架构与设计细节 |
 | `AI/CODEBASE_ANALYSIS.md` | 全量代码分析 |

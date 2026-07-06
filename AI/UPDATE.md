@@ -5,6 +5,24 @@
 
 # 更新日志
 
+## 2026-07-06 — Cloak sidecar APT 源同步
+
+- `capabilities/mcp/js-reverse-mcp/sidecar/Dockerfile` 在 `apt-get update` 前写入 Debian deb822 sources：先用 USTC HTTP mirror 安装 `ca-certificates`，再切换为 USTC HTTPS mirror 安装其余系统包。
+- `test_cloak_sidecar.py` 增加 USTC mirror 和 mirror-before-apt-update 断言，避免 `cairn-cloak-image` 构建源回退。
+- `CODEBASE_ANALYSIS.md` 同步记录 Cloak sidecar Dockerfile 的 APT mirror pin。
+
+---
+
+## 2026-07-06 — Cloak sidecar 与 AI 文档同步
+
+- 同步 `js-reverse-mcp-cloak` 能力：记录项目级 CloakBrowser sidecar、`container/bin/js-reverse-mcp-cairn` slot lease/release wrapper、noVNC 项目 UI 状态入口和 `worker.cloak_sidecar` 配置。
+- 同步当前统计：FastAPI route decorator 为 102 个，顶层 `test_*.py` 文件为 60 个；新增 `GET /projects/{project_id}/cloak-sidecar` 和 `test_cloak_sidecar.py` 覆盖说明。
+- 修正文档漂移：`server.yaml` 真实 YAML key 为 `app/database/security/admin/dispatcher/storage/worker`；加载后才映射到内部 `server.auth`、`worker_runtime.container` 等模型路径。
+- 修正数据模型/API 文档：移除旧 `projects.proxy_id` 和 `proxies` 表描述，补充 `project_proxy_endpoints`、execution config 子表、task-types、prompt/role prompt、intent phase checkpoint 和 project-scoped observability endpoint 说明。
+- 同步命名规范：记录 root config 文件族、`capabilities/mcp/<mcp-id>/` 资源目录和 Docker `Dockerfile` 例外；命名检查命令改为 `cd cairn && uv run python scripts/check_naming.py`。
+
+---
+
 ## 2026-07-06 — 审计同步
 
 - 同步资源发现链路：`config.resources.yaml` 记录 servers/capabilities/roles；Server/Project Proxy discovery 通过 `cairn-resources` MCP 查询，prompt 不再内联 server/proxy 明细。

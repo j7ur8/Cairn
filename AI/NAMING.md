@@ -14,6 +14,8 @@
 - 示例配置文件使用 `config.example.yaml`。
 - 测试配置文件使用 `config.test.yaml`。
 - mock 配置文件使用 `config.mock.yaml` 或 `server.mock.yaml`。
+- Root config files use the current split: `server.yaml`, `config.yaml`, and `config.resources.yaml`; examples/tests/mocks keep the same stem with `.example.yaml`, `.test.yaml`, or `.mock.yaml` where present.
+- First-party MCP assets live under `capabilities/mcp/<mcp-id>/`; sidecar internals may keep tool/runtime filenames such as `Dockerfile`, `entrypoint.sh`, and Node `.mjs` files.
 
 ## Backend Layout
 
@@ -38,7 +40,7 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 
 ## Allowed Exceptions
 
-- Protocol/resource files keep their required names: `SKILL.md`, `ROLE.md`, and `FILE_OUTPUTS.md`.
+- Protocol/resource files keep their required names: `SKILL.md`, `ROLE.md`, `FILE_OUTPUTS.md`, and Docker `Dockerfile`.
 - Alembic migration files keep their revision-prefixed names.
 - Tool-specific config files may keep ecosystem names such as `tailwind.config.js`.
 - Vendored tool assets under `capabilities/**/tools/vendor/**` keep upstream filenames, including YAML files with underscores; first-party YAML files still must avoid underscores.
@@ -58,4 +60,4 @@ Application read/query modules use `*_queries.py`; mutating use cases use `*_com
 2. If a future compatibility shim is unavoidable, keep it explicit, documented, and time-boxed to one CI-stable migration window.
 3. Add or preserve tests that prove removed shim paths do not reappear.
 4. Do not rename externally visible API routes, JSON fields, database identifiers, YAML keys, or protocol files.
-5. Run `uv run python scripts/check_naming.py` before merging naming-sensitive changes.
+5. Run `cd cairn && uv run python scripts/check_naming.py` before merging naming-sensitive changes.
