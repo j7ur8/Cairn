@@ -3,13 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-import yaml
 
 import cairn.dispatcher.prompts as prompt_package
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
-from cairn.dispatcher.tasks.instruction_files import render_task_instruction_files
+from cairn.dispatcher.tasks.instruction_files import (
+    RUNTIME_INSTRUCTION_PHASES,
+    render_task_instruction_files,
+    runtime_instruction_template_path,
+    validate_runtime_instruction_phase,
+    validate_runtime_instruction_template_path,
+)
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.server.config.files import _overwrite_yaml, _text_sha256, resources_yaml_path, save_resources_data
 from cairn.server.config.roles import set_role_default_skills_in_data
@@ -206,7 +212,7 @@ def _instruction_preview_for_phase(phase: str) -> PromptInstructionPreviewPhase:
                 path=relative_path,
                 content=files[absolute_path],
                 sha256=_text_sha256(files[absolute_path]),
-                writable=False,
+                writable=True,
             )
             for absolute_path, relative_path in ordered_paths
         ],
@@ -215,8 +221,19 @@ def _instruction_preview_for_phase(phase: str) -> PromptInstructionPreviewPhase:
 
 def _instruction_previews() -> PromptInstructionPreviewResponse:
     return PromptInstructionPreviewResponse(
-        phases=[_instruction_preview_for_phase(phase) for phase in ("bootstrap", "reason", "explore")]
+        phases=[_instruction_preview_for_phase(phase) for phase in RUNTIME_INSTRUCTION_PHASES]
     )
+
+
+def _runtime_instruction_template_path(phase: str, template_path: str) -> Path:
+    try:
+        phase = validate_runtime_instruction_phase(phase)
+        template_path = validate_runtime_instruction_template_path(template_path)
+        return runtime_instruction_template_path(phase, template_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="runtime instruction template not found") from exc
 
 
 def _role_prompt_metadata(prompt_names: Any) -> tuple[dict[str, dict[str, Any]], str | None]:
@@ -302,6 +319,18 @@ def read_role_prompts():
 
 @router.get("/prompt-instruction-previews", response_model=PromptInstructionPreviewResponse)
 def read_prompt_instruction_previews():
+    return _instruction_previews()
+
+
+@router.put("/prompt-instruction-previews/{phase}/{template_path:path}", response_model=PromptInstructionPreviewResponse)
+def update_prompt_instruction_preview(
+    phase: str,
+    template_path: str,
+    body: PromptGroupTemplateUpdate,
+    _superuser=Depends(current_active_superuser),
+):
+    target = _runtime_instruction_template_path(phase, template_path)
+    target.write_text(body.content, encoding="utf-8")
     return _instruction_previews()
 
 

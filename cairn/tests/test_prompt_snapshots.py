@@ -14,14 +14,15 @@ class PromptSnapshotTests(unittest.TestCase):
     def test_prompt_markdown_files_have_only_task_h1(self) -> None:
         prompts_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts"
 
-        for path in prompts_dir.rglob("*.md"):
-            with self.subTest(path=path.relative_to(prompts_dir).as_posix()):
-                h1s = [
-                    line.removeprefix("# ").strip()
-                    for line in path.read_text(encoding="utf-8").splitlines()
-                    if line.startswith("# ") and not line.startswith("## ")
-                ]
-                self.assertEqual(h1s, ["Task"])
+        for prompt_group in ("default", "mock"):
+            for path in (prompts_dir / prompt_group).rglob("*.md"):
+                with self.subTest(path=path.relative_to(prompts_dir).as_posix()):
+                    h1s = [
+                        line.removeprefix("# ").strip()
+                        for line in path.read_text(encoding="utf-8").splitlines()
+                        if line.startswith("# ") and not line.startswith("## ")
+                    ]
+                    self.assertEqual(h1s, ["Task"])
 
     def test_default_templates_keep_role_out_of_phase_prompts(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"

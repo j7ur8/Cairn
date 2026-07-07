@@ -93,7 +93,7 @@ export function createPromptsState() {
           path: String(file?.path || ''),
           key: this.promptResourceKey('runtime', `${phaseName}/${file?.path || ''}`),
           groupLabel: 'Runtime Instruction Preview',
-          writable: false,
+          writable: file?.writable !== false,
           sha: file?.sha256 || '',
           content: file?.content || '',
         }));
@@ -241,6 +241,17 @@ export function createPromptsState() {
           this.promptEditorContent = submittedContent;
           this.promptRoleRequiredSkillIds = submittedSkillIds;
           this.showToast('Role prompt saved');
+        } else if (resource.type === 'runtime') {
+          const detail = await this.api(
+            'PUT',
+            `/prompt-instruction-previews/${encodeURIComponent(resource.phase)}/${this.promptTemplateRoutePath(resource.path)}`,
+            { content: this.promptEditorContent || '' },
+          );
+          this.promptInstructionPreviewDetail = detail;
+          this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
+          this.promptTemplateSelected = resource.key;
+          this.promptEditorContent = this.promptSelectedResourceContent();
+          this.showToast('Runtime instruction template saved');
         } else {
           const detail = await this.api(
             'PUT',

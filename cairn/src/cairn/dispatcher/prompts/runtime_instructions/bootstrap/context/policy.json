@@ -1,0 +1,9 @@
+{
+  "project_id": "{project_id}",
+  "task_type": "{task_type}",
+  "task_instance_id": "{task_instance_id}",
+  "read_only": {read_only},
+  "allowed_mcp_ids": {selected_mcp_ids_json},
+  "denied_tool_classes": {denied_tool_classes},
+  "hooks_enabled": {hooks_enabled}
+}

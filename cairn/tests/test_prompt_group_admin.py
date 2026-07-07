@@ -46,8 +46,19 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.files_patch = mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files")
         files = self.files_patch.start()
         files.return_value.joinpath.side_effect = lambda group: self.root / group
+        self.runtime_root = self.root / "runtime_instructions"
+        shutil.copytree(
+            _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "runtime_instructions",
+            self.runtime_root,
+        )
+        self.runtime_root_patch = mock.patch(
+            "cairn.dispatcher.tasks.instruction_files.runtime_instruction_templates_root",
+            return_value=self.runtime_root.resolve(),
+        )
+        self.runtime_root_patch.start()
 
     def tearDown(self) -> None:
+        self.runtime_root_patch.stop()
         self.files_patch.stop()
         self.resources_path_patch.stop()
         self.root_patch.stop()
@@ -198,7 +209,7 @@ class PromptGroupAdminTests(unittest.TestCase):
                         "context/policy.json",
                     ],
                 )
-                self.assertTrue(all(file.writable is False for file in phase.files))
+                self.assertTrue(all(file.writable is True for file in phase.files))
                 self.assertTrue(all(file.sha256 and len(file.sha256) == 64 for file in phase.files))
                 contents = {file.path: file.content for file in phase.files}
                 self.assertIn("{origin}", contents["context/project.md"])
@@ -206,6 +217,22 @@ class PromptGroupAdminTests(unittest.TestCase):
                 self.assertIn("{selected role prompt}", contents["AGENTS.md"])
                 self.assertIn("{selected_mcp_ids}", contents["context/capabilities.md"])
                 self.assertIn(f'"task_type": "{phase.phase}"', contents["context/policy.json"])
+
+    def test_runtime_instruction_template_directory_contains_all_phase_files(self) -> None:
+        root = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "runtime_instructions"
+        expected = {
+            "AGENTS.md",
+            "CLAUDE.md",
+            "context/project.md",
+            "context/phase.md",
+            "context/capabilities.md",
+            "context/policy.json",
+        }
+
+        for phase in ("bootstrap", "reason", "explore"):
+            with self.subTest(phase=phase):
+                found = {path.relative_to(root / phase).as_posix() for path in (root / phase).rglob("*") if path.is_file()}
+                self.assertEqual(found, expected)
 
     def test_prompt_instruction_preview_uses_task_instruction_renderer(self) -> None:
         from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
@@ -237,6 +264,67 @@ class PromptGroupAdminTests(unittest.TestCase):
         }
 
         self.assertEqual({file.path: file.content for file in reason.files}, rendered)
+
+    def test_update_prompt_instruction_preview_writes_template_and_refreshes_hash(self) -> None:
+        before = self.router.read_prompt_instruction_previews()
+        reason_before = next(phase for phase in before.phases if phase.phase == "reason")
+        old_file = next(file for file in reason_before.files if file.path == "context/phase.md")
+        body = self.router.PromptGroupTemplateUpdate(content="# Phase Boundary\n\nUpdated {task_type} template.\n")
+
+        after = self.router.update_prompt_instruction_preview("reason", "context/phase.md", body)
+
+        target = self.runtime_root / "reason" / "context" / "phase.md"
+        self.assertEqual(target.read_text(encoding="utf-8"), body.content)
+        reason_after = next(phase for phase in after.phases if phase.phase == "reason")
+        new_file = next(file for file in reason_after.files if file.path == "context/phase.md")
+        self.assertIn("Updated reason template.", new_file.content)
+        self.assertNotEqual(old_file.sha256, new_file.sha256)
+
+    def test_update_prompt_instruction_preview_rejects_invalid_phase_and_path(self) -> None:
+        from fastapi import HTTPException
+
+        body = self.router.PromptGroupTemplateUpdate(content="x")
+        cases = [
+            ("invalid", "AGENTS.md"),
+            ("reason", "../AGENTS.md"),
+            ("reason", "context/unknown.md"),
+        ]
+        for phase, path in cases:
+            with self.subTest(phase=phase, path=path):
+                with self.assertRaises(HTTPException) as cm:
+                    self.router.update_prompt_instruction_preview(phase, path, body)
+                self.assertEqual(cm.exception.status_code, 400)
+
+    def test_inject_task_instructions_uses_runtime_instruction_template_files(self) -> None:
+        from cairn.dispatcher.tasks.instruction_files import inject_task_instructions
+        from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+        (self.runtime_root / "bootstrap" / "AGENTS.md").write_text(
+            "Template marker {project_id} {task_instance_id} {selected role prompt}\n",
+            encoding="utf-8",
+        )
+
+        class Writer:
+            def __init__(self):
+                self.files = {}
+
+            def write_text_file(self, _container_name, path, content):
+                self.files[path] = content
+
+        writer = Writer()
+        paths = inject_task_instructions(
+            container_manager=writer,
+            container_name="runner",
+            project=None,
+            project_id="proj",
+            task_type="bootstrap",
+            task_instance_id="task",
+            role_instructions="Role text.",
+            capability_instructions="Capability text.",
+            context=WorkerExecutionContext(mcp_servers=[{"id": "cairn-resources"}]),
+        )
+
+        self.assertEqual(writer.files[paths.agents_md_path], "Template marker proj task Role text.\n")
 
     def test_update_role_prompt_writes_file_and_updates_hash(self) -> None:
         role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
@@ -581,7 +669,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertTrue(result["canEditRequiredSkills"])
         self.assertEqual(result["groups"], ["Prompt Templates", "Role Prompts"])
 
-    def test_prompt_instruction_previews_are_loaded_as_readonly_resources(self) -> None:
+    def test_prompt_instruction_previews_are_loaded_as_writable_resources(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is required to execute frontend state helper")
@@ -617,7 +705,21 @@ class PromptSettingsFrontendTests(unittest.TestCase):
                       path: 'AGENTS.md',
                       content: 'bootstrap agents preview',
                       sha256: 'preview-sha',
-                      writable: false,
+                      writable: true,
+                    }}],
+                  }}],
+                }};
+              }}
+              if (path === '/prompt-instruction-previews/bootstrap/AGENTS.md') {{
+                return {{
+                  phases: [{{
+                    phase: 'bootstrap',
+                    task_instance_id: '{{task_instance_id}}',
+                    files: [{{
+                      path: 'AGENTS.md',
+                      content: body.content,
+                      sha256: 'updated-preview-sha',
+                      writable: true,
                     }}],
                   }}],
                 }};
@@ -629,6 +731,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
             const resources = state.promptEditorResources();
             const preview = resources.find(resource => resource.key === 'runtime/bootstrap/AGENTS.md');
             state.selectPromptTemplate(preview);
+            state.promptEditorContent = 'updated runtime preview';
             await state.savePromptTemplate();
 
             console.log(JSON.stringify({{
@@ -638,7 +741,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
               content: state.promptEditorContent,
               writable: state.promptSelectedWritable(),
               isRole: state.promptSelectedIsRole(),
-              groups: resources.filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
+              groups: state.promptEditorResources().filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
               keys: state.promptTemplateNames,
             }}));
         """
@@ -654,12 +757,19 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
         self.assertEqual(
             [call[1] for call in api_calls],
-            ["/prompt-templates", "/role-prompts", "/capabilities/catalog", "/prompt-instruction-previews"],
+            [
+                "/prompt-templates",
+                "/role-prompts",
+                "/capabilities/catalog",
+                "/prompt-instruction-previews",
+                "/prompt-instruction-previews/bootstrap/AGENTS.md",
+            ],
         )
+        self.assertEqual(api_calls[-1][2], {"content": "updated runtime preview"})
         self.assertEqual(result["selected"], "runtime/bootstrap/AGENTS.md")
         self.assertEqual(result["label"], "bootstrap / AGENTS.md")
-        self.assertEqual(result["content"], "bootstrap agents preview")
-        self.assertFalse(result["writable"])
+        self.assertEqual(result["content"], "updated runtime preview")
+        self.assertTrue(result["writable"])
         self.assertFalse(result["isRole"])
         self.assertEqual(result["groups"], ["Prompt Templates", "Runtime Instruction Preview"])
         self.assertIn("runtime/bootstrap/AGENTS.md", result["keys"])

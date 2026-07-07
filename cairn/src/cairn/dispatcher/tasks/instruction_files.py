@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
+import cairn.dispatcher.prompts as prompt_package
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
 from cairn.dispatcher.runtime.docker_labels import safe_project_id
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.contracts import ProjectDetail
+
+RUNTIME_INSTRUCTION_PHASES = ("bootstrap", "reason", "explore")
+RUNTIME_INSTRUCTION_TEMPLATE_PATHS = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "context/project.md",
+    "context/phase.md",
+    "context/capabilities.md",
+    "context/policy.json",
+)
 
 
 @dataclass(slots=True)
@@ -77,94 +90,111 @@ def render_task_instruction_files(
         claude_md_path=f"{root}/CLAUDE.md",
         agents_md_path=f"{root}/AGENTS.md",
     )
+    phase = _runtime_template_phase(task_type)
     if project is not None:
-        project_context = _project_context(project)
+        project_origin, project_goal = _project_context_values(project)
     else:
-        project_context = _project_context_from_values(project_origin or "", project_goal or "")
-    phase_context = _phase_context(task_type)
-    capabilities_context = capability_instructions.strip() or "No MCP servers or skills are exposed for this task."
-    policy = _policy(project_id, task_type, task_instance_id, context)
-    instruction = _agent_instruction(
-        task_type=task_type,
-        role_instructions=role_instructions,
-        phase_context_path=paths.phase_context_path,
-        project_context_path=paths.project_context_path,
-        capabilities_context_path=paths.capabilities_context_path,
-        policy_path=paths.policy_path,
-    )
-    return paths, {
-        paths.project_context_path: project_context,
-        paths.phase_context_path: phase_context,
-        paths.capabilities_context_path: capabilities_context,
-        paths.policy_path: json.dumps(policy, ensure_ascii=False, indent=2),
-        paths.claude_md_path: instruction,
-        paths.agents_md_path: instruction,
+        project_origin, project_goal = project_origin or "", project_goal or ""
+    selected_mcp_ids = _selected_mcp_ids(context)
+    values = {
+        "project_id": project_id,
+        "project_safe_id": safe_project_id(project_id),
+        "task_instance_id": task_instance_id,
+        "task_type": task_type,
+        "origin": project_origin,
+        "goal": project_goal,
+        "selected role prompt": role_instructions.strip(),
+        "selected_mcp_ids": capability_instructions.strip() or "No MCP servers or skills are exposed for this task.",
+        "selected_mcp_ids_json": json.dumps(selected_mcp_ids, ensure_ascii=False),
+        "project_context_path": paths.project_context_path,
+        "phase_context_path": paths.phase_context_path,
+        "capabilities_context_path": paths.capabilities_context_path,
+        "policy_path": paths.policy_path,
+        "read_only": json.dumps(task_type in {"reason", "bootstrap_conclude", "explore_conclude"}),
+        "denied_tool_classes": json.dumps(_denied_tool_classes(task_type), ensure_ascii=False),
+        "hooks_enabled": json.dumps(False),
     }
+    rendered = {
+        path: _render_runtime_instruction_template(phase, path, values)
+        for path in RUNTIME_INSTRUCTION_TEMPLATE_PATHS
+    }
+    return paths, _absolute_instruction_files(paths, rendered)
+
+
+def runtime_instruction_templates_root() -> Path:
+    package_paths = list(getattr(prompt_package, "__path__", []))
+    if len(package_paths) != 1:
+        raise RuntimeError("prompt resources are not writable files")
+    return (Path(package_paths[0]) / "runtime_instructions").resolve()
+
+
+def runtime_instruction_template_path(phase: str, relative_path: str) -> Path:
+    phase = validate_runtime_instruction_phase(phase)
+    relative_path = validate_runtime_instruction_template_path(relative_path)
+    root = runtime_instruction_templates_root()
+    target = (root / phase / Path(relative_path)).resolve()
+    if not target.is_relative_to(root / phase):
+        raise ValueError("invalid runtime instruction template path")
+    if not target.is_file():
+        raise FileNotFoundError(relative_path)
+    return target
+
+
+def validate_runtime_instruction_phase(phase: str) -> str:
+    if phase not in RUNTIME_INSTRUCTION_PHASES:
+        raise ValueError("invalid runtime instruction phase")
+    return phase
+
+
+def validate_runtime_instruction_template_path(relative_path: str) -> str:
+    parts = relative_path.split("/")
+    if (
+        not relative_path
+        or relative_path.startswith("/")
+        or "\\" in relative_path
+        or parts != [part for part in parts if part]
+        or ".." in parts
+        or relative_path not in RUNTIME_INSTRUCTION_TEMPLATE_PATHS
+    ):
+        raise ValueError("invalid runtime instruction template path")
+    return relative_path
+
+
+def _absolute_instruction_files(paths: TaskInstructionPaths, rendered: dict[str, str]) -> dict[str, str]:
+    return {
+        paths.agents_md_path: rendered["AGENTS.md"],
+        paths.claude_md_path: rendered["CLAUDE.md"],
+        paths.project_context_path: rendered["context/project.md"],
+        paths.phase_context_path: rendered["context/phase.md"],
+        paths.capabilities_context_path: rendered["context/capabilities.md"],
+        paths.policy_path: rendered["context/policy.json"],
+    }
+
+
+def _runtime_template_phase(task_type: str) -> str:
+    if task_type in RUNTIME_INSTRUCTION_PHASES:
+        return task_type
+    return "explore"
+
+
+def _render_runtime_instruction_template(phase: str, relative_path: str, values: dict[str, Any]) -> str:
+    content = runtime_instruction_template_path(phase, relative_path).read_text(encoding="utf-8")
+    for key, value in values.items():
+        content = content.replace("{" + key + "}", str(value))
+    return content
+
+
+def _selected_mcp_ids(context: WorkerExecutionContext) -> list[str]:
+    return [item.get("id") for item in context.mcp_servers or [] if isinstance(item.get("id"), str)]
+
+
+def _project_context_values(project: ProjectDetail) -> tuple[str, str]:
+    facts = {fact.id: fact.description for fact in project.facts}
+    return facts.get("origin", ""), facts.get("goal", "")
 
 
 def _instruction_root(project_id: str, task_instance_id: str) -> str:
     return f"{CAPABILITY_ROOT}/{safe_project_id(project_id)}/{safe_project_id(task_instance_id)}/instructions"
-
-
-def _project_context(project: ProjectDetail | None) -> str:
-    facts = {fact.id: fact.description for fact in project.facts} if project is not None else {}
-    return _project_context_from_values(facts.get("origin", ""), facts.get("goal", ""))
-
-
-def _project_context_from_values(origin: str, goal: str) -> str:
-    return "\n".join(
-        [
-            "# Project Context",
-            "",
-            "## Origin",
-            "```",
-            origin,
-            "```",
-            "",
-            "## Goal",
-            "```",
-            goal,
-            "```",
-            "",
-            "Hints are dynamic task input and are intentionally not stored in this instruction file.",
-        ]
-    )
-
-
-def _phase_context(task_type: str) -> str:
-    if task_type == "bootstrap":
-        body = [
-            "Bootstrap is target discovery and profiling only.",
-            "Do not perform vulnerability probing, exploitation, brute force, high-volume enumeration, fuzzing, or exploit-chain payloading.",
-            "Use only non-intrusive observations needed to identify the target, purpose, exposed entrypoints, technology, runtime fingerprints, access boundaries, supplied materials, and directly observable abnormal behavior.",
-        ]
-    elif task_type == "explore":
-        body = [
-            "Explore only the assigned Current Intent from the active task prompt.",
-            "Stop when evidence is sufficient, the path is disproven, or the active phase boundary is reached.",
-            "Do not broaden into adjacent intent families unless the active prompt and exposed capabilities explicitly require it.",
-        ]
-    elif task_type == "reason":
-        body = [
-            "Reason does not execute tools or continue exploration.",
-            "Judge whether the confirmed graph satisfies the goal, needs new intents, or should wait for existing open intents.",
-            "Use only the graph, hints, fact ids, open intents, and output schema in the active prompt.",
-        ]
-    else:
-        body = ["Follow the active phase prompt and use only the tools exposed for this task."]
-    return "# Phase Boundary\n\n" + "\n".join(f"- {line}" for line in body)
-
-
-def _policy(project_id: str, task_type: str, task_instance_id: str, context: WorkerExecutionContext) -> dict[str, object]:
-    return {
-        "project_id": project_id,
-        "task_type": task_type,
-        "task_instance_id": task_instance_id,
-        "read_only": task_type in {"reason", "bootstrap_conclude", "explore_conclude"},
-        "allowed_mcp_ids": [item.get("id") for item in context.mcp_servers or [] if isinstance(item.get("id"), str)],
-        "denied_tool_classes": _denied_tool_classes(task_type),
-        "hooks_enabled": False,
-    }
 
 
 def _denied_tool_classes(task_type: str) -> list[str]:
@@ -173,34 +203,3 @@ def _denied_tool_classes(task_type: str) -> list[str]:
     if task_type == "reason":
         return ["bash", "write", "mcp", "browser", "network"]
     return []
-
-
-def _agent_instruction(
-    *,
-    task_type: str,
-    role_instructions: str,
-    phase_context_path: str,
-    project_context_path: str,
-    capabilities_context_path: str,
-    policy_path: str,
-) -> str:
-    lines = [
-        "# Task Instructions",
-        "",
-        f"Current Cairn task phase: `{task_type}`.",
-        "",
-        "Read and follow these task-local context files:",
-        f"- Project context: `{project_context_path}`",
-        f"- Phase boundary: `{phase_context_path}`",
-        f"- Capability summary: `{capabilities_context_path}`",
-        f"- Machine-readable policy: `{policy_path}`",
-        "",
-        "The active task prompt is the authority for dynamic inputs, output markers, JSON schemas, current intent data, fact graph snapshots, and hints.",
-        "Do not treat hints, graph snapshots, or output markers as long-lived instructions.",
-        "Use only MCP servers and skills exposed for this task.",
-        "If a capability is available but does not match the active prompt and phase boundary, do not use it.",
-    ]
-    role = role_instructions.strip()
-    if role:
-        lines.extend(["", "## Project Role", role])
-    return "\n".join(lines) + "\n"
