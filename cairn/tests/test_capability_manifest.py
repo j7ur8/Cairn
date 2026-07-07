@@ -343,7 +343,9 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         self.assertIn("Preferred MCP servers", text)
         self.assertIn("chrome-devtools-host", text)
         self.assertIn("/tmp/cap/skills/js-reverse-automation", text)
-        self.assertIn("Read SKILL.md before using the paired browser MCP.", text)
+        self.assertNotIn("Use this MCP for runtime evidence.", text)
+        self.assertNotIn("Read SKILL.md before using the paired browser MCP.", text)
+        self.assertIn("read /tmp/cap/skills/js-reverse-automation/SKILL.md", text)
 
     def test_execute_instructions_render_files_appendix_as_separate_section(self) -> None:
         from cairn.dispatcher.capability_instructions import instructions

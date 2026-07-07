@@ -34,6 +34,7 @@ def run_healthcheck(
     command: list[str],
     *,
     timeout_seconds: int,
+    workdir: str | None = None,
     tty: bool = False,
     lease: HeartbeatLease | None = None,
     cancellation: TaskCancellation | None = None,
@@ -43,6 +44,7 @@ def run_healthcheck(
         _worker_exec_env(worker),
         command,
         timeout_seconds=timeout_seconds,
+        workdir=workdir,
         tty=tty,
     )
     process.start()
@@ -70,6 +72,7 @@ def run_worker_process(
     *,
     phase: str,
     timeout_seconds: int,
+    workdir: str | None = None,
     tty: bool = False,
     lease: HeartbeatLease | None = None,
     cancellation: TaskCancellation | None = None,
@@ -108,6 +111,7 @@ def run_worker_process(
         _worker_exec_env(worker),
         argv,
         timeout_seconds=timeout_seconds,
+        workdir=workdir,
         tty=tty,
         on_output=on_output if reporter is not None else None,
     )

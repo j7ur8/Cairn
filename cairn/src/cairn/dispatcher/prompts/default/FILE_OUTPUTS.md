@@ -1,6 +1,6 @@
 # Task
 
-Use project-relative paths for generated artifacts whenever possible. The current project root is the worker workspace root, so write outputs to relative directories like `reports/` and `exploit/`, not to a nested `project/` directory.
+Use the project workspace for generated artifacts. The project workspace root is `/home/kali/workspace`; write outputs to paths like `/home/kali/workspace/reports/` and `/home/kali/workspace/exploit/`, not to the task instruction directory.
 
 - `reports/` stores final reports and stage summaries.
 - `exploit/` stores PoCs, payloads, helper scripts, and reproduction artifacts.

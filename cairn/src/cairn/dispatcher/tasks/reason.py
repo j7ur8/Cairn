@@ -155,6 +155,7 @@ def run_reason_task(
             capability_scope=f"reason-{worker.name}-{reason_run_id[:12]}",
             reporter=reporter,
             phase="reason_execute",
+            project=project,
             cloak_sidecar_manager=services.cloak_sidecar_manager,
             preloaded_execution_config=execution_config,
         )
@@ -199,6 +200,7 @@ def run_reason_task(
             command.argv,
             phase="reason_execute",
             timeout_seconds=int(task_timeout["timeout"]),
+            workdir=command.workdir,
             tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
@@ -285,6 +287,7 @@ def run_reason_task(
     finally:
         if prepared is not None:
             prepared.capabilities.release_runtime_leases()
+        container_manager.finish()
         finish = client.finish_reason(
             project.project.id,
             worker.name,

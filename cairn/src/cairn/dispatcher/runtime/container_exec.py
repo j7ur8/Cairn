@@ -26,6 +26,7 @@ class ContainerExec:
         command: list[str],
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
+        workdir: str | None = None,
         tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess:
@@ -34,4 +35,4 @@ class ContainerExec:
         if timeout_seconds is not None:
             argv.extend(["timeout", "-k", f"{kill_after_seconds}s", f"{timeout_seconds}s"])
         argv.extend(command)
-        return ManagedProcess(container, argv, env, user=self.config.exec_user, tty=tty, on_output=on_output)
+        return ManagedProcess(container, argv, env, user=self.config.exec_user, workdir=workdir, tty=tty, on_output=on_output)

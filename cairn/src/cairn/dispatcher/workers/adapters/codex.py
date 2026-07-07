@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from cairn.dispatcher.workers.adapters._jsonl import extract_text_parts, iter_jsonl
-from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext
+from cairn.dispatcher.workers.base import DriverResult, RegexSessionDriver, WorkerExecutionContext, context_workdir
 from cairn.shared.config import WorkerConfig
 
 CODEX_ENV_PREFIX = [
@@ -13,7 +13,6 @@ CODEX_ENV_PREFIX = [
 
 CODEX_EXEC_GUARDRAILS = [
     "--ignore-user-config",
-    "--ignore-rules",
     "--skip-git-repo-check",
 ]
 DEFAULT_CODEX_REASONING_EFFORT = "high"
@@ -44,7 +43,7 @@ class CodexDriver(RegexSessionDriver):
         session: str | None,
         context: WorkerExecutionContext | None = None,
     ) -> DriverResult:
-        return DriverResult(argv=self._build_exec(worker, prompt, context))
+        return DriverResult(argv=self._build_exec(worker, prompt, context), workdir=context_workdir(context))
 
     def build_conclude(
         self,

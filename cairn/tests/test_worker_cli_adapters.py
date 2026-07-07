@@ -71,6 +71,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
             mcp_config_path="/tmp/cairn-capabilities/proj/task/mcp.json",
             skill_root="/tmp/cairn-capabilities/proj/task/skills",
             claude_plugin_dir="/tmp/cairn-capabilities/proj/task/claude-plugin",
+            instruction_root="/tmp/cairn-capabilities/proj/task/instructions",
         )
         result = ClaudeCodeDriver().build_execute(
             self._worker(),
@@ -94,6 +95,7 @@ class ClaudeCodeDriverCommandTests(unittest.TestCase):
             result.argv[result.argv.index("--add-dir") + 1],
             "/tmp/cairn-capabilities/proj/task/skills",
         )
+        self.assertEqual(result.workdir, "/tmp/cairn-capabilities/proj/task/instructions")
 
     def test_build_conclude_omits_claude_capabilities(self) -> None:
         from cairn.dispatcher.workers.adapters.claude_code import ClaudeCodeDriver
@@ -150,7 +152,7 @@ class CodexDriverCommandTests(unittest.TestCase):
         self.assertTrue(CodexDriver().requires_tty())
         self.assertNotIn("--ephemeral", result.argv)
         self.assertIn("--ignore-user-config", result.argv)
-        self.assertIn("--ignore-rules", result.argv)
+        self.assertNotIn("--ignore-rules", result.argv)
         self.assertIn("--skip-git-repo-check", result.argv)
 
     def test_build_healthcheck_uses_same_guardrails(self) -> None:
@@ -160,7 +162,7 @@ class CodexDriverCommandTests(unittest.TestCase):
         self.assertEqual(argv[:4], ["env", "CODEX_NON_INTERACTIVE=1", "codex", "exec"])
         self.assertIn("--ephemeral", argv)
         self.assertIn("--ignore-user-config", argv)
-        self.assertIn("--ignore-rules", argv)
+        self.assertNotIn("--ignore-rules", argv)
 
     def test_build_conclude_uses_noninteractive_ephemeral_invocation(self) -> None:
         from cairn.dispatcher.workers.adapters.codex import CodexDriver
@@ -173,7 +175,7 @@ class CodexDriverCommandTests(unittest.TestCase):
         self.assertEqual(argv[:5], ["env", "CODEX_NON_INTERACTIVE=1", "codex", "exec", "resume"])
         self.assertNotIn("--ephemeral", argv)
         self.assertIn("--ignore-user-config", argv)
-        self.assertIn("--ignore-rules", argv)
+        self.assertNotIn("--ignore-rules", argv)
         self.assertIn("--skip-git-repo-check", argv)
 
     def test_build_execute_uses_configured_reasoning_effort(self) -> None:
@@ -215,12 +217,14 @@ class CodexDriverCommandTests(unittest.TestCase):
         context = WorkerExecutionContext(
             skill_root="/tmp/cairn-capabilities/proj/skills",
             claude_plugin_dir="/tmp/cairn-capabilities/proj/claude-plugin",
+            instruction_root="/tmp/cairn-capabilities/proj/instructions",
         )
         result = CodexDriver().build_execute(self._worker(), "hello", None, context)
         self.assertIn("--add-dir", result.argv)
         self.assertIn("/tmp/cairn-capabilities/proj/skills", result.argv)
         self.assertNotIn("--plugin-dir", result.argv)
         self.assertNotIn("/tmp/cairn-capabilities/proj/claude-plugin", result.argv)
+        self.assertEqual(result.workdir, "/tmp/cairn-capabilities/proj/instructions")
 
 
 class CodexTraceParserTests(unittest.TestCase):

@@ -8,8 +8,11 @@ from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeContext, CloakBrowserManager
 from cairn.dispatcher.roles import RoleInjection, inject_project_role
 from cairn.dispatcher.tasks.context import ContainerRuntime
+from cairn.dispatcher.tasks.instruction_files import inject_task_instructions
+from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.capability_projection import project_capability_data
 from cairn.shared.config import DispatchConfig
+from cairn.shared.contracts import ProjectDetail
 
 
 @dataclass(slots=True)
@@ -31,6 +34,7 @@ def prepare_task_execution(
     capability_scope: str,
     reporter: AnyReporter,
     phase: str,
+    project: ProjectDetail | None = None,
     cloak_sidecar_manager: CloakBrowserManager | None = None,
     preloaded_execution_config: dict | None = None,
 ) -> PreparedTaskExecution | None:
@@ -72,6 +76,18 @@ def prepare_task_execution(
         reporter.emit_result("role", role.summary)
     for error in role.errors or []:
         reporter.emit_error("role", "error", error)
+    if isinstance(capabilities.context, WorkerExecutionContext):
+        inject_task_instructions(
+            container_manager=container_manager,
+            container_name=container_name,
+            project=project,
+            project_id=project_id,
+            task_type=task_type,
+            task_instance_id=capability_scope,
+            role_instructions=role.instructions,
+            capability_instructions=capabilities.instructions,
+            context=capabilities.context,
+        )
     return PreparedTaskExecution(
         execution_config=execution_config,
         task_timeout=task_timeout,

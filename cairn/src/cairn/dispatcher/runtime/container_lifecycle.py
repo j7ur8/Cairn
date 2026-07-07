@@ -101,6 +101,37 @@ class ContainerLifecycle:
             return name
         raise RuntimeError(f"failed to create container {name}")
 
+    def create_named_container(
+        self,
+        *,
+        project_id: str,
+        name: str,
+        config: ContainerConfig | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> str:
+        effective_config = config or self.config
+        self.remove_container(name, force=True)
+        try:
+            self.access.client.containers.run(
+                effective_config.image,
+                ["sleep", "infinity"],
+                detach=True,
+                name=name,
+                network_mode=effective_config.network_mode,
+                cap_add=effective_config.cap_add or None,
+                volumes=docker_volumes(effective_config, project_id) or None,
+                user=effective_config.user,
+                labels=labels or container_labels(project_id),
+                mem_limit=effective_config.mem_limit,
+                pids_limit=effective_config.pids_limit,
+                nano_cpus=effective_config.nano_cpus,
+            )
+            LOG.info("created named container project=%s container=%s", project_id, name)
+            self._workspace_preflight(name, project_id, effective_config)
+            return name
+        except self.docker_exception_type as exc:
+            raise RuntimeError(f"failed to create container {name}: {exc}") from exc
+
     def _recreate_if_config_mismatch(self, name: str, project_id: str, config: ContainerConfig) -> bool:
         mismatches = self._mount_mismatches(name, project_id, config)
         if not mismatches:

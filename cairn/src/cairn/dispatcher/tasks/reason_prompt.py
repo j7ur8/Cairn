@@ -9,6 +9,7 @@ from cairn.dispatcher.prompting import (
     load_prompt_from_execution_config,
     render_prompt,
 )
+from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.fact_views import FactViewRenderer
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
@@ -82,14 +83,13 @@ def build_reason_execute_prompt(
             reporter,
         ),
         {
+            "hints": bootstrap_prompt_replacements(project)["hints"],
             "fact_view": fact_view_reference,
             "full_graph": full_graph_reference,
             "graph_yaml": full_graph_reference,
             "fact_ids": format_fact_ids(allowed_fact_ids),
             "open_intents": format_open_intents(open_intents),
             "max_intents": str(config.tasks.reason.max_intents),
-            "capability_instructions": prepared.capabilities.instructions,
-            "role_instructions": prepared.role.instructions,
         },
     )
     return prompt, open_intents, allowed_fact_ids

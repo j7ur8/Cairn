@@ -36,8 +36,6 @@ def _build_prompt(ctx: IntentTaskContext) -> str:
         ),
         {
             **bootstrap_prompt_replacements(ctx.project),
-            "capability_instructions": prepared.capabilities.instructions,
-            "role_instructions": prepared.role.instructions,
         },
     )
 

@@ -20,15 +20,7 @@ Normal return example:
 - On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 ## Context
-### Origin
-```
-{origin}
-```
-
-### Goal
-```
-{goal}
-```
+Origin and Goal are available in the task-local project context file referenced by CLAUDE.md/AGENTS.md.
 
 ### Hints
 ```

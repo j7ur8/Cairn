@@ -23,6 +23,7 @@ class ContainerRuntime(Protocol):
         command: list[str],
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
+        workdir: str | None = None,
         tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess: ...
@@ -30,6 +31,8 @@ class ContainerRuntime(Protocol):
     def write_text_file(self, container_name: str, path: str, content: str) -> None: ...
 
     def write_directory(self, container_name: str, path: str, source: Path) -> None: ...
+
+    def finish(self) -> None: ...
 
 
 @dataclass(slots=True)

@@ -85,12 +85,14 @@ class ManagedProcess:
         command: list[str],
         env: dict[str, str],
         user: str | None = None,
+        workdir: str | None = None,
         tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ):
         self.command = command
         self.env = env
         self.user = user
+        self.workdir = workdir
         self.tty = tty
         self.on_output = on_output
         self._container = container
@@ -115,6 +117,7 @@ class ManagedProcess:
             tty=self.tty,
             environment=self.env,
             user=self.user,
+            workdir=self.workdir,
         )
         self._exec_id = exec_info["Id"]
         self._reader = threading.Thread(target=self._read_stream, daemon=True)

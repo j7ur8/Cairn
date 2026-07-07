@@ -38,10 +38,14 @@ from cairn.dispatcher.runtime.container_lifecycle import ContainerLifecycle
 from cairn.dispatcher.runtime.docker_labels import (
     CONTAINER_PREFIX,
     LABEL_MANAGED,
+    LABEL_KIND,
+    LABEL_PHASE,
     STARTUP_CONTAINER_NAME,
     STARTUP_PROJECT_ID,
     container_name,
+    container_labels,
     is_startup_container,
+    runner_container_name,
 )
 from cairn.dispatcher.runtime.mounts import docker_volumes, render_bind_mounts
 from cairn.dispatcher.runtime.process import ManagedProcess
@@ -111,6 +115,25 @@ class ContainerManager:
         if container_config is None:
             return self._lifecycle.ensure_running(project_id)
         return self._lifecycle.ensure_running_with_config(project_id, container_config)
+
+    def create_runner_container(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        phase: str,
+        container_config: ContainerConfig | None = None,
+    ) -> str:
+        name = runner_container_name(project_id, task_id)
+        labels = container_labels(project_id, kind="runner", task_id=task_id, phase=phase)
+        labels[LABEL_KIND] = "runner"
+        labels[LABEL_PHASE] = phase
+        return self._lifecycle.create_named_container(
+            project_id=project_id,
+            name=name,
+            config=container_config or self._config,
+            labels=labels,
+        )
 
     def create_startup_container(self) -> str:
         name = self._STARTUP_NAME
@@ -194,6 +217,7 @@ class ContainerManager:
         command: list[str],
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
+        workdir: str | None = None,
         tty: bool = False,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ManagedProcess:
@@ -203,6 +227,7 @@ class ContainerManager:
             command,
             timeout_seconds=timeout_seconds,
             kill_after_seconds=kill_after_seconds,
+            workdir=workdir,
             tty=tty,
             on_output=on_output,
         )

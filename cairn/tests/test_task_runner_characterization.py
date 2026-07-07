@@ -254,7 +254,7 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         self.assertIs(inject_caps.call_args.args[1], client)
         self.assertEqual(inject_caps.call_args.args[3], "worker")
 
-    def test_role_instructions_render_inside_task_section(self) -> None:
+    def test_role_instructions_do_not_render_inside_phase_prompt(self) -> None:
         template = (_REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default" / "bootstrap.md").read_text(
             encoding="utf-8"
         )
@@ -271,8 +271,52 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         )
 
         task_section = prompt.split("## Output Requirements", 1)[0]
-        self.assertIn("## Project Type\nThis is a CTF project.", task_section)
+        self.assertNotIn("## Project Type\nThis is a CTF project.", task_section)
         self.assertNotIn("selected a primary role", prompt)
+
+    def test_task_instruction_files_keep_hints_out_of_agent_instructions(self) -> None:
+        from cairn.dispatcher.tasks.instruction_files import inject_task_instructions
+        from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+        class Writer:
+            def __init__(self):
+                self.files = {}
+
+            def write_text_file(self, _container_name, path, content):
+                self.files[path] = content
+
+            def write_directory(self, *_args, **_kwargs):
+                raise AssertionError("unexpected directory write")
+
+            def ensure_running(self, *_args, **_kwargs):
+                return "runner"
+
+            def build_exec_process(self, *_args, **_kwargs):
+                raise AssertionError("unexpected exec")
+
+            def finish(self):
+                pass
+
+        writer = Writer()
+        context = WorkerExecutionContext(mcp_servers=[{"id": "cairn-resources"}])
+        paths = inject_task_instructions(
+            container_manager=writer,
+            container_name="runner",
+            project=None,
+            project_id="proj",
+            task_type="bootstrap",
+            task_instance_id="task",
+            role_instructions="## Role\nStable role text.",
+            capability_instructions="Capability text.",
+            context=context,
+        )
+
+        self.assertIn("Stable role text.", writer.files[paths.claude_md_path])
+        self.assertIn("Capability text.", writer.files[paths.capabilities_context_path])
+        self.assertNotIn("Hints", writer.files[paths.claude_md_path])
+        self.assertNotIn("Hints", writer.files[paths.agents_md_path])
+        self.assertIn('"hooks_enabled": false', writer.files[paths.policy_path])
+        self.assertEqual(context.instruction_root, paths.instruction_root)
 
     def test_success_returns_complete_status(self) -> None:
         with _patch_bootstrap(process_result=_result(returncode=0)) as (es, release, fallback, canc):

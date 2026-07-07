@@ -27,7 +27,6 @@ def instructions(
             _append_text(lines, "Description", mcp.description)
             _append_list(lines, "Use when", mcp.use_when)
             _append_list(lines, "Required skills", mcp.required_skill_ids)
-            _append_text(lines, "Instruction", mcp.activation_hint)
             lines.append("")
     if skills:
         lines.extend(["## Skills", f"Directory root: {skill_root}", ""])
@@ -41,10 +40,7 @@ def instructions(
             _append_text(lines, "Description", skill.description)
             _append_list(lines, "Use when", skill.use_when)
             _append_list(lines, "Preferred MCP servers", skill.preferred_mcp_ids)
-            if skill.activation_hint:
-                _append_text(lines, "Instruction", skill.activation_hint)
-            else:
-                lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md for domain guidance and adapt any procedures or examples to the current evidence, scope, and constraints.")
+            lines.append(f"  Instruction: When routing conditions match, read {path}/SKILL.md for domain guidance and adapt any procedures or examples to the current evidence, scope, and constraints.")
             lines.append("")
     if files_appendix.strip():
         lines.extend(["## Files", files_appendix.strip(), ""])
@@ -77,7 +73,6 @@ def reason_instructions(
             _append_text(lines, "Description", mcp.description, indent="    ")
             _append_list(lines, "Use when", mcp.use_when, indent="    ")
             _append_list(lines, "Required skills", mcp.required_skill_ids, indent="    ")
-            _append_text(lines, "Instruction", mcp.activation_hint, indent="    ")
         lines.append("")
     if skills:
         lines.append("- Skill metadata:")
@@ -86,7 +81,6 @@ def reason_instructions(
             _append_text(lines, "Description", skill.description, indent="    ")
             _append_list(lines, "Use when", skill.use_when, indent="    ")
             _append_list(lines, "Preferred MCP servers", skill.preferred_mcp_ids, indent="    ")
-            _append_text(lines, "Instruction", skill.activation_hint, indent="    ")
         lines.append("")
     lines.extend(
         [

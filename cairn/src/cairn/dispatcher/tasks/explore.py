@@ -201,4 +201,5 @@ def _run_explore_conclude_only_task(
         reporter.emit_error("explore_conclude", "error", "task crashed")
         return "failed"
     finally:
+        container_manager.finish()
         lifecycle.finish(outcome)

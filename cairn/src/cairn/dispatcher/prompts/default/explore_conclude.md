@@ -26,6 +26,11 @@ Normal return example:
 - On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 ## Context
+### Hints
+```
+{hints}
+```
+
 ### Fact View
 ```
 {fact_view}

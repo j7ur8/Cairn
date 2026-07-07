@@ -1,5 +1,4 @@
 # Task
-{role_instructions}
 
 Do not perform vulnerability probing or exploitation during bootstrap. Do not send SQLi, XSS, RCE, SSRF, traversal, template-injection, deserialization, WAF-boundary, authentication-bypass, brute-force, password-guessing, high-volume directory-enumeration, fuzzing, or exploit-chain payloads. Verification and exploitation belong in later explore intents created by Reason.
 
@@ -22,18 +21,8 @@ Normal return example:
 - Do not put long data blobs in the marked text. Long data should be placed in a file and referenced from the marked text instead.
 - On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
-{capability_instructions}
-
 ## Context
-### Origin
-```
-{origin}
-```
-
-### Goal
-```
-{goal}
-```
+Origin and Goal are available in the task-local project context file referenced by CLAUDE.md/AGENTS.md.
 
 ### Hints
 ```

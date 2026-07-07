@@ -6,6 +6,7 @@ from cairn.dispatcher.prompting import (
     load_prompt_from_execution_config,
     render_prompt,
 )
+from cairn.dispatcher.tasks.bootstrap_prompt import bootstrap_prompt_replacements
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.tasks.fact_views import FactViewRenderer
 from cairn.dispatcher.tasks.runner import PreparedTaskExecution
@@ -50,13 +51,12 @@ def build_explore_execute_prompt(
             reporter,
         ),
         {
+            "hints": bootstrap_prompt_replacements(project)["hints"],
             "fact_view": fact_view_reference,
             "full_graph": full_graph_reference,
             "graph_yaml": full_graph_reference,
             "intent_id": intent.id,
             "intent_description": intent.description,
-            "capability_instructions": prepared.capabilities.instructions,
-            "role_instructions": prepared.role.instructions,
         },
     )
 
@@ -97,6 +97,7 @@ def build_explore_conclude_prompt(
             reporter,
         ),
         {
+            "hints": bootstrap_prompt_replacements(project)["hints"],
             "fact_view": fact_view_reference,
             "full_graph": full_graph_reference,
             "graph_yaml": full_graph_reference,

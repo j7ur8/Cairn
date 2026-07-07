@@ -174,6 +174,7 @@ def run_intent_task(
             capability_scope=spec.capability_scope(intent),
             reporter=reporter,
             phase=spec.prepare_phase,
+            project=project,
             cloak_sidecar_manager=services.cloak_sidecar_manager,
             preloaded_execution_config=execution_config,
         )
@@ -209,6 +210,7 @@ def run_intent_task(
             execute.argv,
             phase=spec.exec_phase,
             timeout_seconds=int(task_timeout["timeout"]),
+            workdir=execute.workdir,
             tty=driver.requires_tty(),
             lease=lease,
             cancellation=cancellation,
@@ -229,6 +231,7 @@ def run_intent_task(
     finally:
         if prepared is not None:
             prepared.capabilities.release_runtime_leases()
+        container_manager.finish()
         lifecycle.finish(outcome)
 
 

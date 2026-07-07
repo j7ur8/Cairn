@@ -23,7 +23,7 @@ class PromptSnapshotTests(unittest.TestCase):
                 ]
                 self.assertEqual(h1s, ["Task"])
 
-    def test_default_templates_keep_role_in_task_and_exclude_it_from_conclude(self) -> None:
+    def test_default_templates_keep_role_out_of_phase_prompts(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
 
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
@@ -35,9 +35,9 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("# Task\n", bootstrap)
         self.assertIn("# Task\n", explore)
         self.assertIn("# Task\n", reason)
-        self.assertIn("{role_instructions}", bootstrap.split("## Output Requirements", 1)[0])
-        self.assertIn("{role_instructions}", explore.split("## Output Requirements", 1)[0])
-        self.assertIn("{role_instructions}", reason.split("## Output Requirements", 1)[0])
+        self.assertNotIn("{role_instructions}", bootstrap)
+        self.assertNotIn("{role_instructions}", explore)
+        self.assertNotIn("{role_instructions}", reason)
         self.assertNotIn("{role_instructions}", bootstrap_conclude)
         self.assertNotIn("{role_instructions}", explore_conclude)
 
@@ -88,9 +88,9 @@ class PromptSnapshotTests(unittest.TestCase):
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
         task_section = bootstrap.split("## Output Requirements", 1)[0]
 
-        self.assertTrue(task_section.strip().startswith("# Task\n{role_instructions}"))
-        self.assertIn("{role_instructions}", bootstrap)
-        self.assertIn("{capability_instructions}", bootstrap)
+        self.assertTrue(task_section.strip().startswith("# Task"))
+        self.assertNotIn("{role_instructions}", bootstrap)
+        self.assertNotIn("{capability_instructions}", bootstrap)
         self.assertIn("target discovery and profiling only", task_section)
         self.assertIn("Build a concise target profile", task_section)
         self.assertIn("static, provided, and publicly observable facts", task_section)
@@ -229,21 +229,22 @@ class PromptSnapshotTests(unittest.TestCase):
         reason = (default_dir / "reason.md").read_text(encoding="utf-8")
 
         self.assertNotIn("{capability_instructions}", reason)
-        self.assertIn("{role_instructions}", reason)
+        self.assertNotIn("{role_instructions}", reason)
+        self.assertIn("{hints}", reason)
         self.assertIn("{fact_view}", reason)
         self.assertIn("{full_graph}", reason)
         self.assertIn("{fact_ids}", reason)
         self.assertIn("{open_intents}", reason)
         self.assertIn("{max_intents}", reason)
 
-    def test_default_bootstrap_and_explore_use_capability_instructions_only(self) -> None:
+    def test_default_bootstrap_and_explore_exclude_capability_instructions(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
         explore = (default_dir / "explore.md").read_text(encoding="utf-8")
 
         for name, prompt in (("bootstrap.md", bootstrap), ("explore.md", explore)):
             with self.subTest(name=name):
-                self.assertIn("{capability_instructions}", prompt)
+                self.assertNotIn("{capability_instructions}", prompt)
                 self.assertNotIn("{remote_" "support_instructions}", prompt)
                 h1s = [line for line in prompt.splitlines() if line.startswith("# ") and not line.startswith("## ")]
                 self.assertEqual(h1s, ["# Task"])

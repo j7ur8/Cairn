@@ -4,8 +4,6 @@ You need to judge two things:
 1. Whether the current facts already satisfy Goal
 2. If not, whether new intents should currently be proposed
 
-{role_instructions}
-
 ## Output Requirements
 Return exactly one marker-wrapped JSON object. The marker chooses the reason state. Do not output markdown fences, explanations, or text outside the marker pair. The JSON inside the marker must be valid, including proper escaping of quotation marks.
 
@@ -36,6 +34,11 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
 ### Context
+#### Hints
+```
+{hints}
+```
+
 #### Fact View
 ```
 {fact_view}

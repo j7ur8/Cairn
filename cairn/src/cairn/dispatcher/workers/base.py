@@ -14,6 +14,7 @@ from cairn.shared.config import WorkerConfig
 class DriverResult:
     argv: list[str]
     session: str | None = None
+    workdir: str | None = None
 
 
 @dataclass(slots=True)
@@ -22,6 +23,11 @@ class WorkerExecutionContext:
     mcp_config_path: str = ""
     skill_root: str = ""
     claude_plugin_dir: str = ""
+    task_workspace: str = ""
+    instruction_root: str = ""
+    claude_md_path: str = ""
+    agents_md_path: str = ""
+    policy_path: str = ""
     mcp_servers: list[dict[str, Any]] | None = None
     skills: list[str] | None = None
 
@@ -76,6 +82,12 @@ class WorkerDriver(abc.ABC):
 
     def extract_response_text(self, stdout: str, stderr: str) -> str:
         return stdout
+
+
+def context_workdir(context: WorkerExecutionContext | None) -> str | None:
+    if context is None:
+        return None
+    return context.instruction_root or context.task_workspace or None
 
 
 class SeedSessionDriver(WorkerDriver):

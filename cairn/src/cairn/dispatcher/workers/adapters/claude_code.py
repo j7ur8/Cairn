@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from cairn.dispatcher.workers.adapters._curl import build_verbose_curl_healthcheck, expand_env, render_curl_command
 from cairn.dispatcher.workers.adapters._jsonl import extract_text_parts, iter_jsonl
-from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext
+from cairn.dispatcher.workers.base import DriverResult, SeedSessionDriver, WorkerExecutionContext, context_workdir
 from cairn.shared.config import WorkerConfig
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -101,6 +101,7 @@ class ClaudeCodeDriver(SeedSessionDriver):
                 prompt,
             ],
             session=session,
+            workdir=context_workdir(context),
         )
 
     def build_conclude(

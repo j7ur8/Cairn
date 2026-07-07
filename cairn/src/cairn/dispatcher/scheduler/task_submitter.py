@@ -38,12 +38,22 @@ class SubmissionContext:
 
 
 @dataclass(slots=True)
-class ProjectContainerRuntime:
+class TaskRunnerRuntime:
     base: ContainerManager
     container_config: ContainerConfig | None
+    task_id: str
+    phase: str
+    _container_name: str | None = None
 
     def ensure_running(self, project_id: str, container_config: ContainerConfig | None = None) -> str:
-        return self.base.ensure_running(project_id, container_config or self.container_config)
+        if self._container_name is None:
+            self._container_name = self.base.create_runner_container(
+                project_id=project_id,
+                task_id=self.task_id,
+                phase=self.phase,
+                container_config=container_config or self.container_config,
+            )
+        return self._container_name
 
     def build_exec_process(self, *args, **kwargs):
         return self.base.build_exec_process(*args, **kwargs)
@@ -53,6 +63,12 @@ class ProjectContainerRuntime:
 
     def write_directory(self, *args, **kwargs):
         return self.base.write_directory(*args, **kwargs)
+
+    def finish(self) -> None:
+        if self._container_name is None:
+            return
+        self.base.remove_container(self._container_name, force=True)
+        self._container_name = None
 
 
 class TaskSubmitter:
@@ -153,7 +169,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.reason_runner,
-                self._task_services(context.execution_config),
+                self._task_services(context.execution_config, task_id=f"reason-{run_id}", phase="reason"),
                 TaskInvocation(
                     project=project,
                     worker=context.worker,
@@ -213,7 +229,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.bootstrap_runner,
-                self._task_services(context.execution_config),
+                self._task_services(context.execution_config, task_id=f"bootstrap-{intent.id}", phase="bootstrap"),
                 TaskInvocation(
                     project=project,
                     intent=intent,
@@ -267,7 +283,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.explore_runner,
-                self._task_services(context.execution_config),
+                self._task_services(context.execution_config, task_id=f"explore-{intent.id}", phase="explore"),
                 TaskInvocation(
                     project=project,
                     intent=intent,
@@ -339,7 +355,7 @@ class TaskSubmitter:
             ),
             submit=lambda cancellation: self.executor.submit(
                 self.explore_runner,
-                self._task_services(context.execution_config),
+                self._task_services(context.execution_config, task_id=f"explore-conclude-{intent.id}", phase="explore_conclude"),
                 TaskInvocation(
                     project=project,
                     intent=intent,
@@ -366,13 +382,15 @@ class TaskSubmitter:
             ),
         )
 
-    def _task_services(self, execution_config: dict) -> TaskServices:
+    def _task_services(self, execution_config: dict, *, task_id: str, phase: str) -> TaskServices:
         return TaskServices(
             config=self.config,
             client=self.client,
-            container_runtime=ProjectContainerRuntime(
+            container_runtime=TaskRunnerRuntime(
                 self.container_manager,
                 self._container_config_from_execution_config(execution_config),
+                task_id,
+                phase,
             ),
             cloak_sidecar_manager=self.cloak_sidecar_manager,
         )

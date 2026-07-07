@@ -173,7 +173,7 @@ def inject_project_capabilities(
     mcp_path = f"{capability_root}/mcp.json"
     skill_root = f"{capability_root}/skills"
     claude_plugin_dir = f"{capability_root}/claude-plugin"
-    injected_mcp_servers = list(mcp_servers)
+    injected_mcp_servers = _task_scoped_mcp_servers(mcp_servers, task_type)
     injected_skills: list[SkillCapabilityConfig] = []
     injected_mcp_details: list[dict[str, Any]] = []
     runtime_leases: dict[str, BrowserRuntimeLease] = {}
@@ -238,7 +238,7 @@ def inject_project_capabilities(
         except Exception as exc:
             errors.append(f"claude_plugin: failed to write session plugin: {exc}")
             claude_plugin_dir = ""
-    resources_appendix = _resources_appendix(injected_mcp_servers)
+    resources_appendix = _resources_appendix(injected_mcp_servers, task_type)
 
     rendered_instructions = instructions(
         mcp_path,
@@ -272,9 +272,19 @@ def _safe_path_segment(value: str) -> str:
     return text or "unknown"
 
 
-def _resources_appendix(mcp_servers: list[McpServerCapabilityConfig]) -> str:
+def _resources_appendix(mcp_servers: list[McpServerCapabilityConfig], task_type: TaskType) -> str:
     if not any(mcp.id == "cairn-resources" for mcp in mcp_servers):
         return ""
+    if task_type == "bootstrap":
+        return "\n".join(
+            [
+                "Use the injected cairn-resources MCP server in read-only mode to query Cairn resource state instead of relying on prompt summaries.",
+                "Servers are global AI-accessible remote server capabilities; they are not automatically proxies or relays.",
+                "For Servers, use servers.list only.",
+                "For Project Proxy endpoints, use project_proxy.list_endpoints, project_proxy.resolve_chain, and project_proxy.explain_endpoint only.",
+                "Do not infer that a Server is a proxy endpoint unless the Cairn Resources MCP data explicitly supports that relationship.",
+            ]
+        )
     return "\n".join(
         [
             "Use the injected cairn-resources MCP server to query Cairn resource state instead of relying on prompt summaries.",
@@ -284,6 +294,19 @@ def _resources_appendix(mcp_servers: list[McpServerCapabilityConfig]) -> str:
             "Do not infer that a Server is a proxy endpoint unless the Cairn Resources MCP data explicitly supports that relationship.",
         ]
     )
+
+
+def _task_scoped_mcp_servers(
+    mcp_servers: list[McpServerCapabilityConfig],
+    task_type: TaskType,
+) -> list[McpServerCapabilityConfig]:
+    scoped: list[McpServerCapabilityConfig] = []
+    for mcp in mcp_servers:
+        if task_type == "bootstrap" and mcp.id == "cairn-resources":
+            scoped.append(mcp.model_copy(update={"env": {**mcp.env, "CAIRN_RESOURCES_READ_ONLY": "1"}}))
+            continue
+        scoped.append(mcp)
+    return scoped
 
 
 def _capability_catalog_from_selection(

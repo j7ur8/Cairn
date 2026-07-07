@@ -34,7 +34,6 @@ capabilities:
     activation_hint: Use this MCP only when an actual Kali command needs to run. Follow
       the active task workflow before choosing commands and recording evidence.
     task_types:
-    - bootstrap
     - explore
   - id: metasploit-mcp
     name: Metasploit MCP
@@ -55,7 +54,6 @@ capabilities:
       module, state the target, module, payload/options, expected validation, and
       cleanup requirements; follow the active scope, ROE, and reporting workflow.
     task_types:
-    - bootstrap
     - explore
   - id: chrome-devtools-host
     name: Host Chrome DevTools MCP

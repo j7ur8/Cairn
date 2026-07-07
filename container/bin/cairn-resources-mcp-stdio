@@ -11,6 +11,7 @@ import urllib.request
 
 SERVER_URL = os.environ.get("CAIRN_SERVER_URL", "http://cairn-server:8000").rstrip("/")
 API_TOKEN = os.environ.get("CAIRN_API_TOKEN", "")
+READ_ONLY = os.environ.get("CAIRN_RESOURCES_READ_ONLY", "").strip().lower() in {"1", "true", "yes"}
 
 
 def respond(request_id, result=None, error=None):
@@ -57,24 +58,36 @@ def tools():
     project_id = {"type": "string", "description": "Cairn project id"}
     endpoint_id = {"type": "string", "description": "Project proxy endpoint id"}
     server_id = {"type": "string", "description": "Server resource id"}
-    return [
+    read_only_tools = [
         tool("servers.list", "List global AI-accessible remote server capabilities.", obj),
+        tool("project_proxy.list_endpoints", "List Project Proxy endpoints for a project.", {"type": "object", "properties": {"project_id": project_id}, "required": ["project_id"], "additionalProperties": False}),
+        tool("project_proxy.resolve_chain", "Resolve prerequisite proxy chain for an endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+        tool("project_proxy.explain_endpoint", "Explain endpoint connection details, chain, reachability, usage mode, and health.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
+    ]
+    if READ_ONLY:
+        return read_only_tools
+    return [
+        *read_only_tools,
         tool("servers.test_ssh", "Run an SSH smoke test for a configured server.", {"type": "object", "properties": {"server_id": server_id, "command": {"type": "string", "default": "true"}, "timeout_seconds": {"type": "integer", "default": 12}}, "required": ["server_id"], "additionalProperties": False}),
         tool("servers.run_command", "Run a command on a configured server over SSH.", {"type": "object", "properties": {"server_id": server_id, "command": {"type": "string"}, "timeout_seconds": {"type": "integer", "default": 30}}, "required": ["server_id", "command"], "additionalProperties": False}),
         tool("servers.inspect_listening_ports", "Inspect listening TCP ports on a configured server.", {"type": "object", "properties": {"server_id": server_id}, "required": ["server_id"], "additionalProperties": False}),
-        tool("project_proxy.list_endpoints", "List Project Proxy endpoints for a project.", {"type": "object", "properties": {"project_id": project_id}, "required": ["project_id"], "additionalProperties": False}),
         tool("project_proxy.register_endpoint", "Register a Project Proxy endpoint discovered or created during work.", {"type": "object", "properties": {"project_id": project_id, "endpoint": {"type": "object"}}, "required": ["project_id", "endpoint"], "additionalProperties": False}),
         tool("project_proxy.update_endpoint", "Update a Project Proxy endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "endpoint": {"type": "object"}}, "required": ["project_id", "endpoint_id", "endpoint"], "additionalProperties": False}),
         tool("project_proxy.delete_endpoint", "Delete a Project Proxy endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
-        tool("project_proxy.resolve_chain", "Resolve prerequisite proxy chain for an endpoint.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
         tool("project_proxy.test_endpoint", "Record/test a Project Proxy endpoint health state.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "target_url": {"type": "string"}, "timeout_seconds": {"type": "integer", "default": 10}}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
-        tool("project_proxy.explain_endpoint", "Explain endpoint connection details, chain, reachability, usage mode, and health.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id}, "required": ["project_id", "endpoint_id"], "additionalProperties": False}),
         tool("project_proxy.record_usage_result", "Record whether a Project Proxy endpoint worked for a concrete use.", {"type": "object", "properties": {"project_id": project_id, "endpoint_id": endpoint_id, "ok": {"type": "boolean"}, "message": {"type": "string"}}, "required": ["project_id", "endpoint_id", "ok"], "additionalProperties": False}),
     ]
 
 
 def call_tool(name, args):
     args = args or {}
+    if READ_ONLY and name not in {
+        "servers.list",
+        "project_proxy.list_endpoints",
+        "project_proxy.resolve_chain",
+        "project_proxy.explain_endpoint",
+    }:
+        raise RuntimeError(f"tool is not available in read-only mode: {name}")
     if name == "servers.list":
         return api("GET", "/servers")
     if name == "servers.test_ssh":
