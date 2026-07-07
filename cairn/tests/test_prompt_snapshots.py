@@ -92,14 +92,13 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertNotIn("{role_instructions}", bootstrap)
         self.assertNotIn("{capability_instructions}", bootstrap)
         self.assertIn("target discovery and profiling only", task_section)
+        self.assertIn("task-local phase boundary", task_section)
         self.assertIn("Build a concise target profile", task_section)
         self.assertIn("static, provided, and publicly observable facts", task_section)
         self.assertIn("technology and runtime fingerprints", task_section)
-        self.assertIn("Allowed bootstrap activity is limited to non-intrusive target profiling", task_section)
-        self.assertIn("Do not perform vulnerability probing or exploitation", task_section)
-        self.assertIn("SQLi, XSS, RCE", task_section)
-        self.assertIn("authentication-bypass", task_section)
-        self.assertIn("high-volume directory-enumeration", task_section)
+        self.assertNotIn("SQLi, XSS, RCE", task_section)
+        self.assertNotIn("authentication-bypass", task_section)
+        self.assertNotIn("high-volume directory-enumeration", task_section)
         self.assertNotIn("CTF", task_section)
         self.assertNotIn("flag", task_section)
         self.assertNotIn("summarize", bootstrap)
@@ -119,6 +118,24 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("## Output Requirements", bootstrap)
         self.assertIn("## Context", bootstrap)
 
+    def test_runtime_instruction_preview_owns_phase_boundaries(self) -> None:
+        from cairn.server.routers.prompt_groups import read_prompt_instruction_previews
+
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
+        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        previews = read_prompt_instruction_previews()
+        phase_files = {
+            phase.phase: {file.path: file.content for file in phase.files}
+            for phase in previews.phases
+        }
+
+        self.assertNotIn("SQLi, XSS, RCE", bootstrap)
+        self.assertNotIn("Stop when evidence is sufficient", explore)
+        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["context/phase.md"])
+        self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["context/phase.md"])
+        self.assertIn("Reason does not execute tools", phase_files["reason"]["context/phase.md"])
+
     def test_role_prompts_keep_project_semantics_without_bootstrap_protocol(self) -> None:
         roles_dir = _REPO / "capabilities" / "roles"
         cases = {
@@ -136,6 +153,7 @@ class PromptSnapshotTests(unittest.TestCase):
                     "page source",
                     "linked JavaScript/CSS/assets",
                     "API clients",
+                    "leaked information",
                     "For pwn, reverse, crypto, forensics, or misc challenges",
                     "binaries, protocols, artifacts, encodings, algorithms",
                     "If a flag or proof is directly exposed",
@@ -148,6 +166,8 @@ class PromptSnapshotTests(unittest.TestCase):
                     "information_leak.json",
                     "JavaScript reverse engineering",
                     "deep exploitation",
+                    "use skill",
+                    "infromation",
                 ],
             },
             "cypher-pentest-operator/ROLE.md": {

@@ -44,18 +44,21 @@ flowchart TB
         Submitter["TaskSubmitter\nclaims + future registry"]
         Runtime["ContainerManager\nDocker lifecycle/files/exec"]
         Cloak["CloakSidecarManager\nproject browser sidecar"]
+        Tools["ToolSidecarManager\nKali + Metasploit HTTP MCP sidecars"]
         Protocol["CairnClient protocol facets\nHTTP + service token"]
     end
 
-    subgraph Worker["Worker container"]
+    subgraph Worker["Worker runner container"]
         Drivers["WorkerDriver adapters\nclaudecode/codex/mock"]
         TaskCode["Task runners\nbootstrap/explore/reason"]
         Prompt["Prompt snapshots\nbootstrap/reason/explore"]
         Capabilities["MCP + Skill + Role injection\n/tmp/cairn-capabilities"]
+        Instructions["Runtime instructions\nAGENTS.md/CLAUDE.md + context/*"]
     end
 
-    subgraph Sidecar["Optional project sidecar"]
+    subgraph Sidecar["Optional project sidecars"]
         BrowserMCP["CloakBrowser slots\nCDP + noVNC + control API"]
+        ToolMCP["Kali/Metasploit tools\nHTTP MCP bridge containers"]
     end
 
     SPA -->|"HTTP + Bearer"| Auth
@@ -75,12 +78,16 @@ flowchart TB
     Submitter --> Runtime
     Runtime --> Worker
     Submitter --> Cloak
+    Submitter --> Tools
     Cloak --> BrowserMCP
+    Tools --> ToolMCP
     Protocol -->|"HTTP + service token"| Routers
     TaskCode --> Drivers
     TaskCode --> Prompt
     TaskCode --> Capabilities
+    Capabilities --> Instructions
     Capabilities --> BrowserMCP
+    Capabilities --> ToolMCP
     Drivers -->|"stdout/stderr JSON trace"| TaskCode
     TaskCode -->|"facts/intents/reason/events"| Protocol
 ```
@@ -113,6 +120,7 @@ sequenceDiagram
     Dispatcher->>Health: start /healthz /metrics /reload /mcp-probe
     Dispatcher->>Docker: create ContainerManager
     Dispatcher->>Docker: create CloakSidecarManager
+    Dispatcher->>Docker: create ToolSidecarManager
     Dispatcher->>Dispatcher: wire TaskSubmitter and coordinators
     Dispatcher->>Docker: startup healthchecks
     Dispatcher->>Server: list_project_work()
@@ -141,7 +149,7 @@ Server entry points:
 | Frontend SPA | `cairn/src/cairn/server/partials/`, `static/js/` | 项目图、日志、设置、能力管理 UI | browser events/API JSON | DOM state/API calls | server APIs |
 | Dispatcher scheduler | `cairn/src/cairn/dispatcher/scheduler/` | Tick、项目选择、claim、submit、cleanup | project summaries | running futures | protocol, runtime, tasks |
 | Dispatcher tasks | `cairn/src/cairn/dispatcher/tasks/` | Bootstrap/Explore/Reason prompt、执行、解析、写回 | project snapshot, intent | facts/intents/reason result | workers, observability |
-| Dispatcher runtime | `cairn/src/cairn/dispatcher/runtime/` | Docker 容器、mount、exec、cleanup、Cloak sidecar | ContainerConfig | container/process/lease | docker |
+| Dispatcher runtime | `cairn/src/cairn/dispatcher/runtime/` | Docker 容器、mount、exec、cleanup、Cloak sidecar、tool sidecar | ContainerConfig, ToolSidecarsConfig | container/process/lease/status | docker |
 | Worker adapters | `cairn/src/cairn/dispatcher/workers/adapters/` | CLI command/env/trace format 适配 | WorkerConfig, prompt | process command/events | Claude Code, Codex, mock |
 | Capabilities | `capabilities/`, `cairn/src/cairn/dispatcher/capabilities.py` | MCP/Skill/Role catalog、注入、probe | execution config | mcp.json, plugin, instructions | config.resources.yaml |
 | Shared contracts/config | `cairn/src/cairn/shared/` | Pydantic contracts、config models、metrics/logging | YAML/JSON | typed models | server, dispatcher |
@@ -151,7 +159,7 @@ Server entry points:
 - Browser 与 Server：HTTP JSON + Bearer token；SPA shell 和 static files 由 FastAPI 提供。
 - Dispatcher 与 Server：`CairnClient` 使用 HTTP + dispatcher service token。
 - Dispatcher 与 Worker：Docker exec 运行 Claude Code/Codex/mock；stdout/stderr 由 dispatcher 解析和记录。
-- Worker 与 MCP：Claude/Codex 启动时注入 `mcp.json` 或 CLI config；MCP wrapper 可能连接项目 sidecar。
+- Worker 与 MCP：Claude/Codex 启动时注入 `mcp.json` 或 CLI config；MCP wrapper 可能连接项目级 Cloak sidecar 或 Kali/Metasploit tool sidecar。
 - Server 与 DB：SQLAlchemy engine + Alembic migration；启动时迁移到当前 head `0013_project_proxy_servers`。
 - 共享数据：Project graph、execution snapshots、AI health、LLM logs 均在 PostgreSQL；YAML config 通过 server config modules 读写。
 
@@ -184,7 +192,7 @@ sequenceDiagram
 - Adapter Pattern：`WorkerDriver` 统一 Claude Code、Codex、mock 的 command/env/trace 行为。
 - Snapshot Pattern：项目创建时冻结 execution config，旧项目不随全局 config 静默漂移。
 - Coordinator Pattern：Dispatcher loop 拆成 Tick、Dispatch、ProjectDispatcher、TaskSubmitter、RuntimeMaintenance。
-- Sidecar Pattern：CloakBrowser 是项目级 runtime provider，通过 MCP wrapper lease/release 使用。
+- Sidecar Pattern：CloakBrowser 是项目级 browser runtime provider，通过 MCP wrapper lease/release 使用；Kali/Metasploit tool sidecar 是项目级 HTTP MCP bridge container，通过 dispatcher runtime 按需 ensure/status/cleanup。
 - Guardrail Tests：`test_architecture_boundaries.py`、`test_route_auth_guard.py`、`test_db_migrations.py` 约束架构、认证和文档漂移。
 
 ## 6. 认证与授权架构
@@ -226,7 +234,10 @@ sequenceDiagram
 2. Dispatcher 为 task 读取 snapshot。
 3. `inject_project_capabilities()` 按 task type 注入 MCP、Skill、Role。
 4. 对 `runtime_provider: cloak_sidecar` 的 MCP，`BrowserRuntimeContext` 向 `CloakSidecarManager` 租用 browser slot。
-5. Worker 运行结束后 dispatcher release lease 并写回观测事件。
+5. 对配置为 tool sidecar 的 MCP，dispatcher 通过 `ToolSidecarManager` 确保项目级 Kali/Metasploit HTTP sidecar 正在运行，并把 worker MCP wrapper 指向对应 HTTP bridge。
+6. `inject_task_instructions()` 写入 task-local runtime instruction 文件：`AGENTS.md`、`CLAUDE.md`、`context/project.md`、`context/phase.md`、`context/capabilities.md`、`context/policy.json`。
+7. Settings → Prompts 的 `GET /prompt-instruction-previews` 使用同一 renderer 提供全局只读模板预览，避免 UI 展示与真实 worker 注入漂移。
+8. Worker 运行结束后 dispatcher release lease 并写回观测事件；项目完成或 cleanup 时清理 worker、Cloak sidecar 与 tool sidecar。
 
 ## 8. 数据库迁移架构
 

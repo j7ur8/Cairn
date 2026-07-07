@@ -13,13 +13,13 @@
 
 **Cairn** 是一个基于 fact-intent graph 的协作式状态空间搜索与 Agent 调度系统。
 
-项目把未知状态空间搜索任务拆成 Project、Fact、Intent、Hint 与 LLM execution log。Server 维护共享黑板、配置快照、认证和观测数据；Dispatcher 按图状态调度 Bootstrap、Explore、Reason 三类任务；Worker 容器运行 Claude Code、Codex 或 mock 适配器，并可注入 MCP、Skill、Role 与项目级 CloakBrowser sidecar。
+项目把未知状态空间搜索任务拆成 Project、Fact、Intent、Hint 与 LLM execution log。Server 维护共享黑板、配置快照、认证和观测数据；Dispatcher 按图状态调度 Bootstrap、Explore、Reason 三类任务；Worker runner 容器运行 Claude Code、Codex 或 mock 适配器，并可注入 MCP、Skill、Role、task-local runtime instruction files、项目级 CloakBrowser sidecar 与 Kali/Metasploit tool sidecar。
 
 ## 2. 技术栈概览
 
 | 层级 | 技术 |
 |------|------|
-| 语言/运行时 | Python 3.12+ |
+| 语言/运行时 | Python 3.12+, Node.js 22 runner |
 | API 服务 | FastAPI, Uvicorn |
 | 数据库 | PostgreSQL 16, SQLAlchemy 2, Alembic |
 | 配置 | YAML, Pydantic v2 |
@@ -28,7 +28,7 @@
 | 认证 | JWT HS256, bcrypt password hash |
 | 观测 | Prometheus metrics, structured logs, LLM execution events |
 | 前端 | No-build SPA, FastAPI partials, Alpine ES modules, Cytoscape, Tailwind |
-| 部署 | Docker Compose, uv, worker image, optional CloakBrowser sidecar |
+| 部署 | Docker Compose, uv, runner image, optional CloakBrowser/Kali/Metasploit sidecars |
 
 ## 3. 目录结构
 
@@ -52,7 +52,10 @@ Cairn/
 │   ├── mcp/                          # MCP sidecar/source assets
 │   ├── payloads/                     # 测试 payload 资源
 │   └── templates/                    # 报告模板
-├── container/                        # Worker 容器镜像与 MCP wrapper
+├── container/
+│   ├── runner/                       # Node 22 worker runner image 与 MCP wrapper
+│   ├── tools-kali/                   # Kali MCP HTTP sidecar image
+│   └── tools-metasploit/             # Metasploit MCP HTTP sidecar image
 ├── README/                           # 图片与架构可视化素材
 └── AI/                               # 本项目给 AI/工程协作用的架构文档
 ```
@@ -62,6 +65,8 @@ Cairn/
 ```bash
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
 docker build ./container/runner -t cairn-llm-runner:latest
+docker build ./container/tools-kali -t cairn-kali-tools:latest
+docker build ./container/tools-metasploit -t cairn-metasploit-tools:latest
 docker build ./capabilities/mcp/js-reverse-mcp/sidecar -t cairn-cloak-browser:js-reverse
 ./start.sh
 ```
@@ -84,3 +89,5 @@ cd cairn && uv run pytest
 | `AI/CODEBASE_ANALYSIS.md` | 代码结构、数据模型、API、测试策略 |
 | `AI/NAMING.md` | 命名规范、例外、迁移策略 |
 | `cairn/tests/test_architecture_boundaries.py` | 架构文档与边界约束 guardrail |
+
+Settings → Prompts 管理全局 default prompt templates 与 role prompts；同页的 Runtime Instruction Preview 只读展示运行时生成的 `AGENTS.md`、`CLAUDE.md` 和 `context/*` instruction 文件模板。

@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, field_validator
 import yaml
 
 import cairn.dispatcher.prompts as prompt_package
+from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
+from cairn.dispatcher.tasks.instruction_files import render_task_instruction_files
+from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.server.config.files import _overwrite_yaml, _text_sha256, resources_yaml_path, save_resources_data
 from cairn.server.config.roles import set_role_default_skills_in_data
 from cairn.server.execution_config.prompt_snapshot import is_complete_prompt_group_dir, load_prompt_snapshot
@@ -47,6 +50,23 @@ class RolePromptDetail(BaseModel):
     role_sha256: dict[str, str]
     role_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
     role_metadata_error: str | None = None
+
+
+class PromptInstructionPreviewFile(BaseModel):
+    path: str
+    content: str
+    sha256: str
+    writable: bool
+
+
+class PromptInstructionPreviewPhase(BaseModel):
+    phase: str
+    task_instance_id: str
+    files: list[PromptInstructionPreviewFile]
+
+
+class PromptInstructionPreviewResponse(BaseModel):
+    phases: list[PromptInstructionPreviewPhase]
 
 
 def _prompts_root() -> Path:
@@ -155,6 +175,50 @@ def _detail_for_role_prompts() -> dict[str, Any]:
     }
 
 
+def _instruction_preview_for_phase(phase: str) -> PromptInstructionPreviewPhase:
+    task_instance_id = "{task_instance_id}"
+    instruction_root = f"{CAPABILITY_ROOT}/{{project_safe_id}}/{task_instance_id}/instructions"
+    paths, files = render_task_instruction_files(
+        project=None,
+        project_id="{project_id}",
+        task_type=phase,
+        task_instance_id=task_instance_id,
+        role_instructions="{selected role prompt}",
+        capability_instructions="{selected_mcp_ids}",
+        context=WorkerExecutionContext(mcp_servers=[{"id": "{selected_mcp_ids}"}]),
+        instruction_root=instruction_root,
+        project_origin="{origin}",
+        project_goal="{goal}",
+    )
+    ordered_paths = [
+        (paths.agents_md_path, "AGENTS.md"),
+        (paths.claude_md_path, "CLAUDE.md"),
+        (paths.project_context_path, "context/project.md"),
+        (paths.phase_context_path, "context/phase.md"),
+        (paths.capabilities_context_path, "context/capabilities.md"),
+        (paths.policy_path, "context/policy.json"),
+    ]
+    return PromptInstructionPreviewPhase(
+        phase=phase,
+        task_instance_id=task_instance_id,
+        files=[
+            PromptInstructionPreviewFile(
+                path=relative_path,
+                content=files[absolute_path],
+                sha256=_text_sha256(files[absolute_path]),
+                writable=False,
+            )
+            for absolute_path, relative_path in ordered_paths
+        ],
+    )
+
+
+def _instruction_previews() -> PromptInstructionPreviewResponse:
+    return PromptInstructionPreviewResponse(
+        phases=[_instruction_preview_for_phase(phase) for phase in ("bootstrap", "reason", "explore")]
+    )
+
+
 def _role_prompt_metadata(prompt_names: Any) -> tuple[dict[str, dict[str, Any]], str | None]:
     names = list(prompt_names)
     try:
@@ -234,6 +298,11 @@ def read_prompt_group():
 @router.get("/role-prompts", response_model=RolePromptDetail)
 def read_role_prompts():
     return _detail_for_role_prompts()
+
+
+@router.get("/prompt-instruction-previews", response_model=PromptInstructionPreviewResponse)
+def read_prompt_instruction_previews():
+    return _instruction_previews()
 
 
 @router.put("/prompt-templates/{name}", response_model=PromptGroupDetail)

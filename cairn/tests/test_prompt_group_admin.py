@@ -180,6 +180,64 @@ class PromptGroupAdminTests(unittest.TestCase):
         self.assertEqual(result["role_metadata"], {})
         self.assertIn("failed to load role metadata", result["role_metadata_error"])
 
+    def test_read_prompt_instruction_previews_returns_phase_files_and_hashes(self) -> None:
+        result = self.router.read_prompt_instruction_previews()
+
+        self.assertEqual([phase.phase for phase in result.phases], ["bootstrap", "reason", "explore"])
+        for phase in result.phases:
+            with self.subTest(phase=phase.phase):
+                self.assertEqual(phase.task_instance_id, "{task_instance_id}")
+                self.assertEqual(
+                    [file.path for file in phase.files],
+                    [
+                        "AGENTS.md",
+                        "CLAUDE.md",
+                        "context/project.md",
+                        "context/phase.md",
+                        "context/capabilities.md",
+                        "context/policy.json",
+                    ],
+                )
+                self.assertTrue(all(file.writable is False for file in phase.files))
+                self.assertTrue(all(file.sha256 and len(file.sha256) == 64 for file in phase.files))
+                contents = {file.path: file.content for file in phase.files}
+                self.assertIn("{origin}", contents["context/project.md"])
+                self.assertIn("{goal}", contents["context/project.md"])
+                self.assertIn("{selected role prompt}", contents["AGENTS.md"])
+                self.assertIn("{selected_mcp_ids}", contents["context/capabilities.md"])
+                self.assertIn(f'"task_type": "{phase.phase}"', contents["context/policy.json"])
+
+    def test_prompt_instruction_preview_uses_task_instruction_renderer(self) -> None:
+        from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
+        from cairn.dispatcher.tasks.instruction_files import render_task_instruction_files
+        from cairn.dispatcher.workers.base import WorkerExecutionContext
+
+        preview = self.router.read_prompt_instruction_previews()
+        reason = next(phase for phase in preview.phases if phase.phase == "reason")
+        instruction_root = f"{CAPABILITY_ROOT}/{{project_safe_id}}/{{task_instance_id}}/instructions"
+        paths, files = render_task_instruction_files(
+            project=None,
+            project_id="{project_id}",
+            task_type="reason",
+            task_instance_id="{task_instance_id}",
+            role_instructions="{selected role prompt}",
+            capability_instructions="{selected_mcp_ids}",
+            context=WorkerExecutionContext(mcp_servers=[{"id": "{selected_mcp_ids}"}]),
+            instruction_root=instruction_root,
+            project_origin="{origin}",
+            project_goal="{goal}",
+        )
+        rendered = {
+            "AGENTS.md": files[paths.agents_md_path],
+            "CLAUDE.md": files[paths.claude_md_path],
+            "context/project.md": files[paths.project_context_path],
+            "context/phase.md": files[paths.phase_context_path],
+            "context/capabilities.md": files[paths.capabilities_context_path],
+            "context/policy.json": files[paths.policy_path],
+        }
+
+        self.assertEqual({file.path: file.content for file in reason.files}, rendered)
+
     def test_update_role_prompt_writes_file_and_updates_hash(self) -> None:
         role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
         role_root.mkdir(parents=True)
@@ -523,6 +581,89 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertTrue(result["canEditRequiredSkills"])
         self.assertEqual(result["groups"], ["Prompt Templates", "Role Prompts"])
 
+    def test_prompt_instruction_previews_are_loaded_as_readonly_resources(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required to execute frontend state helper")
+
+        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
+        script = f"""
+            import {{ pathToFileURL }} from 'node:url';
+
+            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
+            const state = createPromptsState();
+            const calls = [];
+            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
+            state.api = async (method, path, body) => {{
+              calls.push([method, path, body || null]);
+              if (path === '/prompt-templates') {{
+                return {{
+                  prompt_names: ['reason.md'],
+                  prompts: {{ 'reason.md': 'reason prompt' }},
+                  prompt_sha256: {{ 'reason.md': 'reason-sha' }},
+                  prompts_sha256: 'set-sha',
+                }};
+              }}
+              if (path === '/role-prompts') {{
+                return {{ role_names: [], roles: {{}}, role_sha256: {{}}, role_metadata: {{}} }};
+              }}
+              if (path === '/capabilities/catalog') return [];
+              if (path === '/prompt-instruction-previews') {{
+                return {{
+                  phases: [{{
+                    phase: 'bootstrap',
+                    task_instance_id: '{{task_instance_id}}',
+                    files: [{{
+                      path: 'AGENTS.md',
+                      content: 'bootstrap agents preview',
+                      sha256: 'preview-sha',
+                      writable: false,
+                    }}],
+                  }}],
+                }};
+              }}
+              throw new Error(`unexpected api call: ${{method}} ${{path}}`);
+            }};
+
+            await state.loadPromptGroup();
+            const resources = state.promptEditorResources();
+            const preview = resources.find(resource => resource.key === 'runtime/bootstrap/AGENTS.md');
+            state.selectPromptTemplate(preview);
+            await state.savePromptTemplate();
+
+            console.log(JSON.stringify({{
+              calls,
+              selected: state.promptTemplateSelected,
+              label: state.promptResourceDisplayName(preview),
+              content: state.promptEditorContent,
+              writable: state.promptSelectedWritable(),
+              isRole: state.promptSelectedIsRole(),
+              groups: resources.filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
+              keys: state.promptTemplateNames,
+            }}));
+        """
+
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
+        self.assertEqual(
+            [call[1] for call in api_calls],
+            ["/prompt-templates", "/role-prompts", "/capabilities/catalog", "/prompt-instruction-previews"],
+        )
+        self.assertEqual(result["selected"], "runtime/bootstrap/AGENTS.md")
+        self.assertEqual(result["label"], "bootstrap / AGENTS.md")
+        self.assertEqual(result["content"], "bootstrap agents preview")
+        self.assertFalse(result["writable"])
+        self.assertFalse(result["isRole"])
+        self.assertEqual(result["groups"], ["Prompt Templates", "Runtime Instruction Preview"])
+        self.assertIn("runtime/bootstrap/AGENTS.md", result["keys"])
+
     def test_prompt_save_updates_role_default_skills_only_for_role_prompts(self) -> None:
         node = shutil.which("node")
         if node is None:
@@ -742,6 +883,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn("async loadPrompts()", prompts)
         self.assertIn("async loadPromptGroup()", prompts)
         self.assertIn("/prompt-templates", prompts)
+        self.assertIn("/prompt-instruction-previews", prompts)
         self.assertIn("/capabilities/catalog", prompts)
         self.assertIn("/roles/admin/", prompts)
         self.assertIn("/prompt-settings", prompts)
@@ -759,6 +901,7 @@ class PromptSettingsFrontendTests(unittest.TestCase):
         self.assertIn('x-model="promptRoleRequiredSkillIds"', view)
         self.assertIn("promptEditorResources()", prompts)
         self.assertIn("promptSelectedWritable()", prompts)
+        self.assertIn(":readonly=\"!promptSelectedWritable()\"", view)
         self.assertNotIn("promptGroupSelected", prompts)
         self.assertNotIn("promptGroups", prompts)
         self.assertNotIn("deleteCapabilityAdmin", prompts)

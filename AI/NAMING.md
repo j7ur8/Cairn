@@ -25,7 +25,7 @@
 - JavaScript 函数/变量使用 `camelCase`。
 - JavaScript 类/构造器使用 `PascalCase`。
 - 测试文件使用 `test_*.py`。
-- 协议/资源入口文件保持其协议要求的大写文件名，例如 `SKILL.md`、`ROLE.md`、`FILE_OUTPUTS.md`。
+- 协议/资源入口文件保持其协议要求的大写文件名，例如 `SKILL.md`、`ROLE.md`、`FILE_OUTPUTS.md`；运行时生成的 agent instruction 文件保持 `AGENTS.md`、`CLAUDE.md`。
 
 ## 2. Backend/Layout Rules
 
@@ -47,7 +47,7 @@ Dispatcher code uses the current split:
 
 - `scheduler/`: loop assembly, project dispatch, task submission, runtime maintenance.
 - `tasks/`: bootstrap/explore/reason execution, prompt rendering, result parsing, writeback.
-- `runtime/`: Docker container, process, mount, cleanup, Cloak sidecar runtime.
+- `runtime/`: Docker container, process, mount, cleanup, Cloak sidecar and tool sidecar runtime.
 - `protocol/`: HTTP client facets for Server APIs.
 - `workers/adapters/`: Claude Code, Codex, and mock CLI drivers.
 
@@ -76,11 +76,12 @@ Dispatcher code uses the current split:
 - First-party MCP assets live under `capabilities/mcp/<mcp-id>/`.
 - First-party Skills live under `capabilities/skills/<skill-id>/SKILL.md`.
 - First-party Roles live under `capabilities/roles/<role-id>/ROLE.md`.
-- Runner wrapper binaries live under `container/runner/bin/`; tool sidecar entrypoints live under `container/tools-*/bin/`.
+- Runner wrapper binaries live under `container/runner/bin/`; tool sidecar entrypoints live under `container/tools-kali/bin/` and `container/tools-metasploit/bin/`.
 
 ## 6. Allowed Exceptions
 
 - `SKILL.md`, `ROLE.md`, `FILE_OUTPUTS.md`: protocol discovery requires exact names.
+- `AGENTS.md`, `CLAUDE.md`: generated worker instruction filenames are external tool contracts.
 - `Dockerfile`: Docker tooling requires exact name.
 - Alembic migration files keep revision-prefixed names.
 - Vendor assets under `capabilities/**/tools/vendor/**` keep upstream filenames.

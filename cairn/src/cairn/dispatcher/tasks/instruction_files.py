@@ -33,7 +33,41 @@ def inject_task_instructions(
     capability_instructions: str,
     context: WorkerExecutionContext,
 ) -> TaskInstructionPaths:
-    root = _instruction_root(project_id, task_instance_id)
+    paths, files = render_task_instruction_files(
+        project=project,
+        project_id=project_id,
+        task_type=task_type,
+        task_instance_id=task_instance_id,
+        role_instructions=role_instructions,
+        capability_instructions=capability_instructions,
+        context=context,
+    )
+    for path, content in files.items():
+        container_manager.write_text_file(container_name, path, content)
+    context.task_workspace = paths.instruction_root
+    context.instruction_root = paths.instruction_root
+    context.claude_md_path = paths.claude_md_path
+    context.agents_md_path = paths.agents_md_path
+    context.policy_path = paths.policy_path
+    if not context.capability_root:
+        context.capability_root = paths.instruction_root
+    return paths
+
+
+def render_task_instruction_files(
+    *,
+    project: ProjectDetail | None,
+    project_id: str,
+    task_type: str,
+    task_instance_id: str,
+    role_instructions: str,
+    capability_instructions: str,
+    context: WorkerExecutionContext,
+    instruction_root: str | None = None,
+    project_origin: str | None = None,
+    project_goal: str | None = None,
+) -> tuple[TaskInstructionPaths, dict[str, str]]:
+    root = instruction_root or _instruction_root(project_id, task_instance_id)
     paths = TaskInstructionPaths(
         instruction_root=root,
         project_context_path=f"{root}/context/project.md",
@@ -43,7 +77,10 @@ def inject_task_instructions(
         claude_md_path=f"{root}/CLAUDE.md",
         agents_md_path=f"{root}/AGENTS.md",
     )
-    project_context = _project_context(project)
+    if project is not None:
+        project_context = _project_context(project)
+    else:
+        project_context = _project_context_from_values(project_origin or "", project_goal or "")
     phase_context = _phase_context(task_type)
     capabilities_context = capability_instructions.strip() or "No MCP servers or skills are exposed for this task."
     policy = _policy(project_id, task_type, task_instance_id, context)
@@ -55,20 +92,14 @@ def inject_task_instructions(
         capabilities_context_path=paths.capabilities_context_path,
         policy_path=paths.policy_path,
     )
-    container_manager.write_text_file(container_name, paths.project_context_path, project_context)
-    container_manager.write_text_file(container_name, paths.phase_context_path, phase_context)
-    container_manager.write_text_file(container_name, paths.capabilities_context_path, capabilities_context)
-    container_manager.write_text_file(container_name, paths.policy_path, json.dumps(policy, ensure_ascii=False, indent=2))
-    container_manager.write_text_file(container_name, paths.claude_md_path, instruction)
-    container_manager.write_text_file(container_name, paths.agents_md_path, instruction)
-    context.task_workspace = root
-    context.instruction_root = root
-    context.claude_md_path = paths.claude_md_path
-    context.agents_md_path = paths.agents_md_path
-    context.policy_path = paths.policy_path
-    if not context.capability_root:
-        context.capability_root = root
-    return paths
+    return paths, {
+        paths.project_context_path: project_context,
+        paths.phase_context_path: phase_context,
+        paths.capabilities_context_path: capabilities_context,
+        paths.policy_path: json.dumps(policy, ensure_ascii=False, indent=2),
+        paths.claude_md_path: instruction,
+        paths.agents_md_path: instruction,
+    }
 
 
 def _instruction_root(project_id: str, task_instance_id: str) -> str:
@@ -77,18 +108,22 @@ def _instruction_root(project_id: str, task_instance_id: str) -> str:
 
 def _project_context(project: ProjectDetail | None) -> str:
     facts = {fact.id: fact.description for fact in project.facts} if project is not None else {}
+    return _project_context_from_values(facts.get("origin", ""), facts.get("goal", ""))
+
+
+def _project_context_from_values(origin: str, goal: str) -> str:
     return "\n".join(
         [
             "# Project Context",
             "",
             "## Origin",
             "```",
-            facts.get("origin", ""),
+            origin,
             "```",
             "",
             "## Goal",
             "```",
-            facts.get("goal", ""),
+            goal,
             "```",
             "",
             "Hints are dynamic task input and are intentionally not stored in this instruction file.",

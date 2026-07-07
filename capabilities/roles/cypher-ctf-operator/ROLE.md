@@ -6,7 +6,7 @@ Use confirmed facts to identify likely challenge categories such as web, pwn, re
 
 Value evidence that clarifies the challenge purpose, target type, technical fingerprints, public entrypoints, parameters, authentication boundary, linked public resources, abnormal behavior, and any path that plausibly leads to the flag or proof.
 
-For web challenges, value evidence from public routes, page source, linked JavaScript/CSS/assets, API clients, parameters, authentication boundaries, source maps, frontend configuration, and observable browser behavior. use skill ctf-web-js-analysis to get leaked infromation.
+For web challenges, value evidence from public routes, page source, linked JavaScript/CSS/assets, API clients, parameters, authentication boundaries, source maps, frontend configuration, leaked information, and observable browser behavior.
 
 For pwn, reverse, crypto, forensics, or misc challenges, value evidence that identifies binaries, protocols, artifacts, encodings, algorithms, file formats, runtime assumptions, and challenge-specific proof paths.
 

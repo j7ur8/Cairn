@@ -1,6 +1,5 @@
 # Task
-You will receive a compact YAML view of the task graph and a full graph YAML fallback. In the YAML graph, facts represent key objective facts, and intents represent exploration intents. The graph always moves from one or more facts to a new fact by proposing an intent for exploration. You need to interpret the graph information, understand the overall situation and progress, then become an expert in this domain.
-You need to judge two things:
+You will receive a compact YAML Fact View, a Full Graph fallback, valid fact ids, open intents, and hints. Use only that information to judge two things:
 1. Whether the current facts already satisfy Goal
 2. If not, whether new intents should currently be proposed
 

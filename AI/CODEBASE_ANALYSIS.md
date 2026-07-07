@@ -27,6 +27,7 @@
 | 层级 | 技术 | 版本/约束 |
 |------|------|-----------|
 | 运行时/语言 | Python | `>=3.12` |
+| Runner 运行时 | Node.js | `22.x` runner image for Claude/Codex/MCP wrappers |
 | 后端框架 | FastAPI | `>=0.115` |
 | ASGI Server | Uvicorn | `>=0.34` |
 | CLI | Click | `>=8.1` |
@@ -58,7 +59,10 @@ Cairn/
 │   ├── skills/                       # first-party Skills
 │   ├── roles/                        # first-party Roles
 │   └── mcp/                          # MCP runtime/source assets
-├── container/                        # Worker image and wrapper binaries
+├── container/
+│   ├── runner/                       # Node 22 worker runner image and MCP wrapper binaries
+│   ├── tools-kali/                   # Kali tool HTTP MCP sidecar image
+│   └── tools-metasploit/             # Metasploit HTTP MCP sidecar image
 ├── README/                           # images and architecture HTML
 ├── server.yaml                       # deployment/security/database/worker runtime
 ├── config.yaml                       # dispatch/task/observability/worker pool
@@ -85,6 +89,10 @@ Cairn/
 | `cairn/src/cairn/dispatcher/tasks/reason.py` | Reason task |
 | `cairn/src/cairn/dispatcher/runtime/containers.py` | Docker container facade |
 | `cairn/src/cairn/dispatcher/runtime/cloak_sidecar.py` | Project CloakBrowser sidecar |
+| `cairn/src/cairn/dispatcher/runtime/tool_sidecar.py` | Project Kali/Metasploit tool sidecar manager |
+| `container/runner/Dockerfile` | Node 22 runner image with Python/git/sudo and global MCP/npm tools |
+| `container/tools-kali/Dockerfile` | Kali tool sidecar image with mirror-pinned package install |
+| `container/tools-metasploit/Dockerfile` | Metasploit tool sidecar image with mirror-pinned package install |
 
 ## 3. 关键入口点
 
@@ -162,16 +170,21 @@ sequenceDiagram
     participant T as Task preparation
     participant C as Capability injection
     participant B as Cloak sidecar
+    participant S as Tool sidecar
     participant W as Worker
 
     T->>C: selected MCPs/Skills/Role from snapshot
     C->>B: lease browser if runtime_provider=cloak_sidecar
+    C->>S: ensure Kali/Metasploit sidecar if tool bridge is required
     C->>W: write mcp.json, source dirs, skill dirs, lease file
     W->>B: MCP connects to leased browser_url
+    W->>S: MCP wrapper connects to project HTTP bridge
     C->>B: release lease on exit
 ```
 
 Resource discovery note: the `cairn-resources` MCP is the canonical worker-facing path for global Servers and project-scoped proxy endpoint discovery/usage reporting. Worker prompts should use that MCP instead of assuming resource details from static prompt text.
+
+Runtime instruction note: task preparation writes `AGENTS.md`, `CLAUDE.md`, `context/project.md`, `context/phase.md`, `context/capabilities.md`, and `context/policy.json` under the task instruction root. Settings → Prompts exposes `GET /prompt-instruction-previews` as a read-only global preview using the same renderer; editable default prompt templates remain responsible for output markers, schemas, and dynamic placeholders.
 
 ## 6. 数据模型
 
@@ -220,7 +233,7 @@ Current migration head is `0013_project_proxy_servers`. Sensitive fields include
 
 ## 7. API 端点
 
-OpenAPI is disabled at runtime. AST scan currently finds **102 FastAPI route decorators**.
+OpenAPI is disabled at runtime. AST scan currently finds **103 FastAPI route decorators**.
 
 | 分组 | 数量 | 主要路径 |
 |------|------|----------|
@@ -234,7 +247,7 @@ OpenAPI is disabled at runtime. AST scan currently finds **102 FastAPI route dec
 | AI profiles | 12 | catalog CRUD, secret, checks, reports, project AI profile view |
 | Servers | 7 | server resource CRUD, test, command, inspect ports |
 | Capabilities/Roles | 14 | catalog, admin, probe/expand/audit, role defaults, project role |
-| Prompt groups/Roles prompts | 6 | prompt templates and role prompt admin |
+| Prompt groups/Roles prompts | 7 | prompt templates, role prompt admin, runtime instruction preview |
 | Execution configs | 2 | project execution config list and task type config |
 | Observability | 10 | execution list, event list, incremental/card/view, event writes, finish |
 | Settings/System/Task types | 5 | timeouts, task types, system settings, container limits |
@@ -257,6 +270,7 @@ Config files:
 | 文件 | 内容 |
 |------|------|
 | `server.yaml` | `app`, `database`, `security`, `admin`, `dispatcher`, `storage`, `worker` |
+| `server.yaml` tool sidecars | `runner`, `tool_sidecars.kali`, `tool_sidecars.metasploit` image/network/user/resource settings |
 | `config.yaml` | server log/settings, dispatcher runtime, tasks, observability, worker pool |
 | `config.resources.yaml` | servers, MCP servers, skills, roles |
 
@@ -277,6 +291,9 @@ worker_pool:
 Common commands:
 
 ```bash
+docker build ./container/runner -t cairn-llm-runner:latest
+docker build ./container/tools-kali -t cairn-kali-tools:latest
+docker build ./container/tools-metasploit -t cairn-metasploit-tools:latest
 uv run --project cairn cairn config check --config config.yaml
 uv run --project cairn cairn db migrate
 uv run --project cairn cairn serve
@@ -294,7 +311,8 @@ node cairn/scripts/check_frontend.mjs
 - Retention: `BackgroundTasks` runs observability retention when enabled.
 - Static cache: `NoStoreStaticFiles` disables browser cache for no-build SPA assets.
 - Observability redaction: dispatcher reporter and server event writer redact/truncate event content.
-- Runtime cleanup: completed/stopped/orphan worker containers and Cloak sidecars are cleaned by dispatcher policy.
+- Runtime cleanup: completed/stopped/orphan worker containers, Cloak sidecars, and Kali/Metasploit tool sidecars are cleaned by dispatcher policy.
+- Container image builds: runner uses `node:22-bookworm-slim`; runner and sidecar Dockerfiles pin package mirrors before package installs, and the Kali tools image includes archive tooling needed by bundled wordlist/setup flows.
 
 ## 11. 测试策略
 
@@ -312,9 +330,9 @@ Key tests:
 | `test_worker_cli_adapters.py` | Claude/Codex/mock CLI args and trace formats |
 | `test_capability_admin.py`, `test_capability_manifest.py` | capability catalog/admin/projection |
 | `test_mcp_probe.py`, `test_mcp_probe_server.py` | MCP probe path |
-| `test_cloak_sidecar.py`, `test_dispatch_sidecar_config.py` | Cloak sidecar config/runtime assertions |
+| `test_cloak_sidecar.py`, `test_dispatch_sidecar_config.py` | Cloak and tool sidecar config/runtime assertions |
 | `test_observability*.py`, `test_redaction_free_text.py` | event recording, reporter, redaction |
-| `test_prompt_snapshots.py`, `test_prompt_group_admin.py` | prompt snapshot and admin editing |
+| `test_prompt_snapshots.py`, `test_prompt_group_admin.py` | prompt snapshot, runtime instruction preview, and admin editing |
 | `test_static_cache.py`, `test_frontend_static.py`, `test_graph_state.py` | assembled SPA and frontend state |
 | `test_config_loader.py`, `test_config_preflight.py`, `test_yaml_config.py` | config normalization and validation |
 

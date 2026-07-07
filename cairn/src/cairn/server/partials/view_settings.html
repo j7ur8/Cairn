@@ -801,7 +801,7 @@
               <div data-testid="prompts-template-set-sha" class="text-[11px] font-mono text-slate-600 truncate" x-text="promptTemplateSetSha() || '-'"></div>
             </div>
           </div>
-          <textarea data-testid="prompts-editor" x-model="promptEditorContent" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300" placeholder="Select a prompt template to edit."></textarea>
+          <textarea data-testid="prompts-editor" x-model="promptEditorContent" :readonly="!promptSelectedWritable()" spellcheck="false" class="w-full flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none px-3 py-3 border border-slate-200 rounded-xl text-xs font-mono leading-5 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300 read-only:bg-slate-50 read-only:text-slate-500" placeholder="Select a prompt template to edit."></textarea>
           <div data-testid="role-required-skills" x-show="promptSelectedIsRole()" x-cloak class="shrink-0 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
             <div class="flex items-start justify-between gap-3">
               <div>

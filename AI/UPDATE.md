@@ -5,6 +5,25 @@
 
 # 更新日志
 
+## 2026-07-07 — Prompts Runtime Instruction Preview
+
+- Settings → Prompts 新增只读 Runtime Instruction Preview，`GET /prompt-instruction-previews` 按 `bootstrap` / `reason` / `explore` 返回 `AGENTS.md`、`CLAUDE.md`、`context/project.md`、`context/phase.md`、`context/capabilities.md`、`context/policy.json` 的模板内容、sha256 和只读标记。
+- `inject_task_instructions()` 与 preview endpoint 共用 `render_task_instruction_files()`，确保 UI 预览与真实 worker task-local instruction 文件不漂移。
+- 精简 default prompt templates 与 role prompts：阶段边界、能力摘要和 role 技能选择移入 runtime instruction/capability metadata；prompt md 保留 marker、schema 和动态 placeholder，role md 保留项目语义与证据偏好。
+- 同步 Prompts 前端状态与文档：资源列表保留 Prompt Templates、Role Prompts，并新增只读 Runtime Instruction Preview；选中 preview 时 Save 禁用、textarea readonly、Required Skills 隐藏。
+- 当前验证：`cd cairn && uv run pytest tests/test_prompt_group_admin.py tests/test_prompt_snapshots.py tests/test_task_runner_characterization.py` 通过；`node --check cairn/src/cairn/server/static/js/app/state-prompts.js` 通过。
+
+---
+
+## 2026-07-07 — 容器镜像与 tool sidecar 增量同步
+
+- 同步 runner/tool sidecar 容器拆分：`container/runner` 使用 Node 22 runner image，`container/tools-kali` 与 `container/tools-metasploit` 分别提供 Kali/Metasploit HTTP MCP sidecar。
+- 同步 Dispatcher runtime 文档：新增 `ToolSidecarManager`、`tool_sidecars.kali` / `tool_sidecars.metasploit` 配置、项目级 ensure/status/cleanup 行为，以及 worker MCP wrapper 到 sidecar HTTP bridge 的链路。
+- 同步镜像构建说明：记录 runner 与工具 sidecar Dockerfile 的 package mirror pin、Kali tools image 的 archive tooling，以及快速开始中的三类 helper image build 命令。
+- 同步命名规范：明确 runner wrapper 位于 `container/runner/bin/`，工具 sidecar entrypoint 位于 `container/tools-kali/bin/` 与 `container/tools-metasploit/bin/`。
+
+---
+
 ## 2026-07-07 — AI 文档全面重新生成
 
 - 重新生成 `ARCHITECTURE.md`、`CODEBASE_ANALYSIS.md`、`PROJECT_OVERVIEW.md` 和 `NAMING.md`，同步当前 Server/Dispatcher 分层、Scheduler split、Worker adapters、Capability/MCP 注入和 Cloak sidecar runtime。

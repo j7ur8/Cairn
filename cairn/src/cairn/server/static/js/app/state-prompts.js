@@ -4,6 +4,7 @@ export function createPromptsState() {
     promptTemplateSelected: 'bootstrap.md',
     promptTemplateDetail: null,
     rolePromptDetail: null,
+    promptInstructionPreviewDetail: null,
     promptCapabilityCatalog: [],
     promptRoleRequiredSkillIds: [],
     promptEditorContent: '',
@@ -24,25 +25,17 @@ export function createPromptsState() {
     async loadPromptGroup() {
       this.promptEditorLoading = true;
       try {
-        const [detail, roles, catalog] = await Promise.all([
+        const [detail, roles, catalog, previews] = await Promise.all([
           this.api('GET', '/prompt-templates'),
           this.api('GET', '/role-prompts'),
           this.api('GET', '/capabilities/catalog'),
+          this.api('GET', '/prompt-instruction-previews'),
         ]);
         this.promptTemplateDetail = detail;
         this.rolePromptDetail = roles || { role_names: [], roles: {}, role_sha256: {}, role_metadata: {} };
+        this.promptInstructionPreviewDetail = previews || { phases: [] };
         this.promptCapabilityCatalog = Array.isArray(catalog) ? catalog : [];
-        const promptNames = this.sortedPromptTemplateNames(
-          Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
-        );
-        this.promptTemplateNames = [
-          ...promptNames.map(name => this.promptResourceKey('prompt', name)),
-          ...this.sortedRolePromptNames(
-            Array.isArray(this.rolePromptDetail.role_names)
-              ? this.rolePromptDetail.role_names
-              : Object.keys(this.rolePromptDetail.roles || {}),
-          ).map(name => this.promptResourceKey('role', name)),
-        ];
+        this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
         if (!this.promptTemplateNames.includes(this.promptTemplateSelected)) {
           const legacySelected = this.promptTemplateNames.includes(this.promptResourceKey('prompt', this.promptTemplateSelected))
             ? this.promptResourceKey('prompt', this.promptTemplateSelected)
@@ -78,18 +71,33 @@ export function createPromptsState() {
 
     promptResourceKey(type, path) {
       if (type === 'role') return `roles/${path}`;
+      if (type === 'runtime') return `runtime/${path}`;
       return `prompts/${path}`;
     },
 
     promptEditorResources() {
       const detail = this.promptTemplateDetail || {};
       const roles = this.rolePromptDetail || {};
+      const previews = this.promptInstructionPreviewDetail || {};
       const promptNames = this.sortedPromptTemplateNames(
         Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
       );
       const roleNames = this.sortedRolePromptNames(
         Array.isArray(roles.role_names) ? roles.role_names : Object.keys(roles.roles || {}),
       );
+      const previewResources = (Array.isArray(previews.phases) ? previews.phases : []).flatMap(phase => {
+        const phaseName = String(phase?.phase || '');
+        return (Array.isArray(phase?.files) ? phase.files : []).map(file => ({
+          type: 'runtime',
+          phase: phaseName,
+          path: String(file?.path || ''),
+          key: this.promptResourceKey('runtime', `${phaseName}/${file?.path || ''}`),
+          groupLabel: 'Runtime Instruction Preview',
+          writable: false,
+          sha: file?.sha256 || '',
+          content: file?.content || '',
+        }));
+      });
       return [
         ...promptNames.map(name => ({
           type: 'prompt',
@@ -108,6 +116,7 @@ export function createPromptsState() {
           sha: roles.role_sha256?.[name] || '',
           metadata: roles.role_metadata?.[name] || null,
         })),
+        ...previewResources,
       ];
     },
 
@@ -123,13 +132,14 @@ export function createPromptsState() {
         if (basename === 'ROLE.md' && parent) return parent;
         return parent || basename;
       }
+      if (resource.type === 'runtime') return `${resource.phase} / ${resource.path}`;
       return basename;
     },
 
     promptShowResourceGroup(resource, index) {
       if (index === 0) return true;
       const previous = this.promptEditorResources()[index - 1];
-      return !previous || previous.type !== resource.type;
+      return !previous || previous.groupLabel !== resource.groupLabel;
     },
 
     promptSelectedResource() {
@@ -140,6 +150,7 @@ export function createPromptsState() {
       const resource = this.promptSelectedResource();
       if (!resource) return '';
       if (resource.type === 'role') return this.rolePromptDetail?.roles?.[resource.path] || '';
+      if (resource.type === 'runtime') return resource.content || '';
       return this.promptTemplateDetail?.prompts?.[resource.path] || '';
     },
 
