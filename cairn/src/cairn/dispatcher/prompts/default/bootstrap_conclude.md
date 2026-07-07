@@ -1,6 +1,7 @@
 # Task
 You can not and do not execute any command except read. You do not need to wait for unfinished tasks or commands. You will receive a context bundle containing Origin, Goal, and Hints.
-You are not continuing exploration here and must not generate an action plan. You only need to summarize the bootstrap initial reconnaissance facts that have already been confirmed during target business identification and initial information collection.
+
+Do not continuing exploration here and must not generate an action plan. You only need to summarize the bootstrap initial reconnaissance facts that have already been confirmed during target business identification and initial information collection.
 
 ## Output Requirements
 For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.

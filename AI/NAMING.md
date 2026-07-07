@@ -1,8 +1,21 @@
+<!--
+@ai: 本文件记录项目的命名规范、允许例外和迁移策略。任何 AI 会话在新增文件、模块、类型、配置文件或执行重命名前，应先阅读此文件。
+使用提示："请参考 NAMING.md 完成以下命名/重命名任务..."
+
+@update: 如需更新本文档，请遵循以下原则：
+1. 只记录项目当前采用的规范和明确允许的例外，不记录一次性讨论过程
+2. 命名规范变化必须同步更新 ARCHITECTURE.md 或 CODEBASE_ANALYSIS.md 中受影响的路径描述
+3. 修改后必须在 UPDATE.md 追加一条变更记录
+4. 不得把外部 API 路径、JSON/YAML 字段、数据库表/列重命名建议写成已执行事实
+
+生成日期：2026-07-07
+-->
+
 # Cairn Naming Conventions
 
-本文件是 Cairn 的命名准则入口，用于 AI/工程协作时统一文件、模块和类型命名。命名变更只处理可读性与一致性，不改变外部 API 路径、JSON/YAML 字段、数据库表/列或运行行为。
+命名变更只处理可读性与一致性，不改变外部 API 路径、JSON/YAML 字段、数据库表/列或运行行为，除非用户明确要求业务级迁移。
 
-## Core Rules
+## 1. Core Rules
 
 - Python 包、模块、函数、变量使用 `snake_case`。
 - Python 类使用 `PascalCase`。
@@ -11,53 +24,74 @@
 - JavaScript 文件使用 `kebab-case.js`。
 - JavaScript 函数/变量使用 `camelCase`。
 - JavaScript 类/构造器使用 `PascalCase`。
-- 示例配置文件使用 `config.example.yaml`。
-- 测试配置文件使用 `config.test.yaml`。
-- mock 配置文件使用 `config.mock.yaml` 或 `server.mock.yaml`。
-- Root config files use the current split: `server.yaml`, `config.yaml`, and `config.resources.yaml`; examples/tests/mocks keep the same stem with `.example.yaml`, `.test.yaml`, or `.mock.yaml` where present.
-- First-party MCP assets live under `capabilities/mcp/<mcp-id>/`; sidecar internals may keep tool/runtime filenames such as `Dockerfile`, `entrypoint.sh`, and Node `.mjs` files.
+- 测试文件使用 `test_*.py`。
+- 协议/资源入口文件保持其协议要求的大写文件名，例如 `SKILL.md`、`ROLE.md`、`FILE_OUTPUTS.md`。
 
-## Backend Layout
+## 2. Backend/Layout Rules
 
-FastAPI server code follows the existing layered package names:
+FastAPI server code follows the current layered package names:
 
-- `routers/`: HTTP route declarations and dependency wiring.
-- `schemas/`: server-only FastAPI/Pydantic request and response DTOs.
+- `routers/`: HTTP route declaration and dependency wiring.
+- `schemas/`: FastAPI/Pydantic request and response DTOs.
 - `repositories/`: SQL and persistence access.
-- `application/`: command/query orchestration.
-- `domain/`: SQL-free business rules.
+- `application/`: command/query orchestration over repositories and domain rules.
+- `domain/`: SQL-free business rules and domain errors.
 - `mappers/`: row/projection to contract conversion.
+- `execution_config/`: immutable project execution snapshot assembly and persistence.
+- `observability/`: LLM execution/event write and read paths.
+- `security/`: JWT, password hash, path and user dependencies.
 
 Application read/query modules use `*_queries.py`; mutating use cases use `*_commands.py` where the package already follows that split.
 
-## DTO Names
+Dispatcher code uses the current split:
+
+- `scheduler/`: loop assembly, project dispatch, task submission, runtime maintenance.
+- `tasks/`: bootstrap/explore/reason execution, prompt rendering, result parsing, writeback.
+- `runtime/`: Docker container, process, mount, cleanup, Cloak sidecar runtime.
+- `protocol/`: HTTP client facets for Server APIs.
+- `workers/adapters/`: Claude Code, Codex, and mock CLI drivers.
+
+## 3. DTO/API Naming
 
 - Request DTOs end in `Request`, for example `CreateProjectRequest`.
 - Response DTOs end in `Response`, for example `ProjectPollStateResponse`.
 - List items use domain nouns, for example `ProjectSummary`.
-- Paged list wrappers end in `Page`, for example `ProjectSummaryPage`.
+- Paged wrappers end in `Page`, for example `ProjectSummaryPage`.
 - Incremental payloads describe the delta, for example `ProjectGraphDelta`.
+- Event and execution DTOs use explicit nouns such as `ExecutionListResponse`, `EventViewResponse`, and `CreateEventsBatchRequest`.
+- External API paths, JSON fields, database table/column names, and YAML keys are stable contracts and should not be renamed as a cosmetic cleanup.
 
-## Allowed Exceptions
+## 4. Frontend Naming
 
-- Protocol/resource files keep their required names: `SKILL.md`, `ROLE.md`, `FILE_OUTPUTS.md`, and Docker `Dockerfile`.
-- Alembic migration files keep their revision-prefixed names.
-- Tool-specific config files may keep ecosystem names such as `tailwind.config.js`.
-- Vendored tool assets under `capabilities/**/tools/vendor/**` keep upstream filenames, including YAML files with underscores; first-party YAML files still must avoid underscores.
-- Removed compatibility shims must stay removed; new code must use canonical paths.
+- Frontend source lives under `cairn/src/cairn/server/static/js/`.
+- App-level state modules use `state-*.js`, for example `state-core.js`, `state-ai-profiles.js`, `state-settings-admin.js`.
+- Workspace state modules use `workspace/state-*.js`, for example `state-graph.js`, `state-llm-log.js`, `state-cloak.js`.
+- Shared helpers live under `shared/` and use short kebab-case file names, for example `api-client.js`, `capability-selection.js`.
+- HTML partials live under `server/partials/`; modal fragments live under `partials/modals/`.
 
-## Current Canonical Renames
+## 5. Config/Resource Naming
 
-- `server/models_pkg/` is now `server/schemas/`.
-- `server/application/project_read.py` is now `server/application/project_queries.py`.
-- `dispatcher/workers/adapters/claudecode.py` is now `dispatcher/workers/adapters/claude_code.py`.
-- Frontend state files use kebab-case names such as `state-projects.js`, `state-graph.js`, and `state-settings-admin.js`.
-- Mock config files use `config.mock.yaml` and `server.mock.yaml`.
+- Root runtime files use `server.yaml`, `config.yaml`, and `config.resources.yaml`.
+- Examples use `.example.yaml`; test fixtures use `.test.yaml`; mock fixtures use `.mock.yaml`.
+- First-party MCP assets live under `capabilities/mcp/<mcp-id>/`.
+- First-party Skills live under `capabilities/skills/<skill-id>/SKILL.md`.
+- First-party Roles live under `capabilities/roles/<role-id>/ROLE.md`.
+- Worker wrapper binaries live under `container/bin/` and may keep tool-specific names.
 
-## Migration Policy
+## 6. Allowed Exceptions
+
+- `SKILL.md`, `ROLE.md`, `FILE_OUTPUTS.md`: protocol discovery requires exact names.
+- `Dockerfile`: Docker tooling requires exact name.
+- Alembic migration files keep revision-prefixed names.
+- Vendor assets under `capabilities/**/tools/vendor/**` keep upstream filenames.
+- Static vendor assets under `cairn/src/cairn/server/static/vendor/` keep upstream/minified filenames.
+- Ecosystem config files such as `tailwind.config.js` keep their tool names.
+- Container wrapper names such as `cairn-browser-mcp` and `cairn-resources-mcp-stdio` keep their runtime contract names.
+
+## 7. Migration Policy
 
 1. Prefer updating internal source imports to canonical names immediately.
-2. If a future compatibility shim is unavoidable, keep it explicit, documented, and time-boxed to one CI-stable migration window.
-3. Add or preserve tests that prove removed shim paths do not reappear.
-4. Do not rename externally visible API routes, JSON fields, database identifiers, YAML keys, or protocol files.
+2. If a compatibility shim is unavoidable, keep it explicit, documented, and time-boxed.
+3. Add or preserve tests proving removed shim paths do not reappear.
+4. Do not rename externally visible API routes, JSON fields, database identifiers, YAML keys, or protocol files as part of internal cleanup.
 5. Run `cd cairn && uv run python scripts/check_naming.py` before merging naming-sensitive changes.

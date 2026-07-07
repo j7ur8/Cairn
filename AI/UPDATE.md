@@ -5,6 +5,15 @@
 
 # 更新日志
 
+## 2026-07-07 — AI 文档全面重新生成
+
+- 重新生成 `ARCHITECTURE.md`、`CODEBASE_ANALYSIS.md`、`PROJECT_OVERVIEW.md` 和 `NAMING.md`，同步当前 Server/Dispatcher 分层、Scheduler split、Worker adapters、Capability/MCP 注入和 Cloak sidecar runtime。
+- 同步当前数据库与资源契约：Alembic head 为 `0013_project_proxy_servers`，资源发现以 `cairn-resources` MCP 和 `project_proxy_endpoints` 表为准。
+- 同步当前统计：FastAPI route decorator AST 扫描为 102 个，`cairn/tests` 顶层 `test_*.py` 文件为 60 个。
+- 文档中敏感配置仅记录为 placeholder，不复制本地 YAML 中的 token、密码或 API key。
+
+---
+
 ## 2026-07-06 — Cloak sidecar APT 源同步
 
 - `capabilities/mcp/js-reverse-mcp/sidecar/Dockerfile` 在 `apt-get update` 前写入 Debian deb822 sources：先用 USTC HTTP mirror 安装 `ca-certificates`，再切换为 USTC HTTPS mirror 安装其余系统包。

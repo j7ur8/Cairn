@@ -9,7 +9,7 @@
 3. 如 Mermaid 图表有变更，确保图表代码完整且语法正确
 4. 模块清单如有增减，同步更新 CODEBASE_ANALYSIS.md 中的对应模块章节
 
-生成日期：2026-07-06
+生成日期：2026-07-07
 -->
 
 # Cairn 架构与设计文档
@@ -18,275 +18,218 @@
 
 ```mermaid
 flowchart TB
-    subgraph UI["前端展示层"]
-        SPA["静态 SPA\npartials + Alpine ES modules"]
+    subgraph Browser["Browser / no-build SPA"]
+        SPA["FastAPI partials + Alpine ES modules\nCytoscape graph + settings + logs"]
     end
 
-    subgraph API["Cairn Server / FastAPI"]
-        Auth["JWT 鉴权\nserver/security"]
-        Routers["业务路由\nprojects/intents/hints/files/etc."]
-        Services["应用/领域/仓储层\napplication/domain/repositories"]
-        ConfigStore["YAML 配置读写\nmutable dispatch/resources + fixed server"]
-        ObsAPI["观测 API\nllm-executions/events"]
+    subgraph Server["Cairn Server / FastAPI"]
+        Auth["Global Bearer auth guard\nJWT + service token"]
+        Routers["Routers\nprojects/intents/hints/files/replay/admin"]
+        AppLayer["Application + Domain\ncommands, queries, business rules"]
+        Repos["Repositories + Mappers\nSQLAlchemy Core/ORM projections"]
+        ConfigAdmin["YAML config admin\nserver/config + runtime_config"]
+        ObsServer["LLM observability APIs\nexecution/event write/read"]
     end
 
-    subgraph Data["数据层"]
-        PG[("PostgreSQL\nfacts/intents/projects/users")]
+    subgraph Data["Persistent / local state"]
+        PG[("PostgreSQL\nproject graph, snapshots, users, logs")]
         YAML[("server.yaml\nconfig.yaml\nconfig.resources.yaml")]
-        Files[("project-files\nattachments")]
+        Files[("datas/project-files\nattachments and exports")]
     end
 
     subgraph Dispatcher["Cairn Dispatcher"]
-        Loop["DispatcherLoop\n生命周期外壳"]
-        Scheduler["Tick/Dispatch/Submit\n调度协作者"]
-        Control["Health/Reload/MCP probe\nhealth_server + mcp_probe"]
-        Containers["ContainerManager facade\nlifecycle/cleanup/files/exec"]
-        Client["CairnClient\nHTTP client"]
+        Loop["DispatcherLoop\nscheduler/loop.py"]
+        Tick["TickCoordinator + DispatchCoordinator\nwork rotation and limits"]
+        ProjectDispatch["ProjectDispatcher\nbootstrap/explore/reason choice"]
+        Submitter["TaskSubmitter\nclaims + future registry"]
+        Runtime["ContainerManager\nDocker lifecycle/files/exec"]
+        Cloak["CloakSidecarManager\nproject browser sidecar"]
+        Protocol["CairnClient protocol facets\nHTTP + service token"]
     end
 
-    subgraph Workers["Worker Container"]
-        Agent["Agent Worker\nClaude Code / Codex / Mock"]
-        Prompts["Prompt templates\nbootstrap/reason/explore"]
-        MCP["MCP / Skills / Roles"]
+    subgraph Worker["Worker container"]
+        Drivers["WorkerDriver adapters\nclaudecode/codex/mock"]
+        TaskCode["Task runners\nbootstrap/explore/reason"]
+        Prompt["Prompt snapshots\nbootstrap/reason/explore"]
+        Capabilities["MCP + Skill + Role injection\n/tmp/cairn-capabilities"]
     end
 
-    subgraph Sidecars["Project-scoped Sidecars"]
-        Cloak["CloakBrowser sidecar\njs-reverse-mcp slots + noVNC"]
+    subgraph Sidecar["Optional project sidecar"]
+        BrowserMCP["CloakBrowser slots\nCDP + noVNC + control API"]
     end
 
-    SPA -->|"HTTP + Bearer"| Routers
-    Routers --> Auth
-    Routers --> Services
-    Routers --> ObsAPI
-    Services --> PG
-    Services --> Files
-    ConfigStore --> YAML
-    Routers --> ConfigStore
-    Routers -->|"HTTP + service token\nMCP probe/reload"| Control
+    SPA -->|"HTTP + Bearer"| Auth
+    Auth --> Routers
+    Routers --> AppLayer
+    AppLayer --> Repos
+    Repos --> PG
+    Routers --> ConfigAdmin
+    ConfigAdmin --> YAML
+    Routers --> ObsServer
+    ObsServer --> PG
+    Routers --> Files
 
-    Dispatcher -->|"HTTP + service token"| API
-    Loop --> Scheduler
-    Loop --> Control
-    Control -->|"startup probe container"| Containers
-    Scheduler --> Containers
-    Client --> Routers
-    Containers -->|"Docker socket"| Workers
-    Containers -->|"Docker socket\nproject sidecar"| Cloak
-    Agent -->|"JSON execute output\nsentinel conclude text"| Dispatcher
-    Dispatcher -->|"facts/intents/complete/events"| API
-    Workers --> MCP
-    MCP -->|"CDP slot lease\nHTTP control"| Cloak
-    Workers --> Files
+    Loop --> Tick
+    Tick --> ProjectDispatch
+    ProjectDispatch --> Submitter
+    Submitter --> Runtime
+    Runtime --> Worker
+    Submitter --> Cloak
+    Cloak --> BrowserMCP
+    Protocol -->|"HTTP + service token"| Routers
+    TaskCode --> Drivers
+    TaskCode --> Prompt
+    TaskCode --> Capabilities
+    Capabilities --> BrowserMCP
+    Drivers -->|"stdout/stderr JSON trace"| TaskCode
+    TaskCode -->|"facts/intents/reason/events"| Protocol
 ```
-
-Cairn 是一个分层单体加外部 Worker 容器的架构。Server 负责共享事实图、执行配置快照和配置管理；Dispatcher 是调度进程；Worker Container 是隔离执行环境。
 
 ## 2. 启动与初始化链路
 
 ```mermaid
 sequenceDiagram
     participant CLI as cairn.cli
-    participant App as server.app
-    participant Config as runtime_config
-    participant DB as server.db
-    participant PG as PostgreSQL
-    participant Router as FastAPI Routers
-    participant Retention as retention_loop
+    participant Server as FastAPI app
+    participant DB as PostgreSQL/Alembic
+    participant Dispatcher as DispatcherLoop
+    participant Docker as Docker runtime
+    participant Health as dispatcher health server
 
-    CLI->>App: cairn serve imports app
-    CLI->>App: uvicorn.run(app)
-    App->>Config: system_config()
-    Config->>Config: load server.yaml + config.yaml and merge fixed/dynamic sections
-    App->>DB: db.configure()
-    DB->>PG: create_engine + Alembic upgrade_head
-    DB->>PG: seed_defaults()
-    App->>DB: bootstrap_superuser_if_configured()
-    App->>App: assemble_index() 读取 partials 并缓存 app.state.index_html
-    App->>Router: include_router(...)
-    App->>App: register RequestIdMiddleware
-    App->>Retention: optionally start retention_loop
-    App-->>CLI: server listens
+    CLI->>Server: cairn serve
+    Server->>Server: system_config() + configure_logging()
+    Server->>Server: assemble_index() from partials
+    Server->>DB: db.configure()
+    DB->>DB: upgrade_head() to 0013_project_proxy_servers
+    DB->>DB: seed_defaults()
+    Server->>Server: bootstrap_superuser_if_configured()
+    Server->>Server: start BackgroundTasks(retention)
+    Server-->>CLI: uvicorn listens
+
+    CLI->>Dispatcher: cairn dispatch --config config.yaml
+    Dispatcher->>Dispatcher: load_dispatch_config()
+    Dispatcher->>Dispatcher: validate_prompt_resources()
+    Dispatcher->>Server: create CairnClient(service token)
+    Dispatcher->>Health: start /healthz /metrics /reload /mcp-probe
+    Dispatcher->>Docker: create ContainerManager
+    Dispatcher->>Docker: create CloakSidecarManager
+    Dispatcher->>Dispatcher: wire TaskSubmitter and coordinators
+    Dispatcher->>Docker: startup healthchecks
+    Dispatcher->>Server: list_project_work()
+    Dispatcher->>Docker: ensure worker container per project
 ```
 
-Dispatcher 启动链路：
+Server entry points:
 
-```mermaid
-sequenceDiagram
-    participant CLI as cairn.cli
-    participant Loop as DispatcherLoop
-    participant Config as DispatchConfig
-    participant Client as CairnClient
-    participant Health as HealthServer
-    participant Docker as ContainerManager
-
-    CLI->>Loop: cairn dispatch --config config.yaml
-    Loop->>Config: DispatchConfig.load(config_path)
-    Loop->>Client: init(server, dispatcher_api_token)
-    Loop->>Health: start /healthz, /metrics, /reload, /mcp-probe
-    Loop->>Docker: docker.from_env()
-    Loop->>Loop: startup healthchecks
-    Loop->>Client: list_projects()
-    Loop->>Docker: ensure project containers
-    Loop->>Client: write protocol results
-```
-
-关键入口：
-
-| 入口 | 文件 | 说明 |
-|------|------|------|
-| `cairn serve` | `cairn/src/cairn/cli.py` | 启动 FastAPI/Uvicorn |
-| `cairn dispatch` | `cairn/src/cairn/cli.py` | 启动 DispatcherLoop |
-| `cairn db migrate/status/reset` | `cairn/src/cairn/cli.py` | 数据库维护 |
-| FastAPI app | `cairn/src/cairn/server/app.py` | 注册生命周期、鉴权、路由、静态文件 |
-| Dispatcher loop | `cairn/src/cairn/dispatcher/scheduler/loop.py` | 调度 tick、容器与任务 |
+- `cairn/src/cairn/cli.py`: `serve`, `dispatch`, `db migrate`, `db reset`, `config check`.
+- `cairn/src/cairn/server/app.py`: `lifespan()`, global auth dependency, middleware, routers, static SPA.
+- `cairn/src/cairn/dispatcher/scheduler/loop.py`: `DispatcherLoop`.
 
 ## 3. 模块划分与职责
 
 | 模块名称 | 路径 | 职责 | 输入 | 输出 | 依赖 |
 |---------|------|------|------|------|------|
-| CLI | `cairn/src/cairn/cli.py` | 进程入口和管理命令 | 命令行参数 | Server/Dispatcher/DB 操作 | FastAPI, DispatcherLoop, db |
-| Server | `cairn/src/cairn/server/` | HTTP API、应用用例、领域规则、仓储访问、配置管理、静态 UI | HTTP Request | HTTP Response, DB/YAML/文件变更 | FastAPI, SQLAlchemy, Pydantic |
-| Server Application | `cairn/src/cairn/server/application/` | 跨 repository 的用例编排：项目创建/读取/命令、intent/reason 命令、hints/files/attachments、execution config、capabilities、export、replay | Router 调用、DB connection | DTO/domain result | domain, repositories, mappers |
-| Server Domain | `cairn/src/cairn/server/domain/` | intent/reason/project 业务规则、ID、时间、lease 清理、业务异常 | repository row/state、命令参数 | domain result 或 `DomainError` | 纯 Python，无 SQL/FastAPI/repository import |
-| Execution Config | `cairn/src/cairn/server/execution_config/` | 项目/任务执行配置快照、create-only 结构化持久化和 dispatcher payload 组装 | `config.yaml`, `config.resources.yaml`, DB rows | dispatcher 兼容 dict | shared config/contracts |
-| Dispatcher | `cairn/src/cairn/dispatcher/` | 读取图状态、调度任务、管理容器和项目级 CloakBrowser sidecar、回写结果，并暴露 reload/MCP probe 控制面 | Server API, YAML config, dispatcher control HTTP | HTTP writes, worker execution, probe results | requests, Docker SDK |
-| Dispatcher Scheduler | `cairn/src/cairn/dispatcher/scheduler/` | tick、reload、planner、submitter、worker selection、runtime state、replay coordination | Project summaries/config/runtime state | submitted tasks, releases, metrics | protocol client, runtime, tasks |
-| Dispatcher Protocol | `cairn/src/cairn/dispatcher/protocol/` | HTTP transport base 与 project/task/AI profile/observability 子客户端 | Server URL, service JWT | typed DTO 或 `ApiResult` | requests, shared contracts |
-| Dispatcher Control/Probe | `cairn/src/cairn/dispatcher/health_server.py`, `cairn/src/cairn/dispatcher/mcp_probe.py` | Dispatcher 本地 HTTP 控制面，处理 health/metrics/reload 和 MCP initialize/tools-list 探测 | `/healthz`, `/metrics`, `/reload`, `/mcp-probe` | JSON health/probe result, Prometheus metrics | ContainerManager, shared config |
-| Cloak Sidecar Runtime | `cairn/src/cairn/dispatcher/runtime/cloak_sidecar.py`, `capabilities/mcp/js-reverse-mcp/sidecar/`, `container/bin/js-reverse-mcp-cairn` | 当项目 execution config 选择 `js-reverse-mcp-cloak` 时，按项目启动 CloakBrowser sidecar，Worker wrapper 租用 CDP slot 并在退出时释放；noVNC 状态供项目 UI 打开 | execution config、Docker network、`worker.cloak_sidecar` | sidecar container、CDP browser URL、noVNC URL/status | Docker SDK, requests, js-reverse-mcp |
-| Shared | `cairn/src/cairn/shared/` | 共享配置模型、拆分后的 HTTP contract DTO、任务类型注册 | YAML/JSON | Pydantic models | Pydantic |
-| Server Observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、查询、usage view、retention；热点 SQL 仍只在 execution/event/view/usage/retention repository/query 模块，application/router 不感知 SQL 细节 | Dispatcher events, HTTP queries | execution/event DTO | server repositories, redaction |
-| Frontend SPA | `cairn/src/cairn/server/partials/`, `cairn/src/cairn/server/static/js/` | FastAPI partials 拼装页面；Alpine root 由原生 ES modules 装配，按 `shared/`、`app/`、`workspace/` 分层；项目视图使用轻量 poll-state revision 判断是否刷新完整图 | HTTP API, static partials/js | 浏览器 UI 状态和 API 调用 | Alpine, Tailwind |
-| Shared Observability | `cairn/src/cairn/shared/observability/` | 日志、trace id、Prometheus metrics | 请求/任务事件 | metrics/log context | prometheus-client |
-| Migrations | `cairn/migrations/` | PostgreSQL schema 演进 | Alembic commands | DDL changes | Alembic |
-| Capabilities | `capabilities/` | 技能、角色、payload、模板、MCP 配置素材 | YAML/Markdown | Worker prompt context | Dispatcher, prompt builder |
-| Container | `container/` | Worker 运行镜像和 MCP wrapper | Docker build | worker image | Docker |
-| Tests | `cairn/tests/` | 回归测试和关键行为验证；DB 用例无 PostgreSQL 时 clean skip | `python -m pytest` | pass/fail/skip | pytest, httpx, test helpers |
-
-当前 Alembic head 为 `0013_project_proxy_servers`，删除旧项目代理字段并新增项目级 `project_proxy_endpoints`；`projects.graph_revision` 与 `projects.timeline_revision` 服务于前端轻量轮询。Alembic 默认 `alembic_version.version_num` 为 `VARCHAR(32)`，migration revision id 必须保持在 32 字符以内；`test_architecture_boundaries.py` 会扫描 `cairn/migrations/versions/*.py` 防止过长 revision 再次导致 `docker compose up --build` 在写入版本号时失败。
-
-前端保持无构建架构：`assemble_index()` 仍拼装 `server/partials/*`，页面通过 `_doc_open.html` 只加载单一 ES module 入口 `/static/js/app/index.js`。`createAppState()` 负责合并 `app/`、`workspace/`、`shared/` 层状态并保留 duplicate key guard；Settings 数据加载入口在 `app/state-settings.js`，切换 section 时只调用该 section 的 loader，避免进入 Settings 后拉取 Prompts、AI Profiles、Proxies、Capabilities、Runtime 等全部管理数据。项目图工具栏现在通过 `workspace/state-cloak.js` 读取 `/projects/{id}/cloak-sidecar`，仅在 sidecar 已配置且运行并返回 noVNC URL 时打开 Cloak UI。
-
-Project graph 与 Execution Log 在前端状态层保持轻耦合联动：`workspace/state-graph.js` 的 intent 选择流程继续维护右侧 detail selection，同时调用 LLM log state 的 `syncLlmExecutionSelectionForIntent()`，按当前 `llmExecutions` 排序选择同 `intent_id` 的第一个 execution 并刷新 latest preview/page cards；找不到匹配时保留当前 log 选择。Execution Log header 还提供 `refreshCurrentLlmLog()` 手动刷新按钮，只强制刷新 execution list 与当前 execution 的事件视图，不改变 graph/detail/replay 状态，也不强制展开已折叠面板。
+| CLI | `cairn/src/cairn/cli.py` | 进程入口与维护命令 | shell args | Server/Dispatcher/DB action | server, dispatcher, shared config |
+| Server app | `cairn/src/cairn/server/app.py` | FastAPI app、lifespan、全局认证、SPA shell | HTTP request | HTTP/HTML/JSON response | db, routers, security |
+| Server routers | `cairn/src/cairn/server/routers/` | API 路由和依赖注入 | HTTP request, DTO | DTO/response | application, schemas, config |
+| Application | `cairn/src/cairn/server/application/` | 用例编排、事务边界内的命令/查询 | DTO, DB connection | contracts/projections | domain, repositories |
+| Domain | `cairn/src/cairn/server/domain/` | SQL-free 规则、错误和图逻辑 | domain values | decisions/errors | shared contracts |
+| Repositories | `cairn/src/cairn/server/repositories/` | PostgreSQL SQL 读写 | DB connection, params | rows/projections | orm, mappers |
+| Execution config | `cairn/src/cairn/server/execution_config/` | 项目创建时冻结 task/role/AI/capability/prompt 快照 | current config + selections | immutable snapshots | config, repositories |
+| Server observability | `cairn/src/cairn/server/observability/` | LLM execution/event 写入、分页读取、retention | event payloads | event views | repositories, metrics |
+| Security | `cairn/src/cairn/server/security/` | JWT、密码 hash、用户依赖、路径安全 | Bearer token/password | user context/token | config, users table |
+| Frontend SPA | `cairn/src/cairn/server/partials/`, `static/js/` | 项目图、日志、设置、能力管理 UI | browser events/API JSON | DOM state/API calls | server APIs |
+| Dispatcher scheduler | `cairn/src/cairn/dispatcher/scheduler/` | Tick、项目选择、claim、submit、cleanup | project summaries | running futures | protocol, runtime, tasks |
+| Dispatcher tasks | `cairn/src/cairn/dispatcher/tasks/` | Bootstrap/Explore/Reason prompt、执行、解析、写回 | project snapshot, intent | facts/intents/reason result | workers, observability |
+| Dispatcher runtime | `cairn/src/cairn/dispatcher/runtime/` | Docker 容器、mount、exec、cleanup、Cloak sidecar | ContainerConfig | container/process/lease | docker |
+| Worker adapters | `cairn/src/cairn/dispatcher/workers/adapters/` | CLI command/env/trace format 适配 | WorkerConfig, prompt | process command/events | Claude Code, Codex, mock |
+| Capabilities | `capabilities/`, `cairn/src/cairn/dispatcher/capabilities.py` | MCP/Skill/Role catalog、注入、probe | execution config | mcp.json, plugin, instructions | config.resources.yaml |
+| Shared contracts/config | `cairn/src/cairn/shared/` | Pydantic contracts、config models、metrics/logging | YAML/JSON | typed models | server, dispatcher |
 
 ## 4. 内部模块间通信
 
-同步通信：
+- Browser 与 Server：HTTP JSON + Bearer token；SPA shell 和 static files 由 FastAPI 提供。
+- Dispatcher 与 Server：`CairnClient` 使用 HTTP + dispatcher service token。
+- Dispatcher 与 Worker：Docker exec 运行 Claude Code/Codex/mock；stdout/stderr 由 dispatcher 解析和记录。
+- Worker 与 MCP：Claude/Codex 启动时注入 `mcp.json` 或 CLI config；MCP wrapper 可能连接项目 sidecar。
+- Server 与 DB：SQLAlchemy engine + Alembic migration；启动时迁移到当前 head `0013_project_proxy_servers`。
+- 共享数据：Project graph、execution snapshots、AI health、LLM logs 均在 PostgreSQL；YAML config 通过 server config modules 读写。
 
-| 调用方 | 被调用方 | 协议/方式 | 用途 |
-|--------|----------|-----------|------|
-| SPA | Cairn Server | HTTP + Bearer token | 项目、图、配置、文件、观测 UI |
-| SPA | Cairn Server | `GET /projects/{id}/poll-state` | 读取 title/status/reason/counts/revision，只有 revision 变化时刷新完整项目图或时间线 |
-| Dispatcher | Cairn Server | HTTP + service JWT | 读取项目、claim/heartbeat/conclude、写观测事件 |
-| Cairn Server | Dispatcher health server | HTTP + service token | 触发 dispatcher reload；通过 `/mcp-probe` 在 worker image 内探测 MCP initialize/tools-list |
-| Server | PostgreSQL | SQLAlchemy session | 持久化 projects/facts/intents/users/events |
-| Server | YAML files | 原子写入/覆盖 | dispatch 和 resources 配置 |
-| Dispatcher | Docker daemon | Docker socket | 创建/启动/停止 Worker 容器 |
-| Dispatcher | CloakBrowser sidecar | Docker + HTTP control | 项目选择 `js-reverse-mcp-cloak` 时启动 sidecar、检查 health、清理 inactive/orphan sidecar |
-| Worker wrapper | CloakBrowser sidecar | HTTP control + CDP URL | `/usr/local/bin/js-reverse-mcp-cairn` 租用 slot，执行 `js-reverse-mcp --browserUrl ...`，退出时释放 slot |
-| Dispatcher | Worker process | subprocess / CLI adapter | 运行 Claude Code、Codex 或 mock |
-
-典型 Explore 请求链路：
+典型 Explore 链路：
 
 ```mermaid
 sequenceDiagram
-    participant D as DispatcherLoop
-    participant S as Cairn Server
+    participant D as Dispatcher Tick
+    participant S as Server API
+    participant W as Worker Container
+    participant M as MCP/Sidecar
     participant DB as PostgreSQL
-    participant C as Worker Container
-    participant W as Agent Worker
 
-    D->>S: GET /projects
-    S->>DB: expire leases + list project summaries with pre-aggregated counts
-    S-->>D: active projects and open intents
+    D->>S: GET /projects/work
     D->>S: GET /projects/{id}
-    S-->>D: graph detail
-    D->>S: POST /projects/{id}/intents/{intent_id}/claim
-    S->>DB: atomic-ish claim update
-    D->>C: ensure_running(project_id)
-    opt execution config includes js-reverse-mcp-cloak
-        D->>C: ensure Cloak sidecar and render project/task env templates
-    end
-    D->>W: run explore prompt
-    W-->>D: JSON fact / rejection / error
-    Note over D,W: conclude fallback returns sentinel-wrapped plain fact text
-    D->>S: POST /projects/{id}/intents/{intent_id}/conclude
-    S->>DB: insert fact + conclude intent
-    D->>S: POST /projects/{id}/llm-executions/{exec}/events
+    D->>S: POST /projects/{id}/intents/{intent}/claim
+    D->>W: ensure_running + write task snapshot
+    D->>W: run worker adapter with prompt
+    W->>M: optional MCP calls
+    W-->>D: JSON trace + sentinel output
+    D->>S: POST LLM events/batch
+    D->>S: conclude intent / write fact / create intents
+    S->>DB: persist graph and event changes
 ```
-
-异步通信：
-
-| 机制 | 位置 | 说明 |
-|------|------|------|
-| Dispatcher tick loop | `dispatcher/scheduler/loop.py` | 周期轮询 Server，而不是消息队列 |
-| ThreadPoolExecutor | Dispatcher | 并发运行 worker task 和 cleanup task |
-| LLM execution events | Server observability API | Dispatcher 批量上报 prompt/stdout/stderr/usage |
-| Retention loop | Server lifespan | 周期清理观测数据 |
-| MCP probe request | Server admin API -> Dispatcher `/mcp-probe` | 使用临时 startup container 写入 `mcp.json` 和 probe 脚本，执行 initialize + `tools/list` 后删除容器 |
-| Cloak slot lease | Worker `js-reverse-mcp-cairn` -> project sidecar | wrapper 调 `/lease` 获取 browser URL，进程退出 trap 调 `/release` |
-
-性能敏感查询仍收敛在 repository/query 层：project summaries 使用 facts/intents/hints 预聚合 join；execution list 先分页再聚合 events；event view 先计算 by-kind stats，再按可见 `event_kind` 拉取 primary events；retention 使用 DB join delete；replay route extraction 按 completion facts 可达子图加载。Router、application service 和 DTO contract 不暴露这些 SQL 形态。
-
-Execution config 是不可变项目快照：创建项目或 replay project 时插入一次，`project_id` 已存在会触发 `ServerInvariantError`，不会覆盖 header/timeouts/AI profiles/capabilities/runtime snapshots。Dispatcher 因此不做版本轮询或 TTL；`ExecutionConfigResolver` 仅在 process/reload、project log-state clear 或 404 时失效缓存，并对缓存读写返回 deep copy，避免任务下游修改 dict 污染后续 dispatch。
-
-共享数据：
-
-| 数据 | 写入方 | 读取方 |
-|------|--------|--------|
-| projects/facts/intents/hints | Server routers, Dispatcher through API | SPA, Dispatcher, export/replay |
-| projects.graph_revision/timeline_revision | project、intent、hint、reason、lease 命令 | SPA poll-state 和项目列表局部刷新 |
-| project_execution_configs | project creation/replay create-only snapshot | Dispatcher, project detail APIs |
-| server.yaml | operator | Server runtime、Dispatcher runtime merge、container limits read API |
-| config.yaml | Server system settings routers, operator | Server runtime、Dispatcher；UI 可写 settings/runtime/tasks/observability/log-retention |
-| config.resources.yaml | Server capability/role routers, operator | Dispatcher prompt/capability assembly、MCP probe metadata |
-| cloak sidecar profiles | Dispatcher CloakSidecarManager, sidecar container | project-scoped persistent browser profiles under `worker.cloak_sidecar.profile_root` |
-| attachments/project-files | upload route, Worker container | SPA download, Worker |
 
 ## 5. 关键设计模式与架构风格
 
-| 模式 | 应用位置 | 说明 |
-|------|----------|------|
-| Blackboard Architecture | facts/intents/hints graph | Worker 不直接通信，通过共享图协作 |
-| Router/Application/Domain | `server/routers/`, `server/application/`, `server/domain/` | Router 只做参数/鉴权/HTTP 响应映射，application/query service 编排事务用例，domain 是无 SQL 的规则/决策层 |
-| Repository / Query | `server/repositories/`, `server/execution_config/repository.py`, `server/observability/*_repository.py` | 唯一 SQL 访问层，负责条件更新、lease 过期、ID 分配、export/replay/AI check/observability row 读取；project count 预聚合、execution 分页后聚合、retention `DELETE ... USING` 和 replay reachable subgraph 查询都保持在这一层 |
-| Mapper | `server/mappers/` | 只做 row/projection 到 API/domain DTO 的转换，不查 SQL |
-| Adapter | `dispatcher/workers/adapters/` | 对接 Claude Code、Codex、mock |
-| Scheduler Coordinators | `dispatcher/scheduler/` | `DispatcherLoop` 保持生命周期外壳，tick/dispatch/runtime/submitter 协作者依赖 `SchedulerServices` 或具体 resolver，而不是完整 loop |
-| Intent Scheduling | `dispatcher/scheduler/project_dispatcher.py`, default `reason.md` | Reason 只产出 `from` 与 `description`；Scheduler 对 unclaimed open intents 按 `created_at` 选择最新 intent，并在 claimed/running open intents 未结束时跳过 Reason |
-| Task Submit Pipeline | `dispatcher/scheduler/task_submitter.py`, `task_claims.py`, `submission_registry.py` | bootstrap/explore/reason 共用不可变 execution config snapshot、worker selection、claim、export、submit、失败 release、runtime registry/log 流水线；claim 和 registry/log 已拆成 collaborator |
-| Container Facade | `dispatcher/runtime/containers.py` | facade 保留对外方法名，容器生命周期、cleanup、archive/file、exec/process 辅助拆到小模块 |
-| Project-scoped Sidecar | `dispatcher/runtime/cloak_sidecar.py`, `scheduler/task_submitter.py`, `scheduler/cleanup.py` | `js-reverse-mcp-cloak` 不直接启动浏览器；Dispatcher 先确保每项目 CloakBrowser sidecar，worker MCP wrapper 再租用 slot 并连接 CDP |
-| Task Lifecycle | `dispatcher/tasks/lifecycle.py`, `conclude_fallback.py` | 统一 reporter、heartbeat、cancel/timeout/unhealthy/parse failed 和 conclude fallback 前置检查 |
-| Config-as-data | `server.yaml`, `config.yaml`, `config.resources.yaml` | `server.yaml` 保存固定部署/敏感/基础设施配置，实际 YAML 顶层为 `app/database/security/admin/dispatcher/storage/worker`；`config.yaml` 保存 UI 可调整的调度、worker、任务、观测配置；`config.resources.yaml` 保存 servers、capabilities、roles |
-| Lease/Heartbeat | intents, reason lock | 用心跳和超时释放运行中工作 |
-
-总体架构风格是“中心化 Server + 独立调度器 + 容器化执行环境”的分层单体架构，不是微服务系统。边界通过 HTTP、PostgreSQL 和 Docker socket 连接。
+- Blackboard Architecture：Server 保存 shared graph，Dispatcher/Workers 基于 graph 状态推进。
+- Layered Monolith：Server 内部按 routers/application/domain/repositories/schemas 分层，测试防止 domain 依赖 SQL/FastAPI。
+- Adapter Pattern：`WorkerDriver` 统一 Claude Code、Codex、mock 的 command/env/trace 行为。
+- Snapshot Pattern：项目创建时冻结 execution config，旧项目不随全局 config 静默漂移。
+- Coordinator Pattern：Dispatcher loop 拆成 Tick、Dispatch、ProjectDispatcher、TaskSubmitter、RuntimeMaintenance。
+- Sidecar Pattern：CloakBrowser 是项目级 runtime provider，通过 MCP wrapper lease/release 使用。
+- Guardrail Tests：`test_architecture_boundaries.py`、`test_route_auth_guard.py`、`test_db_migrations.py` 约束架构、认证和文档漂移。
 
 ## 6. 认证与授权架构
 
-认证方式：
+- 认证方式：JWT HS256 Bearer token。
+- Token 来源：`POST /auth/login` 登录，`POST /auth/refresh` 刷新；dispatcher 使用 service token。
+- 权限模型：普通 active user 可访问受保护业务接口；superuser 才能执行用户创建、AI profile secret、部分 admin 修改；service token 被映射为 synthetic active superuser 用于内部调度。
+- 全局拦截点：`FastAPI(... dependencies=[Depends(_enforce_auth)])`。
+- 公共路径：`/`、`/auth/login`、`/health`、`/metrics`、`/static/*`。
+- OpenAPI 暴露：`/docs`、`/redoc`、`/openapi.json` 当前禁用，避免绕过全局依赖暴露 schema。
 
-| 项 | 实现 |
-|----|------|
-| Token | JWT HS256 |
-| 签名密钥 | `server.yaml` 的 `security.jwt_secret`，加载后映射到内部 auth model；默认不通过 UI 编辑 |
-| 默认有效期 | 1 小时 |
-| 密码 | bcrypt hash |
-| 服务账号 | `server.yaml` 的 `security.dispatcher_api_token` 对应的 JWT claim `role=service`，映射为 synthetic superuser |
-| 初始管理员 | `server.yaml` 的 `admin.email/password` 可在启动时 bootstrap |
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Guard as _enforce_auth
+    participant JWT as security.jwt
+    participant Router
 
-鉴权入口：
+    Client->>Guard: HTTP request + Authorization
+    Guard->>Guard: allow public path?
+    Guard->>JWT: decode and validate token
+    JWT-->>Guard: User / service claims
+    Guard->>Guard: require active user
+    Guard->>Router: pass request
+```
 
-| 位置 | 行为 |
-|------|------|
-| `server/app.py::_enforce_auth` | 全局依赖，保护除 `/`、`/auth/login`、`/health`、`/metrics`、`/static/*` 以外的路径；其他 `/auth/*` 不做 blanket 豁免 |
-| `server/security/deps.py::current_user` | 校验 Bearer token 并加载用户 |
-| `server/security/deps.py::current_active_superuser` | 要求 `is_superuser=True` |
-| `server/routers/auth.py` | 登录、刷新、注册用户 |
+## 7. 运行时与能力架构
 
-权限模型：
+能力来源：
 
-- 用户表包含 `is_active` 和 `is_superuser`。
-- `/auth/users` 明确要求 `current_active_superuser`。
-- 敏感写接口和 secret/report/check 管理接口使用 `current_active_superuser`；catalog 和项目快照读取依赖全局 Bearer token。
+- `config.resources.yaml`: MCP server、Skill、Role catalog。
+- `capabilities/skills/*/SKILL.md`: worker-facing skill workflow。
+- `capabilities/roles/*/ROLE.md`: role prompt。
+- `capabilities/mcp/*`: MCP source/runtime assets。
+
+执行时：
+
+1. Server 在项目创建时保存 execution config snapshot。
+2. Dispatcher 为 task 读取 snapshot。
+3. `inject_project_capabilities()` 按 task type 注入 MCP、Skill、Role。
+4. 对 `runtime_provider: cloak_sidecar` 的 MCP，`BrowserRuntimeContext` 向 `CloakSidecarManager` 租用 browser slot。
+5. Worker 运行结束后 dispatcher release lease 并写回观测事件。
+
+## 8. 数据库迁移架构
+
+当前 Alembic head：`0013_project_proxy_servers`。
+
+迁移链是线性的，`0013_project_proxy_servers` 直接跟随 `0011_intent_phase_checkpoints`；没有 `0012` 文件但 chain 有效。Server 启动时 `db.configure()` 默认执行 migration 到 head，并运行默认数据 seed。
