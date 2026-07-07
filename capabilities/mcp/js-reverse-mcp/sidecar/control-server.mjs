@@ -1,4 +1,5 @@
 import http from 'node:http';
+import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { launchPersistentContext } from 'cloakbrowser/puppeteer';
 
@@ -20,7 +21,20 @@ const state = Array.from({ length: slots }, (_, index) => ({
 }));
 const waiters = [];
 
+function removeStaleProfileLocks(userDataDir) {
+  for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    const target = `${userDataDir}/${name}`;
+    try {
+      fs.rmSync(target, { force: true, recursive: true });
+    } catch (error) {
+      console.warn(`failed to remove stale Chromium profile lock ${target}: ${error?.message || String(error)}`);
+    }
+  }
+}
+
 async function launchSlot(item) {
+  const userDataDir = `/profiles/slot-${item.slot}`;
+  removeStaleProfileLocks(userDataDir);
   const args = [
     `--remote-debugging-address=0.0.0.0`,
     `--remote-debugging-port=${item.cdpPort}`,
@@ -29,13 +43,14 @@ async function launchSlot(item) {
     '--window-size=1365,900',
   ];
   item.browser = await launchPersistentContext({
-    userDataDir: `/profiles/slot-${item.slot}`,
+    userDataDir,
     headless: false,
     humanize: true,
     args,
     launchOptions: {
       args,
       dumpio: false,
+      env: process.env,
     },
   });
 }
@@ -47,6 +62,8 @@ async function launchAll() {
     } catch (error) {
       item.launchError = error?.message || String(error);
       console.error(`slot ${item.slot} launch failed: ${item.launchError}`);
+    } finally {
+      drainWaiters();
     }
   }));
 }
@@ -70,6 +87,14 @@ function lease(leaseId) {
   return { slot: item.slot, browser_url: item.publicBrowserUrl, lease_id: item.leaseId, ttl_ms: leaseTtlMs };
 }
 
+function isLaunching() {
+  return state.some(item => !item.browser && !item.launchError);
+}
+
+function hasUsableBrowser() {
+  return state.some(item => item.browser && !item.launchError);
+}
+
 function release(leaseId) {
   let released = false;
   for (const item of state) {
@@ -88,6 +113,12 @@ function drainWaiters() {
     const waiter = waiters[index];
     const result = lease(waiter.leaseId);
     if (!result) {
+      if (!isLaunching() && !hasUsableBrowser()) {
+        waiters.splice(index, 1);
+        clearTimeout(waiter.timer);
+        waiter.resolve(null);
+        continue;
+      }
       index += 1;
       continue;
     }
@@ -123,7 +154,22 @@ function writeJson(response, status, payload) {
 
 function healthPayload() {
   expireLeases();
+  const ready = state.some(item => !item.leaseId && item.browser && !item.launchError);
+  const launching = isLaunching();
+  const usable = hasUsableBrowser();
+  const errors = state
+    .filter(item => item.launchError)
+    .map(item => `slot ${item.slot}: ${item.launchError}`);
+  let stateName = 'unavailable';
+  if (ready) stateName = 'ready';
+  else if (launching) stateName = 'launching';
+  else if (usable) stateName = 'busy';
+  else if (errors.length) stateName = 'error';
   return {
+    ready,
+    state: stateName,
+    launching,
+    error: errors.length && !usable && !launching ? errors.join('; ') : '',
     slots: state.map(item => ({
       slot: item.slot,
       cdp_port: item.cdpPort,
@@ -135,7 +181,6 @@ function healthPayload() {
   };
 }
 
-await launchAll();
 setInterval(expireLeases, 10000).unref();
 
 const server = http.createServer(async (request, response) => {
@@ -176,6 +221,16 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(controlPort, '0.0.0.0', () => {
-  console.log(`cloak sidecar control listening on ${controlPort}`);
+await new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(controlPort, '0.0.0.0', () => {
+    server.off('error', reject);
+    console.log(`cloak sidecar control listening on ${controlPort}`);
+    resolve();
+  });
+});
+
+launchAll().catch(error => {
+  console.error(`cloak sidecar launch failed: ${error?.message || String(error)}`);
+  drainWaiters();
 });

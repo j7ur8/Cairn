@@ -435,6 +435,59 @@ class ContainerCleanupCoordinatorTests(unittest.TestCase):
         finally:
             coordinator.shutdown(wait=True, cancel_futures=True)
 
+    def test_orphan_cleanup_preserves_probe_cloak_sidecar(self) -> None:
+        from cairn.dispatcher.scheduler.cleanup import ContainerCleanupCoordinator
+
+        cleaned_cloak_sidecars: list[str] = []
+
+        class FakeContainerManager:
+            def container_name(self, project_id: str) -> str:
+                return f"cairn-{project_id}"
+
+            def needs_completed_cleanup(self, project_id: str) -> bool:
+                return False
+
+            def cleanup_completed(self, project_id: str) -> bool:
+                raise AssertionError("not called")
+
+            def needs_stopped_cleanup(self, project_id: str) -> bool:
+                return False
+
+            def cleanup_stopped(self, project_id: str) -> bool:
+                raise AssertionError("not called")
+
+            def managed_container_names(self) -> list[str]:
+                return []
+
+            def needs_orphan_cleanup(self, container_name: str) -> bool:
+                return True
+
+            def cleanup_orphan(self, container_name: str) -> bool:
+                raise AssertionError("not called")
+
+        class FakeCloakSidecarManager:
+            def managed_container_names(self) -> list[str]:
+                return ["cairn-cloak-probe", "cairn-cloak-orphan"]
+
+            def cleanup_orphan(self, container_name: str) -> bool:
+                cleaned_cloak_sidecars.append(container_name)
+                return True
+
+        coordinator = ContainerCleanupCoordinator(
+            FakeContainerManager(),  # type: ignore[arg-type]
+            cloak_sidecar_manager=FakeCloakSidecarManager(),  # type: ignore[arg-type]
+            max_workers=2,
+        )
+        try:
+            coordinator.queue_for_projects([])
+            for future in list(coordinator.futures):
+                future.result(timeout=5)
+            coordinator.reap()
+
+            self.assertEqual(cleaned_cloak_sidecars, ["cairn-cloak-orphan"])
+        finally:
+            coordinator.shutdown(wait=True, cancel_futures=True)
+
 
 class TaskSubmitterTests(unittest.TestCase):
     def test_dispatcher_loop_isolates_transient_tick_errors_after_startup(self) -> None:

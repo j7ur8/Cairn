@@ -192,9 +192,12 @@ class McpProbeRunnerTests(unittest.TestCase):
 
         class _Cloak:
             def __init__(self):
+                self.cleaned = []
+                self.leased = []
                 self.released = []
 
             def lease_browser(self, project_id, *, task_instance_id, network_mode):
+                self.leased.append(project_id)
                 return {
                     "browser_url": "http://cairn-cloak-probe:9222",
                     "control_url": "http://cairn-cloak-probe:7310",
@@ -203,6 +206,10 @@ class McpProbeRunnerTests(unittest.TestCase):
 
             def release_browser(self, *, control_url, lease_id):
                 self.released.append((control_url, lease_id))
+
+            def cleanup_project(self, project_id, *, remove):
+                self.cleaned.append((project_id, remove))
+                return True
 
         manager = _ContainerManager()
         cloak = _Cloak()
@@ -218,7 +225,9 @@ class McpProbeRunnerTests(unittest.TestCase):
         detail = written["mcpServers"]["js"]
         self.assertEqual(detail["args"][-1], "http://cairn-cloak-probe:9222")
         self.assertEqual(detail["env"]["CAIRN_BROWSER_LEASE_ID"], "lease-1")
+        self.assertEqual(cloak.leased, ["probe"])
         self.assertEqual(cloak.released, [("http://cairn-cloak-probe:7310", "lease-1")])
+        self.assertEqual(cloak.cleaned, [("probe", True), ("probe", True)])
 
     def test_browser_backed_probe_reports_provider_failure_without_exec(self) -> None:
         from cairn.dispatcher.mcp_probe import run_mcp_probe_request

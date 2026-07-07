@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shlex
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ MCP_PROBE_TIMEOUT_SECONDS = 8
 MCP_PROBE_ROOT = f"{CAPABILITY_ROOT}/probe"
 MCP_PROBE_PATH = f"{MCP_PROBE_ROOT}/mcp.json"
 MCP_PROBE_SCRIPT_PATH = f"{CAPABILITY_ROOT}/probe_mcp.py"
+MCP_PROBE_PROJECT_ID = "probe"
 MCP_PROBE_SCRIPT = r'''#!/usr/bin/env python3
 import json
 import os
@@ -242,8 +244,9 @@ def run_mcp_probe_request(
         return {"results": [item.to_dict() for item in missing]}
 
     container_name = container_manager.create_startup_container()
+    _cleanup_probe_sidecar(cloak_sidecar_manager)
     provider_context = BrowserRuntimeContext(
-        project_id="probe",
+        project_id=MCP_PROBE_PROJECT_ID,
         task_instance_id=f"mcp-probe-{uuid.uuid4().hex}",
         network_mode=config.container.network_mode,
         cloak_sidecar_manager=cloak_sidecar_manager,
@@ -282,8 +285,17 @@ def run_mcp_probe_request(
         for lease in runtime_leases.values():
             lease.release()
             remove_temp_lease_file(lease)
+        _cleanup_probe_sidecar(cloak_sidecar_manager)
         container_manager.remove_container(container_name, force=True)
     return {"results": [item.to_dict() for item in [*missing, *provider_errors, *results]]}
+
+
+def _cleanup_probe_sidecar(cloak_sidecar_manager: CloakSidecarManager | None) -> None:
+    cleanup = getattr(cloak_sidecar_manager, "cleanup_project", None)
+    if not callable(cleanup):
+        return
+    with suppress(Exception):
+        cleanup(MCP_PROBE_PROJECT_ID, remove=True)
 
 
 def _probe_one(

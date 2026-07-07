@@ -128,6 +128,7 @@ class ContainerCleanupCoordinator:
             from cairn.dispatcher.runtime.cloak_sidecar import cloak_container_name
 
             expected_cloak_container_names = {cloak_container_name(summary.id) for summary in summaries}
+            expected_cloak_container_names.add(cloak_container_name("probe"))
         for container_name in self.container_manager.managed_container_names():
             if container_name in expected_container_names:
                 continue

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,11 @@ LABEL_CLOAK_SIDECAR = "cairn.cloak_sidecar"
 CONTROL_PORT = 7310
 NOVNC_PORT = 6080
 CDP_BASE_PORT = 9222
+CONTROL_READY_TIMEOUT_SECONDS = 20.0
+SLOT_READY_TIMEOUT_SECONDS = 90.0
+CONTROL_READY_POLL_SECONDS = 0.25
+CONTROL_HEALTH_TIMEOUT_SECONDS = 1.0
+CLOAK_CONTROL_NO_PROXIES = {"http": None, "https": None, "all": None}
 
 
 @dataclass(slots=True)
@@ -43,6 +49,8 @@ class CloakSidecarStatus:
     novnc_url: str | None = None
     slots: int = 0
     busy_slots: int = 0
+    ready: bool = False
+    state: str = "disabled"
     error: str = ""
 
     def model_dump(self) -> dict[str, Any]:
@@ -54,6 +62,8 @@ class CloakSidecarStatus:
             "novnc_url": self.novnc_url,
             "slots": self.slots,
             "busy_slots": self.busy_slots,
+            "ready": self.ready,
+            "state": self.state,
             "error": self.error,
         }
 
@@ -120,7 +130,7 @@ class CloakSidecarManager:
             container.start()
         except DockerException as exc:
             raise RuntimeError(f"failed to create cloak sidecar {name}: {exc}") from exc
-        return self.status(project_id)
+        return self._wait_for_control_service(project_id, name)
 
     def lease_browser(
         self,
@@ -134,11 +144,21 @@ class CloakSidecarManager:
             raise RuntimeError(status.error or f"cloak sidecar not running: {status.container_name}")
         lease_id = f"{task_instance_id}-{project_id}"
         control_url = f"http://{cloak_container_name(project_id)}:{CONTROL_PORT}"
+        control_status = self._wait_for_browser_slot(project_id, status.container_name)
+        if not control_status.running:
+            raise RuntimeError(control_status.error or f"cloak sidecar not running: {control_status.container_name}")
+        if control_status.error.startswith("health unavailable:"):
+            raise RuntimeError(
+                f"cloak sidecar control service unavailable at {control_url}: {control_status.error}"
+            )
+        if control_status.state == "error" and control_status.error:
+            raise RuntimeError(f"cloak sidecar browser slot unavailable at {control_url}: {control_status.error}")
         try:
             response = requests.post(
                 f"{control_url}/lease",
                 json={"lease_id": lease_id},
                 timeout=35.0,
+                proxies=CLOAK_CONTROL_NO_PROXIES,
             )
             response.raise_for_status()
             data = response.json()
@@ -151,7 +171,7 @@ class CloakSidecarManager:
             "browser_url": browser_url,
             "lease_id": str(data.get("lease_id") or lease_id),
             "control_url": control_url,
-            "sidecar": status.model_dump(),
+            "sidecar": control_status.model_dump(),
         }
 
     def release_browser(self, *, control_url: str, lease_id: str) -> None:
@@ -162,6 +182,7 @@ class CloakSidecarManager:
                 f"{control_url.rstrip('/')}/release",
                 json={"lease_id": lease_id},
                 timeout=2.0,
+                proxies=CLOAK_CONTROL_NO_PROXIES,
             )
         except Exception as exc:  # noqa: BLE001
             LOG.warning("failed to release cloak browser lease=%s control_url=%s error=%s", lease_id, control_url, exc)
@@ -173,6 +194,7 @@ class CloakSidecarManager:
             container_name=name,
             enabled=self.config is not None,
             slots=self.config.slots if self.config is not None else 0,
+            state="stopped" if self.config is not None else "disabled",
         )
         if self.config is None:
             return status
@@ -189,6 +211,7 @@ class CloakSidecarManager:
             return status
         state = str(container.attrs.get("State", {}).get("Status") or "")
         status.running = state == "running"
+        status.state = state or ("running" if status.running else "stopped")
         status.novnc_url = self._novnc_url(container) if status.running else None
         if status.running:
             self._merge_health(project_id, status)
@@ -248,16 +271,65 @@ class CloakSidecarManager:
     def _merge_health(self, project_id: str, status: CloakSidecarStatus) -> None:
         url = f"http://{cloak_container_name(project_id)}:{CONTROL_PORT}/healthz"
         try:
-            response = requests.get(url, timeout=1.0)
+            response = requests.get(url, timeout=CONTROL_HEALTH_TIMEOUT_SECONDS, proxies=CLOAK_CONTROL_NO_PROXIES)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:  # noqa: BLE001
             status.error = f"health unavailable: {exc}"
             return
+        status.ready = bool(data.get("ready"))
+        if isinstance(data.get("state"), str) and data.get("state"):
+            status.state = str(data["state"])
+        if isinstance(data.get("error"), str):
+            status.error = str(data.get("error") or "")
         slots = data.get("slots")
         if isinstance(slots, list):
             status.slots = len(slots)
             status.busy_slots = sum(1 for slot in slots if isinstance(slot, dict) and slot.get("busy"))
+            if not status.error:
+                errors = [
+                    f"slot {slot.get('slot')}: {slot.get('error')}"
+                    for slot in slots
+                    if isinstance(slot, dict) and slot.get("error")
+                ]
+                status.error = "; ".join(errors)
+
+    def _wait_for_control_service(self, project_id: str, name: str) -> CloakSidecarStatus:
+        deadline = time.monotonic() + CONTROL_READY_TIMEOUT_SECONDS
+        last_status = self.status(project_id)
+        while True:
+            error = str(last_status.error or "")
+            if last_status.running and not error.startswith("health unavailable:"):
+                return last_status
+            if not last_status.running:
+                last_status.error = last_status.error or f"cloak sidecar exited before control service became ready: {name}"
+                return last_status
+            if time.monotonic() >= deadline:
+                last_status.error = (
+                    error
+                    or f"cloak sidecar control service did not become ready within {CONTROL_READY_TIMEOUT_SECONDS:g}s: {name}"
+                )
+                return last_status
+            time.sleep(CONTROL_READY_POLL_SECONDS)
+            last_status = self.status(project_id)
+
+    def _wait_for_browser_slot(self, project_id: str, name: str) -> CloakSidecarStatus:
+        deadline = time.monotonic() + SLOT_READY_TIMEOUT_SECONDS
+        last_status = self._wait_for_control_service(project_id, name)
+        while True:
+            error = str(last_status.error or "")
+            if not last_status.running or error.startswith("health unavailable:"):
+                return last_status
+            if last_status.ready or last_status.state not in ("launching", "unavailable"):
+                return last_status
+            if time.monotonic() >= deadline:
+                last_status.error = (
+                    error
+                    or f"cloak sidecar browser slot did not become ready within {SLOT_READY_TIMEOUT_SECONDS:g}s: {name}"
+                )
+                return last_status
+            time.sleep(CONTROL_READY_POLL_SECONDS)
+            last_status = self.status(project_id)
 
     def _novnc_url(self, container: Any) -> str | None:
         ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})

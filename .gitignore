@@ -56,3 +56,7 @@ datas/
 !.env.*.example
 config.yaml
 config.resources.yaml
+
+# CloakBrowser browser archive cache populated by start.sh.
+capabilities/mcp/js-reverse-mcp/sidecar/.cloak-downloads/*
+!capabilities/mcp/js-reverse-mcp/sidecar/.cloak-downloads/.gitkeep

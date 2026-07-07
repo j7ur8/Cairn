@@ -54,9 +54,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/cairn-cloak
+COPY .cloak-downloads /opt/cairn-cloak/.cloak-downloads
+COPY install-local-cloak.mjs /opt/cairn-cloak/install-local-cloak.mjs
 RUN npm init -y >/dev/null \
     && npm install cloakbrowser@0.4.8 puppeteer-core@24.11.2 \
-    && npx cloakbrowser install
+    && node install-local-cloak.mjs; status=$?; \
+    if [ "$status" -eq 42 ]; then \
+        node node_modules/cloakbrowser/dist/cli.js install; \
+    elif [ "$status" -ne 0 ]; then \
+        exit "$status"; \
+    fi; \
+    node --input-type=module -e 'import fs from "node:fs"; import { getBinaryPath } from "./node_modules/cloakbrowser/dist/config.js"; const path = getBinaryPath(); if (!fs.existsSync(path)) throw new Error("CloakBrowser binary missing after install: " + path); console.log(path);'
 
 COPY control-server.mjs /opt/cairn-cloak/control-server.mjs
 COPY entrypoint.sh /usr/local/bin/cairn-cloak-entrypoint
