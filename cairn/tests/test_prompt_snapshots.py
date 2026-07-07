@@ -137,9 +137,10 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["AGENTS.md"])
         self.assertIn("Reason does not execute tools", phase_files["reason"]["AGENTS.md"])
 
-    def test_default_phase_prompts_include_project_context_placeholders(self) -> None:
+    def test_default_phase_prompts_use_legacy_context_sections(self) -> None:
         default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         forbidden = (
+            "Project Context",
             "project context file",
             "project.md",
             "phase.md",
@@ -147,13 +148,84 @@ class PromptSnapshotTests(unittest.TestCase):
             "policy.json",
         )
 
-        for name in ("bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"):
+        prompts = {
+            name: (default_dir / name).read_text(encoding="utf-8")
+            for name in ("bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md")
+        }
+
+        for name, prompt in prompts.items():
             with self.subTest(name=name):
-                prompt = (default_dir / name).read_text(encoding="utf-8")
-                self.assertIn("{origin}", prompt)
-                self.assertIn("{goal}", prompt)
                 for text in forbidden:
                     self.assertNotIn(text, prompt)
+
+        for name in ("bootstrap.md", "bootstrap_conclude.md"):
+            with self.subTest(name=name):
+                context = prompts[name].split("## Context\n", 1)[1].strip()
+                self.assertEqual(
+                    context,
+                    "### Origin\n"
+                    "```\n"
+                    "{origin}\n"
+                    "```\n\n"
+                    "### Goal\n"
+                    "```\n"
+                    "{goal}\n"
+                    "```\n\n"
+                    "### Hints\n"
+                    "```\n"
+                    "{hints}\n"
+                    "```",
+                )
+
+        for name in ("explore.md", "explore_conclude.md"):
+            with self.subTest(name=name):
+                context = prompts[name].split("## Context\n", 1)[1].strip()
+                self.assertEqual(
+                    context,
+                    "### Fact View\n"
+                    "```\n"
+                    "{fact_view}\n"
+                    "```\n\n"
+                    "### Full Graph\n"
+                    "```\n"
+                    "{full_graph}\n"
+                    "```\n\n"
+                    "### Current Intent\n"
+                    "```\n"
+                    "{intent_id}\n"
+                    "```\n\n"
+                    "### Current Intent Description\n"
+                    "```\n"
+                    "{intent_description}\n"
+                    "```",
+                )
+                self.assertNotIn("{origin}", prompts[name])
+                self.assertNotIn("{goal}", prompts[name])
+                self.assertNotIn("{hints}", prompts[name])
+
+        reason_context = prompts["reason.md"].split("### Context\n", 1)[1].strip()
+        self.assertEqual(
+            reason_context,
+            "#### Fact View\n"
+            "```\n"
+            "{fact_view}\n"
+            "```\n\n"
+            "#### Full Graph\n"
+            "```\n"
+            "{full_graph}\n"
+            "```\n\n"
+            "#### Valid facts\n"
+            "```\n"
+            "{fact_ids}\n"
+            "```\n\n"
+            "#### Open Intents\n"
+            "```\n"
+            "{open_intents}\n"
+            "```",
+        )
+        self.assertNotIn("{origin}", prompts["reason.md"])
+        self.assertNotIn("{goal}", prompts["reason.md"])
+        self.assertNotIn("{hints}", prompts["reason.md"])
 
     def test_role_prompts_keep_project_semantics_without_bootstrap_protocol(self) -> None:
         roles_dir = _REPO / "capabilities" / "roles"
@@ -269,7 +341,7 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertNotIn("{capability_instructions}", reason)
         self.assertNotIn("{role_instructions}", reason)
-        self.assertIn("{hints}", reason)
+        self.assertNotIn("{hints}", reason)
         self.assertIn("{fact_view}", reason)
         self.assertIn("{full_graph}", reason)
         self.assertIn("{fact_ids}", reason)

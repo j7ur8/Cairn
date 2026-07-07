@@ -16,22 +16,6 @@ Normal return example:
 - When evidence still supports or weakens the broader direction after a partial result, say so plainly in the fact. This lets later reasoning separate a dead leaf from a still-valuable family.
 
 ## Context
-### Project Context
-#### Origin
-```
-{origin}
-```
-
-#### Goal
-```
-{goal}
-```
-
-### Hints
-```
-{hints}
-```
-
 ### Fact View
 ```
 {fact_view}
