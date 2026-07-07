@@ -133,9 +133,27 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertNotIn("SQLi, XSS, RCE", bootstrap)
         self.assertNotIn("Stop when evidence is sufficient", explore)
-        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["context/phase.md"])
-        self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["context/phase.md"])
-        self.assertIn("Reason does not execute tools", phase_files["reason"]["context/phase.md"])
+        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["AGENTS.md"])
+        self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["AGENTS.md"])
+        self.assertIn("Reason does not execute tools", phase_files["reason"]["AGENTS.md"])
+
+    def test_default_phase_prompts_include_project_context_placeholders(self) -> None:
+        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
+        forbidden = (
+            "project context file",
+            "project.md",
+            "phase.md",
+            "capabilities.md",
+            "policy.json",
+        )
+
+        for name in ("bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"):
+            with self.subTest(name=name):
+                prompt = (default_dir / name).read_text(encoding="utf-8")
+                self.assertIn("{origin}", prompt)
+                self.assertIn("{goal}", prompt)
+                for text in forbidden:
+                    self.assertNotIn(text, prompt)
 
     def test_role_prompts_keep_project_semantics_without_bootstrap_protocol(self) -> None:
         roles_dir = _REPO / "capabilities" / "roles"

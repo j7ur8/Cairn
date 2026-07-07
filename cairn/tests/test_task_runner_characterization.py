@@ -312,10 +312,10 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         )
 
         self.assertIn("Stable role text.", writer.files[paths.claude_md_path])
-        self.assertIn("Capability text.", writer.files[paths.capabilities_context_path])
-        self.assertNotIn("Hints", writer.files[paths.claude_md_path])
-        self.assertNotIn("Hints", writer.files[paths.agents_md_path])
-        self.assertIn('"hooks_enabled": false', writer.files[paths.policy_path])
+        self.assertIn("Capability text.", writer.files[paths.claude_md_path])
+        self.assertEqual(set(writer.files), {paths.agents_md_path, paths.claude_md_path})
+        self.assertNotIn("secret hint", writer.files[paths.claude_md_path])
+        self.assertNotIn("secret hint", writer.files[paths.agents_md_path])
         self.assertEqual(context.instruction_root, paths.instruction_root)
 
     def test_success_returns_complete_status(self) -> None:

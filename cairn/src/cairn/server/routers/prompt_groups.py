@@ -199,10 +199,6 @@ def _instruction_preview_for_phase(phase: str) -> PromptInstructionPreviewPhase:
     ordered_paths = [
         (paths.agents_md_path, "AGENTS.md"),
         (paths.claude_md_path, "CLAUDE.md"),
-        (paths.project_context_path, "context/project.md"),
-        (paths.phase_context_path, "context/phase.md"),
-        (paths.capabilities_context_path, "context/capabilities.md"),
-        (paths.policy_path, "context/policy.json"),
     ]
     return PromptInstructionPreviewPhase(
         phase=phase,

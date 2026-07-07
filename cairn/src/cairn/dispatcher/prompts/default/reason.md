@@ -33,6 +33,17 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 - Different intents should cover different exploration dimensions and avoid duplication or heavy overlap.
 
 ### Context
+#### Project Context
+##### Origin
+```
+{origin}
+```
+
+##### Goal
+```
+{goal}
+```
+
 #### Hints
 ```
 {hints}

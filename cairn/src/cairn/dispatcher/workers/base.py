@@ -27,7 +27,6 @@ class WorkerExecutionContext:
     instruction_root: str = ""
     claude_md_path: str = ""
     agents_md_path: str = ""
-    policy_path: str = ""
     mcp_servers: list[dict[str, Any]] | None = None
     skills: list[str] | None = None
 

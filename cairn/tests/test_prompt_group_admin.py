@@ -203,30 +203,20 @@ class PromptGroupAdminTests(unittest.TestCase):
                     [
                         "AGENTS.md",
                         "CLAUDE.md",
-                        "context/project.md",
-                        "context/phase.md",
-                        "context/capabilities.md",
-                        "context/policy.json",
                     ],
                 )
                 self.assertTrue(all(file.writable is True for file in phase.files))
                 self.assertTrue(all(file.sha256 and len(file.sha256) == 64 for file in phase.files))
                 contents = {file.path: file.content for file in phase.files}
-                self.assertIn("{origin}", contents["context/project.md"])
-                self.assertIn("{goal}", contents["context/project.md"])
                 self.assertIn("{selected role prompt}", contents["AGENTS.md"])
-                self.assertIn("{selected_mcp_ids}", contents["context/capabilities.md"])
-                self.assertIn(f'"task_type": "{phase.phase}"', contents["context/policy.json"])
+                self.assertIn("{selected_mcp_ids}", contents["AGENTS.md"])
+                self.assertIn(f"Current Cairn task phase: `{phase.phase}`.", contents["AGENTS.md"])
 
     def test_runtime_instruction_template_directory_contains_all_phase_files(self) -> None:
         root = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "runtime_instructions"
         expected = {
             "AGENTS.md",
             "CLAUDE.md",
-            "context/project.md",
-            "context/phase.md",
-            "context/capabilities.md",
-            "context/policy.json",
         }
 
         for phase in ("bootstrap", "reason", "explore"):
@@ -257,10 +247,6 @@ class PromptGroupAdminTests(unittest.TestCase):
         rendered = {
             "AGENTS.md": files[paths.agents_md_path],
             "CLAUDE.md": files[paths.claude_md_path],
-            "context/project.md": files[paths.project_context_path],
-            "context/phase.md": files[paths.phase_context_path],
-            "context/capabilities.md": files[paths.capabilities_context_path],
-            "context/policy.json": files[paths.policy_path],
         }
 
         self.assertEqual({file.path: file.content for file in reason.files}, rendered)
@@ -268,15 +254,15 @@ class PromptGroupAdminTests(unittest.TestCase):
     def test_update_prompt_instruction_preview_writes_template_and_refreshes_hash(self) -> None:
         before = self.router.read_prompt_instruction_previews()
         reason_before = next(phase for phase in before.phases if phase.phase == "reason")
-        old_file = next(file for file in reason_before.files if file.path == "context/phase.md")
-        body = self.router.PromptGroupTemplateUpdate(content="# Phase Boundary\n\nUpdated {task_type} template.\n")
+        old_file = next(file for file in reason_before.files if file.path == "AGENTS.md")
+        body = self.router.PromptGroupTemplateUpdate(content="# Task Instructions\n\nUpdated {task_type} template.\n")
 
-        after = self.router.update_prompt_instruction_preview("reason", "context/phase.md", body)
+        after = self.router.update_prompt_instruction_preview("reason", "AGENTS.md", body)
 
-        target = self.runtime_root / "reason" / "context" / "phase.md"
+        target = self.runtime_root / "reason" / "AGENTS.md"
         self.assertEqual(target.read_text(encoding="utf-8"), body.content)
         reason_after = next(phase for phase in after.phases if phase.phase == "reason")
-        new_file = next(file for file in reason_after.files if file.path == "context/phase.md")
+        new_file = next(file for file in reason_after.files if file.path == "AGENTS.md")
         self.assertIn("Updated reason template.", new_file.content)
         self.assertNotEqual(old_file.sha256, new_file.sha256)
 
@@ -288,6 +274,10 @@ class PromptGroupAdminTests(unittest.TestCase):
             ("invalid", "AGENTS.md"),
             ("reason", "../AGENTS.md"),
             ("reason", "context/unknown.md"),
+            ("reason", "context/project.md"),
+            ("reason", "context/phase.md"),
+            ("reason", "context/capabilities.md"),
+            ("reason", "context/policy.json"),
         ]
         for phase, path in cases:
             with self.subTest(phase=phase, path=path):

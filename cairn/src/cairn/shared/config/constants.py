@@ -37,6 +37,8 @@ WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
 
 DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
     "reason.md": (
+        "{origin}",
+        "{goal}",
         "{hints}",
         "{fact_view}",
         "{full_graph}",
@@ -45,15 +47,25 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         "{max_intents}",
     ),
     "explore.md": (
+        "{origin}",
+        "{goal}",
         "{hints}",
         "{fact_view}",
         "{full_graph}",
         "{intent_id}",
         "{intent_description}",
     ),
-    "explore_conclude.md": ("{hints}", "{fact_view}", "{full_graph}", "{intent_id}", "{intent_description}"),
-    "bootstrap.md": ("{hints}",),
-    "bootstrap_conclude.md": ("{hints}",),
+    "explore_conclude.md": (
+        "{origin}",
+        "{goal}",
+        "{hints}",
+        "{fact_view}",
+        "{full_graph}",
+        "{intent_id}",
+        "{intent_description}",
+    ),
+    "bootstrap.md": ("{origin}", "{goal}", "{hints}"),
+    "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}"),
 }
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
