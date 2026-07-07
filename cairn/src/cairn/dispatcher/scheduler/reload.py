@@ -11,6 +11,7 @@ from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.tool_sidecar import ToolSidecarManager
 from cairn.shared.config import load_dispatch_config
 
 LOG = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class RuntimeGeneration:
     client: Any
     container_manager: Any
     cloak_sidecar_manager: Any
+    tool_sidecar_manager: Any
     executor: ThreadPoolExecutor
     cleanup_executor: ThreadPoolExecutor | None
 
@@ -32,11 +34,14 @@ class RuntimeGeneration:
                 self.cloak_sidecar_manager.close()
             finally:
                 try:
-                    self.client.close()
+                    self.tool_sidecar_manager.close()
                 finally:
-                    self.executor.shutdown(wait=False, cancel_futures=False)
-                    if self.cleanup_executor is not None:
-                        self.cleanup_executor.shutdown(wait=False, cancel_futures=False)
+                    try:
+                        self.client.close()
+                    finally:
+                        self.executor.shutdown(wait=False, cancel_futures=False)
+                        if self.cleanup_executor is not None:
+                            self.cleanup_executor.shutdown(wait=False, cancel_futures=False)
 
 
 class DispatcherReloader:
@@ -64,27 +69,34 @@ class DispatcherReloader:
             next_cloak_sidecar_manager = CloakSidecarManager(
                 next_config.worker_runtime.cloak_sidecar,
             )
+            next_tool_sidecar_manager = ToolSidecarManager(
+                next_config.worker_runtime.tool_sidecars,
+            )
             next_executor = ThreadPoolExecutor(max_workers=next_config.runtime.max_workers)
             old_container_manager = loop.container_manager
             old_cloak_sidecar_manager = loop.cloak_sidecar_manager
+            old_tool_sidecar_manager = loop.tool_sidecar_manager
             old_client = loop.client
             old_executor = loop.executor
             old_cleanup_futures = list(getattr(loop.cleanup, "futures", {}) or {})
             old_cleanup_executor = loop.cleanup.refresh(
                 next_container_manager,
                 cloak_sidecar_manager=next_cloak_sidecar_manager,
+                tool_sidecar_manager=next_tool_sidecar_manager,
                 max_workers=next_config.runtime.max_workers,
             )
             loop.config = next_config
             loop.client = next_client
             loop.container_manager = next_container_manager
             loop.cloak_sidecar_manager = next_cloak_sidecar_manager
+            loop.tool_sidecar_manager = next_tool_sidecar_manager
             if hasattr(loop, "scheduler_services"):
                 loop.scheduler_services.refresh(
                     config=loop.config,
                     client=loop.client,
                     container_manager=loop.container_manager,
                     cloak_sidecar_manager=loop.cloak_sidecar_manager,
+                    tool_sidecar_manager=loop.tool_sidecar_manager,
                 )
             loop.health.refresh(
                 config=loop.config,
@@ -103,6 +115,7 @@ class DispatcherReloader:
                 client=loop.client,
                 container_manager=loop.container_manager,
                 cloak_sidecar_manager=loop.cloak_sidecar_manager,
+                tool_sidecar_manager=loop.tool_sidecar_manager,
                 executor=loop.executor,
                 runtime=loop.runtime,
             )
@@ -123,6 +136,7 @@ class DispatcherReloader:
                     client=old_client,
                     container_manager=old_container_manager,
                     cloak_sidecar_manager=old_cloak_sidecar_manager,
+                    tool_sidecar_manager=old_tool_sidecar_manager,
                     executor=old_executor,
                     cleanup_executor=old_cleanup_executor,
                 ),

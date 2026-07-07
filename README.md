@@ -146,7 +146,7 @@ Edit `config.yaml` and fill in your LLM endpoints and API keys, then start both 
 ./start.sh
 ```
  
-This exports the repository host path for Docker socket worker mounts, builds both `cairn-app` and the dispatcher-managed worker image `cairn-worker-container:mcp-camoufox`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the worker image build job completes. The dispatcher loads `config.yaml` from the repository host path and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
+This exports the repository host path for Docker socket mounts, builds `cairn-app`, `cairn-llm-runner:latest`, `cairn-kali-tools:latest`, and `cairn-metasploit-tools:latest`, then starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check and the image build jobs complete. The dispatcher loads `config.yaml` from the repository host path and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
 
 Stop Cairn with:
 
@@ -188,8 +188,10 @@ Production Docker images should be pinned by digest (`image@sha256:...`) and sho
 Edit `config.yaml` and fill in your LLM endpoints and API keys, then:
  
 ```bash
-# Build the worker image referenced by config.yaml
-docker build ./container -t cairn-worker-container:mcp-camoufox
+# Build the runner and project tool sidecar images referenced by server.yaml
+docker build ./container/runner -t cairn-llm-runner:latest
+docker build ./container/tools-kali -t cairn-kali-tools:latest
+docker build ./container/tools-metasploit -t cairn-metasploit-tools:latest
 
 # Create the shared Docker network used by Cairn service containers and
 # dispatcher-managed project containers (skip if it already exists)

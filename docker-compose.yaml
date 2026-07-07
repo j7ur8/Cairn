@@ -21,12 +21,30 @@ services:
     networks:
       - cairn
 
-  cairn-worker-image:
+  cairn-runner-image:
     build:
-      context: ./container
+      context: ./container/runner
       dockerfile: Dockerfile
-    image: cairn-worker-container:mcp-camoufox
-    container_name: cairn-worker-image
+    image: cairn-llm-runner:latest
+    container_name: cairn-runner-image
+    command: ["true"]
+    restart: "no"
+    network_mode: "none"
+  cairn-kali-tools-image:
+    build:
+      context: ./container/tools-kali
+      dockerfile: Dockerfile
+    image: cairn-kali-tools:latest
+    container_name: cairn-kali-tools-image
+    command: ["true"]
+    restart: "no"
+    network_mode: "none"
+  cairn-metasploit-tools-image:
+    build:
+      context: ./container/tools-metasploit
+      dockerfile: Dockerfile
+    image: cairn-metasploit-tools:latest
+    container_name: cairn-metasploit-tools-image
     command: ["true"]
     restart: "no"
     network_mode: "none"
@@ -102,7 +120,11 @@ services:
         condition: service_healthy
       cairn-server:
         condition: service_healthy
-      cairn-worker-image:
+      cairn-runner-image:
+        condition: service_completed_successfully
+      cairn-kali-tools-image:
+        condition: service_completed_successfully
+      cairn-metasploit-tools-image:
         condition: service_completed_successfully
       cairn-cloak-image:
         condition: service_completed_successfully

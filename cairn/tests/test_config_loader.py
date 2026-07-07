@@ -62,13 +62,7 @@ storage:
   server_mount: /cairn/datas
   worker_workspace: /home/kali/workspace
 worker:
-  image: img
-  network: bridge
   completed_action: stop
-  resources:
-    mem_limit: null
-    pids_limit: null
-    nano_cpus: null
   cloak_sidecar:
     image: cairn-cloak-browser:js-reverse
     slots: 2
@@ -76,6 +70,22 @@ worker:
       enabled: true
       host: 127.0.0.1
     profile_root: ${CAIRN_HOST_ROOT}/datas/cloak-profiles
+runner:
+  image: img
+  network_mode: bridge
+  resources:
+    mem_limit: null
+    pids_limit: null
+    nano_cpus: null
+tool_sidecars:
+  kali:
+    image: cairn-kali-tools:latest
+    network_mode: bridge
+    enabled: true
+  metasploit:
+    image: cairn-metasploit-tools:latest
+    network_mode: bridge
+    enabled: true
 """
 
 SERVER_YAML = NEW_SERVER_YAML.replace("${CAIRN_HOST_ROOT}/datas", "/tmp/cairn-test")

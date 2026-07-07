@@ -36,6 +36,7 @@ def prepare_task_execution(
     phase: str,
     project: ProjectDetail | None = None,
     cloak_sidecar_manager: CloakBrowserManager | None = None,
+    tool_sidecar_manager: object | None = None,
     preloaded_execution_config: dict | None = None,
 ) -> PreparedTaskExecution | None:
     execution_config = preloaded_execution_config
@@ -61,6 +62,7 @@ def prepare_task_execution(
             container_name=container_name,
             lease_writer=container_manager,
         ),
+        tool_sidecar_manager=tool_sidecar_manager,
     )
     if capabilities.summary:
         reporter.emit_result("capabilities", capabilities.summary)

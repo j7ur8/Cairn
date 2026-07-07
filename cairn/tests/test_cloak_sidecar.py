@@ -86,6 +86,59 @@ class CloakSidecarTests(unittest.TestCase):
         volume = next(iter(kwargs["volumes"].values()))
         self.assertEqual(volume, {"bind": "/profiles", "mode": "rw"})
 
+    def test_tool_sidecar_create_uses_expected_name_labels_network_and_mount(self) -> None:
+        import cairn.dispatcher.runtime.tool_sidecar as tool_mod
+        from cairn.dispatcher.runtime.tool_sidecar import ToolSidecarManager
+        from cairn.shared.config import ToolSidecarsConfig
+
+        client = mock.Mock()
+        client.containers.get.side_effect = tool_mod.NotFound("not found")
+        config = ToolSidecarsConfig.model_validate(
+            {
+                "kali": {
+                    "image": "cairn-kali-tools:latest",
+                    "network_mode": "cairn",
+                    "enabled": True,
+                    "user": "kali",
+                    "exec_user": "kali",
+                    "cap_add": ["NET_RAW"],
+                    "bind_mounts": [
+                        {
+                            "name": "project-files",
+                            "host_path": str(_REPO / "datas" / "project-files" / "{project_id}"),
+                            "container_path": "/home/kali/workspace",
+                            "read_only": False,
+                        }
+                    ],
+                }
+            }
+        )
+        manager = ToolSidecarManager(config, client=client)
+        with (
+            mock.patch.object(manager, "status", side_effect=[
+                mock.Mock(running=False),
+                mock.Mock(running=True),
+            ]),
+            mock.patch.object(manager._preflight, "run") as preflight,
+        ):
+            manager.ensure_running("proj/1", "kali")
+
+        kwargs = client.containers.run.call_args.kwargs
+        args = client.containers.run.call_args.args
+        self.assertEqual(args[0], "cairn-kali-tools:latest")
+        self.assertEqual(args[1], ["/usr/local/bin/kali-mcp-http-sidecar"])
+        self.assertEqual(kwargs["name"], "cairn-kali-proj-1")
+        self.assertEqual(kwargs["network_mode"], "cairn")
+        self.assertEqual(kwargs["labels"]["cairn.managed"], "true")
+        self.assertEqual(kwargs["labels"]["cairn.kind"], "tool-sidecar")
+        self.assertEqual(kwargs["labels"]["cairn.tool"], "kali")
+        self.assertEqual(kwargs["labels"]["cairn.project_id"], "proj/1")
+        self.assertEqual(kwargs["user"], "kali")
+        self.assertEqual(kwargs["cap_add"], ["NET_RAW"])
+        volume = next(iter(kwargs["volumes"].values()))
+        self.assertEqual(volume, {"bind": "/home/kali/workspace", "mode": "rw"})
+        preflight.assert_called_once()
+
     def test_sidecar_status_merges_health_ready_state_and_errors(self) -> None:
         import cairn.dispatcher.runtime.cloak_sidecar as cloak_mod
         from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
@@ -307,8 +360,8 @@ class CloakSidecarTests(unittest.TestCase):
         self.assertLess(fact_index, intent_index)
 
     def test_browser_mcp_wrapper_releases_without_leasing(self) -> None:
-        wrapper = (_REPO / "container/bin/cairn-browser-mcp").read_text(encoding="utf-8")
-        compat = (_REPO / "container/bin/js-reverse-mcp-cairn").read_text(encoding="utf-8")
+        wrapper = (_REPO / "container/runner/bin/cairn-browser-mcp").read_text(encoding="utf-8")
+        compat = (_REPO / "container/runner/bin/js-reverse-mcp-cairn").read_text(encoding="utf-8")
         self.assertNotIn("/lease", wrapper)
         self.assertIn("/release", wrapper)
         self.assertIn("trap release EXIT INT TERM", wrapper)

@@ -78,7 +78,7 @@ def validate_selected_mcp(
     probe_error = probe_config_error(mcp)
     if probe_error:
         return probe_error
-    if mcp.transport == "http" and mcp.url:
+    if mcp.transport == "http" and mcp.url and "{" not in mcp.url:
         ok, reason = probe_http_url(mcp.url, mcp.healthcheck_timeout)
         if not ok:
             return f"mcp_server:{mcp.id}: http probe failed: {reason}"

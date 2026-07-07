@@ -28,7 +28,7 @@ def _dispatch_config_payload(mcp_servers: list[dict]) -> dict:
             "reason": {"timeout": 5, "max_intents": 2},
         },
         "worker_runtime": {
-            "container": {
+            "runner": {
                 "image": "worker:latest",
                 "network_mode": "bridge",
                 "completed_action": "stop",

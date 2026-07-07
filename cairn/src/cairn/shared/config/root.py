@@ -102,7 +102,7 @@ class DispatchConfig(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def container(self) -> ContainerConfig:
-        return self.worker_runtime.container
+        return self.worker_runtime.runner
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -188,7 +188,10 @@ def split_server_dispatch_config(dispatch: dict[str, Any]) -> tuple[dict[str, An
     source_server = dispatch.get("server") if isinstance(dispatch.get("server"), dict) else {}
     source_dispatcher = dispatch.get("dispatcher") if isinstance(dispatch.get("dispatcher"), dict) else {}
     worker_runtime = dispatch.get("worker_runtime") if isinstance(dispatch.get("worker_runtime"), dict) else {}
-    container = worker_runtime.get("container") if isinstance(worker_runtime.get("container"), dict) else {}
+    container = worker_runtime.get("runner") if isinstance(worker_runtime.get("runner"), dict) else {}
+    if not container:
+        container = worker_runtime.get("container") if isinstance(worker_runtime.get("container"), dict) else {}
+    tool_sidecars = worker_runtime.get("tool_sidecars") if isinstance(worker_runtime.get("tool_sidecars"), dict) else {}
     paths = source_server.get("paths") if isinstance(source_server.get("paths"), dict) else {}
     reload_config = source_dispatcher.get("reload") if isinstance(source_dispatcher.get("reload"), dict) else {}
     server_mount = paths.get("datas_root") or "/tmp/cairn-test"
@@ -225,12 +228,15 @@ def split_server_dispatch_config(dispatch: dict[str, Any]) -> tuple[dict[str, An
             "worker_workspace": workspace,
         },
         "worker": {
-            "image": container.get("image", "cairn/test:latest"),
-            "container_user": container.get("user"),
-            "exec_user": container.get("exec_user"),
-            "network": container.get("network_mode", "bridge"),
             "completed_action": container.get("completed_action", "stop"),
             "stopped_action": container.get("stopped_action", "stop"),
+            "common_env": worker_runtime.get("common_env") or {},
+        },
+        "runner": {
+            "image": container.get("image", "cairn/test:latest"),
+            "user": container.get("user"),
+            "exec_user": container.get("exec_user"),
+            "network_mode": container.get("network_mode", "bridge"),
             "cap_add": container.get("cap_add") or [],
             "extra_mounts": [
                 mount
@@ -242,8 +248,8 @@ def split_server_dispatch_config(dispatch: dict[str, Any]) -> tuple[dict[str, An
                 "pids_limit": worker_resources.get("pids_limit"),
                 "nano_cpus": worker_resources.get("nano_cpus"),
             },
-            "common_env": worker_runtime.get("common_env") or {},
         },
+        "tool_sidecars": _server_tool_sidecars(tool_sidecars),
     }
     dynamic = dict(dispatch)
     dynamic.pop("worker_runtime", None)
@@ -275,7 +281,7 @@ class TempYamlConfig:
             },
             "observability": {},
             "worker_runtime": {
-                "container": {
+                "runner": {
                     "image": "cairn/test:latest",
                     "network_mode": "cairn",
                     "completed_action": "stop",
@@ -324,3 +330,33 @@ class TempYamlConfig:
         config_files.CONFIG_YAML = self._old_yaml_dispatch_path
         config_files.CONFIG_RESOURCES_YAML = self._old_yaml_resources_path
         self._tmp.cleanup()
+
+
+def _server_tool_sidecars(tool_sidecars: dict[str, Any]) -> dict[str, Any]:
+    if not tool_sidecars:
+        return {}
+    out: dict[str, Any] = {}
+    for name, raw in tool_sidecars.items():
+        if not isinstance(raw, dict):
+            continue
+        mounts = raw.get("bind_mounts") if isinstance(raw.get("bind_mounts"), list) else []
+        resources = {key: raw.get(key) for key in ("mem_limit", "pids_limit", "nano_cpus") if key in raw}
+        out[name] = {
+            "image": raw.get("image"),
+            "network_mode": raw.get("network_mode", "bridge"),
+            "enabled": raw.get("enabled", True),
+            "user": raw.get("user"),
+            "exec_user": raw.get("exec_user"),
+            "cap_add": raw.get("cap_add") or [],
+            "extra_mounts": [
+                mount
+                for mount in mounts
+                if not (isinstance(mount, dict) and mount.get("name") == "project-files")
+            ],
+            "resources": {
+                "mem_limit": resources.get("mem_limit"),
+                "pids_limit": resources.get("pids_limit"),
+                "nano_cpus": resources.get("nano_cpus"),
+            },
+        }
+    return out

@@ -1,42 +1,35 @@
-# Cairn Worker Container
+# Cairn Runtime Images
 
-Build locally:
-
-```bash
-docker build . -t cairn-worker-container
-```
-
-Build from the repository root with a test tag:
+Build the split runtime images from the repository root:
 
 ```bash
-docker build ./container -t cairn-worker-container:mcp-camoufox
+docker build ./container/runner -t cairn-llm-runner:latest
+docker build ./container/tools-kali -t cairn-kali-tools:latest
+docker build ./container/tools-metasploit -t cairn-metasploit-tools:latest
 ```
 
-When starting the full stack with `./start.sh` from the repository root, Compose builds the same `cairn-worker-container:mcp-camoufox` tag automatically via the `cairn-worker-image` helper service. The manual build command remains useful for isolated image debugging and smoke tests.
+When starting the full stack with `./start.sh`, Compose builds these tags through the `cairn-runner-image`, `cairn-kali-tools-image`, and `cairn-metasploit-tools-image` helper services.
 
-Smoke tests:
+Runner smoke tests:
 
 ```bash
-docker run --rm cairn-worker-container:mcp-camoufox python3 -c "import camoufox; print('camoufox ok')"
-docker run --rm cairn-worker-container:mcp-camoufox kali-server-mcp -h
-docker run --rm cairn-worker-container:mcp-camoufox mcp-server -h
-docker run --rm cairn-worker-container:mcp-camoufox metasploitmcp --help
-docker run --rm cairn-worker-container:mcp-camoufox metasploit-mcp-stdio --help
+docker run --rm cairn-llm-runner:latest codex --help
+docker run --rm cairn-llm-runner:latest claude --help
+docker run --rm cairn-llm-runner:latest sh -lc '! command -v sqlmap && ! command -v nmap && ! command -v msfconsole'
 ```
 
-Camoufox headless smoke:
+Kali sidecar smoke tests:
 
 ```bash
-docker run --rm cairn-worker-container:mcp-camoufox python3 - <<'PY'
-from camoufox.sync_api import Camoufox
-with Camoufox(headless=True) as browser:
-    page = browser.new_page()
-    page.goto("data:text/html,<title>ok</title>")
-    print(page.title())
-PY
+docker run --rm cairn-kali-tools:latest kali-server-mcp -h
+docker run --rm cairn-kali-tools:latest nmap --version
+docker run --rm cairn-kali-tools:latest sqlmap --version
 ```
 
-MCP wrappers installed in the image:
+Metasploit sidecar smoke tests:
 
-- `/usr/local/bin/kali-mcp-stdio`
-- `/usr/local/bin/metasploit-mcp-stdio`
+```bash
+docker run --rm cairn-metasploit-tools:latest msfconsole --version
+docker run --rm cairn-metasploit-tools:latest msfrpcd -h
+docker run --rm cairn-metasploit-tools:latest metasploitmcp --help
+```

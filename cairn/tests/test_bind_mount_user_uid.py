@@ -458,7 +458,7 @@ observability:
 
 worker_runtime:
   common_env: {}
-  container:
+  runner:
     image: "cairn/test:latest"
     network_mode: "cairn"
     completed_action: "stop"

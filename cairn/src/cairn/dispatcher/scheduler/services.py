@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.tool_sidecar import ToolSidecarManager
 from cairn.dispatcher.scheduler.cleanup import ContainerCleanupCoordinator
 from cairn.dispatcher.scheduler.log_state import LogState
 from cairn.dispatcher.scheduler.replay import ReplayCoordinator
@@ -25,6 +26,7 @@ class SchedulerServices:
     cleanup: ContainerCleanupCoordinator
     container_manager: ContainerManager
     cloak_sidecar_manager: CloakSidecarManager | None
+    tool_sidecar_manager: ToolSidecarManager | None
     replay: ReplayCoordinator
     submitter: TaskSubmitter
     runtime_maintenance: RuntimeMaintenance
@@ -49,11 +51,13 @@ class SchedulerServices:
         client: CairnClient,
         container_manager: ContainerManager,
         cloak_sidecar_manager: CloakSidecarManager | None = None,
+        tool_sidecar_manager: ToolSidecarManager | None = None,
     ) -> None:
         self.config = config
         self.client = client
         self.container_manager = container_manager
         self.cloak_sidecar_manager = cloak_sidecar_manager
+        self.tool_sidecar_manager = tool_sidecar_manager
 
     def clear_project_log_state(self, project_id: str) -> None:
         self.log_state.clear_project(project_id)

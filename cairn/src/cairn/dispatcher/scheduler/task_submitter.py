@@ -10,6 +10,7 @@ from cairn.dispatcher.models import RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.tool_sidecar import ToolSidecarManager
 from cairn.dispatcher.scheduler.log_state import LogState
 from cairn.dispatcher.scheduler.runtime_state import RuntimeTaskRegistry
 from cairn.dispatcher.scheduler.submission_registry import TaskSubmissionRegistry
@@ -91,11 +92,13 @@ class TaskSubmitter:
         bootstrap_runner: TaskRunner,
         explore_runner: TaskRunner,
         reason_runner: TaskRunner,
+        tool_sidecar_manager: ToolSidecarManager | None = None,
     ) -> None:
         self.config = config
         self.client = client
         self.container_manager = container_manager
         self.cloak_sidecar_manager = cloak_sidecar_manager
+        self.tool_sidecar_manager = tool_sidecar_manager
         self.executor = executor
         self.runtime = runtime
         self.log_state = log_state
@@ -120,6 +123,7 @@ class TaskSubmitter:
         client: CairnClient,
         container_manager: ContainerManager,
         cloak_sidecar_manager: CloakSidecarManager | None = None,
+        tool_sidecar_manager: ToolSidecarManager | None = None,
         executor: ThreadPoolExecutor,
         runtime: RuntimeTaskRegistry,
     ) -> None:
@@ -127,6 +131,7 @@ class TaskSubmitter:
         self.client = client
         self.container_manager = container_manager
         self.cloak_sidecar_manager = cloak_sidecar_manager
+        self.tool_sidecar_manager = tool_sidecar_manager
         self.executor = executor
         self.runtime = runtime
         self.claimer.refresh(client=client)
@@ -393,6 +398,7 @@ class TaskSubmitter:
                 phase,
             ),
             cloak_sidecar_manager=self.cloak_sidecar_manager,
+            tool_sidecar_manager=self.tool_sidecar_manager,
         )
 
     def _container_config_from_execution_config(self, execution_config: dict) -> ContainerConfig | None:

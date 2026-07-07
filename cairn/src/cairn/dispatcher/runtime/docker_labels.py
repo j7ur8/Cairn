@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 CONTAINER_PREFIX = "cairn-worker-"
 RUNNER_CONTAINER_PREFIX = "cairn-runner-"
+TOOL_SIDECAR_PREFIX = "cairn-"
 STARTUP_CONTAINER_NAME = "cairn-worker-startup-healthcheck"
 STARTUP_PROJECT_ID = "startup-healthcheck"
 LABEL_MANAGED = "cairn.managed"
@@ -16,6 +17,7 @@ LABEL_STARTUP = "cairn.startup_healthcheck"
 LABEL_KIND = "cairn.kind"
 LABEL_TASK_ID = "cairn.task_id"
 LABEL_PHASE = "cairn.phase"
+LABEL_TOOL = "cairn.tool"
 
 
 def safe_project_id(project_id: str) -> str:
@@ -30,6 +32,10 @@ def container_name(project_id: str) -> str:
 
 def runner_container_name(project_id: str, task_id: str) -> str:
     return f"{RUNNER_CONTAINER_PREFIX}{safe_project_id(project_id)}-{safe_project_id(task_id)}"
+
+
+def tool_sidecar_container_name(project_id: str, tool: str) -> str:
+    return f"{TOOL_SIDECAR_PREFIX}{safe_project_id(tool)}-{safe_project_id(project_id)}"
 
 
 def container_labels(

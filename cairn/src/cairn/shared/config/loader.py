@@ -48,8 +48,10 @@ def normalize_server_config_data(data: dict[str, Any], config_dir: Path) -> dict
     admin = _mapping(data.get("admin"), "admin")
     storage = _mapping(data.get("storage"), "storage")
     worker = _mapping(data.get("worker"), "worker")
+    runner = _mapping(data.get("runner"), "runner")
+    tool_sidecars = _mapping(data.get("tool_sidecars"), "tool_sidecars", required=False)
     dispatcher = _mapping(data.get("dispatcher"), "dispatcher")
-    _validate_new_server_sections(app, database, security, admin, dispatcher, storage, worker)
+    _validate_new_server_sections(app, database, security, admin, dispatcher, storage, worker, runner, tool_sidecars)
 
     host_root = _resolve_host_path(config_dir, _required_text(storage, "host_root"))
     server_mount = _required_text(storage, "server_mount").rstrip("/")
@@ -83,14 +85,14 @@ def normalize_server_config_data(data: dict[str, Any], config_dir: Path) -> dict
         "enabled": dispatcher.get("reload_enabled", True),
     }
 
-    container: dict[str, Any] = {
-        "image": _required_text(worker, "image"),
-        "user": worker.get("container_user"),
-        "exec_user": worker.get("exec_user"),
-        "network_mode": _required_text(worker, "network"),
+    runner_config: dict[str, Any] = {
+        "image": _required_text(runner, "image"),
+        "user": runner.get("user"),
+        "exec_user": runner.get("exec_user"),
+        "network_mode": _required_text(runner, "network_mode"),
         "completed_action": _required_text(worker, "completed_action"),
         "stopped_action": worker.get("stopped_action", "stop"),
-        "cap_add": worker.get("cap_add") or [],
+        "cap_add": runner.get("cap_add") or [],
         "bind_mounts": [
             {
                 "name": "ctf-attachments",
@@ -106,12 +108,15 @@ def normalize_server_config_data(data: dict[str, Any], config_dir: Path) -> dict
             },
         ],
     }
-    for mount in worker.get("extra_mounts") or []:
-        container["bind_mounts"].append(mount)
-    resources = worker.get("resources") if isinstance(worker.get("resources"), dict) else {}
+    for mount in runner.get("extra_mounts") or []:
+        runner_config["bind_mounts"].append(mount)
+    resources = runner.get("resources") if isinstance(runner.get("resources"), dict) else {}
     for key in ("mem_limit", "pids_limit", "nano_cpus"):
         if key in resources:
-            container[key] = resources[key]
+            runner_config[key] = resources[key]
+
+    tool_sidecar_config = _tool_sidecar_config(tool_sidecars, host_root, worker_workspace)
+
     cloak_sidecar_raw = worker.get("cloak_sidecar") if isinstance(worker.get("cloak_sidecar"), dict) else None
     cloak_sidecar: dict[str, Any] | None = None
     if cloak_sidecar_raw is not None:
@@ -125,13 +130,14 @@ def normalize_server_config_data(data: dict[str, Any], config_dir: Path) -> dict
             "profile_root": profile_root,
         }
 
-    for key, value in list(container.items()):
+    for key, value in list(runner_config.items()):
         if value is None:
-            container.pop(key)
+            runner_config.pop(key)
 
     worker_runtime: dict[str, Any] = {
-        "container": container,
+        "runner": runner_config,
         "common_env": worker.get("common_env") or {},
+        "tool_sidecars": tool_sidecar_config,
     }
     if cloak_sidecar is not None:
         worker_runtime["cloak_sidecar"] = cloak_sidecar
@@ -164,6 +170,8 @@ _NEW_SERVER_TOP_LEVEL_KEYS = {
     "dispatcher",
     "storage",
     "worker",
+    "runner",
+    "tool_sidecars",
 }
 
 
@@ -175,7 +183,8 @@ def _validate_new_server_schema(data: dict[str, Any]) -> None:
             f"{', '.join(legacy_keys)}. "
             "server.yaml must use app/database/security/admin/dispatcher/storage/worker."
         )
-    missing = sorted(_NEW_SERVER_TOP_LEVEL_KEYS - set(data))
+    required = _NEW_SERVER_TOP_LEVEL_KEYS - {"tool_sidecars"}
+    missing = sorted(required - set(data))
     if missing:
         raise ValueError(
             "server config missing required top-level section(s): "
@@ -195,6 +204,8 @@ def _validate_new_server_sections(
     dispatcher: dict[str, Any],
     storage: dict[str, Any],
     worker: dict[str, Any],
+    runner: dict[str, Any],
+    tool_sidecars: dict[str, Any],
 ) -> None:
     _reject_unknown_keys("app", app, {"public_url", "log", "retention", "settings"})
     _reject_unknown_keys("database", database, {"url", "pool_size", "max_overflow", "pool_timeout"})
@@ -206,28 +217,49 @@ def _validate_new_server_sections(
         "worker",
         worker,
         {
-            "image",
-            "container_user",
-            "exec_user",
-            "network",
             "completed_action",
             "stopped_action",
-            "cap_add",
-            "extra_mounts",
-            "resources",
             "common_env",
             "cloak_sidecar",
         },
     )
-    resources = worker.get("resources")
+    _reject_unknown_keys(
+        "runner",
+        runner,
+        {
+            "image",
+            "user",
+            "exec_user",
+            "network_mode",
+            "cap_add",
+            "extra_mounts",
+            "resources",
+        },
+    )
+    resources = runner.get("resources")
     if isinstance(resources, dict):
-        _reject_unknown_keys("worker.resources", resources, {"mem_limit", "pids_limit", "nano_cpus"})
+        _reject_unknown_keys("runner.resources", resources, {"mem_limit", "pids_limit", "nano_cpus"})
     cloak_sidecar = worker.get("cloak_sidecar")
     if isinstance(cloak_sidecar, dict):
         _reject_unknown_keys("worker.cloak_sidecar", cloak_sidecar, {"image", "slots", "novnc", "profile_root"})
         novnc = cloak_sidecar.get("novnc")
         if isinstance(novnc, dict):
             _reject_unknown_keys("worker.cloak_sidecar.novnc", novnc, {"enabled", "host"})
+    for name, sidecar in tool_sidecars.items():
+        if not isinstance(sidecar, dict):
+            continue
+        _reject_unknown_keys(
+            f"tool_sidecars.{name}",
+            sidecar,
+            {"image", "network_mode", "enabled", "user", "exec_user", "cap_add", "extra_mounts", "resources"},
+        )
+        sidecar_resources = sidecar.get("resources")
+        if isinstance(sidecar_resources, dict):
+            _reject_unknown_keys(
+                f"tool_sidecars.{name}.resources",
+                sidecar_resources,
+                {"mem_limit", "pids_limit", "nano_cpus"},
+            )
 
 
 def _reject_unknown_keys(label: str, section: dict[str, Any], allowed: set[str]) -> None:
@@ -242,6 +274,45 @@ def _mapping(value: Any, label: str, *, required: bool = True) -> dict[str, Any]
     if not isinstance(value, dict):
         raise ValueError(f"server config {label} section must be a mapping")
     return value
+
+
+def _tool_sidecar_config(
+    tool_sidecars: dict[str, Any],
+    host_root: str,
+    worker_workspace: str,
+) -> dict[str, Any]:
+    rendered: dict[str, Any] = {}
+    for name in ("kali", "metasploit"):
+        raw = tool_sidecars.get(name)
+        if not isinstance(raw, dict):
+            continue
+        sidecar = {
+            "image": _required_text(raw, "image"),
+            "network_mode": _required_text(raw, "network_mode"),
+            "enabled": raw.get("enabled", True),
+            "user": raw.get("user"),
+            "exec_user": raw.get("exec_user"),
+            "cap_add": raw.get("cap_add") or [],
+            "bind_mounts": [
+                {
+                    "name": "project-files",
+                    "host_path": str(Path(host_root) / "project-files" / "{project_id}"),
+                    "container_path": worker_workspace,
+                    "read_only": False,
+                },
+            ],
+        }
+        for mount in raw.get("extra_mounts") or []:
+            sidecar["bind_mounts"].append(mount)
+        resources = raw.get("resources") if isinstance(raw.get("resources"), dict) else {}
+        for key in ("mem_limit", "pids_limit", "nano_cpus"):
+            if key in resources:
+                sidecar[key] = resources[key]
+        for key, value in list(sidecar.items()):
+            if value is None:
+                sidecar.pop(key)
+        rendered[name] = sidecar
+    return rendered
 
 
 def _required_text(section: dict[str, Any], key: str) -> str:

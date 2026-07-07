@@ -117,7 +117,7 @@ class SystemSettingsEndpointTests(unittest.TestCase):
                 "redaction_patterns": ["sk-[A-Za-z0-9]+"],
             },
             "worker_runtime": {
-                "container": {
+                "runner": {
                     "image": "cairn/test:latest",
                     "network_mode": "cairn",
                     "completed_action": "stop",
@@ -318,7 +318,7 @@ class ValidationPathResolutionTests(unittest.TestCase):
             },
             "observability": {},
             "worker_runtime": {
-                "container": {
+                "runner": {
                     "image": "cairn/test:latest",
                     "network_mode": "cairn",
                     "completed_action": "stop",

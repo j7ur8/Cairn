@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="${KALI_API_HOST:-0.0.0.0}"
+PORT="${KALI_API_PORT:-8764}"
+HTTP_HOST="${KALI_MCP_HTTP_HOST:-0.0.0.0}"
+HTTP_PORT="${KALI_MCP_HTTP_PORT:-8765}"
+LOG_FILE="${KALI_MCP_LOG_FILE:-/tmp/kali-server-mcp.log}"
+SERVER_URL="http://127.0.0.1:${PORT}"
+
+cleanup() {
+  if [[ -n "${KALI_API_PID:-}" ]] && kill -0 "$KALI_API_PID" >/dev/null 2>&1; then
+    kill "$KALI_API_PID" >/dev/null 2>&1 || true
+    wait "$KALI_API_PID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+kali-server-mcp --ip "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
+KALI_API_PID=$!
+
+python3 - "$PORT" "$LOG_FILE" <<'PY'
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+log_file = sys.argv[2]
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            sys.exit(0)
+    except OSError:
+        time.sleep(0.25)
+print(f"kali-server-mcp did not become ready on 127.0.0.1:{port}; log: {log_file}", file=sys.stderr)
+sys.exit(1)
+PY
+
+exec /usr/local/bin/mcp-stdio-http-bridge \
+  --listen "${HTTP_HOST}:${HTTP_PORT}" \
+  -- mcp-server --server "$SERVER_URL" --timeout "${KALI_MCP_TIMEOUT:-300}"

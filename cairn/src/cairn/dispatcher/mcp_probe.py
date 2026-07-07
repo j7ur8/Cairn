@@ -12,6 +12,7 @@ from cairn.dispatcher.capability_mcp import mcp_json
 from cairn.dispatcher.runtime.browser_provider import BrowserRuntimeContext, BrowserRuntimeLease, remove_temp_lease_file
 from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.docker_labels import safe_project_id
 from cairn.dispatcher.tasks.task_process import communicate_timeout
 from cairn.shared.config import DispatchConfig, McpServerCapabilityConfig
 
@@ -231,6 +232,7 @@ def run_mcp_probe_request(
     container_manager: ContainerManager,
     server_ids: list[str],
     cloak_sidecar_manager: CloakSidecarManager | None = None,
+    tool_sidecar_manager: Any | None = None,
 ) -> dict[str, Any]:
     requested_ids = _dedupe_ids(server_ids) or [item.id for item in config.capabilities.mcp_servers]
     by_id = {item.id: item for item in config.capabilities.mcp_servers}
@@ -245,9 +247,11 @@ def run_mcp_probe_request(
 
     container_name = container_manager.create_startup_container()
     _cleanup_probe_sidecar(cloak_sidecar_manager)
+    _cleanup_probe_tool_sidecars(tool_sidecar_manager)
+    probe_task_id = f"mcp-probe-{uuid.uuid4().hex}"
     provider_context = BrowserRuntimeContext(
         project_id=MCP_PROBE_PROJECT_ID,
-        task_instance_id=f"mcp-probe-{uuid.uuid4().hex}",
+        task_instance_id=probe_task_id,
         network_mode=config.container.network_mode,
         cloak_sidecar_manager=cloak_sidecar_manager,
         container_name=container_name,
@@ -259,6 +263,16 @@ def run_mcp_probe_request(
     probe_targets: list[McpServerCapabilityConfig] = []
     try:
         for target in targets:
+            tool = _tool_sidecar_for_mcp(target.id)
+            if tool is not None:
+                if tool_sidecar_manager is None:
+                    provider_errors.append(McpProbeResult(target.id, "error", "tool sidecar manager unavailable"))
+                    continue
+                try:
+                    tool_sidecar_manager.ensure_running(MCP_PROBE_PROJECT_ID, tool)
+                except Exception as exc:  # noqa: BLE001
+                    provider_errors.append(McpProbeResult(target.id, "error", f"tool sidecar failed: {exc}"))
+                    continue
             try:
                 lease = provider_context.acquire(target)
             except Exception as exc:  # noqa: BLE001
@@ -277,7 +291,16 @@ def run_mcp_probe_request(
         container_manager.write_text_file(
             container_name,
             MCP_PROBE_PATH,
-            mcp_json(probe_targets, MCP_PROBE_ROOT, runtime_leases=runtime_leases),
+            mcp_json(
+                probe_targets,
+                MCP_PROBE_ROOT,
+                replacements={
+                    "project_id": MCP_PROBE_PROJECT_ID,
+                    "project_safe_id": safe_project_id(MCP_PROBE_PROJECT_ID),
+                    "task_instance_id": probe_task_id,
+                },
+                runtime_leases=runtime_leases,
+            ),
         )
         container_manager.write_text_file(container_name, MCP_PROBE_SCRIPT_PATH, MCP_PROBE_SCRIPT)
         results = [_probe_one(container_manager, container_name, item) for item in probe_targets]
@@ -286,6 +309,7 @@ def run_mcp_probe_request(
             lease.release()
             remove_temp_lease_file(lease)
         _cleanup_probe_sidecar(cloak_sidecar_manager)
+        _cleanup_probe_tool_sidecars(tool_sidecar_manager)
         container_manager.remove_container(container_name, force=True)
     return {"results": [item.to_dict() for item in [*missing, *provider_errors, *results]]}
 
@@ -296,6 +320,22 @@ def _cleanup_probe_sidecar(cloak_sidecar_manager: CloakSidecarManager | None) ->
         return
     with suppress(Exception):
         cleanup(MCP_PROBE_PROJECT_ID, remove=True)
+
+
+def _cleanup_probe_tool_sidecars(tool_sidecar_manager: Any | None) -> None:
+    cleanup = getattr(tool_sidecar_manager, "cleanup_project", None)
+    if not callable(cleanup):
+        return
+    with suppress(Exception):
+        cleanup(MCP_PROBE_PROJECT_ID, remove=True)
+
+
+def _tool_sidecar_for_mcp(capability_id: str) -> str | None:
+    if capability_id == "kali-server-mcp":
+        return "kali"
+    if capability_id == "metasploit-mcp":
+        return "metasploit"
+    return None
 
 
 def _probe_one(

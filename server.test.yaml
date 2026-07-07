@@ -26,15 +26,43 @@ storage:
   server_mount: /tmp/cairn-test
   worker_workspace: /home/kali/workspace
 worker:
-  image: cairn-worker-container:mcp-camoufox
-  container_user: 0:0
-  exec_user: kali
-  network: cairn
   completed_action: stop
   stopped_action: remove
+runner:
+  image: cairn-llm-runner:latest
+  user: kali
+  exec_user: kali
+  network_mode: cairn
   cap_add: []
   extra_mounts: []
   resources:
-    mem_limit: null
-    pids_limit: null
+    mem_limit: 2g
+    pids_limit: 512
     nano_cpus: null
+tool_sidecars:
+  kali:
+    image: cairn-kali-tools:latest
+    network_mode: cairn
+    enabled: true
+    user: kali
+    exec_user: kali
+    cap_add:
+    - NET_RAW
+    - NET_ADMIN
+    extra_mounts: []
+    resources:
+      mem_limit: null
+      pids_limit: null
+      nano_cpus: null
+  metasploit:
+    image: cairn-metasploit-tools:latest
+    network_mode: cairn
+    enabled: true
+    user: kali
+    exec_user: kali
+    cap_add: []
+    extra_mounts: []
+    resources:
+      mem_limit: null
+      pids_limit: null
+      nano_cpus: null

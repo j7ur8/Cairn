@@ -35,12 +35,17 @@ class ContainerRuntime(Protocol):
     def finish(self) -> None: ...
 
 
+class ToolSidecarRuntime(Protocol):
+    def ensure_running(self, project_id: str, tool: str): ...
+
+
 @dataclass(slots=True)
 class TaskServices:
     config: DispatchConfig
     client: CairnClient
     container_runtime: ContainerRuntime
     cloak_sidecar_manager: CloakBrowserManager | None = None
+    tool_sidecar_manager: ToolSidecarRuntime | None = None
 
 
 @dataclass(slots=True)

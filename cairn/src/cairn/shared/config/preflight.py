@@ -146,37 +146,37 @@ def _check_project_files_bind_mount_alignment(config: DispatchConfig, result: Pr
 
 
 def _check_container_security(config: DispatchConfig, result: PreflightResult) -> None:
-    result.checked.append("worker.container_user")
+    result.checked.append("runner.user")
     user = (config.container.user or "").strip()
     if not user:
         result.warnings.append(
-            "worker.container_user is not set; worker containers will "
+            "runner.user is not set; runner containers will "
             "run as root (the image default). Recommend setting an explicit "
             "non-root user."
         )
     elif user == "root" or user == "0":
         result.warnings.append(
-            "worker.container_user is 'root'; worker containers will "
+            "runner.user is 'root'; runner containers will "
             "run with full root privileges. Recommend a non-root user."
         )
 
 
 def _check_worker_image(config: DispatchConfig, result: PreflightResult, *, strict: bool) -> None:
-    result.checked.append("worker.image")
+    result.checked.append("runner.image")
     image = config.container.image.strip()
     if not _looks_like_image_ref(image):
-        result.errors.append(f"worker.image is not a valid image reference: {image!r}")
+        result.errors.append(f"runner.image is not a valid image reference: {image!r}")
         return
     if _uses_latest_tag(image):
-        result.errors.append("worker.image must not use the mutable latest tag")
+        result.errors.append("runner.image must not use the mutable latest tag")
     if "@" not in image:
-        result.warnings.append("worker.image is not pinned by digest; production deployments should use image@sha256:...")
+        result.warnings.append("runner.image is not pinned by digest; production deployments should use image@sha256:...")
 
     try:
         import docker
         from docker.errors import DockerException, ImageNotFound
     except ImportError:
-        message = "Docker SDK is unavailable; worker image existence was not checked"
+        message = "Docker SDK is unavailable; runner image existence was not checked"
         (result.errors if strict else result.warnings).append(message)
         return
 
@@ -187,10 +187,10 @@ def _check_worker_image(config: DispatchConfig, result: PreflightResult, *, stri
         finally:
             client.close()
     except ImageNotFound:
-        message = f"worker image is not present locally: {image}"
+        message = f"runner image is not present locally: {image}"
         (result.errors if strict else result.warnings).append(message)
     except DockerException as exc:
-        message = f"Docker daemon unavailable; worker image existence was not checked: {exc}"
+        message = f"Docker daemon unavailable; runner image existence was not checked: {exc}"
         (result.errors if strict else result.warnings).append(message)
 
 

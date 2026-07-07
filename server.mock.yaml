@@ -26,18 +26,46 @@ storage:
   server_mount: datas
   worker_workspace: /home/kali/workspace
 worker:
-  image: ghcr.io/oritera/cairn-worker-container:latest
-  network: cairn
   completed_action: stop
   stopped_action: remove
-  cap_add:
-  - NET_RAW
-  - NET_ADMIN
-  extra_mounts: []
-  resources:
-    mem_limit: null
-    pids_limit: null
-    nano_cpus: null
   common_env:
     TSEC_BASE_URL: http://<SERVER_HOST>/api
     TSEC_AGENT_TOKEN: common-agent-token
+runner:
+  image: cairn-llm-runner:latest
+  user: kali
+  exec_user: kali
+  network_mode: cairn
+  cap_add: []
+  extra_mounts: []
+  resources:
+    mem_limit: 2g
+    pids_limit: 512
+    nano_cpus: null
+tool_sidecars:
+  kali:
+    image: cairn-kali-tools:latest
+    network_mode: cairn
+    enabled: true
+    user: kali
+    exec_user: kali
+    cap_add:
+    - NET_RAW
+    - NET_ADMIN
+    extra_mounts: []
+    resources:
+      mem_limit: null
+      pids_limit: null
+      nano_cpus: null
+  metasploit:
+    image: cairn-metasploit-tools:latest
+    network_mode: cairn
+    enabled: true
+    user: kali
+    exec_user: kali
+    cap_add: []
+    extra_mounts: []
+    resources:
+      mem_limit: null
+      pids_limit: null
+      nano_cpus: null

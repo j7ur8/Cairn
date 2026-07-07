@@ -40,7 +40,7 @@ tasks:
   explore: {timeout: 1, conclude_timeout: 1}
 worker_runtime:
   common_env: {}
-  container:
+  runner:
     image: img
     network_mode: bridge
     completed_action: stop

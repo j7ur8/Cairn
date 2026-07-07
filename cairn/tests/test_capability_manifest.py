@@ -150,9 +150,8 @@ class CapabilityManifestTests(unittest.TestCase):
                     McpServerCapabilityConfig(
                         id="kali-server-mcp",
                         name="Kali",
-                        transport="stdio",
-                        command="/usr/local/bin/kali-mcp-stdio",
-                        args=["--stdio"],
+                        transport="http",
+                        url="http://cairn-kali-{project_safe_id}:8765/mcp",
                         probe_config={"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},
                         required_skill_ids=["js-reverse"],
                         use_when=["browser runtime evidence is needed"],
@@ -177,9 +176,8 @@ class CapabilityManifestTests(unittest.TestCase):
         payload = catalog_payload(config)
         mcp = next(item for item in payload if item["kind"] == "mcp_server")
         skill = next(item for item in payload if item["kind"] == "skill")
-        self.assertEqual(mcp["transport"], "stdio")
-        self.assertEqual(mcp["command"], "/usr/local/bin/kali-mcp-stdio")
-        self.assertEqual(mcp["args"], ["--stdio"])
+        self.assertEqual(mcp["transport"], "http")
+        self.assertEqual(mcp["url"], "http://cairn-kali-{project_safe_id}:8765/mcp")
         self.assertEqual(
             mcp["probe_config"],
             {"type": "chrome_devtools_http", "url": "http://host.docker.internal:9222/json/version"},

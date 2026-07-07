@@ -17,18 +17,15 @@ capabilities:
     - explore
   - id: kali-server-mcp
     name: Kali Server MCP
-    transport: stdio
+    transport: http
     description: Kali Linux MCP server exposing authorized Kali tool execution through
-      a local stdio bridge.
-    command: /usr/local/bin/kali-mcp-stdio
-    args: []
-    env:
-      KALI_MCP_TIMEOUT: '300'
+      the project-scoped Kali tool sidecar.
+    url: http://cairn-kali-{project_safe_id}:8765/mcp
     use_when:
     - Authorized Kali tool execution is required for reconnaissance, scanning, exploitation
       validation, or evidence collection.
-    - The current task needs command-line security tools available in the Kali worker
-      image.
+    - The current task needs command-line security tools available in the project Kali
+      sidecar.
     - A CTF or pentest workflow has identified a concrete tool-assisted action to
       run.
     activation_hint: Use this MCP only when an actual Kali command needs to run. Follow
@@ -37,12 +34,10 @@ capabilities:
     - explore
   - id: metasploit-mcp
     name: Metasploit MCP
-    transport: stdio
+    transport: http
     description: Metasploit Framework MCP server for module search, session handling,
-      and RPC-backed framework operations.
-    command: /usr/local/bin/metasploit-mcp-stdio
-    args: []
-    env: {}
+      and RPC-backed framework operations through the project-scoped Metasploit sidecar.
+    url: http://cairn-metasploit-{project_safe_id}:8775/mcp
     use_when:
     - Metasploit module search, exploit validation, payload handling, session management,
       or post-module execution is required.

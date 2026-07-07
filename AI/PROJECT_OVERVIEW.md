@@ -61,7 +61,7 @@ Cairn/
 
 ```bash
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
-docker build ./container -t cairn-worker-container:mcp-camoufox
+docker build ./container/runner -t cairn-llm-runner:latest
 docker build ./capabilities/mcp/js-reverse-mcp/sidecar -t cairn-cloak-browser:js-reverse
 ./start.sh
 ```

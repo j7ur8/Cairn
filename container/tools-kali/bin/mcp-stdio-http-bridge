@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import threading
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+
+class StdioSession:
+    def __init__(self, command: list[str]) -> None:
+        self.proc = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        self.lock = threading.Lock()
+
+    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.proc.stdin is None or self.proc.stdout is None:
+            raise RuntimeError("stdio process is not available")
+        with self.lock:
+            self.proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            self.proc.stdin.flush()
+            while True:
+                line = self.proc.stdout.readline()
+                if not line:
+                    stderr = ""
+                    if self.proc.stderr is not None:
+                        stderr = self.proc.stderr.read(1000)
+                    raise RuntimeError(f"stdio process closed stdout: {stderr.strip()}")
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict) and data.get("id") == payload.get("id"):
+                    return data
+
+    def close(self) -> None:
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+
+
+class BridgeState:
+    def __init__(self, command: list[str]) -> None:
+        self.command = command
+        self.sessions: dict[str, StdioSession] = {}
+        self.lock = threading.Lock()
+
+    def session(self, session_id: str | None) -> tuple[str, StdioSession, bool]:
+        created = False
+        with self.lock:
+            key = session_id or uuid.uuid4().hex
+            session = self.sessions.get(key)
+            if session is None:
+                session = StdioSession(self.command)
+                self.sessions[key] = session
+                created = True
+            return key, session, created
+
+
+def build_handler(state: BridgeState):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            if self.path in ("/healthz", "/readyz"):
+                self._send_json({"ok": True})
+                return
+            self.send_error(404)
+
+        def do_POST(self) -> None:
+            if self.path.rstrip("/") != "/mcp":
+                self.send_error(404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                session_id, session, _created = state.session(self.headers.get("mcp-session-id"))
+                response = session.request(payload)
+                self._send_json(response, session_id=session_id)
+            except Exception as exc:
+                self._send_json(
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": str(exc)}},
+                    status=500,
+                )
+
+        def log_message(self, fmt: str, *args: object) -> None:
+            print(fmt % args, file=sys.stderr)
+
+        def _send_json(self, payload: dict[str, Any], *, status: int = 200, session_id: str | None = None) -> None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            if session_id:
+                self.send_header("mcp-session-id", session_id)
+            self.end_headers()
+            self.wfile.write(body)
+
+    return Handler
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--listen", default="0.0.0.0:8765")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = list(args.command)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        parser.error("stdio command is required after --")
+    host, _, port_text = args.listen.rpartition(":")
+    server = ThreadingHTTPServer((host or "0.0.0.0", int(port_text or "8765")), build_handler(BridgeState(command)))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

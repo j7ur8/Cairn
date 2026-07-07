@@ -194,12 +194,77 @@ class CloakSidecarConfig(BaseModel):
         return text
 
 
+class ToolSidecarConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image: str
+    network_mode: str
+    enabled: bool = True
+    user: str | None = None
+    exec_user: str | None = None
+    cap_add: list[str] = Field(default_factory=list)
+    bind_mounts: list[BindMountConfig] = Field(default_factory=list)
+    mem_limit: str | None = None
+    pids_limit: int | None = None
+    nano_cpus: int | None = None
+
+    @field_validator("image", "network_mode")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("user", "exec_user")
+    @classmethod
+    def validate_user(cls, value: str | None) -> str | None:
+        return ContainerConfig.validate_user(value)
+
+    @model_validator(mode="after")
+    def validate_bind_mounts(self) -> ToolSidecarConfig:
+        names = [mount.name for mount in self.bind_mounts if mount.name is not None]
+        if len(names) != len(set(names)):
+            raise ValueError("tool sidecar bind_mount names must be unique")
+        container_paths = [mount.container_path for mount in self.bind_mounts]
+        if len(container_paths) != len(set(container_paths)):
+            raise ValueError("tool sidecar bind_mount container_path values must be unique")
+        return self
+
+    def as_container_config(self) -> ContainerConfig:
+        return ContainerConfig(
+            image=self.image,
+            user=self.user,
+            exec_user=self.exec_user,
+            network_mode=self.network_mode,
+            completed_action="remove",
+            stopped_action="remove",
+            cap_add=list(self.cap_add),
+            bind_mounts=list(self.bind_mounts),
+            mem_limit=self.mem_limit,
+            pids_limit=self.pids_limit,
+            nano_cpus=self.nano_cpus,
+        )
+
+
+class ToolSidecarsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kali: ToolSidecarConfig | None = None
+    metasploit: ToolSidecarConfig | None = None
+
+
 class WorkerRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    container: ContainerConfig
+    runner: ContainerConfig
     common_env: dict[str, str] = Field(default_factory=dict)
+    tool_sidecars: ToolSidecarsConfig = Field(default_factory=ToolSidecarsConfig)
     cloak_sidecar: CloakSidecarConfig | None = None
+
+    @property
+    def container(self) -> ContainerConfig:
+        return self.runner
 
 
 class WorkerPoolConfig(BaseModel):
@@ -223,10 +288,10 @@ def prepare_bind_mount_data(data: Any, config_dir: Path) -> Any:
     worker_runtime = data.get("worker_runtime")
     if not isinstance(worker_runtime, dict):
         return data
-    container = worker_runtime.get("container")
-    if not isinstance(container, dict):
+    runner = worker_runtime.get("runner")
+    if not isinstance(runner, dict):
         return data
-    mounts = container.get("bind_mounts")
+    mounts = runner.get("bind_mounts")
     if mounts is None:
         return data
     if not isinstance(mounts, list):
@@ -243,10 +308,35 @@ def prepare_bind_mount_data(data: Any, config_dir: Path) -> Any:
             mount_copy["host_path"] = _resolve_bind_mount_host_path(config_dir, host_path)
         prepared_mounts.append(mount_copy)
 
-    container_copy = dict(container)
-    container_copy["bind_mounts"] = prepared_mounts
+    runner_copy = dict(runner)
+    runner_copy["bind_mounts"] = prepared_mounts
     runtime_copy = dict(worker_runtime)
-    runtime_copy["container"] = container_copy
+    runtime_copy["runner"] = runner_copy
+
+    sidecars = runtime_copy.get("tool_sidecars")
+    if isinstance(sidecars, dict):
+        prepared_sidecars: dict[str, Any] = {}
+        for key, raw_sidecar in sidecars.items():
+            if not isinstance(raw_sidecar, dict):
+                prepared_sidecars[key] = raw_sidecar
+                continue
+            sidecar_copy = dict(raw_sidecar)
+            sidecar_mounts = sidecar_copy.get("bind_mounts")
+            if isinstance(sidecar_mounts, list):
+                sidecar_prepared_mounts: list[Any] = []
+                for mount in sidecar_mounts:
+                    if not isinstance(mount, dict):
+                        sidecar_prepared_mounts.append(mount)
+                        continue
+                    mount_copy = dict(mount)
+                    host_path = mount_copy.get("host_path")
+                    if isinstance(host_path, str):
+                        mount_copy["host_path"] = _resolve_bind_mount_host_path(config_dir, host_path)
+                    sidecar_prepared_mounts.append(mount_copy)
+                sidecar_copy["bind_mounts"] = sidecar_prepared_mounts
+            prepared_sidecars[key] = sidecar_copy
+        runtime_copy["tool_sidecars"] = prepared_sidecars
+
     data_copy = dict(data)
     data_copy["worker_runtime"] = runtime_copy
     return data_copy

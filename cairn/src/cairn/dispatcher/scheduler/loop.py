@@ -11,6 +11,7 @@ from cairn.dispatcher.prompts.validation import validate_prompt_resources
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cloak_sidecar import CloakSidecarManager
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.tool_sidecar import ToolSidecarManager
 from cairn.dispatcher.scheduler.ai_overlay import AIOverlayCache
 from cairn.dispatcher.scheduler.ai_worker_selector import AiWorkerSelector
 from cairn.dispatcher.scheduler.cleanup import ContainerCleanupCoordinator
@@ -118,6 +119,9 @@ class DispatcherLoop:
         self.cloak_sidecar_manager = CloakSidecarManager(
             self.config.worker_runtime.cloak_sidecar,
         )
+        self.tool_sidecar_manager = ToolSidecarManager(
+            self.config.worker_runtime.tool_sidecars,
+        )
         self.health = DispatcherHealthCoordinator(
             config=self.config,
             client=self.client,
@@ -126,6 +130,7 @@ class DispatcherLoop:
         self.cleanup = ContainerCleanupCoordinator(
             self.container_manager,
             cloak_sidecar_manager=self.cloak_sidecar_manager,
+            tool_sidecar_manager=self.tool_sidecar_manager,
             max_workers=self.config.runtime.max_workers,
         )
 
@@ -135,6 +140,7 @@ class DispatcherLoop:
             client=self.client,
             container_manager=self.container_manager,
             cloak_sidecar_manager=self.cloak_sidecar_manager,
+            tool_sidecar_manager=self.tool_sidecar_manager,
             executor=self.executor,
             runtime=self.runtime,
             log_state=self.log_state,
@@ -160,6 +166,7 @@ class DispatcherLoop:
             cleanup=self.cleanup,
             container_manager=self.container_manager,
             cloak_sidecar_manager=self.cloak_sidecar_manager,
+            tool_sidecar_manager=self.tool_sidecar_manager,
             replay=self.replay,
             submitter=self.submitter,
             runtime_maintenance=self.runtime_maintenance,
@@ -190,6 +197,7 @@ class DispatcherLoop:
         self.cleanup.shutdown(wait=True)
         self.container_manager.close()
         self.cloak_sidecar_manager.close()
+        self.tool_sidecar_manager.close()
         self.client.close()
         self.health_server.stop()
 
@@ -282,6 +290,7 @@ class DispatcherLoop:
             container_manager=self.container_manager,
             server_ids=server_ids,
             cloak_sidecar_manager=self.cloak_sidecar_manager,
+            tool_sidecar_manager=self.tool_sidecar_manager,
         )
 
     def _advance_replay_project(self, project_id: str) -> bool | None:

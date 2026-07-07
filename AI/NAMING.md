@@ -76,7 +76,7 @@ Dispatcher code uses the current split:
 - First-party MCP assets live under `capabilities/mcp/<mcp-id>/`.
 - First-party Skills live under `capabilities/skills/<skill-id>/SKILL.md`.
 - First-party Roles live under `capabilities/roles/<role-id>/ROLE.md`.
-- Worker wrapper binaries live under `container/bin/` and may keep tool-specific names.
+- Runner wrapper binaries live under `container/runner/bin/`; tool sidecar entrypoints live under `container/tools-*/bin/`.
 
 ## 6. Allowed Exceptions
 

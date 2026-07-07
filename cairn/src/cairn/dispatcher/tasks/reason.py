@@ -157,6 +157,7 @@ def run_reason_task(
             phase="reason_execute",
             project=project,
             cloak_sidecar_manager=services.cloak_sidecar_manager,
+            tool_sidecar_manager=services.tool_sidecar_manager,
             preloaded_execution_config=execution_config,
         )
         if prepared is None:

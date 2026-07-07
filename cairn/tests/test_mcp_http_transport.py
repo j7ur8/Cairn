@@ -117,7 +117,7 @@ tasks:
   explore: {timeout: 1, conclude_timeout: 1}
 worker_runtime:
   common_env: {}
-  container:
+  runner:
     image: "x:latest"
     network_mode: "cairn"
     completed_action: "stop"
@@ -266,6 +266,14 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
 
         def write_text_file(self, container_name, target_path, content):
             self.files.append((container_name, target_path, content))
+
+    class FakeToolSidecarManager:
+        def __init__(self):
+            self.ensure_calls = []
+
+        def ensure_running(self, project_id, tool):
+            self.ensure_calls.append((project_id, tool))
+            return None
 
     def _config(self, task_types):
         from types import SimpleNamespace
@@ -629,6 +637,65 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.skills, ["s"])
         self.assertNotIn("## Files", result.instructions)
         self.assertIn("files: prompt group default FILE_OUTPUTS.md is empty", result.errors)
+
+    def test_sidecar_mcp_selection_starts_project_sidecar_and_renders_http_url(self):
+        from types import SimpleNamespace
+
+        from cairn.dispatcher.capabilities import inject_project_capabilities
+        from cairn.shared.config import McpServerCapabilityConfig
+
+        config = SimpleNamespace(
+            capabilities=SimpleNamespace(
+                mcp_servers=[
+                    McpServerCapabilityConfig(
+                        id="kali-server-mcp",
+                        name="Kali",
+                        transport="http",
+                        url="http://cairn-kali-{project_safe_id}:8765/mcp",
+                        task_types=["explore"],
+                    ),
+                    McpServerCapabilityConfig(
+                        id="metasploit-mcp",
+                        name="Metasploit",
+                        transport="http",
+                        url="http://cairn-metasploit-{project_safe_id}:8775/mcp",
+                        task_types=["explore"],
+                    ),
+                ],
+                skills=[],
+            )
+        )
+        selection = {
+            "tasks": {
+                "explore": {
+                    "snapshots": [
+                        {"kind": "mcp_server", "capability_id": "kali-server-mcp", "source": "selected"},
+                        {"kind": "mcp_server", "capability_id": "metasploit-mcp", "source": "selected"},
+                    ],
+                }
+            }
+        }
+        manager = self.FakeContainerManager()
+        sidecars = self.FakeToolSidecarManager()
+
+        result = inject_project_capabilities(
+            config,
+            None,
+            manager,
+            "worker",
+            "proj/1",
+            "explore",
+            "task",
+            selection,
+            tool_sidecar_manager=sidecars,
+        )
+
+        self.assertEqual(sidecars.ensure_calls, [("proj/1", "kali"), ("proj/1", "metasploit")])
+        self.assertEqual(result.mcp_servers, ["kali-server-mcp", "metasploit-mcp"])
+        written = json.loads([item for item in manager.files if item[1].endswith("/mcp.json")][0][2])
+        self.assertEqual(written["mcpServers"]["kali-server-mcp"]["type"], "http")
+        self.assertEqual(written["mcpServers"]["kali-server-mcp"]["url"], "http://cairn-kali-proj-1:8765/mcp")
+        self.assertEqual(written["mcpServers"]["metasploit-mcp"]["url"], "http://cairn-metasploit-proj-1:8775/mcp")
 
 
 class CodexAdapterHttpTests(unittest.TestCase):

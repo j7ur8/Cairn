@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-  cat >&2 <<'USAGE'
-Usage: metasploit-mcp-stdio [metasploitmcp args...]
-
-Runs Kali's metasploitmcp in stdio MCP mode. A local msfrpcd instance is
-started on a random 127.0.0.1 port with a generated password and is cleaned up
-when the MCP server exits.
-
-Environment:
-  MSF_SERVER    RPC host exported to metasploitmcp (default: 127.0.0.1)
-  MSF_PORT      RPC port exported to metasploitmcp (default: random free port)
-  MSF_PASSWORD  RPC password exported to metasploitmcp (default: generated)
-  MSF_SSL       RPC SSL setting exported to metasploitmcp (default: false)
-USAGE
-}
-
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1" >&2
@@ -43,23 +27,20 @@ PY
 wait_for_port() {
   local host="$1"
   local port="$2"
-  local deadline=$((SECONDS + 60))
-
+  local deadline=$((SECONDS + 90))
   until python3 - "$host" "$port" <<'PY'
 import socket
 import sys
-
 host = sys.argv[1]
 port = int(sys.argv[2])
 try:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(1)
-        sock.connect((host, port))
+    with socket.create_connection((host, port), timeout=1):
+        sys.exit(0)
 except OSError:
     sys.exit(1)
 PY
   do
-    if [ "$SECONDS" -ge "$deadline" ]; then
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
       echo "timed out waiting for msfrpcd on ${host}:${port}" >&2
       return 1
     fi
@@ -68,38 +49,25 @@ PY
 }
 
 cleanup() {
-  if [ -n "${MSFRPCD_PID:-}" ] && kill -0 "$MSFRPCD_PID" >/dev/null 2>&1; then
+  if [[ -n "${MSFRPCD_PID:-}" ]] && kill -0 "$MSFRPCD_PID" >/dev/null 2>&1; then
     kill "$MSFRPCD_PID" >/dev/null 2>&1 || true
     wait "$MSFRPCD_PID" >/dev/null 2>&1 || true
   fi
 }
+trap cleanup EXIT INT TERM
 
 require_command metasploitmcp
 require_command msfrpcd
-
-case "${1:-}" in
-  -h|--help)
-    usage
-    metasploitmcp --help || true
-    exit 0
-    ;;
-esac
 
 export MSF_SERVER="${MSF_SERVER:-127.0.0.1}"
 export MSF_PORT="${MSF_PORT:-$(choose_port)}"
 export MSF_PASSWORD="${MSF_PASSWORD:-$(random_password)}"
 export MSF_SSL="${MSF_SSL:-false}"
 
-MSFRPCD_PID=""
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 0' TERM
-
 msfrpcd -f -S -a "$MSF_SERVER" -p "$MSF_PORT" -P "$MSF_PASSWORD" >&2 &
 MSFRPCD_PID=$!
+wait_for_port "$MSF_SERVER" "$MSF_PORT"
 
-if ! wait_for_port "$MSF_SERVER" "$MSF_PORT"; then
-  exit 1
-fi
-
-metasploitmcp --transport stdio "$@"
+exec /usr/local/bin/mcp-stdio-http-bridge \
+  --listen "${METASPLOIT_MCP_HTTP_HOST:-0.0.0.0}:${METASPLOIT_MCP_HTTP_PORT:-8775}" \
+  -- metasploitmcp --transport stdio

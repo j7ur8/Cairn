@@ -84,7 +84,7 @@ def _dispatch_config(root: Path) -> dict:
         },
         "worker_runtime": {
             "common_env": {},
-            "container": {
+            "runner": {
                 "image": "cairn/test:2026.06",
                 "network_mode": "bridge",
                 "completed_action": "stop",
@@ -149,7 +149,7 @@ class ConfigPreflightTests(unittest.TestCase):
 
         self.assertTrue(result.ok, result.to_dict())
         self.assertEqual(result.errors, [])
-        self.assertTrue(any("worker image" in warning for warning in result.warnings))
+        self.assertTrue(any("runner image" in warning for warning in result.warnings))
 
     def test_strict_missing_image_fails(self) -> None:
         from cairn.shared.config.preflight import check_dispatch_config
@@ -161,7 +161,7 @@ class ConfigPreflightTests(unittest.TestCase):
                 result = check_dispatch_config(path, strict=True)
 
         self.assertFalse(result.ok)
-        self.assertTrue(any("worker image" in error for error in result.errors))
+        self.assertTrue(any("runner image" in error for error in result.errors))
 
     def test_latest_worker_image_fails_preflight(self) -> None:
         from cairn.shared.config.preflight import check_dispatch_config
@@ -169,7 +169,7 @@ class ConfigPreflightTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             root = Path(td)
             dispatch = _dispatch_config(root)
-            dispatch["worker_runtime"]["container"]["image"] = "cairn/test:latest"
+            dispatch["worker_runtime"]["runner"]["image"] = "cairn/test:latest"
             with mock.patch("docker.from_env") as from_env:
                 from_env.return_value.images.get.return_value = object()
                 result = check_dispatch_config(self._write(root, dispatch))
@@ -236,7 +236,7 @@ class ConfigPreflightTests(unittest.TestCase):
 
         rendered = json.dumps(result.to_dict())
         self.assertIn("storage.host_root", rendered)
-        self.assertIn("worker.image", rendered)
+        self.assertIn("runner.image", rendered)
         self.assertNotIn("server.paths", rendered)
         self.assertNotIn("worker_runtime.container", rendered)
 
@@ -277,7 +277,7 @@ class ConfigPreflightTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             root = Path(td)
             dispatch = _dispatch_config(root)
-            dispatch["worker_runtime"]["container"]["bind_mounts"][0]["container_path"] = "/workspace/project"
+            dispatch["worker_runtime"]["runner"]["bind_mounts"][0]["container_path"] = "/workspace/project"
             result = check_dispatch_config(self._write(root, dispatch))
 
         self.assertFalse(result.ok)

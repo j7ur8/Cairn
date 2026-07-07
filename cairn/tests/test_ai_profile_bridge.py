@@ -55,7 +55,7 @@ def _make_config(*workers):
         server=server,
         dispatcher=dispatcher,
         tasks=tasks,
-        worker_runtime=WorkerRuntimeConfig(container=container, common_env={}),
+        worker_runtime=WorkerRuntimeConfig(runner=container, common_env={}),
         worker_pool=WorkerPoolConfig(workers=list(workers)),
     )
 

@@ -59,6 +59,7 @@ def inject_project_capabilities(
     task_instance_id: str,
     selection_data: dict[str, Any] | None,
     browser_runtime: BrowserRuntimeContext | None = None,
+    tool_sidecar_manager: Any | None = None,
 ) -> CapabilityInjection:
     if task_type == "reason":
         return CapabilityInjection("", "", [], [], [], WorkerExecutionContext())
@@ -198,6 +199,20 @@ def inject_project_capabilities(
                     continue
                 if lease is not None:
                     runtime_leases[mcp.id] = lease
+        for mcp in list(injected_mcp_servers):
+            tool = _tool_sidecar_for_mcp(mcp.id)
+            if tool is None:
+                continue
+            if tool_sidecar_manager is None:
+                errors.append(f"mcp_server:{mcp.id}: tool sidecar manager unavailable")
+                injected_mcp_servers = [item for item in injected_mcp_servers if item.id != mcp.id]
+                continue
+            try:
+                tool_sidecar_manager.ensure_running(project_id, tool)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"mcp_server:{mcp.id}: tool sidecar failed: {exc}")
+                injected_mcp_servers = [item for item in injected_mcp_servers if item.id != mcp.id]
+                continue
         try:
             container_manager.write_text_file(
                 container_name,
@@ -302,11 +317,46 @@ def _task_scoped_mcp_servers(
 ) -> list[McpServerCapabilityConfig]:
     scoped: list[McpServerCapabilityConfig] = []
     for mcp in mcp_servers:
+        sidecar = _sidecar_mcp_override(mcp)
+        if sidecar is not None:
+            mcp = sidecar
         if task_type == "bootstrap" and mcp.id == "cairn-resources":
             scoped.append(mcp.model_copy(update={"env": {**mcp.env, "CAIRN_RESOURCES_READ_ONLY": "1"}}))
             continue
         scoped.append(mcp)
     return scoped
+
+
+def _tool_sidecar_for_mcp(capability_id: str) -> str | None:
+    if capability_id == "kali-server-mcp":
+        return "kali"
+    if capability_id == "metasploit-mcp":
+        return "metasploit"
+    return None
+
+
+def _sidecar_mcp_override(mcp: McpServerCapabilityConfig) -> McpServerCapabilityConfig | None:
+    if mcp.id == "kali-server-mcp":
+        return mcp.model_copy(
+            update={
+                "transport": "http",
+                "command": None,
+                "args": [],
+                "env": {},
+                "url": "http://cairn-kali-{project_safe_id}:8765/mcp",
+            }
+        )
+    if mcp.id == "metasploit-mcp":
+        return mcp.model_copy(
+            update={
+                "transport": "http",
+                "command": None,
+                "args": [],
+                "env": {},
+                "url": "http://cairn-metasploit-{project_safe_id}:8775/mcp",
+            }
+        )
+    return None
 
 
 def _capability_catalog_from_selection(

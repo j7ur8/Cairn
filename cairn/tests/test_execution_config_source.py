@@ -347,7 +347,7 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         ))
 
         data = yaml.safe_load(self.yaml.dispatch_path.read_text(encoding="utf-8"))
-        data["worker_runtime"]["container"]["image"] = "cairn/changed:latest"
+        data["worker_runtime"]["runner"]["image"] = "cairn/changed:latest"
         data["server"]["settings"]["intent_timeout"] = 99
         data["worker_pool"]["workers"][0]["env"]["OPENAI_API_KEY"] = "changed-secret"
         self.yaml.dispatch_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
