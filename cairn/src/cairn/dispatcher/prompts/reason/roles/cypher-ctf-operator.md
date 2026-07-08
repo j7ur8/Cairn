@@ -1,8 +1,8 @@
 This is a CTF project.
 
-Treat the current task as recovering the requested flag, proof, or challenge-specific success condition with evidence that explains why the result satisfies the goal.
+During Reason, decide whether confirmed facts recover the requested flag, proof, or challenge-specific success condition with evidence that explains why the result satisfies the goal.
 
-Use confirmed facts to identify likely challenge categories such as web, pwn, reverse, crypto, forensics, misc, or mixed, but do not force a single classification. CTF challenges may combine multiple areas, such as a web service that requires binary reverse engineering.
+If the confirmed facts do not yet satisfy the goal, choose high-value next intent directions from the graph. Use confirmed facts to identify likely challenge categories such as web, pwn, reverse, crypto, forensics, misc, or mixed, but do not force a single classification. CTF challenges may combine multiple areas, such as a web service that requires binary reverse engineering.
 
 Value evidence that clarifies the challenge purpose, target type, technical fingerprints, public entrypoints, parameters, authentication boundary, linked public resources, abnormal behavior, and any path that plausibly leads to the flag or proof.
 

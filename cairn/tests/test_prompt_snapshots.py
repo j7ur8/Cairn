@@ -73,6 +73,27 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("Do not output JSON", output_requirements)
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
+    def test_default_explore_prompt_is_assigned_intent_investigation(self) -> None:
+        explore = _common_prompt("explore.md")
+        task_section = explore.split("## Output Requirements", 1)[0]
+
+        for text in (
+            "Explore investigates the assigned Current Intent.",
+            "Use Fact View as confirmed context.",
+            "Use Full Graph only as fallback",
+            "Use Current Intent as the starting point",
+            "Current Intent Description as the requested exploration scope",
+            "newly confirmed incremental facts",
+            "Do not make Reason-phase decisions, propose new intents",
+        ):
+            self.assertIn(text, task_section)
+        for text in (
+            "satisfies Goal",
+            "Goal has been achieved",
+            "data.complete",
+        ):
+            self.assertNotIn(text, explore)
+
     def test_default_explore_prompts_preserve_partial_negative_scope(self) -> None:
         explore = _common_prompt("explore.md")
         explore_conclude = _common_prompt("explore_conclude.md")
@@ -97,12 +118,17 @@ class PromptSnapshotTests(unittest.TestCase):
         for text in (
             "Fact View",
             "Full Graph",
+            "confirmed Explore facts",
+            "Do not collect new information",
+            "tested method or scope",
+            "concrete failure limit",
         ):
             self.assertIn(text, prompt)
         for text in (
-            "Explore_conclude is read-only fact conclusion only",
-            "Use Read only",
+            "Explore_conclude summarizes already confirmed Explore facts",
+            "Use only files directly cited by the Fact View or Full Graph",
             "Do not scan for additional files or evidence",
+            "must not run commands",
             "wait for unfinished work",
         ):
             self.assertIn(text, instruction)
@@ -177,6 +203,18 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertEqual(contents["Instruction.md"], contents["AGENTS.md"])
         self.assertEqual(contents["Instruction.md"], contents["CLAUDE.md"])
+
+    def test_explore_and_reason_instruction_variants_are_synchronized(self) -> None:
+        for phase in ("explore", "reason"):
+            with self.subTest(phase=phase):
+                instruction_dir = _PROMPTS_DIR / phase / "instruction"
+                contents = {
+                    name: (instruction_dir / name).read_text(encoding="utf-8")
+                    for name in ("Instruction.md", "AGENTS.md", "CLAUDE.md")
+                }
+
+                self.assertEqual(contents["Instruction.md"], contents["AGENTS.md"])
+                self.assertEqual(contents["Instruction.md"], contents["CLAUDE.md"])
 
     def test_default_phase_prompts_use_legacy_context_sections(self) -> None:
         forbidden = (
@@ -347,6 +385,17 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("requested flag, proof, or challenge-specific success condition", role)
         self.assertIn("evidence that explains why the result satisfies the goal", role)
 
+    def test_explore_ctf_role_excludes_reason_goal_satisfaction_semantics(self) -> None:
+        role = (_PROMPTS_DIR / "explore" / "roles" / "cypher-ctf-operator.md").read_text(encoding="utf-8")
+
+        self.assertIn("During Explore, investigate only the assigned Current Intent", role)
+        self.assertIn("flag or proof is directly exposed", role)
+        for text in (
+            "requested flag, proof, or challenge-specific success condition",
+            "evidence that explains why the result satisfies the goal",
+        ):
+            self.assertNotIn(text, role)
+
     def test_existing_skill_owns_ctf_web_js_output_contract(self) -> None:
         skill_dir = _REPO / "capabilities" / "skills" / "ctf-web-js-analysis"
         skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
@@ -387,6 +436,31 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("{fact_ids}", reason)
         self.assertIn("{open_intents}", reason)
         self.assertIn("{max_intents}", reason)
+
+    def test_default_reason_prompt_is_graph_only_decision(self) -> None:
+        reason = _common_prompt("reason.md")
+
+        for text in (
+            "Reason evaluates the confirmed graph and emits one protocol decision.",
+            "Use Fact View as the primary graph state.",
+            "Use Full Graph only as fallback",
+            "Decide exactly one state",
+            "Goal satisfied",
+            "propose new high-value intents",
+            "wait with no new intent",
+            "Do not execute tools, collect new information, or continue exploration.",
+            "Valid facts",
+            "Open Intents",
+            "{max_intents}",
+        ):
+            self.assertIn(text, reason)
+        for marker in (
+            "32173462130721312360912",
+            "84913462130721312360912",
+            "00003462130721312360912",
+        ):
+            self.assertIn(marker, reason)
+        self.assertIn("data.complete.from` must come only from `Valid facts", reason)
 
     def test_default_bootstrap_and_explore_exclude_capability_instructions(self) -> None:
         bootstrap = _common_prompt("bootstrap.md")

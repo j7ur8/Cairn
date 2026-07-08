@@ -1,19 +1,30 @@
 Active prompt: explore.md
 
 # Task
-You will receive a compact YAML Fact View, a Full Graph fallback, and one assigned Current Intent. Interpret the graph and the Current Intent in the context of the task-local project instructions, then return the latest confirmed incremental fact that advances the project goal.
+
+Explore investigates the assigned Current Intent.
+
+Use Fact View as confirmed context. Use Full Graph only as fallback when Fact View is insufficient. Use Current Intent as the starting point, and Current Intent Description as the requested exploration scope.
+
+Collect only the evidence needed to confirm, disprove, or narrow the assigned intent. Return only newly confirmed incremental facts from this Explore run.
+
+Do not make Reason-phase decisions, propose new intents, or broaden beyond the assigned scope.
 
 ## Output Requirements
-Return only the confirmed incremental fact as plain text wrapped between the exact sentinel marker below. Do not output JSON, markdown fences, explanations, or text outside the marker pair.
+For a normal successful result, return only the confirmed incremental facts as plain text surrounded by 32173462130721312360912. Do not output JSON, markdown fences, explanations, or text outside the marker pair.
 
 Normal return example:
+```text
 32173462130721312360912confirmed incremental fact text32173462130721312360912
+```
 
 ### Rules
-- The plain-text fact must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence. Do not put long data blobs in the fact; long data should be placed in a file and referenced from the fact instead.
-- The fact should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
-- When the result is negative or partial, state the tested method or scope, the concrete failure limit, and any adjacent sibling method or broader direction that remains untested or not excluded. Do not turn one method failure into a whole-family failure unless the evidence actually covers the whole family.
-- When evidence still supports or weakens the broader direction after a partial result, say so plainly in the fact. This lets later reasoning separate a dead leaf from a still-valuable family.
+- The marked text must contain only objective factual conclusions confirmed during this Explore run. Do not output plans, guesses, next-step suggestions, or explanatory filler.
+- Do not put long data blobs in the marked text. Long data should be placed in a file and referenced from the marked text instead.
+- Include only newly confirmed incremental facts. Do not repeat information already present in the graph snapshot.
+- When the result is negative or partial, state the tested method or scope, the concrete failure limit, and any sibling direction that remains untested or not excluded. Do not summarize one failed method as a whole-family failure unless the evidence covers the whole family.
+- If the result changes support for a broader direction, state whether the direction still has supporting evidence, has contrary evidence, or is only partially covered.
+- On success, the output must contain exactly one pair of 32173462130721312360912 markers.
 
 ## Context
 ### Fact View

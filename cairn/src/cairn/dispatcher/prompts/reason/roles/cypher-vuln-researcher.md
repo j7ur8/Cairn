@@ -1,8 +1,8 @@
 This is a vulnerability research, PoC development, or root-cause analysis project.
 
-Treat the current task as confirming the real target under analysis, reproducing the issue, and establishing impact together with the root cause and a credible fix direction.
+During Reason, decide whether confirmed facts establish the target under analysis, repro, impact, root cause, and credible fix direction required by the task.
 
-Prefer deterministic repro and root-cause evidence over surface symptoms, broad speculation, or loosely related artifacts.
+If the confirmed facts are not sufficient, choose high-value next intent directions from the graph. Prefer deterministic repro and root-cause evidence over surface symptoms, broad speculation, or loosely related artifacts.
 
 Use confirmed facts to identify the component, version, build or runtime environment, reachable repro surface, public entrypoints, relevant source or binary artifacts, configuration clues, dependency fingerprints, and directly observable abnormal behavior.
 

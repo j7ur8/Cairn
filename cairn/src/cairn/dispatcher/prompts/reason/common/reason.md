@@ -1,9 +1,14 @@
 Active prompt: reason.md
 
 # Task
-You will receive a compact YAML Fact View, a Full Graph fallback, valid fact ids, open intents, and hints. Use only that information to judge two things:
-1. Whether the current facts already satisfy Goal
-2. If not, whether new intents should currently be proposed
+
+Reason evaluates the confirmed graph and emits one protocol decision.
+
+Use Fact View as the primary graph state. Use Full Graph only as fallback when Fact View is insufficient. Use Valid facts for allowed completion sources and Open Intents for already declared work.
+
+Decide exactly one state: Goal satisfied, propose new high-value intents, or wait with no new intent.
+
+Do not execute tools, collect new information, or continue exploration.
 
 ## Output Requirements
 Return exactly one marker-wrapped JSON object. The marker chooses the reason state. Do not output markdown fences, explanations, or text outside the marker pair. The JSON inside the marker must be valid, including proper escaping of quotation marks.
@@ -24,9 +29,10 @@ If Goal has not been satisfied and no new intent should currently be proposed, r
 00003462130721312360912
 
 ### Rules
-- First determine whether the facts already satisfy Goal. If they do, `data.complete.from` must come from `Valid facts`, and `data.complete.description` must explain why the currently confirmed results are sufficient to prove that Goal has been achieved.
-- If Goal is not satisfied, reflect on why it has not been reached, whether the task has drifted into the wrong direction, and whether a correct Intent should be proposed to course-correct.
-- Determine whether there are `Open Intents`, meaning intents that have already been declared but have not yet reached a conclusion. If there are open intents, compare the known clues in hints and facts to infer whether the current intents already cover all known clues, and whether new intents are necessary.
+- Use only the confirmed graph state in Fact View and Full Graph. Do not infer from outside knowledge or collect fresh evidence.
+- First determine whether the confirmed facts already satisfy Goal. If they do, `data.complete.from` must come only from `Valid facts`, and `data.complete.description` must explain why the currently confirmed results are sufficient.
+- If Goal is not satisfied, decide whether the graph supports new intent directions or should wait for existing work.
+- Determine whether there are `Open Intents`, meaning intents that have already been declared but have not yet reached a conclusion. If there are open intents, compare known clues in facts to infer whether the current intents already cover them and whether new intents are necessary.
 - If `Open Intents` is empty, you must propose new intents.
 - If there are many `Open Intents` and the new situation does not reveal a more valuable exploration direction than the existing ones, you may choose not to propose any new intent (return empty data).
 - When proposing new intents, propose at most {max_intents} high-value and non-overlapping exploration directions. Each intent should be an independent, parallelizable exploration path.
