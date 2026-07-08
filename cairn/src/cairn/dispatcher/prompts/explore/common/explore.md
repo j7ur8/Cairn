@@ -1,3 +1,5 @@
+Active prompt: explore.md
+
 # Task
 You will receive a compact YAML Fact View, a Full Graph fallback, and one assigned Current Intent. Interpret the graph and the Current Intent in the context of the task-local project instructions, then return the latest confirmed incremental fact that advances the project goal.
 
@@ -7,9 +9,7 @@ Return only the confirmed incremental fact as plain text wrapped between the exa
 Normal return example:
 32173462130721312360912confirmed incremental fact text32173462130721312360912
 
-## Rules
-- Explore only the Current Intent.
-- Read the Fact View first. Read the Full Graph only if the view is insufficient or you need omitted details.
+### Rules
 - The plain-text fact must clearly state the confirmed key objective results. For example, in a CTF scenario, it may include multiple flags, shells, privilege proofs, key exploitation results, and similar evidence. Do not put long data blobs in the fact; long data should be placed in a file and referenced from the fact instead.
 - The fact should contain only the latest incremental facts discovered. Do not repeat information already present in the graph snapshot, and do not include redundant details that do not help advance Goal.
 - When the result is negative or partial, state the tested method or scope, the concrete failure limit, and any adjacent sibling method or broader direction that remains untested or not excluded. Do not turn one method failure into a whole-family failure unless the evidence actually covers the whole family.

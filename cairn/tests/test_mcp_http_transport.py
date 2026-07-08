@@ -593,7 +593,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         with patch(
             "cairn.dispatcher.capabilities.load_prompt_files_appendix",
-            return_value=("", ["files: prompt group default missing FILE_OUTPUTS.md"]),
+            return_value=("", ["files: prompt resources missing explore/common/FILE_OUTPUTS.md"]),
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
@@ -609,8 +609,11 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.mcp_servers, ["m"])
         self.assertEqual(result.skills, ["s"])
         self.assertNotIn("## Files", result.instructions)
-        self.assertIn("files: prompt group default missing FILE_OUTPUTS.md", result.errors)
-        self.assertIn('"errors": [\n    "files: prompt group default missing FILE_OUTPUTS.md"\n  ]', result.summary)
+        self.assertIn("files: prompt resources missing explore/common/FILE_OUTPUTS.md", result.errors)
+        self.assertIn(
+            '"errors": [\n    "files: prompt resources missing explore/common/FILE_OUTPUTS.md"\n  ]',
+            result.summary,
+        )
 
     def test_explore_injection_reports_empty_files_appendix_without_blocking(self):
         from unittest.mock import patch
@@ -620,7 +623,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         manager = self.FakeContainerManager()
         with patch(
             "cairn.dispatcher.capabilities.load_prompt_files_appendix",
-            return_value=("", ["files: prompt group default FILE_OUTPUTS.md is empty"]),
+            return_value=("", ["files: prompt resources explore/common/FILE_OUTPUTS.md is empty"]),
         ):
             result = inject_project_capabilities(
                 self._config(["explore"]),
@@ -636,7 +639,7 @@ class CapabilityProjectInjectionTests(unittest.TestCase):
         self.assertEqual(result.mcp_servers, ["m"])
         self.assertEqual(result.skills, ["s"])
         self.assertNotIn("## Files", result.instructions)
-        self.assertIn("files: prompt group default FILE_OUTPUTS.md is empty", result.errors)
+        self.assertIn("files: prompt resources explore/common/FILE_OUTPUTS.md is empty", result.errors)
 
     def test_sidecar_mcp_selection_starts_project_sidecar_and_renders_http_url(self):
         from types import SimpleNamespace

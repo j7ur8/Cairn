@@ -126,10 +126,10 @@ class ExecutionConfigSourceTests(unittest.TestCase):
         self.assertEqual([row["task_type"] for row in ai_rows], ["bootstrap", "explore", "reason"])
         assert header is not None
         prompt_snapshot = json.loads(header["prompts_json"])
-        self.assertEqual(prompt_snapshot["prompt_group"], "default")
+        self.assertNotIn("prompt_group", prompt_snapshot)
         self.assertEqual(
             set(prompt_snapshot["prompts"]),
-            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md", "FILE_OUTPUTS.md"},
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
         )
         self.assertEqual(header["prompts_sha256"], prompt_snapshot["prompts_sha256"])
         self.assertEqual(removed_tables, [])

@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import cairn.dispatcher.prompts as prompt_package
 from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
+from cairn.dispatcher.prompts.layout import PROMPT_PHASES, instruction_prompt_path, prompt_package_path, validate_phase
 from cairn.dispatcher.runtime.docker_labels import safe_project_id
 from cairn.dispatcher.tasks.context import ContainerRuntime
 from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.shared.contracts import ProjectDetail
 
-RUNTIME_INSTRUCTION_PHASES = ("bootstrap", "reason", "explore")
+RUNTIME_INSTRUCTION_PHASES = PROMPT_PHASES
 RUNTIME_INSTRUCTION_TEMPLATE_PATHS = (
     "AGENTS.md",
     "CLAUDE.md",
@@ -99,18 +99,15 @@ def render_task_instruction_files(
 
 
 def runtime_instruction_templates_root() -> Path:
-    package_paths = list(getattr(prompt_package, "__path__", []))
-    if len(package_paths) != 1:
-        raise RuntimeError("prompt resources are not writable files")
-    return (Path(package_paths[0]) / "runtime_instructions").resolve()
+    return prompt_package_path()
 
 
 def runtime_instruction_template_path(phase: str, relative_path: str) -> Path:
     phase = validate_runtime_instruction_phase(phase)
     relative_path = validate_runtime_instruction_template_path(relative_path)
     root = runtime_instruction_templates_root()
-    target = (root / phase / Path(relative_path)).resolve()
-    if not target.is_relative_to(root / phase):
+    target = instruction_prompt_path(phase, relative_path, root)
+    if not target.is_relative_to(root / phase / "instruction"):
         raise ValueError("invalid runtime instruction template path")
     if not target.is_file():
         raise FileNotFoundError(relative_path)
@@ -118,9 +115,10 @@ def runtime_instruction_template_path(phase: str, relative_path: str) -> Path:
 
 
 def validate_runtime_instruction_phase(phase: str) -> str:
-    if phase not in RUNTIME_INSTRUCTION_PHASES:
-        raise ValueError("invalid runtime instruction phase")
-    return phase
+    try:
+        return validate_phase(phase)
+    except ValueError as exc:
+        raise ValueError("invalid runtime instruction phase") from exc
 
 
 def validate_runtime_instruction_template_path(relative_path: str) -> str:

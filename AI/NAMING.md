@@ -25,7 +25,7 @@
 - JavaScript 函数/变量使用 `camelCase`。
 - JavaScript 类/构造器使用 `PascalCase`。
 - 测试文件使用 `test_*.py`。
-- 协议/资源入口文件保持其协议要求的大写文件名，例如 `SKILL.md`、`ROLE.md`、`FILE_OUTPUTS.md`；运行时生成的 agent instruction 文件保持 `AGENTS.md`、`CLAUDE.md`。
+- 协议/资源入口文件保持其协议要求的大写文件名，例如 `SKILL.md`、`FILE_OUTPUTS.md`；运行时生成的 agent instruction 文件保持 `AGENTS.md`、`CLAUDE.md`。
 
 ## 2. Backend/Layout Rules
 
@@ -75,12 +75,12 @@ Dispatcher code uses the current split:
 - Examples use `.example.yaml`; test fixtures use `.test.yaml`; mock fixtures use `.mock.yaml`.
 - First-party MCP assets live under `capabilities/mcp/<mcp-id>/`.
 - First-party Skills live under `capabilities/skills/<skill-id>/SKILL.md`.
-- First-party Roles live under `capabilities/roles/<role-id>/ROLE.md`.
+- First-party Roles live under `cairn/src/cairn/dispatcher/prompts/<phase>/roles/<role-id>.md`.
 - Runner wrapper binaries live under `container/runner/bin/`; tool sidecar entrypoints live under `container/tools-kali/bin/` and `container/tools-metasploit/bin/`.
 
 ## 6. Allowed Exceptions
 
-- `SKILL.md`, `ROLE.md`, `FILE_OUTPUTS.md`: protocol discovery requires exact names.
+- `SKILL.md`, `FILE_OUTPUTS.md`: protocol discovery requires exact names.
 - `AGENTS.md`, `CLAUDE.md`: generated worker instruction filenames are external tool contracts.
 - `Dockerfile`: Docker tooling requires exact name.
 - Alembic migration files keep revision-prefixed names.

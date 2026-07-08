@@ -225,7 +225,7 @@ sequenceDiagram
 
 - `config.resources.yaml`: MCP server、Skill、Role catalog。
 - `capabilities/skills/*/SKILL.md`: worker-facing skill workflow。
-- `capabilities/roles/*/ROLE.md`: role prompt。
+- `cairn/src/cairn/dispatcher/prompts/<phase>/roles/*.md`: phase-scoped role prompt。
 - `capabilities/mcp/*`: MCP source/runtime assets。
 
 执行时：

@@ -421,12 +421,11 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         from cairn.dispatcher import prompt_resources as mod
 
         with tempfile.TemporaryDirectory() as tmp:
-            group_dir = Path(tmp) / "default"
-            group_dir.mkdir()
-            (group_dir / "FILE_OUTPUTS.md").write_text("Use reports/.\n", encoding="utf-8")
-            with mock.patch.object(mod.resources, "files") as files:
-                files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
-                text, errors = mod.load_prompt_files_appendix()
+            target = Path(tmp) / "bootstrap" / "common" / "FILE_OUTPUTS.md"
+            target.parent.mkdir(parents=True)
+            target.write_text("Use reports/.\n", encoding="utf-8")
+            with mock.patch.object(mod, "prompts_root", return_value=Path(tmp)):
+                text, errors = mod.load_prompt_files_appendix("bootstrap")
 
         self.assertEqual(text, "Use reports/.")
         self.assertEqual(errors, [])
@@ -435,12 +434,11 @@ class CapabilityInstructionRenderingTests(unittest.TestCase):
         from cairn.dispatcher import prompt_resources as mod
 
         with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.object(mod.resources, "files") as files:
-                files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
-                text, errors = mod.load_prompt_files_appendix()
+            with mock.patch.object(mod, "prompts_root", return_value=Path(tmp)):
+                text, errors = mod.load_prompt_files_appendix("explore")
 
         self.assertEqual(text, "")
-        self.assertEqual(errors, ["files: prompt group default missing FILE_OUTPUTS.md"])
+        self.assertEqual(errors, ["files: prompt resources missing explore/common/FILE_OUTPUTS.md"])
 
 
 if __name__ == "__main__":

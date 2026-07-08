@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
+from cairn.dispatcher.prompts.layout import PROMPT_PHASES, role_prompt_path
 from cairn.server.config.files import _text_sha256, load_resources_data, resources_yaml_path, save_resources_data
 from cairn.server.schemas import RoleCatalogItem
 from cairn.shared.config.role_models import normalize_default_skill_ids
@@ -60,17 +60,25 @@ def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
     for item in roles:
         if not isinstance(item, dict) or item.get("id") != role_id:
             continue
-        prompt = str(item.get("prompt") or "")
-        if not prompt and item.get("source_path"):
-            path = Path(str(item["source_path"]))
-            if not path.is_absolute():
-                path = resources_yaml_path().parent / path
-            prompt = path.read_text(encoding="utf-8").strip()
+        prompts_by_phase: dict[str, str] = {}
+        prompt_sha256_by_phase: dict[str, str] = {}
+        for phase in PROMPT_PHASES:
+            try:
+                prompt = role_prompt_path(phase, role_id).read_text(encoding="utf-8").strip()
+            except FileNotFoundError as exc:
+                raise ValueError(f"role {role_id} missing {phase} role prompt") from exc
+            if not prompt:
+                raise ValueError(f"role {role_id} {phase} role prompt is empty")
+            prompts_by_phase[phase] = prompt
+            prompt_sha256_by_phase[phase] = _text_sha256(prompt)
+        prompt = prompts_by_phase.get("reason", "")
         return {
             "id": str(item.get("id") or ""),
             "name": str(item.get("name") or item.get("id") or ""),
             "prompt": prompt,
             "prompt_sha256": _text_sha256(prompt),
+            "prompts_by_phase": prompts_by_phase,
+            "prompt_sha256_by_phase": prompt_sha256_by_phase,
             "default_skill_ids": normalize_default_skill_ids(item.get("default_skill_ids") or []),
         }
     return None
@@ -79,6 +87,21 @@ def get_yaml_role_snapshot(role_id: str) -> dict[str, Any] | None:
 def _role_catalog_payload(item: dict[str, Any]) -> dict[str, Any]:
     payload = dict(item)
     payload.setdefault("available", True)
-    payload.setdefault("detail", "")
-    payload.setdefault("prompt_sha256", "")
+    role_id = str(payload.get("id") or "").strip()
+    if role_id:
+        prompt_sha256_by_phase: dict[str, str] = {}
+        for phase in PROMPT_PHASES:
+            try:
+                prompt = role_prompt_path(phase, role_id).read_text(encoding="utf-8").strip()
+            except FileNotFoundError as exc:
+                raise ValueError(f"role {role_id} missing {phase} role prompt") from exc
+            if not prompt:
+                raise ValueError(f"role {role_id} {phase} role prompt is empty")
+            prompt_sha256_by_phase[phase] = _text_sha256(prompt)
+        reason_sha = prompt_sha256_by_phase.get("reason", "")
+        payload["prompt_sha256"] = reason_sha
+        payload.setdefault("detail", f"sha256:{reason_sha}" if reason_sha else "")
+    else:
+        payload.setdefault("detail", "")
+        payload.setdefault("prompt_sha256", "")
     return payload

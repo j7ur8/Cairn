@@ -238,28 +238,34 @@ roles: []
                 DispatchConfig.load(root / "config.yaml")
         self.assertIn("source_path does not exist", str(ctx.exception))
 
-    def test_role_source_path_must_be_file_not_dir(self) -> None:
+    def test_role_legacy_prompt_fields_are_rejected(self) -> None:
         from cairn.shared.config import ConfigError, DispatchConfig
 
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            _write_base(root)
-            (root / "role-as-dir").mkdir()
-            (root / "config.resources.yaml").write_text(
-                """
+        cases = {
+            "prompt": "prompt: inline role prompt",
+            "source_path": "source_path: ./role.md",
+        }
+        for field, line in cases.items():
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as td:
+                    root = Path(td)
+                    _write_base(root)
+                    (root / "config.resources.yaml").write_text(
+                        f"""
 capabilities:
   mcp_servers: []
   skills: []
 roles:
   - id: role1
     name: Role
-    source_path: ./role-as-dir
+    {line}
 """.strip(),
-                encoding="utf-8",
-            )
-            with self.assertRaises(ConfigError) as ctx:
-                DispatchConfig.load(root / "config.yaml")
-        self.assertIn("must be a file", str(ctx.exception))
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(ConfigError) as ctx:
+                        DispatchConfig.load(root / "config.yaml")
+                self.assertIn("Extra inputs are not permitted", str(ctx.exception))
+                self.assertIn(field, str(ctx.exception))
 
     def test_valid_config_loads_without_error(self) -> None:
         # Guards against the failure-path checks rejecting a legitimately valid

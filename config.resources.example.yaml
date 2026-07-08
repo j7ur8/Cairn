@@ -152,7 +152,6 @@ roles:
   name: Cypher CTF Operator
   description: Fast CTF / cyber-range operator focused on flags, shells, proofs, and
     reproducible exploit paths.
-  source_path: ./capabilities/roles/cypher-ctf-operator/ROLE.md
   default_skill_ids:
   - ctf-web-js-analysis
   task_types:
@@ -163,7 +162,6 @@ roles:
   name: Cypher Pentest Operator
   description: Authorized pentest operator focused on scope, evidence, impact validation,
     cleanup, and reporting.
-  source_path: ./capabilities/roles/cypher-pentest-operator/ROLE.md
   default_skill_ids: []
   task_types:
   - bootstrap
@@ -173,7 +171,6 @@ roles:
   name: Cypher Vulnerability Researcher
   description: Vulnerability researcher focused on root cause, reproducible PoC, exploitability,
     and fixes.
-  source_path: ./capabilities/roles/cypher-vuln-researcher/ROLE.md
   default_skill_ids: []
   task_types:
   - bootstrap

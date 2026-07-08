@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from importlib import resources
 from typing import Any
 
+from cairn.dispatcher.prompts.layout import common_prompt_traversable, prompts_root
+
 LOG = logging.getLogger(__name__)
-DEFAULT_PROMPT_GROUP = "default"
 
 
 def load_prompt(name: str) -> str:
-    return resources.files("cairn.dispatcher.prompts").joinpath(DEFAULT_PROMPT_GROUP).joinpath(name).read_text(encoding="utf-8")
+    return common_prompt_traversable(name, prompts_root()).read_text(encoding="utf-8")
 
 
 def load_prompt_from_execution_config(

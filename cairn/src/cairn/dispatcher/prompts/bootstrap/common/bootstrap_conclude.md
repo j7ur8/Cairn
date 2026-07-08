@@ -1,7 +1,7 @@
-# Task
-You can not and do not execute any command except read. You do not need to wait for unfinished tasks or commands. You will receive a context bundle containing Origin, Goal, and Hints.
+Active prompt: bootstrap_conclude.md
 
-Do not continue exploration here and do not generate an action plan. You only need to summarize the bootstrap initial reconnaissance facts that have already been confirmed during target business identification and initial information collection.
+# Task
+Summarize the bootstrap initial reconnaissance facts that have already been confirmed during target business identification and initial information collection.
 
 ## Output Requirements
 For a normal successful result, return only the confirmed facts as plain text surrounded by 32173462130721312360912. Do not output JSON. Do not output anything outside the markers.

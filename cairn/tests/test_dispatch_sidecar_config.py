@@ -87,7 +87,6 @@ roles:
   - id: role1
     name: Role
     description: desc
-    prompt: prompt
     task_types: [reason]
 servers:
   - id: srv1
@@ -112,7 +111,6 @@ servers:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "skill").mkdir()
-            (root / "role.md").write_text("role prompt", encoding="utf-8")
             self._write_dispatch(root)
             (root / "config.resources.yaml").write_text(
                 """
@@ -125,7 +123,6 @@ capabilities:
 roles:
   - id: role1
     name: Role
-    source_path: ./role.md
     default_skill_ids: [skill1]
 """.strip(),
                 encoding="utf-8",
@@ -139,7 +136,6 @@ roles:
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "role.md").write_text("role prompt", encoding="utf-8")
             self._write_dispatch(root)
             (root / "config.resources.yaml").write_text(
                 """
@@ -149,7 +145,6 @@ capabilities:
 roles:
   - id: role1
     name: Role
-    source_path: ./role.md
     default_skill_ids: [missing-skill]
 """.strip(),
                 encoding="utf-8",

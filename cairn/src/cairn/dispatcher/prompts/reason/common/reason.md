@@ -1,3 +1,5 @@
+Active prompt: reason.md
+
 # Task
 You will receive a compact YAML Fact View, a Full Graph fallback, valid fact ids, open intents, and hints. Use only that information to judge two things:
 1. Whether the current facts already satisfy Goal

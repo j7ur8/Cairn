@@ -255,7 +255,17 @@ class BootstrapCharacterizationTests(unittest.TestCase):
         self.assertEqual(inject_caps.call_args.args[3], "worker")
 
     def test_role_instructions_do_not_render_inside_phase_prompt(self) -> None:
-        template = (_REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default" / "bootstrap.md").read_text(
+        template = (
+            _REPO
+            / "cairn"
+            / "src"
+            / "cairn"
+            / "dispatcher"
+            / "prompts"
+            / "bootstrap"
+            / "common"
+            / "bootstrap.md"
+        ).read_text(
             encoding="utf-8"
         )
 

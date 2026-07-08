@@ -125,6 +125,10 @@ def project_role_data(execution_config: dict | None) -> dict | None:
             "role_name": role.get("name") or "",
             "role_prompt": role.get("prompt") or "",
             "role_prompt_sha256": role.get("prompt_sha256") or "",
+            "prompts_by_phase": role.get("prompts_by_phase") if isinstance(role.get("prompts_by_phase"), dict) else {},
+            "prompt_sha256_by_phase": (
+                role.get("prompt_sha256_by_phase") if isinstance(role.get("prompt_sha256_by_phase"), dict) else {}
+            ),
             "created_at": "",
         }
     }

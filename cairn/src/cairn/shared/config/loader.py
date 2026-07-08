@@ -410,11 +410,4 @@ def validate_capability_resources(config: Any) -> None:
 
 
 def validate_role_resources(config: Any) -> None:
-    for role in config.roles:
-        if role.source_path is None:
-            continue
-        path = Path(role.source_path)
-        if not path.exists():
-            raise ConfigError(f"role {role.id} source_path does not exist: {path}")
-        if not path.is_file():
-            raise ConfigError(f"role {role.id} source_path must be a file: {path}")
+    return None

@@ -7,16 +7,21 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-import cairn.dispatcher.prompts as prompt_package
-from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
+from cairn.dispatcher.prompts.layout import (
+    COMMON_PROMPT_NAMES,
+    PROMPT_PHASES,
+    common_prompt_path,
+    phase_for_logical_prompt,
+    prompt_package_path,
+    role_prompt_path,
+    validate_phase,
+)
 from cairn.dispatcher.tasks.instruction_files import (
     RUNTIME_INSTRUCTION_PHASES,
-    render_task_instruction_files,
     runtime_instruction_template_path,
     validate_runtime_instruction_phase,
     validate_runtime_instruction_template_path,
 )
-from cairn.dispatcher.workers.base import WorkerExecutionContext
 from cairn.server.config.files import _overwrite_yaml, _text_sha256, resources_yaml_path, save_resources_data
 from cairn.server.config.roles import set_role_default_skills_in_data
 from cairn.server.execution_config.prompt_snapshot import is_complete_prompt_group_dir, load_prompt_snapshot
@@ -25,7 +30,6 @@ from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT
 from cairn.shared.config.role_models import normalize_default_skill_ids
 
 router = APIRouter(tags=["prompt-groups"])
-DEFAULT_PROMPT_GROUP = "default"
 
 
 class PromptGroupTemplateUpdate(BaseModel):
@@ -35,6 +39,7 @@ class PromptGroupTemplateUpdate(BaseModel):
 class RolePromptSettingsUpdateRequest(BaseModel):
     content: str
     default_skill_ids: list[str] = Field(default_factory=list)
+    phase: str = "bootstrap"
 
     @field_validator("default_skill_ids")
     @classmethod
@@ -43,11 +48,12 @@ class RolePromptSettingsUpdateRequest(BaseModel):
 
 
 class PromptGroupDetail(BaseModel):
-    prompt_group: str
+    prompt_group: str = "phase-first"
     prompt_names: list[str]
     prompts: dict[str, str]
     prompt_sha256: dict[str, str]
     prompts_sha256: str
+    resources: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RolePromptDetail(BaseModel):
@@ -56,6 +62,7 @@ class RolePromptDetail(BaseModel):
     role_sha256: dict[str, str]
     role_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
     role_metadata_error: str | None = None
+    resources: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PromptInstructionPreviewFile(BaseModel):
@@ -73,25 +80,18 @@ class PromptInstructionPreviewPhase(BaseModel):
 
 class PromptInstructionPreviewResponse(BaseModel):
     phases: list[PromptInstructionPreviewPhase]
+    resources: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _prompts_root() -> Path:
-    package_paths = list(getattr(prompt_package, "__path__", []))
-    if len(package_paths) != 1:
-        raise HTTPException(status_code=500, detail="prompt resources are not writable files")
-    return Path(package_paths[0]).resolve()
-
-
-def _roles_root() -> Path:
-    return (resources_yaml_path().parent / "capabilities" / "roles").resolve()
+    try:
+        return prompt_package_path()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="prompt resources are not writable files") from exc
 
 
 def _default_group_dir() -> Path:
-    root = _prompts_root()
-    group_path = (root / DEFAULT_PROMPT_GROUP).resolve()
-    if not group_path.is_relative_to(root) or not group_path.is_dir():
-        raise HTTPException(status_code=404, detail="default prompt templates not found")
-    return group_path
+    return _prompts_root()
 
 
 def _validate_template_name(name: str) -> str:
@@ -100,14 +100,16 @@ def _validate_template_name(name: str) -> str:
         raise HTTPException(status_code=400, detail="invalid prompt template name")
     if not name.endswith(".md"):
         raise HTTPException(status_code=400, detail="invalid prompt template name")
+    if name not in COMMON_PROMPT_NAMES:
+        raise HTTPException(status_code=404, detail="prompt template not found")
     return name
 
 
 def _template_path(name: str) -> Path:
     name = _validate_template_name(name)
-    group_path = _default_group_dir()
-    target = (group_path / Path(name)).resolve()
-    if not target.is_relative_to(group_path) or not target.is_file():
+    root = _prompts_root()
+    target = common_prompt_path(name, root)
+    if not target.is_relative_to(root) or not target.is_file():
         raise HTTPException(status_code=404, detail="prompt template not found")
     return target
 
@@ -116,15 +118,20 @@ def _validate_role_prompt_path(path: str) -> str:
     parts = path.split("/")
     if not path or path.startswith("/") or "\\" in path or parts != [part for part in parts if part] or ".." in parts:
         raise HTTPException(status_code=400, detail="invalid role prompt path")
-    if not path.endswith(".md"):
+    if len(parts) != 3 or parts[1] != "roles" or not path.endswith(".md"):
         raise HTTPException(status_code=400, detail="invalid role prompt path")
+    try:
+        validate_phase(parts[0])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid role prompt path") from exc
     return path
 
 
 def _role_prompt_path(path: str) -> Path:
     path = _validate_role_prompt_path(path)
-    root = _roles_root()
-    target = (root / Path(path)).resolve()
+    root = _prompts_root()
+    parts = path.split("/")
+    target = role_prompt_path(parts[0], Path(parts[2]).stem, root)
     if not target.is_relative_to(root):
         raise HTTPException(status_code=400, detail="invalid role prompt path")
     if not target.is_file():
@@ -133,7 +140,7 @@ def _role_prompt_path(path: str) -> Path:
 
 
 def _validate_template_content(name: str, content: str) -> None:
-    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(DEFAULT_PROMPT_GROUP, DEFAULT_PROMPT_REQUIRED_TOKENS)
+    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get("default", DEFAULT_PROMPT_REQUIRED_TOKENS)
     missing = [token for token in required_tokens.get(name, ()) if token not in content]
     if missing:
         raise HTTPException(
@@ -144,23 +151,54 @@ def _validate_template_content(name: str, content: str) -> None:
 
 def _detail_for_group() -> dict[str, Any]:
     if not is_complete_prompt_group_dir(_default_group_dir()):
-        raise HTTPException(status_code=400, detail="default prompt templates missing resource: FILE_OUTPUTS.md")
+        raise HTTPException(status_code=400, detail="prompt templates missing required resource")
     try:
-        return load_prompt_snapshot()
+        snapshot = load_prompt_snapshot()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    prompts: dict[str, str] = {}
+    prompt_sha256: dict[str, str] = {}
+    for name in COMMON_PROMPT_NAMES:
+        target = _template_path(name)
+        content = target.read_text(encoding="utf-8")
+        prompts[name] = content
+        prompt_sha256[name] = _text_sha256(content)
+    resources = []
+    for name in COMMON_PROMPT_NAMES:
+        phase = phase_for_logical_prompt(name)
+        logical_name = Path(name).name
+        resources.append(
+            {
+                "phase": phase,
+                "category": "common",
+                "path": name,
+                "logical_name": logical_name,
+                "content": prompts[name],
+                "sha256": prompt_sha256[name],
+                "writable": True,
+            }
+        )
+    return {
+        **snapshot,
+        "prompt_group": "phase-first",
+        "prompt_names": list(COMMON_PROMPT_NAMES),
+        "prompts": prompts,
+        "prompt_sha256": prompt_sha256,
+        "resources": resources,
+    }
 
 
 def _list_role_prompt_names() -> list[str]:
-    root = _roles_root()
-    if not root.is_dir():
-        return []
+    root = _prompts_root()
     names: list[str] = []
-    for path in root.rglob("*.md"):
-        relative_parts = path.relative_to(root).parts
-        if any(part.startswith(".") for part in relative_parts):
+    for phase in PROMPT_PHASES:
+        role_root = root / phase / "roles"
+        if not role_root.is_dir():
             continue
-        names.append(path.relative_to(root).as_posix())
+        for path in role_root.glob("*.md"):
+            if path.name.startswith("."):
+                continue
+            names.append(path.relative_to(root).as_posix())
     return sorted(names)
 
 
@@ -178,52 +216,63 @@ def _detail_for_role_prompts() -> dict[str, Any]:
         "role_sha256": sha256,
         "role_metadata": metadata,
         "role_metadata_error": metadata_error,
+        "resources": [
+            {
+                "phase": name.split("/", 1)[0],
+                "category": "roles",
+                "path": name,
+                "logical_name": Path(name).name,
+                "content": prompts[name],
+                "sha256": sha256[name],
+                "writable": True,
+                "role_metadata": metadata.get(name),
+            }
+            for name in prompts
+        ],
     }
 
 
 def _instruction_preview_for_phase(phase: str) -> PromptInstructionPreviewPhase:
     task_instance_id = "{task_instance_id}"
-    instruction_root = f"{CAPABILITY_ROOT}/{{project_safe_id}}/{task_instance_id}/instructions"
-    paths, files = render_task_instruction_files(
-        project=None,
-        project_id="{project_id}",
-        task_type=phase,
-        task_instance_id=task_instance_id,
-        role_instructions="{selected role prompt}",
-        capability_instructions="{selected_mcp_ids}",
-        context=WorkerExecutionContext(mcp_servers=[{"id": "{selected_mcp_ids}"}]),
-        instruction_root=instruction_root,
-        project_origin="{origin}",
-        project_goal="{goal}",
-    )
-    ordered_paths = [
-        (paths.agents_md_path, "AGENTS.md"),
-        (paths.claude_md_path, "CLAUDE.md"),
-    ]
+    target = _runtime_instruction_template_path(phase, "Instruction.md")
+    content = target.read_text(encoding="utf-8")
     return PromptInstructionPreviewPhase(
         phase=phase,
         task_instance_id=task_instance_id,
         files=[
             PromptInstructionPreviewFile(
-                path=relative_path,
-                content=files[absolute_path],
-                sha256=_text_sha256(files[absolute_path]),
+                path="Instruction.md",
+                content=content,
+                sha256=_text_sha256(content),
                 writable=True,
             )
-            for absolute_path, relative_path in ordered_paths
         ],
     )
 
 
 def _instruction_previews() -> PromptInstructionPreviewResponse:
-    return PromptInstructionPreviewResponse(
-        phases=[_instruction_preview_for_phase(phase) for phase in RUNTIME_INSTRUCTION_PHASES]
-    )
+    phases = [_instruction_preview_for_phase(phase) for phase in RUNTIME_INSTRUCTION_PHASES]
+    resources = [
+        {
+            "phase": phase.phase,
+            "category": "instruction",
+            "path": file.path,
+            "logical_name": file.path,
+            "content": file.content,
+            "sha256": file.sha256,
+            "writable": file.writable,
+        }
+        for phase in phases
+        for file in phase.files
+    ]
+    return PromptInstructionPreviewResponse(phases=phases, resources=resources)
 
 
 def _runtime_instruction_template_path(phase: str, template_path: str) -> Path:
     try:
         phase = validate_runtime_instruction_phase(phase)
+        if template_path == "Instruction.md":
+            return runtime_instruction_template_path(phase, "AGENTS.md").with_name("Instruction.md")
         template_path = validate_runtime_instruction_template_path(template_path)
         return runtime_instruction_template_path(phase, template_path)
     except ValueError as exc:
@@ -250,33 +299,20 @@ def _role_prompt_metadata(prompt_names: Any) -> tuple[dict[str, dict[str, Any]],
             role_id = str(role.get("id") or "").strip()
             if not role_id:
                 continue
-            prompt_path = _prompt_path_for_role(role)
-            if prompt_path not in names:
-                continue
-            metadata[prompt_path] = {
-                "role_id": role_id,
-                "name": str(role.get("name") or role_id),
-                "default_skill_ids": _normalize_metadata_skill_ids(role.get("default_skill_ids") or []),
-                "available": bool(role.get("available", True)),
-            }
+            for phase in PROMPT_PHASES:
+                prompt_path = f"{phase}/roles/{role_id}.md"
+                if prompt_path not in names:
+                    continue
+                metadata[prompt_path] = {
+                    "role_id": role_id,
+                    "phase": phase,
+                    "name": str(role.get("name") or role_id),
+                    "default_skill_ids": _normalize_metadata_skill_ids(role.get("default_skill_ids") or []),
+                    "available": bool(role.get("available", True)),
+                }
     except ValueError as exc:
         return {}, f"failed to load role metadata: {exc}"
     return metadata, None
-
-
-def _prompt_path_for_role(role: dict[str, Any]) -> str:
-    role_id = str(role.get("id") or "").strip()
-    data_path = resources_yaml_path()
-    root = _roles_root()
-    if role.get("source_path"):
-        path = Path(str(role["source_path"]))
-        if not path.is_absolute():
-            path = data_path.parent / path
-        try:
-            return path.resolve().relative_to(root).as_posix()
-        except ValueError:
-            pass
-    return f"{role_id}/ROLE.md"
 
 
 def _normalize_metadata_skill_ids(value: Any) -> list[str]:
@@ -326,7 +362,11 @@ def update_prompt_instruction_preview(
     _superuser=Depends(current_active_superuser),
 ):
     target = _runtime_instruction_template_path(phase, template_path)
+    if target.name != "Instruction.md":
+        raise HTTPException(status_code=400, detail="only Instruction.md is editable")
     target.write_text(body.content, encoding="utf-8")
+    target.with_name("AGENTS.md").write_text(body.content, encoding="utf-8")
+    target.with_name("CLAUDE.md").write_text(body.content, encoding="utf-8")
     return _instruction_previews()
 
 
@@ -362,8 +402,12 @@ def update_role_prompt_settings(
     _superuser=Depends(current_active_superuser),
 ):
     data = _load_resources_data_for_role_prompt_settings()
-    role = _role_for_id(data, role_id)
-    role_prompt_path = _prompt_path_for_role(role)
+    _role_for_id(data, role_id)
+    try:
+        phase = validate_phase(body.phase)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid prompt phase") from exc
+    role_prompt_path = f"{phase}/roles/{role_id}.md"
     target = _role_prompt_path(role_prompt_path)
     set_role_default_skills_in_data(data, role_id, body.default_skill_ids)
     original_resources = resources_yaml_path().read_text(encoding="utf-8")

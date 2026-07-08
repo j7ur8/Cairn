@@ -9,116 +9,52 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import yaml
+
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 
-def _write_prompt_group(root: Path, group: str, overrides: dict[str, str] | None = None) -> None:
-    from cairn.server.execution_config.prompt_snapshot import PROMPT_SNAPSHOT_NAMES
+def _write_phase_prompts(root: Path) -> None:
+    from cairn.dispatcher.prompts.layout import PROMPT_PHASES
     from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS
 
-    overrides = overrides or {}
-    group_dir = root / group
-    group_dir.mkdir(parents=True, exist_ok=True)
-    for name in PROMPT_SNAPSHOT_NAMES:
-        tokens = " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS.get(name, ()))
-        content = overrides.get(name, f"{name}\n{tokens}\n")
-        (group_dir / name).write_text(content, encoding="utf-8")
-    (group_dir / "FILE_OUTPUTS.md").write_text(overrides.get("FILE_OUTPUTS.md", "file outputs\n"), encoding="utf-8")
+    common = {
+        "bootstrap": ("bootstrap.md", "bootstrap_conclude.md", "FILE_OUTPUTS.md"),
+        "explore": ("explore.md", "explore_conclude.md", "FILE_OUTPUTS.md"),
+        "reason": ("reason.md", "FILE_OUTPUTS.md"),
+    }
+    for phase in PROMPT_PHASES:
+        (root / phase / "common").mkdir(parents=True, exist_ok=True)
+        (root / phase / "roles").mkdir(parents=True, exist_ok=True)
+        (root / phase / "instruction").mkdir(parents=True, exist_ok=True)
+        instruction = f"# Instructions\n\nCurrent Cairn task family: `{{task_type}}`.\n{{selected role prompt}}\n{{selected_mcp_ids}}\n"
+        for name in ("Instruction.md", "AGENTS.md", "CLAUDE.md"):
+            (root / phase / "instruction" / name).write_text(instruction, encoding="utf-8")
+        for role_id in ("cypher-ctf-operator", "cypher-pentest-operator"):
+            (root / phase / "roles" / f"{role_id}.md").write_text(f"{phase} {role_id} role\n", encoding="utf-8")
+        for name in common[phase]:
+            tokens = " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS.get(name, ()))
+            (root / phase / "common" / name).write_text(f"{name}\n{tokens}\n", encoding="utf-8")
 
 
 class PromptGroupAdminTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        _write_prompt_group(self.root, "default")
-        import cairn.server.routers.prompt_groups as prompt_groups
-
-        self.router = prompt_groups
-        self.root_patch = mock.patch.object(prompt_groups, "_prompts_root", return_value=self.root.resolve())
-        self.root_patch.start()
-        self.resources_path_patch = mock.patch.object(
-            prompt_groups,
-            "resources_yaml_path",
-            return_value=self.root / "config.resources.yaml",
-        )
-        self.resources_path_patch.start()
-        self.files_patch = mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files")
-        files = self.files_patch.start()
-        files.return_value.joinpath.side_effect = lambda group: self.root / group
-        self.runtime_root = self.root / "runtime_instructions"
-        shutil.copytree(
-            _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "runtime_instructions",
-            self.runtime_root,
-        )
-        self.runtime_root_patch = mock.patch(
-            "cairn.dispatcher.tasks.instruction_files.runtime_instruction_templates_root",
-            return_value=self.runtime_root.resolve(),
-        )
-        self.runtime_root_patch.start()
-
-    def tearDown(self) -> None:
-        self.runtime_root_patch.stop()
-        self.files_patch.stop()
-        self.resources_path_patch.stop()
-        self.root_patch.stop()
-        self.tmp.cleanup()
-
-    def test_read_prompt_group_returns_templates_and_hashes(self) -> None:
-        roles_dir = self.root / "default" / "roles"
-        roles_dir.mkdir()
-        (roles_dir / "redteam.md").write_text("extra role prompt\n", encoding="utf-8")
-
-        result = self.router.read_prompt_group()
-
-        self.assertEqual(result["prompt_group"], "default")
-        self.assertEqual(
-            set(result["prompts"]),
-            {
-                "FILE_OUTPUTS.md",
-                "bootstrap.md",
-                "bootstrap_conclude.md",
-                "explore.md",
-                "explore_conclude.md",
-                "reason.md",
-                "roles/redteam.md",
-            },
-        )
-        self.assertIn("roles/redteam.md", result["prompt_names"])
-        self.assertRegex(result["prompt_sha256"]["reason.md"], r"^[0-9a-f]{64}$")
-        self.assertRegex(result["prompt_sha256"]["roles/redteam.md"], r"^[0-9a-f]{64}$")
-        self.assertRegex(result["prompts_sha256"], r"^[0-9a-f]{64}$")
-
-    def test_read_prompt_group_rejects_group_missing_file_outputs(self) -> None:
-        from fastapi import HTTPException
-
-        (self.root / "default" / "FILE_OUTPUTS.md").unlink()
-
-        with self.assertRaises(HTTPException) as cm:
-            self.router.read_prompt_group()
-
-        self.assertEqual(cm.exception.status_code, 400)
-        self.assertIn("missing resource: FILE_OUTPUTS.md", cm.exception.detail)
-
-    def test_read_role_prompts_returns_markdown_files_and_hashes(self) -> None:
-        import yaml
-
-        role_root = self.root / "capabilities" / "roles"
-        (role_root / "cypher-ctf-operator").mkdir(parents=True)
-        (role_root / "cypher-ctf-operator" / "ROLE.md").write_text("ctf role\n", encoding="utf-8")
-        (role_root / "cypher-pentest-operator").mkdir(parents=True)
-        (role_root / "cypher-pentest-operator" / "ROLE.md").write_text("pentest role\n", encoding="utf-8")
+        _write_phase_prompts(self.root)
         (self.root / "config.resources.yaml").write_text(
             yaml.safe_dump(
                 {
-                    "capabilities": {"mcp_servers": [], "skills": []},
+                    "capabilities": {
+                        "mcp_servers": [],
+                        "skills": [{"id": "skill-a", "name": "Skill A", "source_path": str(self.root)}],
+                    },
                     "roles": [
                         {
                             "id": "cypher-ctf-operator",
                             "name": "CTF Operator",
-                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
-                            "default_skill_ids": ["cypher-ctf"],
-                            "available": True,
+                            "default_skill_ids": ["skill-a"],
                         },
                         {
                             "id": "cypher-pentest-operator",
@@ -132,164 +68,124 @@ class PromptGroupAdminTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        import cairn.server.routers.prompt_groups as prompt_groups
 
-        result = self.router.read_role_prompts()
+        self.router = prompt_groups
+        self.root_patch = mock.patch.object(prompt_groups, "_prompts_root", return_value=self.root.resolve())
+        self.resources_path_patch = mock.patch.object(
+            prompt_groups,
+            "resources_yaml_path",
+            return_value=self.root / "config.resources.yaml",
+        )
+        self.files_patch = mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files", return_value=self.root)
+        self.runtime_root_patch = mock.patch(
+            "cairn.dispatcher.tasks.instruction_files.runtime_instruction_templates_root",
+            return_value=self.root.resolve(),
+        )
+        for patcher in (self.root_patch, self.resources_path_patch, self.files_patch, self.runtime_root_patch):
+            patcher.start()
 
-        self.assertEqual(result["role_names"], ["cypher-ctf-operator/ROLE.md", "cypher-pentest-operator/ROLE.md"])
-        self.assertEqual(result["roles"]["cypher-ctf-operator/ROLE.md"], "ctf role\n")
-        self.assertRegex(result["role_sha256"]["cypher-ctf-operator/ROLE.md"], r"^[0-9a-f]{64}$")
+    def tearDown(self) -> None:
+        for patcher in (self.runtime_root_patch, self.files_patch, self.resources_path_patch, self.root_patch):
+            patcher.stop()
+        self.tmp.cleanup()
+
+    def test_read_prompt_group_returns_phase_first_common_resources(self) -> None:
+        result = self.router.read_prompt_group()
+
+        self.assertEqual(result["prompt_group"], "phase-first")
         self.assertEqual(
-            result["role_metadata"]["cypher-ctf-operator/ROLE.md"],
+            set(result["prompts"]),
             {
-                "role_id": "cypher-ctf-operator",
-                "name": "CTF Operator",
-                "default_skill_ids": ["cypher-ctf"],
-                "available": True,
+                "bootstrap.md",
+                "bootstrap_conclude.md",
+                "bootstrap/FILE_OUTPUTS.md",
+                "explore.md",
+                "explore_conclude.md",
+                "explore/FILE_OUTPUTS.md",
+                "reason.md",
+                "reason/FILE_OUTPUTS.md",
             },
         )
-        self.assertFalse(result["role_metadata"]["cypher-pentest-operator/ROLE.md"]["available"])
+        resources = {resource["path"]: resource for resource in result["resources"]}
+        self.assertEqual(resources["bootstrap.md"]["phase"], "bootstrap")
+        self.assertEqual(resources["explore.md"]["category"], "common")
+        self.assertEqual(resources["explore/FILE_OUTPUTS.md"]["phase"], "explore")
+        self.assertEqual(resources["reason/FILE_OUTPUTS.md"]["logical_name"], "FILE_OUTPUTS.md")
+        self.assertRegex(result["prompt_sha256"]["reason.md"], r"^[0-9a-f]{64}$")
+        self.assertRegex(result["prompts_sha256"], r"^[0-9a-f]{64}$")
 
-    def test_read_role_prompts_metadata_prefers_source_path(self) -> None:
-        import yaml
+    def test_common_prompt_save_validates_required_placeholders(self) -> None:
+        from fastapi import HTTPException
+        from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS
 
-        role_root = self.root / "capabilities" / "roles"
-        (role_root / "custom-location").mkdir(parents=True)
-        (role_root / "custom-location" / "ROLE.md").write_text("custom role\n", encoding="utf-8")
-        (self.root / "config.resources.yaml").write_text(
-            yaml.safe_dump(
-                {
-                    "capabilities": {"mcp_servers": [], "skills": []},
-                    "roles": [
-                        {
-                            "id": "role-id",
-                            "name": "Role Name",
-                            "source_path": "capabilities/roles/custom-location/ROLE.md",
-                            "default_skill_ids": ["skill1"],
-                        }
-                    ],
-                },
-                sort_keys=False,
-            ),
-            encoding="utf-8",
+        original = (self.root / "reason" / "common" / "reason.md").read_text(encoding="utf-8")
+        with self.assertRaises(HTTPException) as cm:
+            self.router.update_prompt_template_legacy("reason.md", self.router.PromptGroupTemplateUpdate(content="missing\n"))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertEqual((self.root / "reason" / "common" / "reason.md").read_text(encoding="utf-8"), original)
+
+        content = "updated\n" + " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS["reason.md"]) + "\n"
+        result = self.router.update_prompt_template("reason.md", self.router.PromptGroupTemplateUpdate(content=content))
+        self.assertEqual(result["prompts"]["reason.md"], content)
+        self.assertEqual((self.root / "reason" / "common" / "reason.md").read_text(encoding="utf-8"), content)
+
+    def test_role_prompts_are_phase_specific_and_update_default_skills(self) -> None:
+        body = self.router.RolePromptSettingsUpdateRequest(
+            content="updated explore role\n",
+            phase="explore",
+            default_skill_ids=["skill-a"],
         )
+        with mock.patch.object(self.router, "save_resources_data") as save:
+            save.side_effect = lambda data: (self.root / "config.resources.yaml").write_text(
+                yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+            )
+            result = self.router.update_role_prompt_settings("cypher-ctf-operator", body)
 
-        result = self.router.read_role_prompts()
+        key = "explore/roles/cypher-ctf-operator.md"
+        self.assertEqual(result["roles"][key], "updated explore role\n")
+        self.assertEqual((self.root / key).read_text(encoding="utf-8"), "updated explore role\n")
+        self.assertEqual(result["role_metadata"][key]["phase"], "explore")
+        self.assertEqual(result["role_metadata"][key]["default_skill_ids"], ["skill-a"])
+        self.assertEqual((self.root / "bootstrap" / "roles" / "cypher-ctf-operator.md").read_text(encoding="utf-8"), "bootstrap cypher-ctf-operator role\n")
 
-        self.assertIn("custom-location/ROLE.md", result["role_metadata"])
-        self.assertEqual(result["role_metadata"]["custom-location/ROLE.md"]["role_id"], "role-id")
-        self.assertNotIn("role-id/ROLE.md", result["role_metadata"])
-
-    def test_read_role_prompts_reports_metadata_load_error(self) -> None:
-        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
-        role_root.mkdir(parents=True)
-        (role_root / "ROLE.md").write_text("ctf role\n", encoding="utf-8")
-        (self.root / "config.resources.yaml").write_text("roles: [\n", encoding="utf-8")
-
-        result = self.router.read_role_prompts()
-
-        self.assertEqual(result["roles"]["cypher-ctf-operator/ROLE.md"], "ctf role\n")
-        self.assertEqual(result["role_metadata"], {})
-        self.assertIn("failed to load role metadata", result["role_metadata_error"])
-
-    def test_read_prompt_instruction_previews_returns_phase_files_and_hashes(self) -> None:
-        result = self.router.read_prompt_instruction_previews()
-
-        self.assertEqual([phase.phase for phase in result.phases], ["bootstrap", "reason", "explore"])
-        for phase in result.phases:
-            with self.subTest(phase=phase.phase):
-                self.assertEqual(phase.task_instance_id, "{task_instance_id}")
-                self.assertEqual(
-                    [file.path for file in phase.files],
-                    [
-                        "AGENTS.md",
-                        "CLAUDE.md",
-                    ],
-                )
-                self.assertTrue(all(file.writable is True for file in phase.files))
-                self.assertTrue(all(file.sha256 and len(file.sha256) == 64 for file in phase.files))
-                contents = {file.path: file.content for file in phase.files}
-                self.assertIn("{selected role prompt}", contents["AGENTS.md"])
-                self.assertIn("{selected_mcp_ids}", contents["AGENTS.md"])
-                self.assertIn(f"Current Cairn task phase: `{phase.phase}`.", contents["AGENTS.md"])
-
-    def test_runtime_instruction_template_directory_contains_all_phase_files(self) -> None:
-        root = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "runtime_instructions"
-        expected = {
-            "AGENTS.md",
-            "CLAUDE.md",
-        }
-
-        for phase in ("bootstrap", "reason", "explore"):
-            with self.subTest(phase=phase):
-                found = {path.relative_to(root / phase).as_posix() for path in (root / phase).rglob("*") if path.is_file()}
-                self.assertEqual(found, expected)
-
-    def test_prompt_instruction_preview_uses_task_instruction_renderer(self) -> None:
-        from cairn.dispatcher.capability_constants import CAPABILITY_ROOT
-        from cairn.dispatcher.tasks.instruction_files import render_task_instruction_files
-        from cairn.dispatcher.workers.base import WorkerExecutionContext
-
-        preview = self.router.read_prompt_instruction_previews()
-        reason = next(phase for phase in preview.phases if phase.phase == "reason")
-        instruction_root = f"{CAPABILITY_ROOT}/{{project_safe_id}}/{{task_instance_id}}/instructions"
-        paths, files = render_task_instruction_files(
-            project=None,
-            project_id="{project_id}",
-            task_type="reason",
-            task_instance_id="{task_instance_id}",
-            role_instructions="{selected role prompt}",
-            capability_instructions="{selected_mcp_ids}",
-            context=WorkerExecutionContext(mcp_servers=[{"id": "{selected_mcp_ids}"}]),
-            instruction_root=instruction_root,
-            project_origin="{origin}",
-            project_goal="{goal}",
-        )
-        rendered = {
-            "AGENTS.md": files[paths.agents_md_path],
-            "CLAUDE.md": files[paths.claude_md_path],
-        }
-
-        self.assertEqual({file.path: file.content for file in reason.files}, rendered)
-
-    def test_update_prompt_instruction_preview_writes_template_and_refreshes_hash(self) -> None:
+    def test_instruction_prompt_save_regenerates_agent_files(self) -> None:
         before = self.router.read_prompt_instruction_previews()
-        reason_before = next(phase for phase in before.phases if phase.phase == "reason")
-        old_file = next(file for file in reason_before.files if file.path == "AGENTS.md")
-        body = self.router.PromptGroupTemplateUpdate(content="# Task Instructions\n\nUpdated {task_type} template.\n")
+        bootstrap_before = next(phase for phase in before.phases if phase.phase == "bootstrap")
+        old_sha = bootstrap_before.files[0].sha256
+        body = self.router.PromptGroupTemplateUpdate(content="# Instructions\n\nUpdated {task_type}.\n")
 
-        after = self.router.update_prompt_instruction_preview("reason", "AGENTS.md", body)
+        after = self.router.update_prompt_instruction_preview("bootstrap", "Instruction.md", body)
 
-        target = self.runtime_root / "reason" / "AGENTS.md"
-        self.assertEqual(target.read_text(encoding="utf-8"), body.content)
-        reason_after = next(phase for phase in after.phases if phase.phase == "reason")
-        new_file = next(file for file in reason_after.files if file.path == "AGENTS.md")
-        self.assertIn("Updated reason template.", new_file.content)
-        self.assertNotEqual(old_file.sha256, new_file.sha256)
+        for name in ("Instruction.md", "AGENTS.md", "CLAUDE.md"):
+            self.assertEqual((self.root / "bootstrap" / "instruction" / name).read_text(encoding="utf-8"), body.content)
+        bootstrap_after = next(phase for phase in after.phases if phase.phase == "bootstrap")
+        self.assertEqual([file.path for file in bootstrap_after.files], ["Instruction.md"])
+        self.assertNotEqual(old_sha, bootstrap_after.files[0].sha256)
 
-    def test_update_prompt_instruction_preview_rejects_invalid_phase_and_path(self) -> None:
+    def test_invalid_prompt_paths_are_rejected(self) -> None:
         from fastapi import HTTPException
 
-        body = self.router.PromptGroupTemplateUpdate(content="x")
-        cases = [
-            ("invalid", "AGENTS.md"),
-            ("reason", "../AGENTS.md"),
-            ("reason", "context/unknown.md"),
-            ("reason", "context/project.md"),
-            ("reason", "context/phase.md"),
-            ("reason", "context/capabilities.md"),
-            ("reason", "context/policy.json"),
-        ]
-        for phase, path in cases:
-            with self.subTest(phase=phase, path=path):
-                with self.assertRaises(HTTPException) as cm:
-                    self.router.update_prompt_instruction_preview(phase, path, body)
-                self.assertEqual(cm.exception.status_code, 400)
+        for name in ("../x.md", "/x.md", "roles/x.md", "unknown.md"):
+            with self.subTest(name=name):
+                with self.assertRaises(HTTPException):
+                    self.router.update_prompt_template(name, self.router.PromptGroupTemplateUpdate(content="x"))
+        for name in ("../x.md", "roles/x.md", "bootstrap/roles/x.txt", "invalid/roles/x.md"):
+            with self.subTest(name=name):
+                with self.assertRaises(HTTPException):
+                    self.router.update_role_prompt(name, self.router.PromptGroupTemplateUpdate(content="x"))
+        with self.assertRaises(HTTPException):
+            self.router.update_prompt_instruction_preview(
+                "bootstrap",
+                "AGENTS.md",
+                self.router.PromptGroupTemplateUpdate(content="x"),
+            )
 
-    def test_inject_task_instructions_uses_runtime_instruction_template_files(self) -> None:
+    def test_inject_task_instructions_uses_phase_instruction_files(self) -> None:
         from cairn.dispatcher.tasks.instruction_files import inject_task_instructions
         from cairn.dispatcher.workers.base import WorkerExecutionContext
 
-        (self.runtime_root / "bootstrap" / "AGENTS.md").write_text(
+        (self.root / "bootstrap" / "instruction" / "AGENTS.md").write_text(
             "Template marker {project_id} {task_instance_id} {selected role prompt}\n",
             encoding="utf-8",
         )
@@ -316,350 +212,24 @@ class PromptGroupAdminTests(unittest.TestCase):
 
         self.assertEqual(writer.files[paths.agents_md_path], "Template marker proj task Role text.\n")
 
-    def test_update_role_prompt_writes_file_and_updates_hash(self) -> None:
-        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
-        role_root.mkdir(parents=True)
-        target = role_root / "ROLE.md"
-        target.write_text("original role prompt\n", encoding="utf-8")
 
-        before = self.router.read_role_prompts()
-        body = self.router.PromptGroupTemplateUpdate(content="updated role prompt\n")
-        after = self.router.update_role_prompt("cypher-ctf-operator/ROLE.md", body)
+class DockerComposePromptVolumeTests(unittest.TestCase):
+    def test_cairn_server_mounts_phase_first_prompt_root(self) -> None:
+        compose = yaml.safe_load((_REPO / "docker-compose.yaml").read_text(encoding="utf-8"))
+        volumes = compose["services"]["cairn-server"]["volumes"]
 
-        self.assertEqual(target.read_text(encoding="utf-8"), "updated role prompt\n")
-        self.assertEqual(after["roles"]["cypher-ctf-operator/ROLE.md"], "updated role prompt\n")
-        self.assertNotEqual(before["role_sha256"]["cypher-ctf-operator/ROLE.md"], after["role_sha256"]["cypher-ctf-operator/ROLE.md"])
-
-    def test_update_role_prompt_settings_updates_prompt_and_default_skills(self) -> None:
-        import yaml
-
-        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
-        role_root.mkdir(parents=True)
-        target = role_root / "ROLE.md"
-        target.write_text("original role prompt\n", encoding="utf-8")
-        (self.root / "skill-a").mkdir()
-        (self.root / "skill-b").mkdir()
-        (self.root / "config.resources.yaml").write_text(
-            yaml.safe_dump(
-                {
-                    "capabilities": {
-                        "mcp_servers": [],
-                        "skills": [
-                            {"id": "skill-a", "name": "Skill A", "source_path": str(self.root / "skill-a")},
-                            {"id": "skill-b", "name": "Skill B", "source_path": str(self.root / "skill-b")},
-                        ],
-                    },
-                    "roles": [
-                        {
-                            "id": "cypher-ctf-operator",
-                            "name": "CTF Operator",
-                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
-                            "default_skill_ids": ["skill-b"],
-                        }
-                    ],
-                },
-                sort_keys=False,
-            ),
-            encoding="utf-8",
+        self.assertIn(
+            "./cairn/src/cairn/dispatcher/prompts:/cairn/src/cairn/dispatcher/prompts",
+            volumes,
         )
-        body = self.router.RolePromptSettingsUpdateRequest(
-            content="updated role prompt\n",
-            default_skill_ids=[" skill-a ", "skill-a", "", "skill-b"],
+        self.assertNotIn(
+            "./cairn/src/cairn/dispatcher/prompts/default:/cairn/src/cairn/dispatcher/prompts/default",
+            volumes,
         )
-
-        with mock.patch.object(self.router, "save_resources_data") as save:
-            save.side_effect = lambda data: (self.root / "config.resources.yaml").write_text(
-                yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
-            )
-            after = self.router.update_role_prompt_settings("cypher-ctf-operator", body)
-
-        data = yaml.safe_load((self.root / "config.resources.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(target.read_text(encoding="utf-8"), "updated role prompt\n")
-        self.assertEqual(data["roles"][0]["default_skill_ids"], ["skill-a", "skill-b"])
-        self.assertEqual(after["roles"]["cypher-ctf-operator/ROLE.md"], "updated role prompt\n")
-        self.assertEqual(
-            after["role_metadata"]["cypher-ctf-operator/ROLE.md"]["default_skill_ids"],
-            ["skill-a", "skill-b"],
-        )
-
-    def test_update_role_prompt_settings_rolls_back_prompt_when_yaml_save_fails(self) -> None:
-        import yaml
-        from fastapi import HTTPException
-
-        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
-        role_root.mkdir(parents=True)
-        target = role_root / "ROLE.md"
-        target.write_text("original role prompt\n", encoding="utf-8")
-        (self.root / "skill-a").mkdir()
-        (self.root / "config.resources.yaml").write_text(
-            yaml.safe_dump(
-                {
-                    "capabilities": {
-                        "mcp_servers": [],
-                        "skills": [{"id": "skill-a", "name": "Skill A", "source_path": str(self.root / "skill-a")}],
-                    },
-                    "roles": [
-                        {
-                            "id": "cypher-ctf-operator",
-                            "name": "CTF Operator",
-                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
-                            "default_skill_ids": [],
-                        }
-                    ],
-                },
-                sort_keys=False,
-            ),
-            encoding="utf-8",
-        )
-        original_yaml = (self.root / "config.resources.yaml").read_text(encoding="utf-8")
-        body = self.router.RolePromptSettingsUpdateRequest(content="updated role prompt\n", default_skill_ids=["skill-a"])
-
-        def write_then_fail(data):
-            (self.root / "config.resources.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-            raise HTTPException(503, "reload failed")
-
-        with mock.patch.object(self.router, "save_resources_data", side_effect=write_then_fail):
-            with self.assertRaises(HTTPException) as cm:
-                self.router.update_role_prompt_settings("cypher-ctf-operator", body)
-
-        self.assertEqual(cm.exception.status_code, 503)
-        self.assertEqual(target.read_text(encoding="utf-8"), "original role prompt\n")
-        self.assertEqual((self.root / "config.resources.yaml").read_text(encoding="utf-8"), original_yaml)
-
-    def test_update_role_prompt_settings_rejects_unknown_role_or_skill_without_writing(self) -> None:
-        import yaml
-        from fastapi import HTTPException
-
-        role_root = self.root / "capabilities" / "roles" / "cypher-ctf-operator"
-        role_root.mkdir(parents=True)
-        target = role_root / "ROLE.md"
-        target.write_text("original role prompt\n", encoding="utf-8")
-        (self.root / "config.resources.yaml").write_text(
-            yaml.safe_dump(
-                {
-                    "capabilities": {"mcp_servers": [], "skills": []},
-                    "roles": [
-                        {
-                            "id": "cypher-ctf-operator",
-                            "name": "CTF Operator",
-                            "source_path": "capabilities/roles/cypher-ctf-operator/ROLE.md",
-                            "default_skill_ids": [],
-                        }
-                    ],
-                },
-                sort_keys=False,
-            ),
-            encoding="utf-8",
-        )
-        original_yaml = (self.root / "config.resources.yaml").read_text(encoding="utf-8")
-
-        for role_id, skill_ids, status in (
-            ("missing-role", [], 404),
-            ("cypher-ctf-operator", ["missing-skill"], 400),
-        ):
-            with self.subTest(role_id=role_id, skill_ids=skill_ids):
-                with self.assertRaises(HTTPException) as cm:
-                    self.router.update_role_prompt_settings(
-                        role_id,
-                        self.router.RolePromptSettingsUpdateRequest(
-                            content="updated role prompt\n",
-                            default_skill_ids=skill_ids,
-                        ),
-                    )
-                self.assertEqual(cm.exception.status_code, status)
-                self.assertEqual(target.read_text(encoding="utf-8"), "original role prompt\n")
-                self.assertEqual((self.root / "config.resources.yaml").read_text(encoding="utf-8"), original_yaml)
-
-    def test_update_prompt_template_writes_file_and_updates_hash(self) -> None:
-        from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS
-
-        before = self.router.read_prompt_group()
-        content = "updated reason\n" + " ".join(DEFAULT_PROMPT_REQUIRED_TOKENS["reason.md"]) + "\n"
-        body = self.router.PromptGroupTemplateUpdate(content=content)
-        after = self.router.update_prompt_template_legacy("reason.md", body)
-
-        self.assertEqual((self.root / "default" / "reason.md").read_text(encoding="utf-8"), content)
-        self.assertEqual(after["prompts"]["reason.md"], content)
-        self.assertNotEqual(before["prompt_sha256"]["reason.md"], after["prompt_sha256"]["reason.md"])
-        self.assertNotEqual(before["prompts_sha256"], after["prompts_sha256"])
-
-    def test_update_nested_prompt_template_writes_file_and_updates_hash(self) -> None:
-        roles_dir = self.root / "default" / "roles"
-        roles_dir.mkdir()
-        (roles_dir / "redteam.md").write_text("original role prompt\n", encoding="utf-8")
-
-        before = self.router.read_prompt_group()
-        content = "updated role prompt\n"
-        body = self.router.PromptGroupTemplateUpdate(content=content)
-        after = self.router.update_prompt_template("roles/redteam.md", body)
-
-        self.assertEqual((roles_dir / "redteam.md").read_text(encoding="utf-8"), content)
-        self.assertEqual(after["prompts"]["roles/redteam.md"], content)
-        self.assertNotEqual(before["prompt_sha256"]["roles/redteam.md"], after["prompt_sha256"]["roles/redteam.md"])
-        self.assertNotEqual(before["prompts_sha256"], after["prompts_sha256"])
-
-    def test_extra_prompt_template_does_not_require_core_placeholders(self) -> None:
-        roles_dir = self.root / "default" / "roles"
-        roles_dir.mkdir()
-        (roles_dir / "redteam.md").write_text("original role prompt\n", encoding="utf-8")
-        body = self.router.PromptGroupTemplateUpdate(content="no placeholders required here\n")
-
-        after = self.router.update_prompt_template("roles/redteam.md", body)
-
-        self.assertEqual(after["prompts"]["roles/redteam.md"], "no placeholders required here\n")
-
-    def test_file_outputs_template_is_writable_without_placeholder_validation(self) -> None:
-        body = self.router.PromptGroupTemplateUpdate(content="updated file outputs\n")
-
-        after = self.router.update_prompt_template_legacy("FILE_OUTPUTS.md", body)
-
-        self.assertEqual((self.root / "default" / "FILE_OUTPUTS.md").read_text(encoding="utf-8"), "updated file outputs\n")
-        self.assertEqual(after["prompts"]["FILE_OUTPUTS.md"], "updated file outputs\n")
-
-    def test_update_missing_required_placeholder_fails_without_writing(self) -> None:
-        from fastapi import HTTPException
-
-        original = (self.root / "default" / "reason.md").read_text(encoding="utf-8")
-        body = self.router.PromptGroupTemplateUpdate(content="{graph_yaml}\n")
-
-        with self.assertRaises(HTTPException) as cm:
-            self.router.update_prompt_template_legacy("reason.md", body)
-
-        self.assertEqual(cm.exception.status_code, 400)
-        self.assertIn("missing placeholders", cm.exception.detail)
-        self.assertEqual((self.root / "default" / "reason.md").read_text(encoding="utf-8"), original)
-
-    def test_invalid_template_name_is_rejected(self) -> None:
-        from fastapi import HTTPException
-
-        with self.assertRaises(HTTPException) as name_cm:
-            self.router.update_prompt_template_legacy(
-                "../reason.md",
-                self.router.PromptGroupTemplateUpdate(content="x"),
-            )
-
-        self.assertEqual(name_cm.exception.status_code, 400)
-
-    def test_nested_template_invalid_paths_are_rejected(self) -> None:
-        from fastapi import HTTPException
-
-        for name in ("../x.md", "/x.md", "roles\\x.md", "roles/x.txt"):
-            with self.subTest(name=name):
-                with self.assertRaises(HTTPException) as cm:
-                    self.router.update_prompt_template(
-                        name,
-                        self.router.PromptGroupTemplateUpdate(content="x"),
-                    )
-                self.assertEqual(cm.exception.status_code, 400)
-
-    def test_invalid_role_prompt_paths_are_rejected(self) -> None:
-        from fastapi import HTTPException
-
-        for name in ("../x.md", "/x.md", "roles\\x.md", "roles/x.txt", "missing.md"):
-            with self.subTest(name=name):
-                with self.assertRaises(HTTPException) as cm:
-                    self.router.update_role_prompt(name, self.router.PromptGroupTemplateUpdate(content="x"))
-                self.assertIn(cm.exception.status_code, {400, 404})
 
 
 class PromptSettingsFrontendTests(unittest.TestCase):
-    def test_prompt_resource_display_names_are_sidebar_only_labels(self) -> None:
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is required to execute frontend state helper")
-
-        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
-        script = f"""
-            import {{ pathToFileURL }} from 'node:url';
-
-            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
-            const state = createPromptsState();
-            state.promptTemplateDetail = {{
-              prompt_names: ['reason.md', 'roles/redteam.md'],
-              prompts: {{
-                'reason.md': 'reason prompt',
-                'roles/redteam.md': 'redteam prompt',
-              }},
-              prompt_sha256: {{
-                'reason.md': 'reason-sha',
-                'roles/redteam.md': 'redteam-sha',
-              }},
-              prompts_sha256: 'group-sha',
-            }};
-            state.rolePromptDetail = {{
-              role_names: ['cypher-ctf-operator/ROLE.md', 'legacy/custom.md', 'custom.md'],
-              roles: {{
-                'cypher-ctf-operator/ROLE.md': 'ctf role',
-                'legacy/custom.md': 'legacy role',
-                'custom.md': 'custom role',
-              }},
-              role_sha256: {{
-                'cypher-ctf-operator/ROLE.md': 'role-sha',
-                'legacy/custom.md': 'legacy-sha',
-                'custom.md': 'custom-sha',
-              }},
-              role_metadata: {{
-                'cypher-ctf-operator/ROLE.md': {{
-                  role_id: 'cypher-ctf-operator',
-                  name: 'CTF Operator',
-                  default_skill_ids: ['cypher-ctf'],
-                  available: true,
-                }},
-              }},
-            }};
-            state.promptCapabilityCatalog = [
-              {{ id: 'cypher-ctf', name: 'CTF', kind: 'skill' }},
-              {{ id: 'kali-server-mcp', name: 'Kali', kind: 'mcp_server' }},
-            ];
-
-            const resources = state.promptEditorResources();
-            const roleResource = resources.find(resource => resource.path === 'cypher-ctf-operator/ROLE.md');
-            state.promptTemplateNames = resources.map(resource => resource.key);
-            state.promptTemplateSelected = roleResource.key;
-            state.syncPromptRoleRequiredSkills();
-
-            console.log(JSON.stringify({{
-              labels: Object.fromEntries(resources.map(resource => [resource.key, state.promptResourceDisplayName(resource)])),
-              roleKey: roleResource.key,
-              rolePath: roleResource.path,
-              selectedContent: state.promptSelectedResourceContent(),
-              selectedSha: state.promptTemplateSha(),
-              routePath: state.promptTemplateRoutePath(roleResource.path),
-              isRole: state.promptSelectedIsRole(),
-              roleName: state.promptSelectedRoleName(),
-              selectedSkillIds: state.promptRoleRequiredSkillIds,
-              skillOptions: state.promptAvailableSkillOptions().map(item => item.id),
-              canEditRequiredSkills: state.promptRoleCanEditRequiredSkills(),
-              groups: resources.filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
-            }}));
-        """
-
-        completed = subprocess.run(
-            [node, "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        result = json.loads(completed.stdout)
-
-        self.assertEqual(result["labels"]["prompts/reason.md"], "reason.md")
-        self.assertEqual(result["labels"]["prompts/roles/redteam.md"], "redteam.md")
-        self.assertEqual(result["labels"]["roles/cypher-ctf-operator/ROLE.md"], "cypher-ctf-operator")
-        self.assertEqual(result["labels"]["roles/legacy/custom.md"], "legacy")
-        self.assertEqual(result["labels"]["roles/custom.md"], "custom.md")
-        self.assertEqual(result["roleKey"], "roles/cypher-ctf-operator/ROLE.md")
-        self.assertEqual(result["rolePath"], "cypher-ctf-operator/ROLE.md")
-        self.assertEqual(result["selectedContent"], "ctf role")
-        self.assertEqual(result["selectedSha"], "role-sha")
-        self.assertEqual(result["routePath"], "cypher-ctf-operator/ROLE.md")
-        self.assertTrue(result["isRole"])
-        self.assertEqual(result["roleName"], "CTF Operator")
-        self.assertEqual(result["selectedSkillIds"], ["cypher-ctf"])
-        self.assertEqual(result["skillOptions"], ["cypher-ctf"])
-        self.assertTrue(result["canEditRequiredSkills"])
-        self.assertEqual(result["groups"], ["Prompt Templates", "Role Prompts"])
-
-    def test_prompt_instruction_previews_are_loaded_as_writable_resources(self) -> None:
+    def test_frontend_filters_by_phase_and_category_and_saves_role_or_instruction(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is required to execute frontend state helper")
@@ -674,512 +244,133 @@ class PromptSettingsFrontendTests(unittest.TestCase):
             state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
             state.api = async (method, path, body) => {{
               calls.push([method, path, body || null]);
-              if (path === '/prompt-templates') {{
-                return {{
-                  prompt_names: ['reason.md'],
-                  prompts: {{ 'reason.md': 'reason prompt' }},
-                  prompt_sha256: {{ 'reason.md': 'reason-sha' }},
-                  prompts_sha256: 'set-sha',
-                }};
-              }}
-              if (path === '/role-prompts') {{
-                return {{ role_names: [], roles: {{}}, role_sha256: {{}}, role_metadata: {{}} }};
-              }}
-              if (path === '/capabilities/catalog') return [];
-              if (path === '/prompt-instruction-previews') {{
-                return {{
-                  phases: [{{
-                    phase: 'bootstrap',
-                    task_instance_id: '{{task_instance_id}}',
-                    files: [{{
-                      path: 'AGENTS.md',
-                      content: 'bootstrap agents preview',
-                      sha256: 'preview-sha',
-                      writable: true,
-                    }}],
-                  }}],
-                }};
-              }}
-              if (path === '/prompt-instruction-previews/bootstrap/AGENTS.md') {{
-                return {{
-                  phases: [{{
-                    phase: 'bootstrap',
-                    task_instance_id: '{{task_instance_id}}',
-                    files: [{{
-                      path: 'AGENTS.md',
-                      content: body.content,
-                      sha256: 'updated-preview-sha',
-                      writable: true,
-                    }}],
-                  }}],
-                }};
-              }}
+              if (path === '/prompt-templates') return {{
+                prompt_names: ['bootstrap.md', 'explore.md'],
+                prompts: {{ 'bootstrap.md': 'bootstrap prompt', 'explore.md': 'explore prompt' }},
+                prompt_sha256: {{ 'bootstrap.md': 'boot-sha', 'explore.md': 'explore-sha' }},
+                prompts_sha256: 'set-sha',
+                resources: [
+                  {{ phase: 'bootstrap', category: 'common', path: 'bootstrap.md', logical_name: 'bootstrap.md', content: 'bootstrap prompt', sha256: 'boot-sha', writable: true }},
+                  {{ phase: 'explore', category: 'common', path: 'explore.md', logical_name: 'explore.md', content: 'explore prompt', sha256: 'explore-sha', writable: true }},
+                ],
+              }};
+              if (path === '/role-prompts') return {{
+                role_names: ['explore/roles/cypher-ctf-operator.md'],
+                roles: {{ 'explore/roles/cypher-ctf-operator.md': 'explore role' }},
+                role_sha256: {{ 'explore/roles/cypher-ctf-operator.md': 'role-sha' }},
+                role_metadata: {{ 'explore/roles/cypher-ctf-operator.md': {{ role_id: 'cypher-ctf-operator', phase: 'explore', name: 'CTF Operator', default_skill_ids: ['skill-a'], available: true }} }},
+                resources: [{{ phase: 'explore', category: 'roles', path: 'explore/roles/cypher-ctf-operator.md', logical_name: 'cypher-ctf-operator.md', content: 'explore role', sha256: 'role-sha', writable: true, role_metadata: {{ role_id: 'cypher-ctf-operator', phase: 'explore', name: 'CTF Operator', default_skill_ids: ['skill-a'], available: true }} }}],
+              }};
+              if (path === '/capabilities/catalog') return [{{ id: 'skill-a', name: 'Skill A', kind: 'skill' }}];
+              if (path === '/prompt-instruction-previews') return {{
+                phases: [{{ phase: 'explore', task_instance_id: '{{task_instance_id}}', files: [{{ path: 'Instruction.md', content: 'instruction', sha256: 'inst-sha', writable: true }}] }}],
+                resources: [{{ phase: 'explore', category: 'instruction', path: 'Instruction.md', logical_name: 'Instruction.md', content: 'instruction', sha256: 'inst-sha', writable: true }}],
+              }};
+              if (path === '/prompt-templates/templates/explore.md') return {{
+                prompt_names: ['bootstrap.md', 'explore.md'],
+                prompts: {{ 'bootstrap.md': 'bootstrap prompt', 'explore.md': body.content }},
+                prompt_sha256: {{ 'bootstrap.md': 'boot-sha', 'explore.md': 'new-explore-sha' }},
+                prompts_sha256: 'new-set-sha',
+                resources: [
+                  {{ phase: 'bootstrap', category: 'common', path: 'bootstrap.md', logical_name: 'bootstrap.md', content: 'bootstrap prompt', sha256: 'boot-sha', writable: true }},
+                  {{ phase: 'explore', category: 'common', path: 'explore.md', logical_name: 'explore.md', content: body.content, sha256: 'new-explore-sha', writable: true }},
+                ],
+              }};
+              if (path === '/roles/admin/cypher-ctf-operator/prompt-settings') return {{
+                role_names: ['explore/roles/cypher-ctf-operator.md'],
+                roles: {{ 'explore/roles/cypher-ctf-operator.md': body.content }},
+                role_sha256: {{ 'explore/roles/cypher-ctf-operator.md': 'new-role-sha' }},
+                role_metadata: {{ 'explore/roles/cypher-ctf-operator.md': {{ role_id: 'cypher-ctf-operator', phase: 'explore', name: 'CTF Operator', default_skill_ids: body.default_skill_ids, available: true }} }},
+                resources: [],
+              }};
+              if (path === '/prompt-instruction-previews/explore/Instruction.md') return {{
+                phases: [{{ phase: 'explore', task_instance_id: '{{task_instance_id}}', files: [{{ path: 'Instruction.md', content: body.content, sha256: 'new-inst-sha', writable: true }}] }}],
+                resources: [{{ phase: 'explore', category: 'instruction', path: 'Instruction.md', logical_name: 'Instruction.md', content: body.content, sha256: 'new-inst-sha', writable: true }}],
+              }};
               throw new Error(`unexpected api call: ${{method}} ${{path}}`);
             }};
 
             await state.loadPromptGroup();
-            const resources = state.promptEditorResources();
-            const preview = resources.find(resource => resource.key === 'runtime/bootstrap/AGENTS.md');
-            state.selectPromptTemplate(preview);
-            state.promptEditorContent = 'updated runtime preview';
+            state.selectPromptPhase('explore');
+            const phaseResources = state.promptEditorResources();
+            const phaseKeys = phaseResources.map(resource => resource.key);
+            const groups = phaseResources
+              .filter((resource, index) => state.promptShowResourceGroup(resource, index))
+              .map(resource => resource.groupLabel);
+            const role = phaseResources.find(resource => resource.type === 'role');
+            const common = phaseResources.find(resource => resource.type === 'prompt');
+            state.selectPromptTemplate(common);
+            state.promptEditorContent = 'updated explore prompt';
+            await state.savePromptTemplate();
+            const commonContentAfterSave = state.promptEditorContent;
+            state.selectPromptTemplate(role);
+            state.promptEditorContent = 'updated role';
+            state.promptRoleRequiredSkillIds = ['skill-a'];
+            await state.savePromptTemplate();
+            const isRole = state.promptSelectedIsRole();
+            const instruction = state.promptEditorResources().find(resource => resource.type === 'runtime');
+            state.selectPromptTemplate(instruction);
+            state.promptEditorContent = 'updated instruction';
             await state.savePromptTemplate();
 
             console.log(JSON.stringify({{
               calls,
-              selected: state.promptTemplateSelected,
-              label: state.promptResourceDisplayName(preview),
-              content: state.promptEditorContent,
-              writable: state.promptSelectedWritable(),
-              isRole: state.promptSelectedIsRole(),
-              groups: state.promptEditorResources().filter((resource, index) => state.promptShowResourceGroup(resource, index)).map(resource => resource.groupLabel),
-              keys: state.promptTemplateNames,
+              phaseKeys,
+              groups,
+              roleLabel: state.promptResourceDisplayName(role),
+              instructionLabel: state.promptResourceDisplayName(instruction),
+              isRole,
+              commonContentAfterSave,
+              finalContent: state.promptEditorContent,
             }}));
         """
 
-        completed = subprocess.run(
-            [node, "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        completed = subprocess.run([node, "--input-type=module", "-e", script], check=True, capture_output=True, text=True)
         result = json.loads(completed.stdout)
-
         api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
+
         self.assertEqual(
-            [call[1] for call in api_calls],
+            result["phaseKeys"],
             [
-                "/prompt-templates",
-                "/role-prompts",
-                "/capabilities/catalog",
-                "/prompt-instruction-previews",
-                "/prompt-instruction-previews/bootstrap/AGENTS.md",
+                "explore/common/explore.md",
+                "explore/roles/cypher-ctf-operator.md",
+                "explore/instruction/Instruction.md",
             ],
         )
-        self.assertEqual(api_calls[-1][2], {"content": "updated runtime preview"})
-        self.assertEqual(result["selected"], "runtime/bootstrap/AGENTS.md")
-        self.assertEqual(result["label"], "bootstrap / AGENTS.md")
-        self.assertEqual(result["content"], "updated runtime preview")
-        self.assertTrue(result["writable"])
-        self.assertFalse(result["isRole"])
-        self.assertEqual(result["groups"], ["Prompt Templates", "Runtime Instruction Preview"])
-        self.assertIn("runtime/bootstrap/AGENTS.md", result["keys"])
+        self.assertEqual(result["groups"], ["Common Prompt", "Role Prompt", "Instruction Prompt"])
+        self.assertEqual(result["roleLabel"], "cypher-ctf-operator")
+        self.assertEqual(result["instructionLabel"], "Instruction.md")
+        self.assertTrue(result["isRole"])
+        self.assertEqual(result["commonContentAfterSave"], "updated explore prompt")
+        common_save = next(call for call in api_calls if call[1] == "/prompt-templates/templates/explore.md")
+        role_save = next(call for call in api_calls if call[1] == "/roles/admin/cypher-ctf-operator/prompt-settings")
+        instruction_save = next(call for call in api_calls if call[1] == "/prompt-instruction-previews/explore/Instruction.md")
+        self.assertEqual(common_save[2]["content"], "updated explore prompt")
+        self.assertEqual(role_save[2]["phase"], "explore")
+        self.assertEqual(instruction_save[2]["content"], "updated instruction")
+        self.assertEqual(result["finalContent"], "updated instruction")
 
-    def test_prompt_save_updates_role_default_skills_only_for_role_prompts(self) -> None:
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is required to execute frontend state helper")
-
-        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
-        script = f"""
-            import {{ pathToFileURL }} from 'node:url';
-
-            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
-            const state = createPromptsState();
-            const calls = [];
-            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
-            state.api = async (method, path, body) => {{
-              calls.push([method, path, body || null]);
-              if (path === '/roles/admin/cypher-ctf-operator/prompt-settings') {{
-                return {{
-                  role_names: ['cypher-ctf-operator/ROLE.md'],
-                  roles: {{ 'cypher-ctf-operator/ROLE.md': body.content }},
-                  role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'new-role-sha' }},
-                  role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: body.default_skill_ids, available: true }} }},
-                }};
-              }}
-              if (path === '/prompt-templates/templates/reason.md') {{
-                return {{
-                  prompt_names: ['reason.md'],
-                  prompts: {{ 'reason.md': body.content }},
-                  prompt_sha256: {{ 'reason.md': 'new-prompt-sha' }},
-                  prompts_sha256: 'new-set-sha',
-                }};
-              }}
-              throw new Error(`unexpected api call: ${{method}} ${{path}}`);
-            }};
-            state.promptTemplateDetail = {{
-              prompt_names: ['reason.md'],
-              prompts: {{ 'reason.md': 'reason prompt' }},
-              prompt_sha256: {{ 'reason.md': 'reason-sha' }},
-              prompts_sha256: 'set-sha',
-            }};
-            state.rolePromptDetail = {{
-              role_names: ['cypher-ctf-operator/ROLE.md'],
-              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
-              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
-              role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
-            }};
-            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
-
-            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
-            state.promptEditorContent = 'updated role';
-            state.promptRoleRequiredSkillIds = ['skill-a', 'skill-b'];
-            await state.savePromptTemplate();
-
-            state.promptTemplateSelected = 'prompts/reason.md';
-            state.promptEditorContent = 'updated reason';
-            await state.savePromptTemplate();
-
-            console.log(JSON.stringify({{
-              calls,
-              roleSkillIds: state.rolePromptDetail.role_metadata['cypher-ctf-operator/ROLE.md'].default_skill_ids,
-            }}));
-        """
-
-        completed = subprocess.run(
-            [node, "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        result = json.loads(completed.stdout)
-
-        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
-        self.assertEqual(api_calls[0][1], "/roles/admin/cypher-ctf-operator/prompt-settings")
-        self.assertEqual(api_calls[0][2], {"content": "updated role", "default_skill_ids": ["skill-a", "skill-b"]})
-        self.assertEqual(api_calls[1][1], "/prompt-templates/templates/reason.md")
-        self.assertEqual(
-            [call[1] for call in api_calls].count("/roles/admin/cypher-ctf-operator/default-skills"),
-            0,
-        )
-        self.assertEqual(result["roleSkillIds"], ["skill-a", "skill-b"])
-
-    def test_prompt_save_failure_keeps_role_editor_state(self) -> None:
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is required to execute frontend state helper")
-
-        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
-        script = f"""
-            import {{ pathToFileURL }} from 'node:url';
-
-            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
-            const state = createPromptsState();
-            const calls = [];
-            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
-            state.api = async (method, path, body) => {{
-              calls.push([method, path, body || null]);
-              throw new Error('save failed');
-            }};
-            state.promptTemplateDetail = {{ prompt_names: [], prompts: {{}}, prompt_sha256: {{}}, prompts_sha256: 'set-sha' }};
-            state.rolePromptDetail = {{
-              role_names: ['cypher-ctf-operator/ROLE.md'],
-              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
-              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
-              role_metadata: {{ 'cypher-ctf-operator/ROLE.md': {{ role_id: 'cypher-ctf-operator', name: 'CTF Operator', default_skill_ids: ['old-skill'], available: true }} }},
-            }};
-            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
-            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
-            state.promptEditorContent = 'unsaved role';
-            state.promptRoleRequiredSkillIds = ['skill-a'];
-
-            await state.savePromptTemplate();
-
-            console.log(JSON.stringify({{
-              calls,
-              editorContent: state.promptEditorContent,
-              skillIds: state.promptRoleRequiredSkillIds,
-            }}));
-        """
-
-        completed = subprocess.run(
-            [node, "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        result = json.loads(completed.stdout)
-
-        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
-        self.assertEqual(api_calls[0][1], "/roles/admin/cypher-ctf-operator/prompt-settings")
-        self.assertEqual(result["editorContent"], "unsaved role")
-        self.assertEqual(result["skillIds"], ["skill-a"])
-
-    def test_prompt_required_skills_disabled_when_metadata_errors(self) -> None:
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is required to execute frontend state helper")
-
-        prompts_path = _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js"
-        script = f"""
-            import {{ pathToFileURL }} from 'node:url';
-
-            const {{ createPromptsState }} = await import(pathToFileURL({json.dumps(str(prompts_path))}).href);
-            const state = createPromptsState();
-            const calls = [];
-            state.showToast = (message, type = 'success') => calls.push(['toast', type, message]);
-            state.api = async (method, path, body) => {{
-              calls.push([method, path, body || null]);
-              throw new Error('should not call api');
-            }};
-            state.promptTemplateDetail = {{ prompt_names: [], prompts: {{}}, prompt_sha256: {{}}, prompts_sha256: 'set-sha' }};
-            state.rolePromptDetail = {{
-              role_names: ['cypher-ctf-operator/ROLE.md'],
-              roles: {{ 'cypher-ctf-operator/ROLE.md': 'ctf role' }},
-              role_sha256: {{ 'cypher-ctf-operator/ROLE.md': 'role-sha' }},
-              role_metadata: {{}},
-              role_metadata_error: 'failed to load role metadata: yaml error',
-            }};
-            state.promptTemplateNames = state.promptEditorResources().map(item => item.key);
-            state.promptTemplateSelected = 'roles/cypher-ctf-operator/ROLE.md';
-            state.promptEditorContent = 'unsaved role';
-            state.promptRoleRequiredSkillIds = ['skill-a'];
-
-            await state.savePromptTemplate();
-
-            console.log(JSON.stringify({{
-              calls,
-              canEdit: state.promptRoleCanEditRequiredSkills(),
-              error: state.promptRoleMetadataError(),
-              editorContent: state.promptEditorContent,
-              skillIds: state.promptRoleRequiredSkillIds,
-            }}));
-        """
-
-        completed = subprocess.run(
-            [node, "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        result = json.loads(completed.stdout)
-
-        api_calls = [call for call in result["calls"] if call[0] in {"GET", "PUT", "POST", "DELETE"}]
-        self.assertEqual(api_calls, [])
-        self.assertFalse(result["canEdit"])
-        self.assertIn("failed to load role metadata", result["error"])
-        self.assertEqual(result["editorContent"], "unsaved role")
-        self.assertEqual(result["skillIds"], ["skill-a"])
-
-    def test_settings_contains_prompt_editor_controls(self) -> None:
+    def test_settings_contains_phase_prompt_editor_controls(self) -> None:
         view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
             encoding="utf-8"
         )
-        ui = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-ui.js").read_text(
-            encoding="utf-8"
-        )
-        settings = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-settings.js").read_text(
-            encoding="utf-8"
-        )
-        settings_admin = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-settings-admin.js"
-        ).read_text(encoding="utf-8")
         prompts = (_REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "app" / "state-prompts.js").read_text(
             encoding="utf-8"
         )
-        capabilities = (
-            _REPO / "cairn" / "src" / "cairn" / "server" / "static" / "js" / "workspace" / "state-capabilities.js"
-        ).read_text(encoding="utf-8")
 
-        self.assertNotIn("async navigateSettings(section = 'server')", ui)
-        self.assertIn("section: 'prompts'", settings)
-        self.assertIn("adminNavItems()", settings)
-        self.assertIn("async navigateSettings(section = 'system')", settings)
-        self.assertIn("async loadSettingsSection(section = this.settingsSection)", settings)
-        self.assertIn("async loadSettings()", settings)
-        self.assertIn("async saveServerSettings()", settings)
-        self.assertIn("async loadSystemSettings()", settings_admin)
-        self.assertIn("async saveSystemSettings()", settings_admin)
-        self.assertIn("async loadPrompts()", prompts)
-        self.assertIn("async loadPromptGroup()", prompts)
-        self.assertIn("/prompt-templates", prompts)
-        self.assertIn("/prompt-instruction-previews", prompts)
-        self.assertIn("/capabilities/catalog", prompts)
-        self.assertIn("/roles/admin/", prompts)
-        self.assertIn("/prompt-settings", prompts)
-        self.assertNotIn("/default-skills", prompts)
-        self.assertIn("promptTemplateRoutePath(name)", prompts)
-        self.assertIn("promptSelectedIsRole()", prompts)
-        self.assertIn("promptRoleRequiredSkillIds", prompts)
-        self.assertIn("settingsSection === 'prompts'", view)
-        self.assertNotIn('data-testid="prompts-group"', view)
-        self.assertIn('data-testid="prompts-editor"', view)
-        self.assertIn('data-testid="prompts-save"', view)
+        self.assertIn("selectPromptPhase('bootstrap')", view)
+        self.assertIn("selectPromptPhase('explore')", view)
+        self.assertIn("selectPromptPhase('reason')", view)
+        self.assertIn("Common Prompt", prompts)
+        self.assertIn("Role Prompt", prompts)
+        self.assertIn("Instruction Prompt", prompts)
+        self.assertIn("resource.groupLabel", view)
+        self.assertIn("promptActivePhase", prompts)
+        self.assertNotIn("promptActiveCategory", prompts)
+        self.assertNotIn("selectPromptCategory", prompts)
+        self.assertNotIn("selectPromptCategory", view)
         self.assertIn('data-testid="role-required-skills"', view)
-        self.assertIn("Required Skills", view)
         self.assertIn('x-show="promptSelectedIsRole()"', view)
-        self.assertIn('x-model="promptRoleRequiredSkillIds"', view)
-        self.assertIn("promptEditorResources()", prompts)
-        self.assertIn("promptSelectedWritable()", prompts)
-        self.assertIn(":readonly=\"!promptSelectedWritable()\"", view)
-        self.assertNotIn("promptGroupSelected", prompts)
-        self.assertNotIn("promptGroups", prompts)
-        self.assertNotIn("deleteCapabilityAdmin", prompts)
-        self.assertNotIn("/capabilities/admin/", prompts)
-        self.assertNotIn("/prompt-groups", prompts)
-        self.assertNotIn("promptTemplateNames: ['bootstrap.md'", prompts)
-        self.assertNotIn("/prompt-groups", capabilities)
-        self.assertNotIn("/role-prompts", capabilities)
-        self.assertNotIn("/templates/", capabilities)
-        self.assertNotIn("promptEditorResources()", capabilities)
-        self.assertNotIn("promptSelectedWritable()", capabilities)
-
-    def test_settings_prompt_editor_uses_available_viewport_height(self) -> None:
-        view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn(
-            'settingsSection === \'prompts\'" class="h-full min-h-0 flex flex-col',
-            view,
-        )
-        self.assertIn("grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-3 flex-1 min-h-0", view)
-        self.assertIn("min-h-0 flex-1 space-y-1 overflow-y-auto", view)
-        self.assertIn("min-w-0 min-h-0 flex flex-col gap-2", view)
-        self.assertIn("flex-1 min-h-[18rem] lg:min-h-0 overflow-y-auto resize-none", view)
-        self.assertNotIn('settingsSection === \'prompts\'" class="min-h-[calc(100vh-13rem)]', view)
-        self.assertNotIn("min-h-[520px]", view)
-
-    def test_settings_capabilities_is_two_column_and_type_specific(self) -> None:
-        view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(
-            'settingsSection === \'capabilities\'" class="h-full min-h-0 flex flex-col gap-3',
-            view,
-        )
-        self.assertIn("data-testid=\"settings-capability-add-mcp\"", view)
-        self.assertIn("data-testid=\"settings-capability-add-skill\"", view)
-        self.assertIn("data-testid=\"settings-capability-probe-all-mcp\"", view)
-        self.assertIn("Import MCP JSON", view)
-        self.assertIn("Probe All", view)
-        self.assertIn("MCP Servers", view)
-        self.assertIn("Skills", view)
-        self.assertIn("x-show=\"capabilityFormOpen\"", view)
-        self.assertIn("x-show=\"!capabilityFormOpen && !capabilityImportOpen\"", view)
-        self.assertIn("flex-1 min-h-0 overflow-y-auto", view)
-        self.assertIn("flex-1 min-h-0 lg:grid-cols-2 lg:auto-rows-fr", view)
-        self.assertIn('x-show="capabilityImportOpen" x-cloak class="flex-1 min-h-0 overflow-y-auto', view)
-        self.assertNotIn('x-show="capabilityImportOpen && !capabilityFormOpen" x-cloak class="shrink-0', view)
-        self.assertIn("h-32 overflow-hidden rounded-xl border border-slate-200 bg-white", view)
-        self.assertNotIn("settingsSection === 'capabilities'\" class=\"flex min-h-[calc(100vh-13rem)]", view)
-        self.assertNotIn("lg:min-h-[calc(100vh-14rem)]", view)
-        self.assertIn("data-testid=\"prompts-reload\"", view)
-        self.assertIn("data-testid=\"prompts-save\"", view)
-        self.assertIn("flex items-center gap-2 shrink-0", view)
-        self.assertIn(
-            "h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500",
-            view,
-        )
-        self.assertIn(
-            "h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium",
-            view,
-        )
-        self.assertIn("No markdown prompt resources found.", view)
-        self.assertNotIn("max-h-[calc(100vh-430px)]", view)
-        self.assertNotIn("capabilityAdminPanel", view)
-        self.assertIn('data-testid="capability-task-types"', view)
-        self.assertIn("capabilityTaskTypes()", view)
-        self.assertIn("capabilityTaskTypesSelected()", view)
-        self.assertIn("capabilityTaskTypeSummary(item)", view)
-
-    def test_settings_servers_and_proxy_match_ai_profile_management_layout(self) -> None:
-        view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
-            encoding="utf-8"
-        )
-        servers_view = view.split("<section x-show=\"settingsSection === 'servers'\"", 1)[1].split(
-            "<section x-show=\"settingsSection === 'proxy'\"",
-            1,
-        )[0]
-        proxy_view = view.split("<section x-show=\"settingsSection === 'proxy'\"", 1)[1].split(
-            "<section x-show=\"settingsSection === 'capabilities'\"",
-            1,
-        )[0]
-
-        self.assertIn(
-            'settingsSection === \'servers\'" class="h-full min-h-0 flex flex-col gap-3',
-            view,
-        )
-        self.assertIn(
-            'settingsSection === \'proxy\'" class="h-full min-h-0 flex flex-col gap-3',
-            view,
-        )
-        self.assertNotIn("settingsSection === 'resources'", view)
-        self.assertIn('data-testid="settings-server-refresh"', servers_view)
-        self.assertIn('data-testid="settings-server-add"', servers_view)
-        self.assertIn('x-show="!serverFormOpen"', servers_view)
-        self.assertIn('x-show="serverFormOpen"', servers_view)
-        self.assertIn('data-testid="server-save"', servers_view)
-        self.assertNotIn('x-model="serverForm.auth_type"', servers_view)
-        self.assertNotIn("<select x-model=\"serverForm.auth_type\"", servers_view)
-        self.assertNotIn('x-model="serverForm.cert_path"', servers_view)
-        self.assertIn('x-model="serverForm.password"', servers_view)
-        self.assertIn('x-model="serverForm.private_key"', servers_view)
-        self.assertIn('type="file"', servers_view)
-        self.assertIn("serverForm.certificateFile", servers_view)
-        self.assertIn("openEditServer(s)", servers_view)
-        self.assertIn("deleteServerResource(s.id, s.name)", servers_view)
-        self.assertIn("testServerResource(s.id)", servers_view)
-        self.assertIn("Servers", servers_view)
-
-        self.assertIn('data-testid="settings-proxy-refresh"', proxy_view)
-        self.assertIn('data-testid="settings-proxy-back"', proxy_view)
-        self.assertIn('data-testid="settings-proxy-add"', proxy_view)
-        self.assertIn('data-testid="proxy-save"', proxy_view)
-        self.assertIn("filteredProxyProjects()", proxy_view)
-        self.assertIn("selectProxyProject(p)", proxy_view)
-        self.assertIn("backToProxyProjects()", proxy_view)
-        self.assertIn("proxySelectedProjectId && projectProxyFormOpen", proxy_view)
-        self.assertIn("proxySelectedProjectId && !projectProxyFormOpen", proxy_view)
-        self.assertIn("openEditProjectProxy(p)", proxy_view)
-        self.assertIn("deleteProjectProxy(p.id, p.name)", proxy_view)
-        self.assertIn("resolveProjectProxyChain(p.id)", proxy_view)
-        self.assertNotIn("selectedProjectId", proxy_view)
-        self.assertNotIn("openEditProxy(p.id)", proxy_view)
-
-    def test_settings_primary_save_buttons_are_in_headers(self) -> None:
-        view = (_REPO / "cairn" / "src" / "cairn" / "server" / "partials" / "view_settings.html").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertNotIn("flex justify-end gap-2 mt-5", view)
-        self.assertIn('data-testid="system-settings-save"', view)
-        self.assertNotIn('data-testid="server-settings-save"', view)
-        self.assertNotIn('data-testid="runtime-limits-save"', view)
-        self.assertNotIn('data-testid="task-timeouts-save"', view)
-        self.assertNotIn('data-testid="observability-save"', view)
-        self.assertNotIn('data-testid="log-retention-save"', view)
-        self.assertIn("shrink-0 space-y-1.5", view)
-        self.assertIn(
-            '<div class="text-[11px] text-slate-400">Identity, routing metadata, and type-specific settings are grouped below.</div>',
-            view,
-        )
-        self.assertIn(
-            '<div x-show="!capabilityFormOpen && !capabilityImportOpen" x-cloak class="flex flex-wrap items-center justify-end gap-2">',
-            view,
-        )
-        self.assertIn(
-            '<button data-testid="settings-capability-import" @click="openImportMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg border border-slate-200 text-slate-500',
-            view,
-        )
-        self.assertIn(
-            '<div x-show="capabilityImportOpen" x-cloak class="flex items-center gap-2">\n'
-            '            <button @click="cancelImportMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg text-slate-500',
-            view,
-        )
-        self.assertIn(
-            'data-testid="capability-import-save" @click="importMcpJson()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium',
-            view,
-        )
-        self.assertIn(
-            '<div x-show="capabilityFormOpen" x-cloak class="flex items-center gap-3">\n'
-            '            <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">\n'
-            '              <input type="checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-brand-100" x-model="capabilityForm.available">\n'
-            '              available\n'
-            '            </label>\n'
-            '            <div class="flex items-center gap-2">\n'
-            '              <button @click="cancelCapabilityEdit()" class="h-7 inline-flex items-center justify-center',
-            view,
-        )
-        self.assertIn(
-            'data-testid="capability-save" @click="saveCapability()" :disabled="!capabilityForm.id.trim() || !capabilityForm.name.trim() || !capabilityTaskTypesSelected()" class="h-7 inline-flex items-center justify-center px-3 text-xs rounded-lg bg-brand-500 text-white font-medium',
-            view,
-        )
-        self.assertNotIn(
-            '              <div class="flex items-center gap-3">\n'
-            '                <label class="inline-flex items-center gap-2 text-[11px] text-slate-500">',
-            view,
-        )
 
 
 if __name__ == "__main__":

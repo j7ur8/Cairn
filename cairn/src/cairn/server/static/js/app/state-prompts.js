@@ -1,7 +1,8 @@
 export function createPromptsState() {
   return {
     promptTemplateNames: [],
-    promptTemplateSelected: 'bootstrap.md',
+    promptTemplateSelected: '',
+    promptActivePhase: 'bootstrap',
     promptTemplateDetail: null,
     rolePromptDetail: null,
     promptInstructionPreviewDetail: null,
@@ -37,10 +38,7 @@ export function createPromptsState() {
         this.promptCapabilityCatalog = Array.isArray(catalog) ? catalog : [];
         this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
         if (!this.promptTemplateNames.includes(this.promptTemplateSelected)) {
-          const legacySelected = this.promptTemplateNames.includes(this.promptResourceKey('prompt', this.promptTemplateSelected))
-            ? this.promptResourceKey('prompt', this.promptTemplateSelected)
-            : '';
-          this.promptTemplateSelected = legacySelected || this.promptTemplateNames[0] || '';
+          this.promptTemplateSelected = this.promptTemplateNames[0] || '';
         }
         this.promptEditorContent = this.promptSelectedResourceContent();
         this.syncPromptRoleRequiredSkills();
@@ -70,54 +68,129 @@ export function createPromptsState() {
     },
 
     promptResourceKey(type, path) {
-      if (type === 'role') return `roles/${path}`;
-      if (type === 'runtime') return `runtime/${path}`;
-      return `prompts/${path}`;
+      const phase = arguments.length > 2 ? arguments[2] : '';
+      if (type === 'role') return this.normalizedRolePromptPath(path, phase);
+      const category = type === 'prompt' ? 'common' : (type === 'runtime' ? 'instruction' : (type === 'role' ? 'roles' : type));
+      return `${phase || 'bootstrap'}/${category}/${path}`;
+    },
+
+    normalizedRolePromptPath(path, phase = 'bootstrap') {
+      const raw = String(path || '').trim();
+      const parts = raw.split('/').filter(Boolean);
+      const knownPhases = ['bootstrap', 'explore', 'reason'];
+      const selectedPhase = knownPhases.includes(String(phase))
+        ? String(phase)
+        : (knownPhases.includes(parts[0]) ? parts[0] : 'bootstrap');
+      let filename = parts[parts.length - 1] || '';
+      if (!filename) return `${selectedPhase}/roles/`;
+      if (!filename.endsWith('.md')) filename = `${filename}.md`;
+      return `${selectedPhase}/roles/${filename}`;
+    },
+
+    refreshPromptSelectionAfterSave(resource, expectedContent) {
+      this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
+      if (!this.promptTemplateNames.includes(resource.key)) {
+        throw new Error('Saved prompt was not returned by server.');
+      }
+      this.promptTemplateSelected = resource.key;
+      const content = this.promptSelectedResourceContent();
+      if (typeof expectedContent === 'string' && content !== expectedContent) {
+        throw new Error('Saved prompt response did not include the updated content.');
+      }
+      this.promptEditorContent = content;
+      this.syncPromptRoleRequiredSkills();
     },
 
     promptEditorResources() {
       const detail = this.promptTemplateDetail || {};
       const roles = this.rolePromptDetail || {};
       const previews = this.promptInstructionPreviewDetail || {};
-      const promptNames = this.sortedPromptTemplateNames(
-        Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {}),
-      );
-      const roleNames = this.sortedRolePromptNames(
-        Array.isArray(roles.role_names) ? roles.role_names : Object.keys(roles.roles || {}),
-      );
-      const previewResources = (Array.isArray(previews.phases) ? previews.phases : []).flatMap(phase => {
-        const phaseName = String(phase?.phase || '');
-        return (Array.isArray(phase?.files) ? phase.files : []).map(file => ({
-          type: 'runtime',
-          phase: phaseName,
-          path: String(file?.path || ''),
-          key: this.promptResourceKey('runtime', `${phaseName}/${file?.path || ''}`),
-          groupLabel: 'Runtime Instruction Preview',
-          writable: file?.writable !== false,
-          sha: file?.sha256 || '',
-          content: file?.content || '',
-        }));
-      });
-      return [
-        ...promptNames.map(name => ({
+      const promptResources = Array.isArray(detail.resources) && detail.resources.length > 0
+        ? detail.resources.map(resource => ({
           type: 'prompt',
+          phase: resource.phase || 'bootstrap',
+          category: 'common',
+          path: resource.path || resource.logical_name || '',
+          logicalName: resource.logical_name || resource.path || '',
+          key: this.promptResourceKey('prompt', resource.path || resource.logical_name || '', resource.phase || 'bootstrap'),
+          groupLabel: 'Common Prompt',
+          writable: resource.writable !== false,
+          sha: resource.sha256 || '',
+          content: resource.content || '',
+        }))
+        : this.sortedPromptTemplateNames(Array.isArray(detail.prompt_names) ? detail.prompt_names : Object.keys(detail.prompts || {})).map(name => ({
+          type: 'prompt',
+          phase: name.startsWith('explore') ? 'explore' : (name.startsWith('reason') ? 'reason' : 'bootstrap'),
+          category: 'common',
           path: name,
-          key: this.promptResourceKey('prompt', name),
-          groupLabel: 'Prompt Templates',
+          logicalName: name,
+          key: this.promptResourceKey('prompt', name, name.startsWith('explore') ? 'explore' : (name.startsWith('reason') ? 'reason' : 'bootstrap')),
+          groupLabel: 'Common Prompt',
           writable: true,
           sha: detail.prompt_sha256?.[name] || '',
-        })),
-        ...roleNames.map(name => ({
-          type: 'role',
-          path: name,
-          key: this.promptResourceKey('role', name),
-          groupLabel: 'Role Prompts',
-          writable: true,
-          sha: roles.role_sha256?.[name] || '',
-          metadata: roles.role_metadata?.[name] || null,
-        })),
-        ...previewResources,
-      ];
+        }));
+      const roleResources = Array.isArray(roles.resources) && roles.resources.length > 0
+        ? roles.resources.map(resource => {
+          const phase = resource.phase || String(resource.path || '').split('/')[0] || 'bootstrap';
+          const path = this.normalizedRolePromptPath(resource.path || resource.logical_name || '', phase);
+          return {
+            type: 'role',
+            phase,
+            category: 'roles',
+            path,
+            logicalName: resource.logical_name || path,
+            key: this.promptResourceKey('role', path, phase),
+            groupLabel: 'Role Prompt',
+            writable: resource.writable !== false,
+            sha: resource.sha256 || roles.role_sha256?.[path] || '',
+            content: resource.content || roles.roles?.[path] || '',
+            metadata: resource.role_metadata || roles.role_metadata?.[path] || roles.role_metadata?.[resource.path] || null,
+          };
+        })
+        : this.sortedRolePromptNames(Array.isArray(roles.role_names) ? roles.role_names : Object.keys(roles.roles || {})).map(name => {
+          const phase = String(name).split('/')[0] || 'bootstrap';
+          const path = this.normalizedRolePromptPath(name, phase);
+          return {
+            type: 'role',
+            phase,
+            category: 'roles',
+            path,
+            logicalName: path,
+            key: this.promptResourceKey('role', path, phase),
+            groupLabel: 'Role Prompt',
+            writable: true,
+            sha: roles.role_sha256?.[path] || roles.role_sha256?.[name] || '',
+            content: roles.roles?.[path] || roles.roles?.[name] || '',
+            metadata: roles.role_metadata?.[path] || roles.role_metadata?.[name] || null,
+          };
+        });
+      const instructionResources = (Array.isArray(previews.resources) && previews.resources.length > 0
+        ? previews.resources
+        : (Array.isArray(previews.phases) ? previews.phases : []).flatMap(phase => {
+            const phaseName = String(phase?.phase || '');
+            return (Array.isArray(phase?.files) ? phase.files : []).map(file => ({
+              phase: phaseName,
+              category: 'instruction',
+              path: String(file?.path || ''),
+              logical_name: String(file?.path || ''),
+              content: file?.content || '',
+              sha256: file?.sha256 || '',
+              writable: file?.writable !== false,
+            }));
+          })).map(resource => ({
+            type: 'runtime',
+            phase: resource.phase || 'bootstrap',
+            category: 'instruction',
+            path: resource.path || resource.logical_name || 'Instruction.md',
+            logicalName: resource.logical_name || resource.path || 'Instruction.md',
+            key: this.promptResourceKey('runtime', resource.path || resource.logical_name || 'Instruction.md', resource.phase || 'bootstrap'),
+            groupLabel: 'Instruction Prompt',
+            writable: resource.writable !== false,
+            sha: resource.sha256 || '',
+            content: resource.content || '',
+          }));
+      return [...promptResources, ...roleResources, ...instructionResources]
+        .filter(resource => resource.phase === this.promptActivePhase);
     },
 
     promptResourceDisplayName(resource) {
@@ -126,13 +199,11 @@ export function createPromptsState() {
       const keySegments = String(resource.key || '').split('/').filter(Boolean);
       const segments = pathSegments.length > 0 ? pathSegments : keySegments;
       const basename = segments[segments.length - 1] || '';
-      if (resource.type === 'prompt') return basename;
+      if (resource.type === 'prompt') return resource.logicalName || basename;
       if (resource.type === 'role') {
-        const parent = segments[segments.length - 2] || '';
-        if (basename === 'ROLE.md' && parent) return parent;
-        return parent || basename;
+        return basename.replace(/\.md$/, '');
       }
-      if (resource.type === 'runtime') return `${resource.phase} / ${resource.path}`;
+      if (resource.type === 'runtime') return resource.path;
       return basename;
     },
 
@@ -149,9 +220,9 @@ export function createPromptsState() {
     promptSelectedResourceContent() {
       const resource = this.promptSelectedResource();
       if (!resource) return '';
-      if (resource.type === 'role') return this.rolePromptDetail?.roles?.[resource.path] || '';
+      if (resource.type === 'role') return this.rolePromptDetail?.roles?.[resource.path] || resource.content || '';
       if (resource.type === 'runtime') return resource.content || '';
-      return this.promptTemplateDetail?.prompts?.[resource.path] || '';
+      return this.promptTemplateDetail?.prompts?.[resource.path] || resource.content || '';
     },
 
     promptSelectedWritable() {
@@ -160,7 +231,8 @@ export function createPromptsState() {
     },
 
     promptSelectedIsRole() {
-      return this.promptSelectedResource()?.type === 'role';
+      const resource = this.promptSelectedResource();
+      return resource?.type === 'role' && !!this.promptSelectedRoleMetadata();
     },
 
     promptSelectedRoleMetadata() {
@@ -205,6 +277,15 @@ export function createPromptsState() {
       this.syncPromptRoleRequiredSkills();
     },
 
+    selectPromptPhase(phase) {
+      if (!['bootstrap', 'explore', 'reason'].includes(phase)) return;
+      this.promptActivePhase = phase;
+      this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
+      this.promptTemplateSelected = this.promptTemplateNames[0] || '';
+      this.promptEditorContent = this.promptSelectedResourceContent();
+      this.syncPromptRoleRequiredSkills();
+    },
+
     promptTemplateSha(name = this.promptTemplateSelected) {
       const key = typeof name === 'string' ? name : name?.key;
       const resource = this.promptEditorResources().find(item => item.key === key);
@@ -234,12 +315,10 @@ export function createPromptsState() {
           const detail = await this.api(
             'PUT',
             `/roles/admin/${encodeURIComponent(meta.role_id)}/prompt-settings`,
-            { content: submittedContent, default_skill_ids: submittedSkillIds },
+            { content: submittedContent, default_skill_ids: submittedSkillIds, phase: resource.phase },
           );
           this.rolePromptDetail = detail;
-          this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
-          this.promptEditorContent = submittedContent;
-          this.promptRoleRequiredSkillIds = submittedSkillIds;
+          this.refreshPromptSelectionAfterSave(resource, submittedContent);
           this.showToast('Role prompt saved');
         } else if (resource.type === 'runtime') {
           const detail = await this.api(
@@ -248,9 +327,7 @@ export function createPromptsState() {
             { content: this.promptEditorContent || '' },
           );
           this.promptInstructionPreviewDetail = detail;
-          this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
-          this.promptTemplateSelected = resource.key;
-          this.promptEditorContent = this.promptSelectedResourceContent();
+          this.refreshPromptSelectionAfterSave(resource, submittedContent);
           this.showToast('Runtime instruction template saved');
         } else {
           const detail = await this.api(
@@ -259,8 +336,7 @@ export function createPromptsState() {
             { content: this.promptEditorContent || '' },
           );
           this.promptTemplateDetail = detail;
-          this.promptTemplateNames = this.promptEditorResources().map(item => item.key);
-          this.promptEditorContent = this.promptTemplateDetail?.prompts?.[resource.path] || '';
+          this.refreshPromptSelectionAfterSave(resource, submittedContent);
           this.showToast('Prompt template saved');
         }
       } catch(e) {

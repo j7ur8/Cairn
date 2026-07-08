@@ -6,33 +6,18 @@ from importlib import resources
 from importlib.resources.abc import Traversable
 from typing import Any
 
+from cairn.dispatcher.prompts.layout import COMMON_PROMPT_NAMES, EXECUTION_PROMPT_NAMES, common_prompt_traversable
 from cairn.shared.config.constants import DEFAULT_PROMPT_REQUIRED_TOKENS, PROMPT_REQUIRED_TOKENS_BY_GROUP
 
-DEFAULT_PROMPT_GROUP = "default"
-PROMPT_SNAPSHOT_NAMES = (
-    "bootstrap.md",
-    "bootstrap_conclude.md",
-    "explore.md",
-    "explore_conclude.md",
-    "reason.md",
-)
-PROMPT_GROUP_REQUIRED_RESOURCE_NAMES = PROMPT_SNAPSHOT_NAMES + ("FILE_OUTPUTS.md",)
+PROMPT_SNAPSHOT_NAMES = EXECUTION_PROMPT_NAMES
+PROMPT_REQUIRED_RESOURCE_NAMES = COMMON_PROMPT_NAMES
 
 
-def list_prompt_markdown_names(group_dir: Traversable) -> list[str]:
+def list_prompt_markdown_names(root_dir: Traversable) -> list[str]:
     names: list[str] = []
-
-    def visit(node: Traversable, prefix: str = "") -> None:
-        for child in node.iterdir():
-            if child.name.startswith("."):
-                continue
-            rel_name = f"{prefix}{child.name}"
-            if child.is_dir():
-                visit(child, f"{rel_name}/")
-            elif child.is_file() and child.name.endswith(".md"):
-                names.append(rel_name)
-
-    visit(group_dir)
+    for name in EXECUTION_PROMPT_NAMES:
+        if common_prompt_traversable(name, root_dir).is_file():
+            names.append(name)
     return _sort_prompt_names(names)
 
 
@@ -42,42 +27,36 @@ def _sort_prompt_names(names: list[str]) -> list[str]:
 
 
 def load_prompt_snapshot() -> dict[str, Any]:
-    prompt_group = DEFAULT_PROMPT_GROUP
     prompts_dir = resources.files("cairn.dispatcher.prompts")
-    group_dir = prompts_dir.joinpath(prompt_group)
-    if not group_dir.is_dir():
-        raise ValueError(f"missing prompt group: {prompt_group}")
 
-    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(prompt_group, DEFAULT_PROMPT_REQUIRED_TOKENS)
-    prompt_names = list_prompt_markdown_names(group_dir)
+    required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get("default", DEFAULT_PROMPT_REQUIRED_TOKENS)
+    prompt_names = list_prompt_markdown_names(prompts_dir)
     missing_required = [name for name in required_tokens if name not in prompt_names]
     if missing_required:
-        raise ValueError(f"prompt group {prompt_group} missing resource: {missing_required[0]}")
+        raise ValueError(f"prompt resources missing resource: {missing_required[0]}")
 
     prompts: dict[str, str] = {}
     prompt_sha256: dict[str, str] = {}
     for name in prompt_names:
         try:
-            content = group_dir.joinpath(*name.split("/")).read_text(encoding="utf-8")
+            content = common_prompt_traversable(name, prompts_dir).read_text(encoding="utf-8")
         except FileNotFoundError as exc:
-            raise ValueError(f"prompt group {prompt_group} missing resource: {name}") from exc
+            raise ValueError(f"prompt resources missing resource: {name}") from exc
         missing = [token for token in required_tokens.get(name, ()) if token not in content]
         if missing:
             raise ValueError(
-                f"prompt group {prompt_group} resource {name} missing placeholders: {', '.join(missing)}"
+                f"prompt resource {name} missing placeholders: {', '.join(missing)}"
             )
         prompts[name] = content
         prompt_sha256[name] = _sha256_text(content)
 
     prompts_sha256 = _sha256_json(
         {
-            "prompt_group": prompt_group,
             "prompt_names": prompt_names,
             "prompt_sha256": prompt_sha256,
         }
     )
     return {
-        "prompt_group": prompt_group,
         "prompt_names": prompt_names,
         "prompts": prompts,
         "prompt_sha256": prompt_sha256,
@@ -85,8 +64,8 @@ def load_prompt_snapshot() -> dict[str, Any]:
     }
 
 
-def is_complete_prompt_group_dir(group_dir: Traversable) -> bool:
-    return group_dir.is_dir() and all(group_dir.joinpath(name).is_file() for name in PROMPT_GROUP_REQUIRED_RESOURCE_NAMES)
+def is_complete_prompt_group_dir(root_dir: Traversable) -> bool:
+    return all(common_prompt_traversable(name, root_dir).is_file() for name in PROMPT_REQUIRED_RESOURCE_NAMES)
 
 
 def _sha256_text(value: str) -> str:

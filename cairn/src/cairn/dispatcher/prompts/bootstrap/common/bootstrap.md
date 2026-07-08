@@ -1,8 +1,8 @@
+Active prompt: bootstrap.md
+
 # Task
 
-Follow the task-local phase boundary referenced by CLAUDE.md/AGENTS.md. Bootstrap is target discovery and profiling only; vulnerability verification and exploitation belong in later Explore intents created by Reason.
-
-Build a concise target profile from static, provided, and publicly observable facts about the Origin, target identity, purpose, exposed entrypoints or artifacts, technology and runtime fingerprints, access boundaries, supplied materials, linked public resources, constraints, and directly observable abnormal behavior.
+Do discovery and profiling only;
 
 ## Output Requirements
 For a normal successful result, return only the confirmed target profile facts as plain text surrounded by 32173462130721312360912. Do not output anything outside the markers.

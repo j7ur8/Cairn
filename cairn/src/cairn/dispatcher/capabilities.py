@@ -68,7 +68,7 @@ def inject_project_capabilities(
     files_errors: list[str] = []
     files_appendix = ""
     if include_files_appendix:
-        files_appendix, files_errors = load_prompt_files_appendix()
+        files_appendix, files_errors = load_prompt_files_appendix(task_type)
     resources_appendix = ""
 
     def render_files_only_instructions() -> str:

@@ -8,34 +8,56 @@ from unittest import mock
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "cairn" / "src"))
+_PROMPTS_DIR = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts"
+
+
+def _common_prompt_path(name: str) -> Path:
+    if "/" in name:
+        phase, filename = name.split("/", 1)
+        return _PROMPTS_DIR / phase / "common" / filename
+    phase = "bootstrap"
+    if name.startswith("explore"):
+        phase = "explore"
+    elif name.startswith("reason"):
+        phase = "reason"
+    return _PROMPTS_DIR / phase / "common" / name
+
+
+def _common_prompt(name: str) -> str:
+    return _common_prompt_path(name).read_text(encoding="utf-8")
+
+
+def _write_phase_snapshot(root: Path, prompts: dict[str, str]) -> None:
+    for name, content in prompts.items():
+        target = root / _common_prompt_path(name).relative_to(_PROMPTS_DIR)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
 
 class PromptSnapshotTests(unittest.TestCase):
     def test_prompt_markdown_files_have_only_task_h1(self) -> None:
-        prompts_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts"
-
-        for prompt_group in ("default", "mock"):
-            for path in (prompts_dir / prompt_group).rglob("*.md"):
-                with self.subTest(path=path.relative_to(prompts_dir).as_posix()):
-                    h1s = [
-                        line.removeprefix("# ").strip()
-                        for line in path.read_text(encoding="utf-8").splitlines()
-                        if line.startswith("# ") and not line.startswith("## ")
-                    ]
-                    self.assertEqual(h1s, ["Task"])
+        for path in _PROMPTS_DIR.glob("*/common/*.md"):
+            with self.subTest(path=path.relative_to(_PROMPTS_DIR).as_posix()):
+                h1s = [
+                    line.removeprefix("# ").strip()
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("# ") and not line.startswith("## ")
+                ]
+                self.assertEqual(h1s, ["Task"])
 
     def test_default_templates_keep_role_out_of_phase_prompts(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-
-        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
-        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
-        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
-        bootstrap_conclude = (default_dir / "bootstrap_conclude.md").read_text(encoding="utf-8")
-        explore_conclude = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+        bootstrap = _common_prompt("bootstrap.md")
+        explore = _common_prompt("explore.md")
+        reason = _common_prompt("reason.md")
+        bootstrap_conclude = _common_prompt("bootstrap_conclude.md")
+        explore_conclude = _common_prompt("explore_conclude.md")
 
         self.assertIn("# Task\n", bootstrap)
         self.assertIn("# Task\n", explore)
         self.assertIn("# Task\n", reason)
+        self.assertIn("Active prompt: bootstrap.md", bootstrap.splitlines()[:3])
+        self.assertIn("Active prompt: explore.md", explore.splitlines()[:3])
+        self.assertIn("Active prompt: reason.md", reason.splitlines()[:3])
         self.assertNotIn("{role_instructions}", bootstrap)
         self.assertNotIn("{role_instructions}", explore)
         self.assertNotIn("{role_instructions}", reason)
@@ -43,19 +65,17 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertNotIn("{role_instructions}", explore_conclude)
 
     def test_default_explore_uses_plain_text_sentinel_output(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        explore = _common_prompt("explore.md")
 
-        output_requirements = explore.split("## Output Requirements", 1)[1].split("## Rules", 1)[0]
+        output_requirements = explore.split("## Output Requirements", 1)[1].split("### Rules", 1)[0]
         self.assertIn("32173462130721312360912", output_requirements)
         self.assertIn("plain text", output_requirements)
         self.assertIn("Do not output JSON", output_requirements)
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
     def test_default_explore_prompts_preserve_partial_negative_scope(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
-        explore_conclude = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+        explore = _common_prompt("explore.md")
+        explore_conclude = _common_prompt("explore_conclude.md")
 
         for name, prompt in (("explore.md", explore), ("explore_conclude.md", explore_conclude)):
             with self.subTest(name=name):
@@ -64,36 +84,38 @@ class PromptSnapshotTests(unittest.TestCase):
                 self.assertIn("whole-family", prompt)
 
     def test_default_explore_conclude_is_read_only_fact_conclusion(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        prompt = (default_dir / "explore_conclude.md").read_text(encoding="utf-8")
+        prompt = _common_prompt("explore_conclude.md")
+        from cairn.server.routers.prompt_groups import read_prompt_instruction_previews
+
+        previews = read_prompt_instruction_previews()
+        phase_files = {
+            phase.phase: {file.path: file.content for file in phase.files}
+            for phase in previews.phases
+        }
+        instruction = phase_files["explore"]["Instruction.md"]
 
         for text in (
-            "read-only fact-conclusion phase",
-            "already confirmed facts from this session",
             "Fact View",
             "Full Graph",
-            "Do not use Bash",
-            "MCP tools",
-            "browser or network access",
-            "scanners",
-            "Do not create new payloads",
-            "continue exploration",
-            "wait for tasks",
-            "Use Read only",
-            "Do not scan for additional files or evidence",
         ):
             self.assertIn(text, prompt)
+        for text in (
+            "Explore_conclude is read-only fact conclusion only",
+            "Use Read only",
+            "Do not scan for additional files or evidence",
+            "wait for unfinished work",
+        ):
+            self.assertIn(text, instruction)
 
     def test_default_bootstrap_task_sets_discovery_only_boundary(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
+        bootstrap = _common_prompt("bootstrap.md")
         task_section = bootstrap.split("## Output Requirements", 1)[0]
 
-        self.assertTrue(task_section.strip().startswith("# Task"))
+        self.assertIn("Active prompt: bootstrap.md", task_section.splitlines()[:3])
+        self.assertIn("# Task", task_section.splitlines()[:4])
         self.assertNotIn("{role_instructions}", bootstrap)
         self.assertNotIn("{capability_instructions}", bootstrap)
         self.assertIn("target discovery and profiling only", task_section)
-        self.assertIn("task-local phase boundary", task_section)
         self.assertIn("Build a concise target profile", task_section)
         self.assertIn("static, provided, and publicly observable facts", task_section)
         self.assertIn("technology and runtime fingerprints", task_section)
@@ -122,9 +144,8 @@ class PromptSnapshotTests(unittest.TestCase):
     def test_runtime_instruction_preview_owns_phase_boundaries(self) -> None:
         from cairn.server.routers.prompt_groups import read_prompt_instruction_previews
 
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
-        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        bootstrap = _common_prompt("bootstrap.md")
+        explore = _common_prompt("explore.md")
         previews = read_prompt_instruction_previews()
         phase_files = {
             phase.phase: {file.path: file.content for file in phase.files}
@@ -133,12 +154,11 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertNotIn("SQLi, XSS, RCE", bootstrap)
         self.assertNotIn("Stop when evidence is sufficient", explore)
-        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["AGENTS.md"])
-        self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["AGENTS.md"])
-        self.assertIn("Reason does not execute tools", phase_files["reason"]["AGENTS.md"])
+        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["Instruction.md"])
+        self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["Instruction.md"])
+        self.assertIn("Reason does not execute tools", phase_files["reason"]["Instruction.md"])
 
     def test_default_phase_prompts_use_legacy_context_sections(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
         forbidden = (
             "Project Context",
             "project context file",
@@ -149,7 +169,7 @@ class PromptSnapshotTests(unittest.TestCase):
         )
 
         prompts = {
-            name: (default_dir / name).read_text(encoding="utf-8")
+            name: _common_prompt(name)
             for name in ("bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md")
         }
 
@@ -228,9 +248,13 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertNotIn("{hints}", prompts["reason.md"])
 
     def test_role_prompts_keep_project_semantics_without_bootstrap_protocol(self) -> None:
-        roles_dir = _REPO / "capabilities" / "roles"
+        roles_dirs = [
+            _PROMPTS_DIR / "bootstrap" / "roles",
+            _PROMPTS_DIR / "explore" / "roles",
+            _PROMPTS_DIR / "reason" / "roles",
+        ]
         cases = {
-            "cypher-ctf-operator/ROLE.md": {
+            "cypher-ctf-operator.md": {
                 "include": [
                     "This is a CTF project.",
                     "requested flag, proof, or challenge-specific success condition",
@@ -261,7 +285,7 @@ class PromptSnapshotTests(unittest.TestCase):
                     "infromation",
                 ],
             },
-            "cypher-pentest-operator/ROLE.md": {
+            "cypher-pentest-operator.md": {
                 "include": [
                     "This is an authorized penetration testing project.",
                     "rules of engagement",
@@ -278,7 +302,7 @@ class PromptSnapshotTests(unittest.TestCase):
                     "deep exploitation",
                 ],
             },
-            "cypher-vuln-researcher/ROLE.md": {
+            "cypher-vuln-researcher.md": {
                 "include": [
                     "This is a vulnerability research, PoC development, or root-cause analysis project.",
                     "deterministic repro and root-cause evidence",
@@ -297,13 +321,14 @@ class PromptSnapshotTests(unittest.TestCase):
             },
         }
 
-        for name, expected in cases.items():
-            with self.subTest(name=name):
-                role = (roles_dir / name).read_text(encoding="utf-8")
-                for text in expected["include"]:
-                    self.assertIn(text, role)
-                for text in expected["exclude"]:
-                    self.assertNotIn(text, role)
+        for roles_dir in roles_dirs:
+            for name, expected in cases.items():
+                with self.subTest(path=(roles_dir / name).relative_to(_PROMPTS_DIR).as_posix()):
+                    role = (roles_dir / name).read_text(encoding="utf-8")
+                    for text in expected["include"]:
+                        self.assertIn(text, role)
+                    for text in expected["exclude"]:
+                        self.assertNotIn(text, role)
 
     def test_existing_skill_owns_ctf_web_js_output_contract(self) -> None:
         skill_dir = _REPO / "capabilities" / "skills" / "ctf-web-js-analysis"
@@ -323,8 +348,7 @@ class PromptSnapshotTests(unittest.TestCase):
             self.assertIn(text, output_contract)
 
     def test_default_reason_uses_marker_gated_output(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
+        reason = _common_prompt("reason.md")
 
         output_requirements = reason.split("## Output Requirements", 1)[1].split("### Rules", 1)[0]
         self.assertIn("32173462130721312360912", output_requirements)
@@ -336,8 +360,7 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertNotIn("Return only one raw JSON object", output_requirements)
 
     def test_default_reason_excludes_capability_instructions_placeholder(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        reason = (default_dir / "reason.md").read_text(encoding="utf-8")
+        reason = _common_prompt("reason.md")
 
         self.assertNotIn("{capability_instructions}", reason)
         self.assertNotIn("{role_instructions}", reason)
@@ -349,9 +372,8 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("{max_intents}", reason)
 
     def test_default_bootstrap_and_explore_exclude_capability_instructions(self) -> None:
-        default_dir = _REPO / "cairn" / "src" / "cairn" / "dispatcher" / "prompts" / "default"
-        bootstrap = (default_dir / "bootstrap.md").read_text(encoding="utf-8")
-        explore = (default_dir / "explore.md").read_text(encoding="utf-8")
+        bootstrap = _common_prompt("bootstrap.md")
+        explore = _common_prompt("explore.md")
 
         for name, prompt in (("bootstrap.md", bootstrap), ("explore.md", explore)):
             with self.subTest(name=name):
@@ -368,19 +390,16 @@ class PromptSnapshotTests(unittest.TestCase):
         prompts = dict(first["prompts"])
         prompts["reason.md"] = f"{original}\nextra"
         with tempfile.TemporaryDirectory() as tmp:
-            group_dir = Path(tmp) / "default"
-            group_dir.mkdir()
-            for name, content in prompts.items():
-                (group_dir / name).write_text(content, encoding="utf-8")
+            _write_phase_snapshot(Path(tmp), prompts)
             with mock.patch("cairn.server.execution_config.prompt_snapshot.resources.files") as files:
-                files.return_value.joinpath.side_effect = lambda group: Path(tmp) / group
+                files.return_value = Path(tmp)
                 changed = load_prompt_snapshot()
 
         self.assertEqual(
             set(first["prompts"]),
-            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md", "FILE_OUTPUTS.md"},
+            {"bootstrap.md", "bootstrap_conclude.md", "explore.md", "explore_conclude.md", "reason.md"},
         )
-        self.assertEqual(first["prompt_group"], "default")
+        self.assertNotIn("prompt_group", first)
         self.assertNotEqual(first["prompts_sha256"], changed["prompts_sha256"])
 
     def test_load_prompt_from_execution_config_uses_snapshot(self) -> None:

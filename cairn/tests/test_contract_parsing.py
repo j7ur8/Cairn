@@ -10,7 +10,7 @@ sys.path.insert(0, str(_REPO / "cairn" / "src"))
 
 class ContractParsingTests(unittest.TestCase):
     def test_default_reason_prompt_uses_plain_intent_contract(self) -> None:
-        prompt = (_REPO / "cairn/src/cairn/dispatcher/prompts/default/reason.md").read_text()
+        prompt = (_REPO / "cairn/src/cairn/dispatcher/prompts/reason/common/reason.md").read_text()
 
         forbidden_terms = [
             "priority_score",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from cairn.shared.config.constants import TaskType, _check_known_task_types
 from cairn.shared.task_types import builtin_task_type_names
@@ -30,17 +30,13 @@ class RoleConfig(BaseModel):
     name: str
     task_types: list[TaskType] = Field(default_factory=lambda: list(builtin_task_type_names()))
     description: str = ""
-    prompt: str | None = None
-    source_path: str | None = None
     default_skill_ids: list[str] = Field(default_factory=list)
     detail: str = ""
     available: bool = True
 
-    @field_validator("id", "name", "prompt", "source_path")
+    @field_validator("id", "name")
     @classmethod
-    def validate_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
+    def validate_text(cls, value: str) -> str:
         text = value.strip()
         if not text:
             raise ValueError("must not be empty")
@@ -74,32 +70,6 @@ class RoleConfig(BaseModel):
     def validate_default_skill_ids(cls, value: list[str]) -> list[str]:
         return normalize_default_skill_ids(value)
 
-    @model_validator(mode="after")
-    def validate_prompt_source(self) -> RoleConfig:
-        if bool(self.prompt) == bool(self.source_path):
-            raise ValueError(f"role {self.id} must set exactly one of prompt or source_path")
-        return self
 
-
-def prepare_role_data(data: Any, config_dir: Path) -> Any:
-    if not isinstance(data, dict):
-        return data
-    roles = data.get("roles")
-    if not isinstance(roles, list):
-        return data
-    prepared_roles: list[Any] = []
-    for role in roles:
-        if not isinstance(role, dict):
-            prepared_roles.append(role)
-            continue
-        role_copy = dict(role)
-        source_path = role_copy.get("source_path")
-        if isinstance(source_path, str):
-            path = Path(source_path).expanduser()
-            if not path.is_absolute():
-                path = config_dir / path
-            role_copy["source_path"] = str(path.resolve(strict=False))
-        prepared_roles.append(role_copy)
-    data_copy = dict(data)
-    data_copy["roles"] = prepared_roles
-    return data_copy
+def prepare_role_data(data: Any, _config_dir: Path) -> Any:
+    return data
