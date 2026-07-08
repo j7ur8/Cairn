@@ -12,17 +12,16 @@ If a capability does not match the active phase boundary, do not use it.
 ## Shared Session Phase Rules
 - Bootstrap and bootstrap_conclude may run in the same LLM session.
 - Do not continue a previous phase after the active task prompt changes.
-- Bootstrap performs target discovery and profiling. Bootstrap_conclude performs read-only fact summarization.
+- Bootstrap collects initial target information. Bootstrap_conclude summarizes already confirmed bootstrap facts.
 
 ## Bootstrap Boundary
-- Bootstrap is target discovery and profiling only.
-- Do not perform vulnerability probing, exploitation, brute force, high-volume enumeration, fuzzing, or exploit-chain payloading.
-- Use only non-intrusive observations needed to identify the target, purpose, exposed entrypoints, technology, runtime fingerprints, access boundaries, supplied materials, and directly observable abnormal behavior.
+- Bootstrap collects initial target information from Origin, Goal, and Hints.
+- Do not perform actual vulnerability exploitation.
 
 ## Bootstrap Conclude Boundary
-- Bootstrap_conclude is read-only fact conclusion only.
+- Bootstrap_conclude summarizes already confirmed bootstrap facts.
 - Do not execute any command except read. Do not need to wait for unfinished tasks or commands. Do not continue exploration and Do not generate an action plan.
-- Summarize only already confirmed bootstrap facts according to the active bootstrap_conclude prompt.
+- Do not continue information collection during bootstrap_conclude.
 
 ## Capability Summary
 {selected_mcp_ids}

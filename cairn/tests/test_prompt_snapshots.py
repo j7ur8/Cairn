@@ -115,24 +115,24 @@ class PromptSnapshotTests(unittest.TestCase):
         self.assertIn("# Task", task_section.splitlines()[:4])
         self.assertNotIn("{role_instructions}", bootstrap)
         self.assertNotIn("{capability_instructions}", bootstrap)
-        self.assertIn("target discovery and profiling only", task_section)
-        self.assertIn("Build a concise target profile", task_section)
-        self.assertIn("static, provided, and publicly observable facts", task_section)
-        self.assertIn("technology and runtime fingerprints", task_section)
+        self.assertIn(
+            "Use Origin as the starting point. Use Goal only to understand the requested success condition. Treat Hints as unverified guidance;",
+            task_section,
+        )
+        self.assertIn("initial target information", task_section)
+        self.assertIn("confirmed target profile facts", task_section)
+        self.assertIn("actual vulnerability exploitation", task_section)
         self.assertNotIn("SQLi, XSS, RCE", task_section)
         self.assertNotIn("authentication-bypass", task_section)
         self.assertNotIn("high-volume directory-enumeration", task_section)
+        self.assertNotIn("static, provided, and publicly observable facts", task_section)
+        self.assertNotIn("satisfies Goal", task_section)
+        self.assertNotIn("complete", task_section)
         self.assertNotIn("CTF", task_section)
         self.assertNotIn("flag", task_section)
         self.assertNotIn("summarize", bootstrap)
         self.assertNotIn("not continuing exploration", bootstrap)
         self.assertNotIn("execute any command except read", bootstrap)
-        self.assertNotIn("page source", task_section)
-        self.assertNotIn("response headers", task_section)
-        self.assertNotIn("JavaScript", task_section)
-        self.assertNotIn("CSS", task_section)
-        self.assertNotIn("public paths", task_section)
-        self.assertNotIn("form behavior", task_section)
         self.assertNotIn("information_api.json", task_section)
         self.assertNotIn("information_leak.json", task_section)
         output_requirements = bootstrap.split("## Output Requirements", 1)[1].split("## Rules", 1)[0]
@@ -154,9 +154,29 @@ class PromptSnapshotTests(unittest.TestCase):
 
         self.assertNotIn("SQLi, XSS, RCE", bootstrap)
         self.assertNotIn("Stop when evidence is sufficient", explore)
-        self.assertIn("high-volume enumeration", phase_files["bootstrap"]["Instruction.md"])
+        self.assertIn("Bootstrap collects initial target information from Origin, Goal, and Hints.", phase_files["bootstrap"]["Instruction.md"])
+        self.assertIn("Do not perform actual vulnerability exploitation.", phase_files["bootstrap"]["Instruction.md"])
+        self.assertIn("Bootstrap_conclude summarizes already confirmed bootstrap facts.", phase_files["bootstrap"]["Instruction.md"])
+        self.assertIn(
+            "Do not execute any command except read. Do not need to wait for unfinished tasks or commands. Do not continue exploration and Do not generate an action plan.",
+            phase_files["bootstrap"]["Instruction.md"],
+        )
+        self.assertIn("Do not continue information collection during bootstrap_conclude.", phase_files["bootstrap"]["Instruction.md"])
+        self.assertNotIn("high-volume enumeration", phase_files["bootstrap"]["Instruction.md"])
+        self.assertNotIn("brute force", phase_files["bootstrap"]["Instruction.md"])
+        self.assertNotIn("exploit-chain payloading", phase_files["bootstrap"]["Instruction.md"])
         self.assertIn("Stop when evidence is sufficient", phase_files["explore"]["Instruction.md"])
         self.assertIn("Reason does not execute tools", phase_files["reason"]["Instruction.md"])
+
+    def test_bootstrap_instruction_variants_are_synchronized(self) -> None:
+        instruction_dir = _PROMPTS_DIR / "bootstrap" / "instruction"
+        contents = {
+            name: (instruction_dir / name).read_text(encoding="utf-8")
+            for name in ("Instruction.md", "AGENTS.md", "CLAUDE.md")
+        }
+
+        self.assertEqual(contents["Instruction.md"], contents["AGENTS.md"])
+        self.assertEqual(contents["Instruction.md"], contents["CLAUDE.md"])
 
     def test_default_phase_prompts_use_legacy_context_sections(self) -> None:
         forbidden = (
@@ -254,37 +274,6 @@ class PromptSnapshotTests(unittest.TestCase):
             _PROMPTS_DIR / "reason" / "roles",
         ]
         cases = {
-            "cypher-ctf-operator.md": {
-                "include": [
-                    "This is a CTF project.",
-                    "requested flag, proof, or challenge-specific success condition",
-                    "evidence that explains why the result satisfies the goal",
-                    "likely challenge categories",
-                    "do not force a single classification",
-                    "mixed",
-                    "combine multiple areas",
-                    "public entrypoints",
-                    "For web challenges",
-                    "page source",
-                    "linked JavaScript/CSS/assets",
-                    "API clients",
-                    "leaked information",
-                    "For pwn, reverse, crypto, forensics, or misc challenges",
-                    "binaries, protocols, artifacts, encodings, algorithms",
-                    "If a flag or proof is directly exposed",
-                ],
-                "exclude": [
-                    "Bootstrap is target discovery only",
-                    "Allowed bootstrap activity includes",
-                    "vulnerability verification, SQLi/XSS/RCE payloading",
-                    "information_api.json",
-                    "information_leak.json",
-                    "JavaScript reverse engineering",
-                    "deep exploitation",
-                    "use skill",
-                    "infromation",
-                ],
-            },
             "cypher-pentest-operator.md": {
                 "include": [
                     "This is an authorized penetration testing project.",
@@ -329,6 +318,34 @@ class PromptSnapshotTests(unittest.TestCase):
                         self.assertIn(text, role)
                     for text in expected["exclude"]:
                         self.assertNotIn(text, role)
+
+    def test_bootstrap_ctf_role_supports_initial_collection_without_reason_completion(self) -> None:
+        role = (_PROMPTS_DIR / "bootstrap" / "roles" / "cypher-ctf-operator.md").read_text(encoding="utf-8")
+
+        for text in (
+            "bootstrap stage",
+            "Determine the type",
+            "web, pwn, reverse, crypto, forensics, misc",
+            "public routes",
+            "page source",
+            "linked JavaScript/CSS/assets",
+            "API clients",
+            "binaries, protocols, artifacts, encodings, algorithms",
+            "actual vulnerability exploitation",
+        ):
+            self.assertIn(text, role)
+        for text in (
+            "requested flag, proof, or challenge-specific success condition",
+            "evidence that explains why the result satisfies the goal",
+            "complete",
+        ):
+            self.assertNotIn(text, role)
+
+    def test_reason_ctf_role_keeps_goal_satisfaction_semantics(self) -> None:
+        role = (_PROMPTS_DIR / "reason" / "roles" / "cypher-ctf-operator.md").read_text(encoding="utf-8")
+
+        self.assertIn("requested flag, proof, or challenge-specific success condition", role)
+        self.assertIn("evidence that explains why the result satisfies the goal", role)
 
     def test_existing_skill_owns_ctf_web_js_output_contract(self) -> None:
         skill_dir = _REPO / "capabilities" / "skills" / "ctf-web-js-analysis"

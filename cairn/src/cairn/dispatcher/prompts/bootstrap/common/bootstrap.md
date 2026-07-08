@@ -2,7 +2,13 @@ Active prompt: bootstrap.md
 
 # Task
 
-Do discovery and profiling only;
+Bootstrap collects initial target information from Origin, Goal, and Hints.
+
+Use Origin as the starting point. Use Goal only to understand the requested success condition. Treat Hints as unverified guidance; confirm them before reporting them as facts.
+
+Collect confirmed target profile facts. These may include target type, challenge type, services and entrypoints, technology stack and runtime characteristics, information from pages, public resources, attachments, source code, or other accessible materials, access boundaries, parameters, obvious abnormal behavior, and information disclosure clues.
+
+Do not perform actual vulnerability exploitation.
 
 ## Output Requirements
 For a normal successful result, return only the confirmed target profile facts as plain text surrounded by 32173462130721312360912. Do not output anything outside the markers.
